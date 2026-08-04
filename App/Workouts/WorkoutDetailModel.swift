@@ -2,17 +2,30 @@ import Foundation
 import MaximizeCore
 import Observation
 
-/// Loads one workout and derives its `WorkoutVerdict` (MaximizeCore) for the detail
-/// screen's header. Everything that decides *what the header should say* — unscored
-/// vs. scored, plan vs. no plan, auto-score vs. correction — lives in `WorkoutVerdict`
-/// and is unit tested there; this class only fetches the three records that feed it
-/// and hands the result to the view.
+/// Everything the detail screen's sections read for one workout. Bundled into a value
+/// rather than several optional properties on the model so each ticket that adds a
+/// section (MAX-042's `heartRateChart`, MAX-043's cadence, MAX-044's route, MAX-045's
+/// splits) adds one field here instead of widening `LoadState.loaded`'s case itself.
+struct WorkoutDetailData: Equatable {
+    let verdict: WorkoutVerdict
+
+    /// FR-1.2. Nil means no HR series was captured for this workout at all — a real,
+    /// first-class state (MAX-010's "absent, not empty"), not a loading placeholder.
+    /// `HRCurveView` renders that nil as "no chart to draw" rather than an empty axis.
+    let heartRateChart: HeartRateChartData?
+}
+
+/// Loads one workout and assembles `WorkoutDetailData` for the detail screen. Everything
+/// that decides *what a section should say* — unscored vs. scored, plan vs. no plan,
+/// auto-score vs. correction — lives in `WorkoutVerdict` and `HeartRateChartData` and is
+/// unit tested there; this class only fetches the records each section needs and hands
+/// the result to the view.
 @MainActor
 @Observable
 final class WorkoutDetailModel {
     enum LoadState: Equatable {
         case loading
-        case loaded(verdict: WorkoutVerdict)
+        case loaded(WorkoutDetailData)
         /// The store could not be opened, the workout no longer exists, or a read
         /// failed. See `WorkoutsListModel.LoadState.failed` for why this stays one
         /// case rather than several.
@@ -78,10 +91,39 @@ final class WorkoutDetailModel {
             let day = try workout.calendarDay(in: timeZone)
             let planDay = try planCalendar?.planDay(on: day)
 
-            state = .loaded(verdict: WorkoutVerdict(workout: workout, planDay: planDay, ledger: ledger))
+            let verdict = WorkoutVerdict(workout: workout, planDay: planDay, ledger: ledger)
+            let chartData = try await heartRateChart(
+                workoutRepository: workoutRepository,
+                planCalendar: planCalendar,
+                day: day
+            )
+
+            state = .loaded(WorkoutDetailData(verdict: verdict, heartRateChart: chartData))
         } catch {
             state = .failed
         }
+    }
+
+    /// FR-1.2's inputs: the stored curve, the plan's cap for the workout's day (D1 —
+    /// `PlanCalendar.plan(on:)`, never a literal), and the stored time-above-cap figure
+    /// (D2 — `DerivedMetrics.timeAboveCapSeconds`, read, never recomputed here).
+    ///
+    /// Nil when no HR series was captured — MAX-010's "absent, not empty" distinction —
+    /// which is the one case with nothing to build a chart from at all. A workout with a
+    /// series but no governing plan, or a series but not-yet-computed metrics, still
+    /// yields a `HeartRateChartData`; `capBPM` and `timeAboveCapSeconds` simply carry nil
+    /// through it, and `HRCurveView` is what turns those into the right on-screen state.
+    private func heartRateChart(
+        workoutRepository: any WorkoutRepository,
+        planCalendar: PlanCalendar?,
+        day: CalendarDay
+    ) async throws -> HeartRateChartData? {
+        guard let series = try await workoutRepository.heartRateSeries(forWorkout: workoutID) else {
+            return nil
+        }
+        let metrics = try await workoutRepository.derivedMetrics(forWorkout: workoutID)
+        let capBPM = planCalendar?.plan(on: day)?.heartRateCapBPM
+        return HeartRateChartData(series: series, capBPM: capBPM, timeAboveCapSeconds: metrics?.timeAboveCapSeconds)
     }
 
     /// R8's lazy path (MAX-033): scores a run the background wake could not score.
