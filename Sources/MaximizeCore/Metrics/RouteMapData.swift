@@ -131,8 +131,8 @@ public enum RouteMapData: Hashable, Sendable {
             )
         }
 
-        /// Widens the raw bounding box by a quarter on each side so the track's own
-        /// extremities land inside the frame rather than on its border.
+        /// Scales the raw bounding box to 1.3× its own span — 15% clear on each side —
+        /// so the track's extremities land inside the frame rather than on its border.
         private static let paddingFactor = 1.3
 
         /// Roughly 300m of latitude span at the equator — enough to show a single GPS
