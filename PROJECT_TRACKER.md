@@ -110,7 +110,7 @@ not block on device runs — but every PR here states plainly what a human must 
 
 | ID | Ticket | Spec | Tier | Status | Depends on |
 |---|---|---|---|---|---|
-| MAX-040 | Design system: dark-first tokens, score bands, accent, Liquid Glass on chrome only, flat content surfaces | FR-4.1–4.4, A7 | **Opus** | 🔄 | MAX-006 |
+| MAX-040 | Design system: dark-first tokens, score bands, accent, Liquid Glass on chrome only, flat content surfaces | FR-4.1–4.4, A7 | **Opus** | ✅ | MAX-006 |
 | MAX-041 | Detail view: plan-verdict header | FR-1.1 | Sonnet | ⬜ | MAX-020, MAX-040 |
 | MAX-042 | HR curve with cap line + time-above-cap shading | FR-1.2 | Sonnet | ⬜ | MAX-040, MAX-012 |
 | MAX-043 | Cadence vs target band | FR-1.3 | Sonnet | ⬜ | MAX-042 |
@@ -146,7 +146,7 @@ function, so its branch never renders), and `enteredKey` is not cleared on the
 
 | ID | Ticket | Spec | Tier | Status | Depends on |
 |---|---|---|---|---|---|
-| MAX-070 | Accessibility: Reduce Transparency / Increase Contrast degrade to solid chrome | FR-4.5 | Sonnet | ⬜ | MAX-040 |
+| MAX-070 | Accessibility: Reduce Transparency / Increase Contrast degrade to solid chrome | FR-4.5 | Sonnet | 🔲 | MAX-040 |
 | MAX-071 | Scoring fixture suite: known-good runs → expected score bands | R7 | Sonnet | ⬜ | MAX-015 |
 | MAX-072 | Security review: Keychain handling, data at rest, prompt minimization, distribution tripwire | §11, A5 | **Opus** 🔒 | ⬜ | MAX-023, MAX-024 |
 
@@ -177,7 +177,7 @@ scope discipline as the top execution risk, above any technical unknown.
 
 | # | Question | Blocks | Status |
 |---|---|---|---|
-| Q1 | Accent color for the on-plan/effective state (PRD §14.2) | MAX-040 | Open, non-blocking — will land as a single token |
+| Q1 | Accent color for the on-plan/effective state (PRD §14.2) | — | **Owner's call, open.** A placeholder violet `#8E7CFF` is in place — chosen to sit far from green/amber/red and from iOS system blue, ~5.9:1 on dark. Change the single `Color.accent` declaration in `ColorTokens.swift` to re-theme |
 
 Resolved: backend architecture (→ A1, on-device) · existing-code question (greenfield) ·
 rest-day conversion (→ A6, automatic) · **Q2 Xcode 26 availability** — yes, verified
@@ -214,3 +214,6 @@ and CI selects a 26.x toolchain explicitly rather than trusting the runner defau
 | 2026-08-04 | **iOS 26.0 deployment floor** — no back-compatibility to earlier iOS | PRD §7.4 is written around iOS 26 Liquid Glass. Supporting iOS 17+ with conditional enhancement would roughly double the design surface for zero benefit: this is a single-user app and the user controls the only device it runs on |
 | 2026-08-04 | Bundle ID `com.example.maximize.app` is a deliberate placeholder | Must be replaced before any signed build; flagged in `project.yml` rather than inventing something that looks official |
 | 2026-08-04 | `Security` added to the CI banned-import list for the core | MAX-022 put the key protocol in the core and Keychain in the app layer. Without the guard, a later ticket could call `SecItemCopyMatching` directly in the core and quietly make key handling untestable again |
+| 2026-08-04 | `ScoreBand` lives in the core, with no `init(score:)` | It is domain vocabulary — produced by the scorer, aggregated by tallies, persisted beside the immutable auto-score. A parallel app-layer copy would drift. Refusing `init(score:)` is D1: only the scorer, reading the plan version in effect on the workout's date, may turn a number into a band |
+| 2026-08-04 | Glass-over-data asserts in debug, degrades to opaque in release | FR-4.2 exists because translucency destroys chart legibility. A release fallback means a user never sees the illegible version; the debug assert catches it during development. The rejected alternative — render it wrong so someone notices — trades a real user-facing defect for a diagnostic |
+| 2026-08-04 | CI rejects raw color literals outside `ColorTokens.swift` | Suggested by MAX-040 against its own work: the design system is only worth having if views name meaning, not appearance. A palette erodes quietly — nothing breaks, the colors just stop agreeing |

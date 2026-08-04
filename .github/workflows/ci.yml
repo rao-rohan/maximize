@@ -50,6 +50,24 @@ jobs:
           fi
           echo "OK: no platform framework imports in MaximizeCore."
 
+      # MAX-040's design system is only worth having if views name meaning
+      # (Color.textSecondary) rather than appearance. One stray literal is harmless;
+      # the habit is what erodes a palette, and it erodes quietly — nothing breaks,
+      # the colors just stop agreeing with each other. ColorTokens.swift is the single
+      # place a color value may be written down.
+      - name: Reject raw color literals outside ColorTokens.swift
+        run: |
+          HITS=$(grep -rEn '0x[0-9A-Fa-f]{6}|Color\(red:|UIColor\(red:|Color\(\.sRGB' \
+            --include='*.swift' App \
+            | grep -v '^App/DesignSystem/ColorTokens.swift:' || true)
+          if [ -n "$HITS" ]; then
+            echo "$HITS"
+            echo "::error::Raw color values belong only in App/DesignSystem/ColorTokens.swift."
+            echo "Add a semantically named token there and use that instead."
+            exit 1
+          fi
+          echo "OK: no raw color literals outside ColorTokens.swift."
+
   ios-app:
     name: Build app shell for iOS Simulator
     # macos-26 (Tahoe) has been GA on GitHub-hosted runners since Feb 2026 and is the
