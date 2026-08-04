@@ -152,7 +152,7 @@ final class SummaryTileDataTests: XCTestCase {
     }
 
     func testTilesFollowsFR15sStatedOrderWhenEveryFigureIsPresent() throws {
-        let workout = try Fixture.workout(distanceMeters: 8_420, durationSeconds: 462)
+        let workout = try Fixture.workout(durationSeconds: 462, distanceMeters: 8_420)
         let data = SummaryTileData(workout: workout, metrics: try metrics())
 
         XCTAssertEqual(data.tiles.count, 7)
