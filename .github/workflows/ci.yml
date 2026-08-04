@@ -37,7 +37,12 @@ jobs:
       # simulator or a device. See CLAUDE.md.
       - name: Reject platform imports in MaximizeCore
         run: |
-          BANNED='SwiftUI|UIKit|HealthKit|SwiftData|CloudKit|MapKit|Charts'
+          # Security is on this list because of MAX-022: the core defines the
+          # AnthropicAPIKeyStoring protocol, and the Keychain implementation lives in
+          # the app layer. Without the guard, nothing stops a later ticket from
+          # reaching for SecItemCopyMatching directly in the core and quietly making
+          # the key-handling path untestable again.
+          BANNED='SwiftUI|UIKit|HealthKit|SwiftData|CloudKit|MapKit|Charts|Security'
           if grep -rEn "^\s*import\s+($BANNED)\b" Sources/MaximizeCore; then
             echo "::error::MaximizeCore must not import platform frameworks ($BANNED)."
             echo "Define a protocol or value type in the core; implement it in the app layer."

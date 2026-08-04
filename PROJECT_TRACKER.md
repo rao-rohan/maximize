@@ -86,7 +86,7 @@ layer implements them and maps across the boundary.
 |---|---|---|---|---|---|
 | MAX-020 | SwiftData models + mapping to/from core types + repository implementations | §8, A1 | **Opus** | ⬜ | MAX-006, MAX-010 |
 | MAX-021 | CloudKit sync so history survives reinstall | D6, A1 | Sonnet | ⬜ | MAX-020 |
-| MAX-022 | Keychain-backed Anthropic key storage + settings entry point | A5, §11 | Sonnet 🔒 | ⬜ | MAX-006 |
+| MAX-022 | Keychain-backed Anthropic key storage + settings entry point | A5, §11 | Sonnet 🔒 | ✅ | MAX-006 |
 | MAX-023 | Claude client: scoring call | §10, §11 | Sonnet 🔒 | ⬜ | MAX-022, MAX-015 |
 | MAX-024 | Claude client: streaming chat transport | D10, FR-2.4 | **Opus** | ⬜ | MAX-022, MAX-014 |
 
@@ -110,7 +110,7 @@ not block on device runs — but every PR here states plainly what a human must 
 
 | ID | Ticket | Spec | Tier | Status | Depends on |
 |---|---|---|---|---|---|
-| MAX-040 | Design system: dark-first tokens, score bands, accent, Liquid Glass on chrome only, flat content surfaces | FR-4.1–4.4, A7 | **Opus** | 🔲 | MAX-006 |
+| MAX-040 | Design system: dark-first tokens, score bands, accent, Liquid Glass on chrome only, flat content surfaces | FR-4.1–4.4, A7 | **Opus** | 🔄 | MAX-006 |
 | MAX-041 | Detail view: plan-verdict header | FR-1.1 | Sonnet | ⬜ | MAX-020, MAX-040 |
 | MAX-042 | HR curve with cap line + time-above-cap shading | FR-1.2 | Sonnet | ⬜ | MAX-040, MAX-012 |
 | MAX-043 | Cadence vs target band | FR-1.3 | Sonnet | ⬜ | MAX-042 |
@@ -136,6 +136,11 @@ Haiku to keep it that way.
 | MAX-062 | **Cross-run HR-drift overlay** on %-elapsed axis | FR-3.3, D5 | **Opus** | ⬜ | MAX-060, MAX-040, MAX-012 |
 | MAX-063 | Summary tiles: mileage vs arc, effective days, streak, avg score | FR-3.4 | Haiku | ⬜ | MAX-017, MAX-060 |
 | MAX-064 | Settings: rest-days-per-week, display/accessibility prefs | §8 | Haiku | ⬜ | MAX-020 |
+
+MAX-064 rewrites `SettingsView`, which MAX-022 left with two cosmetic rough edges to
+clean up then: `isCheckingStatus` is dead state (set and unset inside one synchronous
+function, so its branch never renders), and `enteredKey` is not cleared on the
+`save()` failure path.
 
 ### Phase 7 — Hardening
 
@@ -208,3 +213,4 @@ and CI selects a 26.x toolchain explicitly rather than trusting the runner defau
 | 2026-08-04 | CI selects Xcode 26 explicitly and fails loudly if absent | A silent fallback to an older SDK would build a non-Liquid-Glass app that still passes CI — the worst failure mode, because it looks green |
 | 2026-08-04 | **iOS 26.0 deployment floor** — no back-compatibility to earlier iOS | PRD §7.4 is written around iOS 26 Liquid Glass. Supporting iOS 17+ with conditional enhancement would roughly double the design surface for zero benefit: this is a single-user app and the user controls the only device it runs on |
 | 2026-08-04 | Bundle ID `com.example.maximize.app` is a deliberate placeholder | Must be replaced before any signed build; flagged in `project.yml` rather than inventing something that looks official |
+| 2026-08-04 | `Security` added to the CI banned-import list for the core | MAX-022 put the key protocol in the core and Keychain in the app layer. Without the guard, a later ticket could call `SecItemCopyMatching` directly in the core and quietly make key handling untestable again |
