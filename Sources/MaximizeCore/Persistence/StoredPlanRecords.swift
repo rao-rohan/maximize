@@ -39,10 +39,11 @@ public struct StoredPlan: Hashable, Sendable {
     }
 
     public init(_ plan: Plan) throws {
+        let payloadJSON = try PersistencePayload.encode(plan, field: "StoredPlan.payloadJSON")
         self.init(
             versionNumber: plan.version.number,
             effectiveFromISO8601: plan.effectiveFrom.description,
-            payloadJSON: try PersistencePayload.encode(plan, field: "StoredPlan.payloadJSON")
+            payloadJSON: payloadJSON
         )
     }
 
@@ -122,13 +123,14 @@ public struct StoredChatThread: Hashable, Sendable {
     }
 
     public init(_ thread: ChatThread) throws {
+        let messagesJSON = try PersistencePayload.encode(
+            thread.messages,
+            field: "StoredChatThread.messagesJSON"
+        )
         self.init(
             threadUUID: thread.id,
             workoutUUID: thread.workoutID,
-            messagesJSON: try PersistencePayload.encode(
-                thread.messages,
-                field: "StoredChatThread.messagesJSON"
-            )
+            messagesJSON: messagesJSON
         )
     }
 

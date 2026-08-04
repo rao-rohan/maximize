@@ -154,13 +154,11 @@ public struct StoredHeartRateSeries: Hashable, Sendable {
     }
 
     public init(_ series: HeartRateSeries) throws {
-        self.init(
-            workoutUUID: series.workoutID,
-            samplesJSON: try PersistencePayload.encode(
-                series.samples,
-                field: "StoredHeartRateSeries.samplesJSON"
-            )
+        let samplesJSON = try PersistencePayload.encode(
+            series.samples,
+            field: "StoredHeartRateSeries.samplesJSON"
         )
+        self.init(workoutUUID: series.workoutID, samplesJSON: samplesJSON)
     }
 
     public func toDomain() throws -> HeartRateSeries {
@@ -194,13 +192,11 @@ public struct StoredRoute: Hashable, Sendable {
     }
 
     public init(_ route: Route) throws {
-        self.init(
-            workoutUUID: route.workoutID,
-            pointsJSON: try PersistencePayload.encode(
-                route.points,
-                field: "StoredRoute.pointsJSON"
-            )
+        let pointsJSON = try PersistencePayload.encode(
+            route.points,
+            field: "StoredRoute.pointsJSON"
         )
+        self.init(workoutUUID: route.workoutID, pointsJSON: pointsJSON)
     }
 
     public func toDomain() throws -> Route {
@@ -259,6 +255,10 @@ public struct StoredDerivedMetrics: Hashable, Sendable {
     }
 
     public init(_ metrics: DerivedMetrics) throws {
+        let zoneSplitsJSON = try PersistencePayload.encode(
+            metrics.zoneSplits,
+            field: "StoredDerivedMetrics.zoneSplitsJSON"
+        )
         self.init(
             workoutUUID: metrics.workoutID,
             averageHeartRateBPM: metrics.averageHeartRateBPM,
@@ -267,10 +267,7 @@ public struct StoredDerivedMetrics: Hashable, Sendable {
             heartRateDriftFraction: metrics.heartRateDriftFraction,
             averageCadenceStepsPerMinute: metrics.averageCadenceStepsPerMinute,
             gradeAdjustedPaceSecondsPerKilometer: metrics.gradeAdjustedPaceSecondsPerKilometer,
-            zoneSplitsJSON: try PersistencePayload.encode(
-                metrics.zoneSplits,
-                field: "StoredDerivedMetrics.zoneSplitsJSON"
-            ),
+            zoneSplitsJSON: zoneSplitsJSON,
             planVersionNumber: metrics.planVersion.number
         )
     }

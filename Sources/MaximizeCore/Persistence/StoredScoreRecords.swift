@@ -54,13 +54,14 @@ public struct StoredScore: Hashable, Sendable {
     }
 
     public init(_ score: Score) throws {
+        let scheduledSessionJSON = try PersistencePayload.encode(
+            score.scheduledSession,
+            field: "StoredScore.scheduledSessionJSON"
+        )
         self.init(
             workoutUUID: score.workoutID,
             planVersionNumber: score.planVersion.number,
-            scheduledSessionJSON: try PersistencePayload.encode(
-                score.scheduledSession,
-                field: "StoredScore.scheduledSessionJSON"
-            ),
+            scheduledSessionJSON: scheduledSessionJSON,
             actualClassificationRawValue: score.actualClassification.rawValue,
             points: score.value.points,
             effectiveThresholdPoints: score.effectiveThreshold.points,
