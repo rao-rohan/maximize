@@ -71,7 +71,7 @@ struct SettingsView: View {
                 if let keyStatusMessage {
                     Text(keyStatusMessage)
                         .font(.metricLabel)
-                        .foregroundStyle(.textSecondary)
+                        .foregroundStyle(Color.textSecondary)
                 }
             }
         }
@@ -91,10 +91,8 @@ struct SettingsView: View {
                     selection: Binding(
                         get: { appSettings.restDayBudget.daysPerWeek },
                         set: { newValue in
-                            if let budget = try? RestDayBudget(daysPerWeek: newValue) {
-                                appSettings.restDayBudget = budget
-                                Task { await saveSettings() }
-                            }
+                            guard let budget = try? RestDayBudget(daysPerWeek: newValue) else { return }
+                            apply(updating(restDayBudget: budget))
                         }
                     )
                 ) {
@@ -112,23 +110,61 @@ struct SettingsView: View {
     @ViewBuilder
     private var displaySection: some View {
         Section("Display") {
-            Picker("Distance unit", selection: $appSettings.distanceUnit) {
+            Picker(
+                "Distance unit",
+                selection: Binding(
+                    get: { appSettings.distanceUnit },
+                    set: { apply(updating(distanceUnit: $0)) }
+                )
+            ) {
                 Text("Miles").tag(DistanceUnit.miles)
                 Text("Kilometers").tag(DistanceUnit.kilometers)
             }
 
-            Picker("Appearance", selection: $appSettings.appearance) {
+            Picker(
+                "Appearance",
+                selection: Binding(
+                    get: { appSettings.appearance },
+                    set: { apply(updating(appearance: $0)) }
+                )
+            ) {
                 Text("System").tag(AppearancePreference.system)
                 Text("Light").tag(AppearancePreference.light)
                 Text("Dark").tag(AppearancePreference.dark)
             }
         }
-        .onChange(of: appSettings.distanceUnit) { _, _ in
-            Task { await saveSettings() }
-        }
-        .onChange(of: appSettings.appearance) { _, _ in
-            Task { await saveSettings() }
-        }
+    }
+
+    // MARK: - Editing an immutable value
+
+    /// `AppSettings` is a value type whose properties are all `let` — deliberately, so
+    /// nothing can mutate a settings record in place behind a reader's back. Editing one
+    /// therefore means constructing a new one, which is what these two helpers do.
+    ///
+    /// Note what `updating` carries forward untouched: the three accessibility fields.
+    /// This screen exposes no control for them (see the Accessibility note above), so a
+    /// settings write from here must never silently overwrite whatever a future ticket
+    /// has seeded into them from the OS.
+    private func updating(
+        restDayBudget: RestDayBudget? = nil,
+        distanceUnit: DistanceUnit? = nil,
+        appearance: AppearancePreference? = nil
+    ) -> AppSettings {
+        AppSettings(
+            restDayBudget: restDayBudget ?? appSettings.restDayBudget,
+            distanceUnit: distanceUnit ?? appSettings.distanceUnit,
+            appearance: appearance ?? appSettings.appearance,
+            reducesTransparency: appSettings.reducesTransparency,
+            increasesContrast: appSettings.increasesContrast,
+            reducesMotion: appSettings.reducesMotion
+        )
+    }
+
+    /// Shows the new value immediately and persists it. Kept in one place so no edit
+    /// path can update the screen without also writing, or write without updating.
+    private func apply(_ updated: AppSettings) {
+        appSettings = updated
+        Task { await saveSettings() }
     }
 
     // MARK: - Accessibility
