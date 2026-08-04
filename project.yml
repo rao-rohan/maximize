@@ -50,6 +50,8 @@ targets:
       # required to build. It is here so the app's platform dependencies are legible
       # in the spec rather than only in an import statement.
       - sdk: HealthKit.framework
+      # MAX-044 / FR-1.4: the route map view.
+      - sdk: MapKit.framework
 
     # MAX-030 / FR-0.1. XcodeGen writes this file on `xcodegen generate` and points
     # CODE_SIGN_ENTITLEMENTS at it; like the .xcodeproj, the generated file is

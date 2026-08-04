@@ -20,6 +20,13 @@ struct WorkoutDetailData: Equatable {
     /// carries rather than a reason to omit the section; see its own documentation
     /// and `CadenceBandView`'s for how each renders.
     let cadence: CadenceChartData
+
+    /// FR-1.4. Always present, like `cadence` — `RouteMapData.resolve(hasRoute:route:)`
+    /// is where the indoor / unavailable / available branch lives (see its own
+    /// documentation), so this model only fetches what that decision needs and hands
+    /// the result on. `RouteMapView` is what turns each case into the right on-screen
+    /// state.
+    let routeMap: RouteMapData
 }
 
 /// Loads one workout and assembles `WorkoutDetailData` for the detail screen. Everything
@@ -114,8 +121,15 @@ final class WorkoutDetailModel {
                 averageStepsPerMinute: metrics?.averageCadenceStepsPerMinute,
                 band: planCalendar?.plan(on: day)?.cadenceTarget
             )
+            // The read only happens when `hasRoute` says there is something to find —
+            // `RouteMapData.resolve`'s contract (see its doc comment) — rather than
+            // querying the store for every indoor run.
+            let route = workout.hasRoute ? try await workoutRepository.route(forWorkout: workoutID) : nil
+            let routeMap = RouteMapData.resolve(hasRoute: workout.hasRoute, route: route)
 
-            state = .loaded(WorkoutDetailData(verdict: verdict, heartRateChart: chartData, cadence: cadence))
+            state = .loaded(
+                WorkoutDetailData(verdict: verdict, heartRateChart: chartData, cadence: cadence, routeMap: routeMap)
+            )
         } catch {
             state = .failed
         }

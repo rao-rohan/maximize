@@ -53,8 +53,8 @@ struct WorkoutDetailView: View {
                 VerdictHeaderView(verdict: data.verdict)
                 HRCurveView(chartData: data.heartRateChart)
                 CadenceBandView(data: data.cadence)
-                // MAX-044 (route map), MAX-045 (splits/tiles), MAX-051 (chat entry
-                // point) land here.
+                RouteMapView(data: data.routeMap)
+                // MAX-045 (splits/tiles), MAX-051 (chat entry point) land here.
             }
         }
     }
