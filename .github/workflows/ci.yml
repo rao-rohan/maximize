@@ -44,3 +44,47 @@ jobs:
             exit 1
           fi
           echo "OK: no platform framework imports in MaximizeCore."
+
+  ios-app:
+    name: Build app shell for iOS Simulator
+    # macos-26 (Tahoe) has been GA on GitHub-hosted runners since Feb 2026 and is the
+    # natural home for iOS 26 SDK work — PRD §7.4 wants Liquid Glass, which needs
+    # Xcode 26. Independent of this runner's default Xcode, the next step verifies a
+    # 26.x toolchain is actually present and fails loudly if it isn't, rather than
+    # silently building against an older SDK.
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 26 (iOS 26 SDK, required for PRD §7.4 Liquid Glass)
+        run: |
+          XCODE_26=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XCODE_26" ]; then
+            echo "::error::No Xcode 26.x found on this runner. PRD §7.4 requires the iOS 26 SDK for Liquid Glass; refusing to silently fall back to an older SDK."
+            echo "Available Xcode installs:"
+            ls /Applications | grep -i xcode || true
+            exit 1
+          fi
+          echo "Selecting $XCODE_26"
+          sudo xcode-select -s "$XCODE_26/Contents/Developer"
+
+      - name: Show toolchain
+        run: xcodebuild -version
+
+      - name: Install XcodeGen
+        run: HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+
+      - name: Generate Xcode project from project.yml
+        run: xcodegen generate
+
+      # Unsigned build against a generic simulator destination — no specific
+      # device/OS pinned, so this doesn't depend on which simulator runtimes happen
+      # to be pre-provisioned on the runner. This proves the app target compiles and
+      # links MaximizeCore; it does not run the app or verify anything visually.
+      - name: Build for iOS Simulator (unsigned)
+        run: |
+          xcodebuild build \
+            -project Maximize.xcodeproj \
+            -scheme Maximize \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO
