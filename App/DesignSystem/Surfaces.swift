@@ -101,9 +101,13 @@ private struct ContentSurfaceModifier: ViewModifier {
     func body(content: Content) -> some View {
         switch surface {
         case .screen:
+            // Deliberately does *not* mark the subtree as content. A screen background
+            // is a backdrop, not a data container, and chrome legitimately floats over
+            // a screen — flagging it here would make every correct use of
+            // `glassChrome(_:)` trip the assertion. The flag belongs to the bounded
+            // surfaces that actually hold data.
             content
                 .background { surface.fill.ignoresSafeArea() }
-                .environment(\.isWithinContentSurface, true)
         case .card, .tile, .inset:
             let shape = RoundedRectangle(cornerRadius: surface.cornerRadius, style: .continuous)
             content
@@ -225,7 +229,8 @@ private struct IsWithinContentSurfaceKey: EnvironmentKey {
 }
 
 extension EnvironmentValues {
-    /// True anywhere inside a `contentSurface()`.
+    /// True anywhere inside a bounded content surface — a card, tile or inset. Not set
+    /// by `contentSurface(.screen)`, which is a backdrop rather than a data container.
     ///
     /// Set by the design system, read by the design system. Views should not need to
     /// consult it; if one does, that is a sign a component is trying to be both chrome
