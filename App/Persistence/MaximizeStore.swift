@@ -323,13 +323,22 @@ extension MaximizeStore: PlanRepository {
 
 extension MaximizeStore: ChatThreadRepository {
 
+    /// Deterministic per MAX-048: see `threadRecords(for:)`.
     func thread(forWorkout id: UUID) async throws -> ChatThread? {
-        try threadRecord(for: id)?.stored.toDomain()
+        try threadRecords(for: id).first?.stored.toDomain()
     }
 
+    /// The upsert chokepoint (D6), matching `store(_ workout:)`'s shape.
+    ///
+    /// `createdAt` is preserved across an update, never reset to "now": its only job is
+    /// breaking a tie between duplicate rows deterministically (MAX-048), and
+    /// resetting it on every edit would make that tie float with whichever replica
+    /// wrote last — the opposite of the point. It is set once, on a record's first
+    /// insert here, and carried forward unchanged after that.
     func store(_ thread: ChatThread) async throws {
-        let stored = try StoredChatThread(thread)
-        if let existing = try threadRecord(for: thread.workoutID) {
+        let existing = try threadRecords(for: thread.workoutID).first
+        let stored = try StoredChatThread(thread, createdAt: existing?.stored.createdAt ?? Date())
+        if let existing {
             existing.stored = stored
         } else {
             modelContext.insert(ChatThreadRecord(stored))
@@ -337,12 +346,31 @@ extension MaximizeStore: ChatThreadRepository {
         try modelContext.save()
     }
 
-    private func threadRecord(for identifier: UUID) throws -> ChatThreadRecord? {
-        var descriptor = FetchDescriptor<ChatThreadRecord>(
-            predicate: #Predicate<ChatThreadRecord> { $0.workoutUUID == identifier }
+    /// Records matching a workout identifier, oldest `createdAt` first, `threadUUID`
+    /// breaking a tie.
+    ///
+    /// Mirrors `workoutRecords(for:)`: CloudKit cannot enforce "one thread per
+    /// workout" (see `MaximizeSchema`'s CloudKit notes), so a sync race between two
+    /// devices can leave two `ChatThreadRecord`s for the same workout, and fetching
+    /// without a sort left "which one does `.first` return" undefined — this makes it
+    /// explicit and total instead.
+    ///
+    /// The `threadUUID` tiebreak is not a theoretical nicety: every record written
+    /// before `createdAt` existed loads with the same default
+    /// (`.distantPast`, see `MaximizeSchemaV1.ChatThreadRecord`), so a store holding two
+    /// pre-migration duplicates ties on the primary key and needs the secondary one to
+    /// stay deterministic. `UUID` has conformed to `Comparable` since iOS 17
+    /// (this app's floor is iOS 26), so the ordering is well-defined even then.
+    private func threadRecords(for identifier: UUID) throws -> [ChatThreadRecord] {
+        try modelContext.fetch(
+            FetchDescriptor<ChatThreadRecord>(
+                predicate: #Predicate<ChatThreadRecord> { $0.workoutUUID == identifier },
+                sortBy: [
+                    SortDescriptor<ChatThreadRecord>(\.createdAt, order: .forward),
+                    SortDescriptor<ChatThreadRecord>(\.threadUUID, order: .forward),
+                ]
+            )
         )
-        descriptor.fetchLimit = 1
-        return try modelContext.fetch(descriptor).first
     }
 }
 

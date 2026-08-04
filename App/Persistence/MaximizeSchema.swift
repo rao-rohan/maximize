@@ -328,6 +328,8 @@ enum MaximizeSchemaV1: VersionedSchema {
         }
     }
 
+    /// See `StoredChatThread`'s doc comment for why `createdAt` exists and what it is
+    /// not: a duplicate-resolution tiebreak (MAX-048), not domain data.
     @Model
     final class ChatThreadRecord {
         var threadUUID: UUID = UUID()
@@ -335,10 +337,19 @@ enum MaximizeSchemaV1: VersionedSchema {
 
         @Attribute(.externalStorage) var messagesJSON: Data = Data()
 
+        /// Default `.distantPast` per this file's "every property has a default"
+        /// rule. A record written before this field existed loads with that default,
+        /// which is deliberate rather than a gap: `MaximizeStore.threadRecords(for:)`
+        /// breaks a tie on `threadUUID`, so two such pre-migration duplicates still
+        /// resolve deterministically even though they collapse onto the same
+        /// `createdAt`.
+        var createdAt: Date = Date.distantPast
+
         init(_ stored: StoredChatThread) {
             threadUUID = stored.threadUUID
             workoutUUID = stored.workoutUUID
             messagesJSON = stored.messagesJSON
+            createdAt = stored.createdAt
         }
 
         var stored: StoredChatThread {
@@ -346,13 +357,15 @@ enum MaximizeSchemaV1: VersionedSchema {
                 StoredChatThread(
                     threadUUID: threadUUID,
                     workoutUUID: workoutUUID,
-                    messagesJSON: messagesJSON
+                    messagesJSON: messagesJSON,
+                    createdAt: createdAt
                 )
             }
             set {
                 threadUUID = newValue.threadUUID
                 workoutUUID = newValue.workoutUUID
                 messagesJSON = newValue.messagesJSON
+                createdAt = newValue.createdAt
             }
         }
     }
