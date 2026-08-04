@@ -27,6 +27,10 @@ struct WorkoutDetailData: Equatable {
     /// the result on. `RouteMapView` is what turns each case into the right on-screen
     /// state.
     let routeMap: RouteMapData
+
+    /// FR-1.5. Always present — `SummaryTileData.duration` is never absent (see its
+    /// own documentation) — so there is no "nothing to build from" case here either.
+    let summaryTiles: SummaryTileData
 }
 
 /// Loads one workout and assembles `WorkoutDetailData` for the detail screen. Everything
@@ -126,10 +130,15 @@ final class WorkoutDetailModel {
             // querying the store for every indoor run.
             let route = workout.hasRoute ? try await workoutRepository.route(forWorkout: workoutID) : nil
             let routeMap = RouteMapData.resolve(hasRoute: workout.hasRoute, route: route)
+            let summaryTiles = SummaryTileData(workout: workout, metrics: metrics)
 
-            state = .loaded(
-                WorkoutDetailData(verdict: verdict, heartRateChart: chartData, cadence: cadence, routeMap: routeMap)
-            )
+            state = .loaded(WorkoutDetailData(
+                verdict: verdict,
+                heartRateChart: chartData,
+                cadence: cadence,
+                routeMap: routeMap,
+                summaryTiles: summaryTiles
+            ))
         } catch {
             state = .failed
         }
