@@ -118,17 +118,17 @@ final class TrendIntervalSelectionModel {
     /// returns nil there by design (see its own documentation), and this model
     /// leaves the selection exactly where it was rather than guessing at one.
     func selectPrevious() {
+        // `try?` flattens the `TrendInterval?` this returns, so one binding covers
+        // both no-op cases: `.custom` (nil by design) and a thrown calendar error.
         guard case .ready(let interval) = state,
-              let stepped = try? interval.previous(),
-              let previous = stepped
+              let previous = try? interval.previous()
         else { return }
         state = .ready(previous)
     }
 
     func selectNext() {
         guard case .ready(let interval) = state,
-              let stepped = try? interval.next(),
-              let next = stepped
+              let next = try? interval.next()
         else { return }
         state = .ready(next)
     }
