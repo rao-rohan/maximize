@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// The typographic scale.
 ///
@@ -23,23 +24,21 @@ extension Font {
     /// The one number on a screen: the 0–100 effectiveness score in the verdict
     /// header (FR-1.1). Never more than one of these visible at a time.
     ///
-    /// Fixed point size rather than a text style because no built-in style is this
-    /// large. **Dynamic Type behavior at accessibility sizes is unverified** — see the
-    /// device checklist on the MAX-040 PR; if it does not scale, MAX-070 should switch
-    /// this to `@ScaledMetric`.
-    static let metricHero = Font
-        .system(size: 56, weight: .semibold, design: .rounded)
+    /// Scales with Dynamic Type (MAX-070) — see `scaledMetricFont(size:weight:relativeTo:)`
+    /// below. Anchored to `.largeTitle`, the built-in style closest to this weight of
+    /// emphasis, so the hero numeral scales on the same curve `screenTitle` does.
+    static let metricHero = scaledMetricFont(size: 56, weight: .semibold, relativeTo: .largeTitle)
         .monospacedDigit()
 
     /// The headline value in a summary tile: distance, average HR, drift %
-    /// (FR-1.5, FR-3.4).
-    static let metricPrimary = Font
-        .system(size: 32, weight: .semibold, design: .rounded)
+    /// (FR-1.5, FR-3.4). Anchored to `.title1` (28pt default — the closest built-in
+    /// size to 32pt).
+    static let metricPrimary = scaledMetricFont(size: 32, weight: .semibold, relativeTo: .title1)
         .monospacedDigit()
 
-    /// A value inline in a row — a split's pace, a cadence readout.
-    static let metricSecondary = Font
-        .system(size: 20, weight: .medium, design: .rounded)
+    /// A value inline in a row — a split's pace, a cadence readout. Anchored to
+    /// `.title3` (20pt default — matches this token's base size exactly).
+    static let metricSecondary = scaledMetricFont(size: 20, weight: .medium, relativeTo: .title3)
         .monospacedDigit()
 
     // MARK: Structure
@@ -63,4 +62,34 @@ extension Font {
     static let microLabel = Font
         .system(.caption2, weight: .medium)
         .monospacedDigit()
+}
+
+// MARK: - Dynamic Type for a fixed point size
+
+/// Builds a `.rounded` system font at exactly `size`/`weight`, then scales it against
+/// the user's preferred text size the same way a built-in text style would (MAX-070).
+///
+/// `Font.system(size:weight:design:)` — what the metric fonts used before this ticket
+/// — takes a fixed point size that Dynamic Type cannot touch at all: turn on an
+/// accessibility text size and the 0–100 effectiveness score, the single most
+/// important number on the screen (FR-1.1), stayed exactly 56pt while every label
+/// around it grew. `UIFontMetrics` is Apple's supported bridge for exactly this case:
+/// it scales a custom-size font by the same ratio the OS would apply to `relativeTo`,
+/// so the numeral grows under Larger Text precisely as that text style does, while
+/// still starting from the exact point size the visual hierarchy was designed at.
+///
+/// At the default (non-accessibility) content size category this returns the font at
+/// its designed size unchanged — `UIFontMetrics` scaling is 1.0 there — so
+/// `metricHero`/`metricPrimary`/`metricSecondary` render at exactly 56/32/20pt as
+/// before and the hierarchy at default size is untouched.
+private func scaledMetricFont(size: CGFloat, weight: UIFont.Weight, relativeTo textStyle: UIFont.TextStyle) -> Font {
+    let base = UIFont.systemFont(ofSize: size, weight: weight)
+    // `withDesign` is documented to return nil only when the requested design isn't
+    // available for this descriptor; falling back to the non-rounded descriptor keeps
+    // this total rather than introducing a force-unwrap for a case that, on every
+    // iOS 26 target this app ships to, does not happen.
+    let roundedDescriptor = base.fontDescriptor.withDesign(.rounded) ?? base.fontDescriptor
+    let rounded = UIFont(descriptor: roundedDescriptor, size: size)
+    let scaled = UIFontMetrics(forTextStyle: textStyle).scaledFont(for: rounded)
+    return Font(scaled)
 }

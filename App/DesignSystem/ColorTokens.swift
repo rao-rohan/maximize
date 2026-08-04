@@ -1,64 +1,54 @@
 import SwiftUI
 import UIKit
+import MaximizeCore
 
-// MARK: - The one place raw color values live
+// MARK: - Turning palette data into a live SwiftUI color
 
-/// A color literal in four appearances.
+/// Adapts a `DesignPalette.Ink` (plain sRGB data, defined once in `MaximizeCore`) into
+/// a `UIColor` that re-resolves on every trait change.
 ///
-/// Every token below is declared as one of these, which is what makes MAX-070
-/// (Reduce Transparency / Increase Contrast) a small change rather than a rewrite:
-/// **Increase Contrast is already wired**. `UIColor`'s dynamic provider re-resolves on
-/// every trait change, so raising contrast is a matter of editing the
-/// `…HighContrast` values in this file — no view, modifier, or call site changes.
+/// MAX-070: the raw color numbers used to live here, in a private `Ink` this file
+/// owned. They now live in `DesignPalette` (MaximizeCore/Accessibility), which has no
+/// UIKit dependency and therefore builds and runs on whatever host CI's `swift test`
+/// uses — that's what makes `WCAGContrastTests` possible at all. This file's job
+/// narrowed to exactly what only it can do: turn that data into a `UIColor`. **This
+/// is still the only place in the app that constructs a `UIColor`/`Color` from raw
+/// numbers** — that half of the contract (name meaning, not appearance, everywhere
+/// else) is unchanged; only where the numbers themselves are declared moved.
+///
+/// Increase Contrast is wired end to end (MAX-040): `UIColor`'s dynamic provider
+/// re-resolves on every trait change, so raising contrast is a matter of editing the
+/// `…HighContrast` values in `DesignPalette` — no view, modifier, or call site changes.
 ///
 /// Dark-first (FR-4.3): the dark value is the designed one and is also what an
 /// `.unspecified` interface style resolves to. Light values exist so the app is not
 /// unreadable if someone runs it in light mode; they have not been designed with the
 /// same care and no screen has been reviewed in light appearance.
-private struct Ink {
-    let dark: UInt32
-    let light: UInt32
-    let darkHighContrast: UInt32
-    let lightHighContrast: UInt32
-
-    init(
-        dark: UInt32,
-        light: UInt32,
-        darkHighContrast: UInt32? = nil,
-        lightHighContrast: UInt32? = nil
-    ) {
-        self.dark = dark
-        self.light = light
-        self.darkHighContrast = darkHighContrast ?? dark
-        self.lightHighContrast = lightHighContrast ?? light
-    }
-
+private extension DesignPalette.Ink {
     var color: Color {
         Color(uiColor: UIColor { traits in
             let wantsHighContrast = traits.accessibilityContrast == .high
             switch (traits.userInterfaceStyle, wantsHighContrast) {
             case (.light, true):
-                return UIColor(rgb: lightHighContrast)
+                return UIColor(lightHighContrast)
             case (.light, false):
-                return UIColor(rgb: light)
+                return UIColor(light)
             // `.dark` and `.unspecified` both land here — dark is the default appearance.
             case (_, true):
-                return UIColor(rgb: darkHighContrast)
+                return UIColor(darkHighContrast)
             case (_, false):
-                return UIColor(rgb: dark)
+                return UIColor(dark)
             }
         })
     }
 }
 
 private extension UIColor {
-    /// Total by construction: every `UInt32` names a valid opaque color, so there is
-    /// no failable parse and therefore nothing to force-unwrap.
-    convenience init(rgb: UInt32) {
+    convenience init(_ token: ColorToken) {
         self.init(
-            red: CGFloat((rgb >> 16) & 0xFF) / 255,
-            green: CGFloat((rgb >> 8) & 0xFF) / 255,
-            blue: CGFloat(rgb & 0xFF) / 255,
+            red: CGFloat(token.red) / 255,
+            green: CGFloat(token.green) / 255,
+            blue: CGFloat(token.blue) / 255,
             alpha: 1
         )
     }
@@ -70,81 +60,44 @@ private extension UIColor {
 ///
 /// Views name *meaning* (`Color.textSecondary`), never appearance. If a view ever needs
 /// a color that is not here, the fix is to add a token with a semantic name — not to
-/// reach for a literal. This file is the only place in the app where a color value is
-/// written down.
+/// reach for a literal. The values themselves live in `MaximizeCore`'s `DesignPalette`
+/// (MAX-070); this file is the only place they are turned into a `Color`.
 extension Color {
 
     // MARK: Content surfaces (flat, opaque — FR-4.2)
 
     /// The screen background everything else sits on.
-    static let surface = Ink(
-        dark: 0x0B0B0F,
-        light: 0xFFFFFF,
-        darkHighContrast: 0x000000,
-        lightHighContrast: 0xFFFFFF
-    ).color
+    static let surface = DesignPalette.surface.color
 
     /// A card or tile lifted off the screen background: summary tiles, chart
     /// containers, the calendar. Opaque, always.
-    static let surfaceElevated = Ink(
-        dark: 0x16161C,
-        light: 0xF5F5F7,
-        darkHighContrast: 0x1C1C25,
-        lightHighContrast: 0xEDEDF2
-    ).color
+    static let surfaceElevated = DesignPalette.surfaceElevated.color
 
     /// A well *inside* a card: a chart's plot area, a segmented-control track, the
     /// shaded time-above-cap region's backdrop.
-    static let surfaceInset = Ink(
-        dark: 0x1F1F27,
-        light: 0xEBEBEF,
-        darkHighContrast: 0x26262F,
-        lightHighContrast: 0xE0E0E6
-    ).color
+    static let surfaceInset = DesignPalette.surfaceInset.color
 
     /// Hairline rules between rows and sections.
-    static let separator = Ink(
-        dark: 0x2C2C36,
-        light: 0xD5D5DC,
-        darkHighContrast: 0x4A4A56,
-        lightHighContrast: 0xA8A8B4
-    ).color
+    static let separator = DesignPalette.separator.color
 
     // MARK: Text
 
     /// Metrics that matter, headings, primary values.
-    static let textPrimary = Ink(
-        dark: 0xF5F5F7,
-        light: 0x0B0B0F,
-        darkHighContrast: 0xFFFFFF,
-        lightHighContrast: 0x000000
-    ).color
+    static let textPrimary = DesignPalette.textPrimary.color
 
     /// Quiet labels — the units, the captions, the "what this number is" text. FR-4.3
     /// wants typography and this contrast step doing the hierarchy work, not color.
-    static let textSecondary = Ink(
-        dark: 0xA0A0AC,
-        light: 0x55555F,
-        darkHighContrast: 0xC6C6D0,
-        lightHighContrast: 0x2E2E38
-    ).color
+    static let textSecondary = DesignPalette.textSecondary.color
 
-    /// Axis ticks, timestamps, disabled states. Deliberately recessive.
-    static let textTertiary = Ink(
-        dark: 0x70707C,
-        light: 0x8A8A96,
-        darkHighContrast: 0x9C9CA8,
-        lightHighContrast: 0x55555F
-    ).color
+    /// Axis ticks, timestamps, disabled states. Deliberately recessive — but still
+    /// real text (MAX-070 raised it to clear WCAG AA's 4.5:1; see `DesignPalette`).
+    static let textTertiary = DesignPalette.textTertiary.color
 
     /// Text or glyphs drawn *on top of* a saturated fill — the accent, or a score-band
     /// cell in the calendar. One token because it is one job: all four saturated
     /// colors are light in dark mode and dark in light mode, so the legible ink over
     /// them is the same in every case.
-    static let textOnSaturatedFill = Ink(
-        dark: 0x0B0B0F,
-        light: 0xFFFFFF
-    ).color
+    static let textOnSaturatedFill = DesignPalette.textOnSaturatedFill.color
 
     // MARK: Accent
 
@@ -164,14 +117,10 @@ extension Color {
     ///   "default app, no design applied", and which is also the color of a link.
     ///
     /// Violet is the only region of the wheel far from green, amber, *and* red at
-    /// once. `#8E7CFF` measures roughly 5.9:1 against `surface` in dark, so it is
-    /// legible as text and not only as a fill.
-    static let accent = Ink(
-        dark: 0x8E7CFF,
-        light: 0x5B3FE8,
-        darkHighContrast: 0xB3A6FF,
-        lightHighContrast: 0x3B22C4
-    ).color
+    /// once. `#8E7CFF` measures **6.06:1** against `surface` in dark (verified,
+    /// MAX-070 — `WCAGContrastTests`; MAX-040's original ~5.9:1 was an eyeball
+    /// estimate), so it is legible as text and not only as a fill.
+    static let accent = DesignPalette.accent.color
 
     // MARK: Score bands (FR-4.3 — the only other saturated colors in the app)
 
@@ -179,26 +128,11 @@ extension Color {
     // `Color.scoreBand(_:)` in ScoreBandColors.swift, which takes a decided band and
     // cannot be handed a raw score.
 
-    static let scoreEffective = Ink(
-        dark: 0x30D158,
-        light: 0x248A3D,
-        darkHighContrast: 0x5CE07B,
-        lightHighContrast: 0x146B2C
-    ).color
+    static let scoreEffective = DesignPalette.scoreEffective.color
 
-    static let scoreMarginal = Ink(
-        dark: 0xFF9F0A,
-        light: 0xB25000,
-        darkHighContrast: 0xFFB84D,
-        lightHighContrast: 0x8C3D00
-    ).color
+    static let scoreMarginal = DesignPalette.scoreMarginal.color
 
-    static let scoreIneffective = Ink(
-        dark: 0xFF453A,
-        light: 0xD70015,
-        darkHighContrast: 0xFF7A72,
-        lightHighContrast: 0xA80010
-    ).color
+    static let scoreIneffective = DesignPalette.scoreIneffective.color
 
     // MARK: Charts
     //
@@ -207,38 +141,18 @@ extension Color {
     // on purpose — the saturated budget is already spent on the accent and the bands.
 
     /// Gridlines behind a plot. Should be visible and never compete with the series.
-    static let chartGridline = Ink(
-        dark: 0x2A2A33,
-        light: 0xE2E2E8,
-        darkHighContrast: 0x45454F,
-        lightHighContrast: 0xC2C2CC
-    ).color
+    static let chartGridline = DesignPalette.chartGridline.color
 
     /// A plan threshold drawn across a chart — the HR cap line (FR-1.2), the cadence
     /// target band edges (FR-1.3). Reads as "the rule", distinct from the data.
-    static let chartThreshold = Ink(
-        dark: 0xC9C9D4,
-        light: 0x3A3A44,
-        darkHighContrast: 0xFFFFFF,
-        lightHighContrast: 0x000000
-    ).color
+    static let chartThreshold = DesignPalette.chartThreshold.color
 
     /// The run being looked at — the foreground HR curve.
-    static let chartSeriesPrimary = Ink(
-        dark: 0xE8E8EF,
-        light: 0x16161C,
-        darkHighContrast: 0xFFFFFF,
-        lightHighContrast: 0x000000
-    ).color
+    static let chartSeriesPrimary = DesignPalette.chartSeriesPrimary.color
 
     /// Context curves behind the primary one: the other runs in the cross-run drift
     /// overlay (D5/FR-3.3), which stacks many curves and highlights one.
-    static let chartSeriesMuted = Ink(
-        dark: 0x5A5A66,
-        light: 0xA8A8B4,
-        darkHighContrast: 0x81818D,
-        lightHighContrast: 0x74747F
-    ).color
+    static let chartSeriesMuted = DesignPalette.chartSeriesMuted.color
 
     // MARK: Chrome
 
@@ -247,10 +161,5 @@ extension Color {
     /// Chrome degrades to this solid fill rather than to nothing, so the tab bar and
     /// floating controls keep their figure/ground separation from the content beneath.
     /// Applied by `View.glassChrome(_:)`; no view should need to name it.
-    static let chromeOpaque = Ink(
-        dark: 0x17171E,
-        light: 0xF7F7FA,
-        darkHighContrast: 0x000000,
-        lightHighContrast: 0xFFFFFF
-    ).color
+    static let chromeOpaque = DesignPalette.chromeOpaque.color
 }
