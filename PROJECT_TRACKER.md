@@ -267,6 +267,27 @@ schema change and therefore its own ticket.
 | MAX-062 | **Cross-run HR-drift overlay** on %-elapsed axis | FR-3.3, D5 | **Opus** | 🔲 | MAX-060, MAX-040, MAX-012 |
 | MAX-063 | Summary tiles: mileage vs arc, effective days, streak, avg score | FR-3.4 | Haiku | 🔲 | MAX-017, MAX-060 |
 | MAX-064 | Settings: rest-days-per-week, display/accessibility prefs | §8 | Haiku | ✅ | MAX-020 |
+| MAX-049 | Settings screen writes to a stub, not the store | §8, D9 | Sonnet | 🔲 | MAX-064, MAX-020 |
+
+**MAX-049 is a live bug in merged MAX-064 code**, found by MAX-063 and reported rather
+than fixed. `App/RootTabView.swift` constructs `SettingsView()` with no arguments, so
+its `settingsRepository` parameter falls to its default —
+`DefaultSettingsRepository.shared`, a no-op stub whose `settings()` returns `.standard`
+and whose `store(_:)` does nothing. Nothing on that screen reaches
+`PersistenceComposition.store`.
+
+So every setting silently fails to persist, and the symptom is a screen that looks like
+it works: a picker moves, the value shows, and it is gone on relaunch. The rest-day
+budget is the one that matters beyond the settings screen itself — D9's budget feeds
+rest-day conversion, which colours the calendar (MAX-061) and shifts effective-days in
+the tallies (MAX-017), so the whole app is running on `.standard` regardless of what the
+athlete chose.
+
+Worth noting what did *not* catch this. The architecture guard checks imports; the
+colour guard checks literals; `swift test` covers `MaximizeCore`, and this is App-layer
+wiring that CI compiles and never executes. It took an agent reading the call chain for
+an unrelated ticket. That is the shape of the gap R2 describes, arriving in the most
+boring way available — a defaulted parameter.
 
 MAX-064 rewrites `SettingsView`, which MAX-022 left with two cosmetic rough edges to
 clean up then: `isCheckingStatus` is dead state (set and unset inside one synchronous
