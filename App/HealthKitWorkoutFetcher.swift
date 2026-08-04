@@ -161,10 +161,13 @@ final class HealthKitWorkoutFetcher: WorkoutFetching, @unchecked Sendable {
     /// Whether the source actually stored a GPS route for this workout.
     ///
     /// Asked rather than inferred, because `Workout.hasRoute` describes what was recorded
-    /// and an outdoor run with location services denied has none. The probe is skipped
-    /// entirely for activities that cannot have a route, so a treadmill run costs nothing
-    /// (FR-0.6) — and it is a one-sample existence check, not a fetch. MAX-032 fetches the
-    /// route itself and subsumes this.
+    /// and an outdoor run with location services denied has none. Skipped entirely for
+    /// activities that cannot have a route, so a treadmill run costs nothing (FR-0.6).
+    ///
+    /// MAX-032 subsumed this: it used to run its own one-sample existence query, and now
+    /// delegates to `HealthKitRouteLookup`, the same lookup `HealthKitWorkoutSampleFetcher`
+    /// uses to fetch the route's actual locations later — one implementation of "does this
+    /// workout have a route" rather than two that could drift apart.
     private func hasStoredRoute(
         for workout: HKWorkout,
         activityType: ActivityType,
@@ -172,19 +175,7 @@ final class HealthKitWorkoutFetcher: WorkoutFetching, @unchecked Sendable {
     ) async -> Bool {
         guard activityType.isOutdoorByNature, !isIndoor else { return false }
 
-        return await withCheckedContinuation { continuation in
-            let query = HKSampleQuery(
-                sampleType: HKSeriesType.workoutRoute(),
-                predicate: HKQuery.predicateForObjects(from: workout),
-                limit: 1,
-                sortDescriptors: nil
-            ) { _, samples, _ in
-                // An error and an empty result are the same answer here: nothing to draw.
-                continuation.resume(returning: samples?.isEmpty == false)
-            }
-
-            healthStore.execute(query)
-        }
+        return await HealthKitRouteLookup.route(for: workout, in: healthStore) != nil
     }
 }
 
