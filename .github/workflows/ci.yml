@@ -53,20 +53,23 @@ jobs:
       # MAX-040's design system is only worth having if views name meaning
       # (Color.textSecondary) rather than appearance. One stray literal is harmless;
       # the habit is what erodes a palette, and it erodes quietly — nothing breaks,
-      # the colors just stop agreeing with each other. ColorTokens.swift is the single
-      # place a color value may be written down.
-      - name: Reject raw color literals outside ColorTokens.swift
+      # the colors just stop agreeing with each other.
+      #
+      # MAX-070 moved the palette values into MaximizeCore as DesignPalette so their
+      # WCAG contrast could be computed and tested without UIKit, leaving App/
+      # entirely literal-free. So this guard now admits no exceptions: a color value
+      # anywhere under App/ is a value escaping the contrast suite that guards it.
+      - name: Reject raw color literals in the app layer
         run: |
           HITS=$(grep -rEn '0x[0-9A-Fa-f]{6}|Color\(red:|UIColor\(red:|Color\(\.sRGB' \
-            --include='*.swift' App \
-            | grep -v '^App/DesignSystem/ColorTokens.swift:' || true)
+            --include='*.swift' App || true)
           if [ -n "$HITS" ]; then
             echo "$HITS"
-            echo "::error::Raw color values belong only in App/DesignSystem/ColorTokens.swift."
-            echo "Add a semantically named token there and use that instead."
+            echo "::error::Raw color values belong in Sources/MaximizeCore/Accessibility/DesignPalette.swift."
+            echo "Define it there so WCAGContrastTests covers it, then expose a semantic token in ColorTokens.swift."
             exit 1
           fi
-          echo "OK: no raw color literals outside ColorTokens.swift."
+          echo "OK: no raw color literals anywhere in App/."
 
   ios-app:
     name: Build app shell for iOS Simulator
