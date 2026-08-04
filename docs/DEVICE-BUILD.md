@@ -123,17 +123,30 @@ provisioned — the first signed run with the iCloud capability is normally what
 it; the CloudKit Dashboard (icloud.developer.apple.com) can confirm the container and
 schema exist under your team.
 
-## Expected behaviour right now
+## What to expect on a real run
 
-**Until MAX-033 lands, ingestion deliberately fails.** MAX-031's placeholder sink
-throws, which holds the HealthKit anchor in place so no workout is skipped in the
-meantime. On device today the correct symptom is:
+The capture-to-score loop is complete (MAX-033). Finish a run on the Watch and, without
+opening the app, it should be captured, measured, classified, scored and stored.
 
-- one logged ingestion failure per background wake, and
-- the anchor never advancing.
+**Anything recorded while the pipeline was pinned drains on the first wake** after you
+install a build containing MAX-033 — so the first run may bring several older workouts
+with it. That is the anchor doing its job, not a duplicate-ingestion bug.
 
-That is the pipeline working as designed, not a bug. Everything captured meanwhile
-drains on the first wake after MAX-033 ships.
+**With no API key stored, workouts still land.** They arrive complete — measured,
+classified, stored — just unscored, and the detail view renders that as a first-class
+state rather than an error. Scoring fills in later once a key exists. This is the app's
+ordinary condition on the day it is installed, so it is worth confirming deliberately:
+install, record a run, and check it appears *before* you enter a key.
+
+Worth watching in Console.app (subsystem `Maximize`, category `ingestion`) on the first
+device run — the pipeline reports its own state there, deliberately without any health
+data in the messages:
+
+- `Gave up on a workout at …` is R11's escape firing. It should be rare, and it is the
+  one place the pipeline abandons a workout permanently.
+- `Workout stored but unscored (…)` is the expected line before a key is entered.
+- `Ingestion pass stopped after N batches` means a wake ran out of budget; the rest
+  resumes next pass.
 
 ## If it will not build
 
