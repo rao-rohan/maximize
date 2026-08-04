@@ -44,6 +44,49 @@ targets:
       - path: App
     dependencies:
       - package: MaximizeCore
+      # Swift auto-links system frameworks it imports, so this is not strictly
+      # required to build. It is here so the app's platform dependencies are legible
+      # in the spec rather than only in an import statement.
+      - sdk: HealthKit.framework
+
+    # MAX-030 / FR-0.1. XcodeGen writes this file on `xcodegen generate` and points
+    # CODE_SIGN_ENTITLEMENTS at it; like the .xcodeproj, the generated file is
+    # gitignored so this spec stays the single reviewable source of truth.
+    #
+    # The keys below are the whole of tracker risk R5. PRD §13 recorded only moderate
+    # confidence in the background-delivery key, and a wrong key here fails silently —
+    # the app is simply never woken. Both were checked against Apple's current
+    # documentation before being written down:
+    #
+    #   com.apple.developer.healthkit
+    #     "HealthKit Entitlement" — "A Boolean value that indicates whether the app may
+    #     request user authorization to access health and activity data that appears in
+    #     the Health app." Added by enabling the HealthKit capability in Xcode.
+    #     https://developer.apple.com/documentation/BundleResources/Entitlements/com.apple.developer.healthkit
+    #
+    #   com.apple.developer.healthkit.background-delivery
+    #     "A Boolean value that indicates whether observer queries receive updates while
+    #     running in the background." iOS 15.0+. Added by enabling the nested
+    #     "Background Delivery" capability under HealthKit.
+    #     https://developer.apple.com/documentation/BundleResources/Entitlements/com.apple.developer.healthkit.background-delivery
+    #
+    # The PRD's guess was right. Recorded here rather than only in the PR, because the
+    # next person to touch this file is the one who needs the citation.
+    #
+    # NOT included: com.apple.developer.healthkit.access. That entitlement gates
+    # clinical health records (FHIR documents from healthcare providers), which this
+    # app does not read. Apple warns that App Review may reject apps enabling it
+    # without using the data.
+    #
+    # Written to Support/ rather than App/ deliberately: App/ is this target's sources
+    # path, and a generated file dropped among hand-written sources is one XcodeGen
+    # file-type heuristic away from being copied into the bundle as a resource.
+    entitlements:
+      path: Support/Maximize.entitlements
+      properties:
+        com.apple.developer.healthkit: true
+        com.apple.developer.healthkit.background-delivery: true
+
     settings:
       base:
         # PLACEHOLDER — see options.bundleIdPrefix above.
@@ -55,3 +98,16 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+
+        # Required, not optional: "You must set the usage keys, or your app will crash
+        # when you request authorization."
+        # https://developer.apple.com/documentation/healthkit/hkhealthstore/requestauthorization(toshare:read:completion:)
+        #
+        # The string is what the user reads on the permission sheet, so it names what
+        # is actually read and says plainly that nothing is written.
+        INFOPLIST_KEY_NSHealthShareUsageDescription: "Maximize reads your completed workouts — heart rate, distance, energy, steps and route — so it can score each run against your training plan automatically."
+
+        # NSHealthUpdateUsageDescription is deliberately absent. It is required only
+        # for apps that write to HealthKit, and PRD §3 lists writing as an explicit
+        # non-goal. Declaring it would put a write-permission row on the sheet for a
+        # capability this app does not have.

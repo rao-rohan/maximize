@@ -31,6 +31,11 @@ struct SettingsView: View {
                 Text("MaximizeCore \(MaximizeCore.version)")
             }
 
+            // MAX-030. The observer query is registered at launch without any user
+            // action; only the permission sheet needs a foreground, which is why it
+            // is here and not on the launch path.
+            HealthAccessSettingsSection()
+
             Section("Anthropic API key") {
                 storedKeyStatusRow
 
