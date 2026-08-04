@@ -67,8 +67,8 @@ network.
 |---|---|---|---|---|---|
 | MAX-010 | Domain value types: Workout, HR series, route, Plan, PlanDay, Score, Annotation | §8 | **Opus** | ✅ | — |
 | MAX-011 | Versioned plan + `PlanDay` calendar resolution | D1, §8 | **Opus** | 🔲 | MAX-010 |
-| MAX-012 | Derived metrics: time-above-cap, HR drift, avg cadence, grade-adjusted pace, zone splits | §9, D2 | **Opus** | 🔄 | MAX-010 |
-| MAX-013 | Workout classification (easy / hard / long / other) from type + HR profile | §10.2 | **Opus** | ⬜ | MAX-012 |
+| MAX-012 | Derived metrics: time-above-cap, HR drift, avg cadence, grade-adjusted pace, zone splits | §9, D2 | **Opus** | ✅ | MAX-010 |
+| MAX-013 | Workout classification (easy / hard / long / other) from type + HR profile | §10.2 | **Opus** | 🔄 | MAX-012 |
 | MAX-014 | Context builder — the single assembler of what Claude sees | D3 | **Opus** | ⬜ | MAX-011, MAX-013 |
 | MAX-015 | Scoring rubric application + effective threshold + rationale contract | §10, D1 | **Opus** | ⬜ | MAX-014 |
 | MAX-016 | Rest-day budget: automatic conversion of missed days | D9, A6 | Sonnet | ⬜ | MAX-011 |
@@ -76,6 +76,17 @@ network.
 
 MAX-013 is Opus despite looking small: PRD §13 names plan/actual misclassification as
 a risk that "poisons the score," and every downstream number inherits its mistakes.
+
+MAX-031 was **re-tiered from Sonnet to Opus** after MAX-030 landed. The original
+estimate treated it as a routine fetch; R9 made it the thing standing between a failed
+background wake and permanent silent data loss.
+
+**Process note for parallel work.** MAX-012 was branched before MAX-030 and MAX-070
+merged, so its PR diff showed both tickets' files as deletions — merging it unrebased
+would have silently reverted them. Rebase every long-running agent branch onto `main`
+before opening its PR, and check the diff is additions-only where it should be.
+Related: dispatch briefs must be self-contained, because an agent's worktree only sees
+`main` as it stood when the worktree was made.
 
 ### Phase 2 — Persistence & platform adapters
 
@@ -102,7 +113,7 @@ not block on device runs — but every PR here states plainly what a human must 
 | ID | Ticket | Spec | Tier | Status | Depends on |
 |---|---|---|---|---|---|
 | MAX-030 | `HKObserverQuery` + background delivery + entitlement | FR-0.1 | **Opus** | ✅ | MAX-006 |
-| MAX-031 | Anchored incremental fetch with persisted anchor | FR-0.2 | Sonnet | 🔲 | MAX-030 |
+| MAX-031 | Anchored incremental fetch with persisted anchor | FR-0.2 | **Opus** | 🔄 | MAX-030 |
 | MAX-032 | Full-fidelity extraction: HR series, route, cadence, energy; indoor runs first-class | FR-0.3, FR-0.6 | Sonnet | ⬜ | MAX-031 |
 | MAX-033 | Ingestion pipeline: dedupe on `workoutUUID`, compute + store derived metrics, trigger scoring | FR-0.5, D2, A2 | **Opus** | ⬜ | MAX-032, MAX-020, MAX-023 |
 
