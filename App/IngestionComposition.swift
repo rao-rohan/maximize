@@ -4,6 +4,21 @@ import MaximizeCore
 import OSLog
 import UIKit
 
+/// Logger for the ingestion pipeline's *plumbing*.
+///
+/// Deliberately at file scope and not inside `IngestionComposition`: it is read from
+/// HealthKit's background callbacks, and a member of a `@MainActor` type would be
+/// isolated to the main actor and therefore wrong to touch from there. `Logger` is
+/// itself `Sendable`, so a non-isolated global is the honest shape.
+///
+/// **No health data ever goes through this.** CLAUDE.md treats workout data as PII and
+/// rules it out of logs entirely; every call site below records pipeline state only —
+/// never a sample, a date, or an identifier.
+let ingestionLog = Logger(
+    subsystem: Bundle.main.bundleIdentifier ?? "Maximize",
+    category: "ingestion"
+)
+
 /// Composition root for the zero-touch capture pipeline (PRD §7.0).
 ///
 /// Everything the wake path needs is assembled here, once, so that the pieces
@@ -16,11 +31,6 @@ enum IngestionComposition {
     /// reference for later use."
     private static let healthStore = HKHealthStore()
 
-    private static let log = Logger(
-        subsystem: Bundle.main.bundleIdentifier ?? "Maximize",
-        category: "ingestion"
-    )
-
     /// **The MAX-031 → MAX-033 seam.**
     ///
     /// Replace `UningestedWorkoutsPlaceholder()` with the real ingester — anchored
@@ -30,9 +40,8 @@ enum IngestionComposition {
     private static let coordinator = WorkoutObservationCoordinator(
         ingester: UningestedWorkoutsPlaceholder(),
         reportFailure: { error in
-            // Pipeline state only. No workout, no sample, no identifier — CLAUDE.md
-            // treats health data as PII and rules it out of logs entirely.
-            log.error("Workout ingestion failed: \(String(describing: error), privacy: .public)")
+            // Pipeline state only, per `ingestionLog`'s contract above.
+            ingestionLog.error("Workout ingestion failed: \(String(describing: error), privacy: .public)")
         }
     )
 

@@ -24,16 +24,6 @@ import MaximizeCore
 /// else, so it is free to run on HealthKit's background queue.
 @MainActor
 final class HealthKitWorkoutObserver {
-    /// No health data ever reaches this logger. It records the state of the *plumbing*
-    /// — did authorization complete, did background delivery turn on — because the
-    /// failure mode this whole ticket exists to avoid is invisible without it.
-    /// CLAUDE.md rules out workout data in logs; that rule is why nothing below
-    /// interpolates a sample, a date, or a UUID.
-    private static let log = Logger(
-        subsystem: Bundle.main.bundleIdentifier ?? "Maximize",
-        category: "ingestion"
-    )
-
     private let healthStore: HKHealthStore
     private let responder: WorkoutChangeResponding
 
@@ -73,7 +63,7 @@ final class HealthKitWorkoutObserver {
         // granted, by design, so that an app cannot infer the absence of data from the
         // absence of permission. "The user answered the sheet" is the strongest fact
         // available, and the pipeline finds out the rest by getting zero workouts.
-        Self.log.info("HealthKit read authorization request completed.")
+        ingestionLog.info("HealthKit read authorization request completed.")
     }
 
     // MARK: - Observation
@@ -96,7 +86,7 @@ final class HealthKitWorkoutObserver {
     /// query against the same type.
     func startObservingWorkouts() {
         guard HKHealthStore.isHealthDataAvailable() else {
-            Self.log.notice("HealthKit unavailable on this device; workout observation not started.")
+            ingestionLog.notice("HealthKit unavailable on this device; workout observation not started.")
             return
         }
         guard observerQuery == nil else { return }
@@ -139,7 +129,7 @@ final class HealthKitWorkoutObserver {
         // soft for exactly this reason. Asking for less would only make it worse.
         healthStore.enableBackgroundDelivery(for: workoutType, frequency: .immediate) { enabled, error in
             if enabled {
-                Self.log.info("HealthKit background delivery enabled for workouts.")
+                ingestionLog.info("HealthKit background delivery enabled for workouts.")
                 return
             }
 
@@ -149,8 +139,8 @@ final class HealthKitWorkoutObserver {
             // woken again — no crash, no user-visible symptom, just a capture pipeline
             // that captures nothing (PRD §13, tracker R5).
             let reason = error.map { String(describing: $0) } ?? "no error reported"
-            Self.log.error("HealthKit background delivery NOT enabled: \(reason, privacy: .public)")
-            Self.log.error("Zero-touch capture is inert. Verify the com.apple.developer.healthkit.background-delivery entitlement is present in the signed build, and that Health access was granted.")
+            ingestionLog.error("HealthKit background delivery NOT enabled: \(reason, privacy: .public)")
+            ingestionLog.error("Zero-touch capture is inert. Verify the com.apple.developer.healthkit.background-delivery entitlement is present in the signed build, and that Health access was granted.")
         }
     }
 

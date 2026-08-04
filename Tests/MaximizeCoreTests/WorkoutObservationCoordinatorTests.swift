@@ -45,7 +45,9 @@ final class WorkoutObservationCoordinatorTests: XCTestCase {
 
         await coordinator.workoutsMayHaveChanged(acknowledge: acknowledgements.handler())
 
-        XCTAssertEqual(observedMidIngest.hasAcknowledged, false)
+        // Defaulting to `true` makes a hook that never ran fail the test rather than
+        // pass it vacuously.
+        XCTAssertFalse(observedMidIngest.hasAcknowledged ?? true)
         XCTAssertTrue(acknowledgements.hasAcknowledged)
     }
 

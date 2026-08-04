@@ -31,6 +31,10 @@ struct HealthAccessSettingsSection: View {
         }
     }
 
+    /// `@MainActor` so the `Task` it spawns inherits main-actor isolation: the work
+    /// touches `@State` and the main-actor-isolated composition root, and an
+    /// unisolated `Task` would be free to do both off the main thread.
+    @MainActor
     private func request() {
         isRequesting = true
         Task {
