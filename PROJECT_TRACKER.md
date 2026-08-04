@@ -225,8 +225,38 @@ thin, and the brief carries that instruction explicitly.
 
 | ID | Ticket | Spec | Tier | Status | Depends on |
 |---|---|---|---|---|---|
-| MAX-050 | Per-workout thread persistence | D6, FR-2.3 | Sonnet | 🔲 | MAX-020 |
+| MAX-048 | Deterministic duplicate resolution for `ChatThreadRecord` | D6, A1 | Sonnet | 🔲 | MAX-020 |
+| MAX-050 | Per-workout thread persistence | D6, FR-2.3 | Sonnet | ✅ | MAX-020 |
 | MAX-051 | Chat UI with token-streaming reveal | FR-2.1–2.4, D10 | Sonnet | 🔲 | MAX-024, MAX-041, MAX-050 |
+
+**MAX-050 was already built when it was dispatched, and that is a tracker failure, not
+an agent one.** `ChatThread`/`ChatMessage` shipped with MAX-010, the
+`ChatThreadRepository` protocol and `StoredChatThread` payload with MAX-020, and the
+CloudKit-safe `ChatThreadRecord` plus its `MaximizeStore` conformance with MAX-020/021.
+Every constraint the ticket listed — schema shape, thread identity keyed on the workout,
+durable explicit ordering — was already satisfied on `main`. This board said 🔲 because
+nobody re-derived it after those three merged.
+
+The agent read the path first, found the work done, verified it was not a stale-worktree
+artifact by rebasing onto the true `origin/main` and confirming the files were identical,
+and reported that instead of rebuilding it. That is the behaviour the briefs ask for and
+it is worth naming.
+
+**The real gap it did close** is that the "one thread per workout" invariant lived only
+in `MaximizeStore.swift` — App-layer code CI never executes, because this pipeline has no
+simulator or device run. A `FakeChatThreadRepository` plus protocol-contract tests now
+pin that behaviour where CI can see it, and give MAX-051 a seam it can drive end-to-end
+with no SwiftData.
+
+**MAX-048 is a latent bug in merged MAX-020 code**, found by MAX-050 and reported rather
+than fixed. `MaximizeStore.threadRecord(for:)` fetches without a sort or tiebreak, unlike
+`workoutRecords(for:)`, which sorts by `ingestedAt` precisely so duplicate resolution is
+deterministic (see the CloudKit-constraints section above). `ChatThreadRecord` has no
+equivalent field, so two records for one workout — which a CloudKit sync race can
+produce, since the schema cannot carry a uniqueness constraint — resolve to whichever
+row the store happens to return first. The thread a user sees would depend on fetch
+order. Fixing it means giving the record a tiebreak field and sorting on it, which is a
+schema change and therefore its own ticket.
 
 ### Phase 6 — Dashboard
 
