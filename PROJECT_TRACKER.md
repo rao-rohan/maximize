@@ -72,7 +72,7 @@ network.
 | MAX-014 | Context builder — the single assembler of what Claude sees | D3 | **Opus** | ✅ | MAX-011, MAX-013 |
 | MAX-015 | Scoring rubric application + effective threshold + rationale contract | §10, D1 | **Opus** | ✅ | MAX-014 |
 | MAX-016 | Rest-day budget: automatic conversion of missed days | D9, A6 | Sonnet | ✅ | MAX-011 |
-| MAX-017 | Tallies: workout-days, effective-days, avg score, streak, current week | FR-3.4, §8 | Sonnet | 🔲 | MAX-015, MAX-016 |
+| MAX-017 | Tallies: workout-days, effective-days, avg score, streak, current week | FR-3.4, §8 | Sonnet | ✅ | MAX-015, MAX-016 |
 
 MAX-013 is Opus despite looking small: PRD §13 names plan/actual misclassification as
 a risk that "poisons the score," and every downstream number inherits its mistakes.
@@ -116,11 +116,12 @@ not block on device runs — but every PR here states plainly what a human must 
 | MAX-031 | Anchored incremental fetch with persisted anchor | FR-0.2 | **Opus** | ✅ | MAX-030 |
 | MAX-032 | Full-fidelity extraction: HR series, route, cadence, energy; indoor runs first-class | FR-0.3, FR-0.6 | Sonnet | ✅ | MAX-031 |
 | MAX-033 | Ingestion pipeline: dedupe on `workoutUUID`, compute + store derived metrics, trigger scoring | FR-0.5, D2, A2 | **Opus** | ✅ | MAX-032, MAX-020, MAX-023 |
-| MAX-034 | Store captured samples independently of plan coverage | FR-0.3, D7 | Sonnet | 🔲 | MAX-033 |
+| MAX-034 | Store captured samples independently of plan coverage | FR-0.3, D7 | Sonnet | ✅ | MAX-033 |
 
-**MAX-034 fixes real data loss, found by MAX-042.** `WorkoutIngestionPipeline.enrich`
-returns as soon as no plan governs the workout's day — *before* `WorkoutSampleExtractor`
-runs — so the heart-rate series, route and step count are never fetched or stored. Its
+**MAX-034 fixed real data loss, found by MAX-042.** `WorkoutIngestionPipeline.enrich`
+used to return as soon as no plan governed the workout's day — *before*
+`WorkoutSampleExtractor` ran — so the heart-rate series, route and step count were
+never fetched or stored. Sample extraction now runs unconditionally and first. Its
 reasoning is sound for **derived metrics**, which are all measured against the plan's
 cap, but the raw curve is a fact about the run rather than about the plan.
 
@@ -129,8 +130,17 @@ revisits it. Every run predating the first plan version therefore keeps no curve
 — and D7 stores whole curves precisely so the cross-run drift overlay (D5/FR-3.3,
 MAX-062) can read them. PRD §1 calls that overlay the thing no other app can draw.
 
-It also conflates two states downstream that MAX-042 correctly renders differently:
+It also conflated two states downstream that MAX-042 correctly renders differently:
 "no plan governed this day" and "this workout has no heart-rate data".
+
+**Open, reported by MAX-034, not fixed by it:** a workout in the
+`.workoutPredatesEveryPlan` state can never gain derived metrics. `completeIngestion`
+re-resolves the plan calendar on every call, so `.noPlanAuthored` workouts *are*
+recoverable — the first plan version an athlete authors may cover them retroactively —
+but MAX-011's no-back-dating rule means that once any version exists, no later one can
+open earlier. Those runs keep their curves (post-MAX-034) and stay permanently
+unscored. No backfill mechanism exists; deciding whether one is wanted is its own
+ticket, not a defect in the pipeline.
 
 **MAX-033 must treat an already-recorded automatic score as success, not failure.**
 MAX-020 flagged this: `automaticScoreAlreadyRecorded` is what D8 immutability looks
@@ -155,7 +165,7 @@ probe in `HealthKitWorkoutFetcher` (one extra query per outdoor workout, needed 
 | MAX-040 | Design system: dark-first tokens, score bands, accent, Liquid Glass on chrome only, flat content surfaces | FR-4.1–4.4, A7 | **Opus** | ✅ | MAX-006 |
 | MAX-041 | Detail view: plan-verdict header | FR-1.1 | Sonnet | ✅ | MAX-020, MAX-040 |
 | MAX-042 | HR curve with cap line + time-above-cap shading | FR-1.2 | Sonnet | ✅ | MAX-040, MAX-012 |
-| MAX-043 | Cadence vs target band | FR-1.3 | Sonnet | 🔲 | MAX-042 |
+| MAX-043 | Cadence vs target band | FR-1.3 | Sonnet | ✅ | MAX-042 |
 | MAX-044 | Route map — outdoor only, omitted cleanly for treadmill | FR-1.4 | Sonnet | 🔲 | MAX-040 |
 | MAX-045 | Splits + summary tiles | FR-1.5 | Haiku | 🔲 | MAX-040 |
 
