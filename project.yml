@@ -23,13 +23,15 @@ configs:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    # Unsigned, always. No team ID, no signing identity belongs in this repo — CI
-    # builds for the simulator only, and local device installs are a human's problem
-    # to solve with their own signing config, never checked in here.
-    CODE_SIGNING_ALLOWED: NO
-    CODE_SIGNING_REQUIRED: NO
-    CODE_SIGN_IDENTITY: ""
-    DEVELOPMENT_TEAM: ""
+
+# Signing lives in an xcconfig rather than here, because it is the one part of this
+# spec that differs per machine. Support/Signing.xcconfig defaults to fully unsigned
+# (what CI needs) and optionally includes Support/Signing.local.xcconfig, which is
+# gitignored and holds a developer's own team ID and bundle identifier.
+#
+# Build settings written here would *outrank* the xcconfig and make a local device
+# build impossible without editing a committed file — which is exactly the situation
+# that ends with someone's team ID in a diff. See docs/DEVICE-BUILD.md.
 
 packages:
   MaximizeCore:
@@ -87,10 +89,14 @@ targets:
         com.apple.developer.healthkit: true
         com.apple.developer.healthkit.background-delivery: true
 
+    # Signing and bundle identifier come from here, not from `settings` below, so a
+    # local device build can override them without touching a committed file.
+    configFiles:
+      Debug: Support/Signing.xcconfig
+      Release: Support/Signing.xcconfig
+
     settings:
       base:
-        # PLACEHOLDER — see options.bundleIdPrefix above.
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.maximize.app
         TARGETED_DEVICE_FAMILY: "1" # iPhone only for now; PRD doesn't call out iPad
         # No physical Info.plist checked in — Xcode's modern build-setting-driven
         # generation (the same default a fresh SwiftUI App template uses) covers the

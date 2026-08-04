@@ -52,3 +52,8 @@ secrets.json
 *.mobileprovision
 .env
 .env.*
+
+# Your personal signing config: team ID and bundle identifier. Support/Signing.xcconfig
+# optionally includes it, so a device build needs no edit to any committed file.
+# The .example template beside it IS committed.
+Support/Signing.local.xcconfig
