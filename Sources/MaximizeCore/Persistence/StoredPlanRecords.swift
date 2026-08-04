@@ -109,6 +109,23 @@ public struct StoredRestDayOverride: Hashable, Sendable {
 ///
 /// D6 is why this record syncs like the rest: the conversation about a run is part of
 /// the longitudinal record and must survive a reinstall.
+///
+/// ## `createdAt` is storage metadata, not domain data (MAX-048)
+///
+/// `ChatThread` carries no timestamp of its own — a thread is an ordered list of
+/// messages, and each message already carries when it happened. `createdAt` exists so
+/// the store can break a tie deterministically when CloudKit mirroring produces two
+/// `ChatThreadRecord`s for one workout: the schema cannot carry a unique constraint
+/// (see `MaximizeSchemaV1`'s CloudKit notes), so `MaximizeStore.threadRecords(for:)`
+/// needs the same kind of explicit ordering `workoutRecords(for:)` already has via
+/// `StoredWorkout.ingestedAt`.
+///
+/// The difference from `ingestedAt` is that `ingestedAt` is real domain data — it is a
+/// field on `Workout` and round-trips through `toDomain()`. `createdAt` has nowhere to
+/// round-trip into, because `ChatThread` has no such field, so it stays a plain
+/// property on this stored struct and the domain type is untouched. It is set once, at
+/// a record's first insert, and `MaximizeStore` preserves it across every later
+/// `store(_:)` for the same workout — see that file for why.
 public struct StoredChatThread: Hashable, Sendable {
     public var threadUUID: UUID
     public var workoutUUID: UUID
@@ -116,13 +133,20 @@ public struct StoredChatThread: Hashable, Sendable {
     /// A JSON-encoded `[ChatMessage]`.
     public var messagesJSON: Data
 
-    public init(threadUUID: UUID, workoutUUID: UUID, messagesJSON: Data) {
+    /// Duplicate-resolution tiebreak (MAX-048). See the type-level doc above.
+    public var createdAt: Date
+
+    public init(threadUUID: UUID, workoutUUID: UUID, messagesJSON: Data, createdAt: Date) {
         self.threadUUID = threadUUID
         self.workoutUUID = workoutUUID
         self.messagesJSON = messagesJSON
+        self.createdAt = createdAt
     }
 
-    public init(_ thread: ChatThread) throws {
+    /// - Parameter createdAt: Not derived from `thread` — `ChatThread` has no
+    ///   timestamp of its own. The caller (`MaximizeStore`) decides this: the existing
+    ///   record's `createdAt` on an update, or the current time on first insert.
+    public init(_ thread: ChatThread, createdAt: Date) throws {
         let messagesJSON = try PersistencePayload.encode(
             thread.messages,
             field: "StoredChatThread.messagesJSON"
@@ -130,7 +154,8 @@ public struct StoredChatThread: Hashable, Sendable {
         self.init(
             threadUUID: thread.id,
             workoutUUID: thread.workoutID,
-            messagesJSON: messagesJSON
+            messagesJSON: messagesJSON,
+            createdAt: createdAt
         )
     }
 

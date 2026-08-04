@@ -475,7 +475,7 @@ final class StoredRecordRoundTripTests: XCTestCase {
                 ),
             ]
         )
-        let restored = try StoredChatThread(thread).toDomain()
+        let restored = try StoredChatThread(thread, createdAt: Fixture.epoch).toDomain()
         XCTAssertEqual(restored, thread)
         // The seed context is not a bubble (FR-2.1); storage must not change that.
         XCTAssertEqual(restored.visibleMessages.count, 2)
@@ -484,7 +484,7 @@ final class StoredRecordRoundTripTests: XCTestCase {
 
     func testEmptyChatThreadRoundTrips() throws {
         let thread = try ChatThread(id: UUID(), workoutID: Fixture.workoutID)
-        let restored = try StoredChatThread(thread).toDomain()
+        let restored = try StoredChatThread(thread, createdAt: Fixture.epoch).toDomain()
         XCTAssertEqual(restored, thread)
         XCTAssertTrue(restored.isEmpty)
     }
@@ -496,7 +496,33 @@ final class StoredRecordRoundTripTests: XCTestCase {
             workoutID: Fixture.workoutID,
             messages: [ChatMessage(id: UUID(), role: .user, content: "hi", timestamp: precise)]
         )
-        XCTAssertEqual(try StoredChatThread(thread).toDomain().messages[0].timestamp, precise)
+        XCTAssertEqual(
+            try StoredChatThread(thread, createdAt: Fixture.epoch).toDomain().messages[0].timestamp,
+            precise
+        )
+    }
+
+    /// MAX-048: `createdAt` is storage-only bookkeeping for duplicate resolution, not
+    /// domain data — `ChatThread` has no timestamp of its own to carry it. What CI can
+    /// verify here is that `StoredChatThread` carries exactly the value its caller
+    /// gave it, and that the value cannot leak into the domain type because there is
+    /// no field for it to leak into. The rule for *which* value `MaximizeStore` passes
+    /// — the existing record's `createdAt` on an update, `Date()` on first insert, and
+    /// the sort in `threadRecords(for:)` that makes the tiebreak matter — lives in
+    /// `App/Persistence/MaximizeStore.swift`, which CI never executes (no simulator or
+    /// device in this pipeline — tracker R2).
+    func testChatThreadCreatedAtIsStorageOnlyBookkeeping() throws {
+        let thread = try ChatThread(id: UUID(), workoutID: Fixture.workoutID)
+        let createdAt = Fixture.epoch.addingTimeInterval(42)
+
+        let stored = try StoredChatThread(thread, createdAt: createdAt)
+        XCTAssertEqual(stored.createdAt, createdAt)
+
+        // Two stored records for the same thread that differ only in `createdAt` must
+        // round-trip to the identical domain value — there is nowhere on `ChatThread`
+        // for the difference to surface.
+        let otherStored = try StoredChatThread(thread, createdAt: createdAt.addingTimeInterval(3_600))
+        XCTAssertEqual(try stored.toDomain(), try otherStored.toDomain())
     }
 
     func testAppSettingsRoundTripUnchanged() throws {
