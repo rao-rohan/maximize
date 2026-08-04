@@ -4,9 +4,9 @@ import MaximizeCore
 /// The workout detail screen (FR-1.1–1.6).
 ///
 /// MAX-041 built the plan-verdict header and the scaffold needed to reach it. MAX-042
-/// adds the HR curve. Cadence vs. target (MAX-043), route map (MAX-044), splits and
-/// summary tiles (MAX-045), and the chat entry point (MAX-051) all land as further
-/// siblings inside `content` below — the seam is still this view's body, and
+/// adds the HR curve. MAX-043 adds cadence vs. target. Route map (MAX-044), splits
+/// and summary tiles (MAX-045), and the chat entry point (MAX-051) all land as
+/// further siblings inside `content` below — the seam is still this view's body, and
 /// `WorkoutDetailData` (see `WorkoutDetailModel`) is where each of those adds its
 /// section's data without touching `WorkoutVerdict`.
 struct WorkoutDetailView: View {
@@ -52,8 +52,9 @@ struct WorkoutDetailView: View {
             VStack(alignment: .leading, spacing: LayoutMetrics.sectionSpacing) {
                 VerdictHeaderView(verdict: data.verdict)
                 HRCurveView(chartData: data.heartRateChart)
-                // MAX-043 (cadence), MAX-044 (route map), MAX-045 (splits/tiles),
-                // MAX-051 (chat entry point) land here.
+                CadenceBandView(data: data.cadence)
+                // MAX-044 (route map), MAX-045 (splits/tiles), MAX-051 (chat entry
+                // point) land here.
             }
         }
     }
