@@ -13,6 +13,13 @@ struct WorkoutDetailData: Equatable {
     /// first-class state (MAX-010's "absent, not empty"), not a loading placeholder.
     /// `HRCurveView` renders that nil as "no chart to draw" rather than an empty axis.
     let heartRateChart: HeartRateChartData?
+
+    /// FR-1.3. Unlike `heartRateChart`, always present — there is no "nothing to
+    /// build from" case for cadence. A run with no step count, a day with no
+    /// governing plan, and a run with both are all real states `CadenceChartData`
+    /// carries rather than a reason to omit the section; see its own documentation
+    /// and `CadenceBandView`'s for how each renders.
+    let cadence: CadenceChartData
 }
 
 /// Loads one workout and assembles `WorkoutDetailData` for the detail screen. Everything
@@ -91,14 +98,24 @@ final class WorkoutDetailModel {
             let day = try workout.calendarDay(in: timeZone)
             let planDay = try planCalendar?.planDay(on: day)
 
+            // Fetched once, here, and handed to every section below — MAX-042's D2
+            // discipline: a metric read once at ingestion must also be read only once
+            // per screen load, never re-fetched (let alone recomputed) per section.
+            let metrics = try await workoutRepository.derivedMetrics(forWorkout: workoutID)
+
             let verdict = WorkoutVerdict(workout: workout, planDay: planDay, ledger: ledger)
             let chartData = try await heartRateChart(
                 workoutRepository: workoutRepository,
                 planCalendar: planCalendar,
-                day: day
+                day: day,
+                metrics: metrics
+            )
+            let cadence = CadenceChartData(
+                averageStepsPerMinute: metrics?.averageCadenceStepsPerMinute,
+                band: planCalendar?.plan(on: day)?.cadenceTarget
             )
 
-            state = .loaded(WorkoutDetailData(verdict: verdict, heartRateChart: chartData))
+            state = .loaded(WorkoutDetailData(verdict: verdict, heartRateChart: chartData, cadence: cadence))
         } catch {
             state = .failed
         }
@@ -116,12 +133,12 @@ final class WorkoutDetailModel {
     private func heartRateChart(
         workoutRepository: any WorkoutRepository,
         planCalendar: PlanCalendar?,
-        day: CalendarDay
+        day: CalendarDay,
+        metrics: DerivedMetrics?
     ) async throws -> HeartRateChartData? {
         guard let series = try await workoutRepository.heartRateSeries(forWorkout: workoutID) else {
             return nil
         }
-        let metrics = try await workoutRepository.derivedMetrics(forWorkout: workoutID)
         let capBPM = planCalendar?.plan(on: day)?.heartRateCapBPM
         return HeartRateChartData(series: series, capBPM: capBPM, timeAboveCapSeconds: metrics?.timeAboveCapSeconds)
     }
