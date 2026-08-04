@@ -47,13 +47,63 @@ enum MaximizeModelContainer {
 
     /// The on-disk container the app runs against.
     ///
-    /// - Parameter cloudKitDatabase: `.none` today. MAX-021 owns turning mirroring on,
-    ///   which also needs the iCloud capability and a container identifier in
-    ///   `project.yml`. The *schema* is already built to CloudKit's restrictions — no
-    ///   unique constraints, no relationships, defaults on every non-optional property —
-    ///   so that ticket should be configuration rather than a redesign.
+    /// ## CloudKit mirroring (MAX-021, D6)
+    ///
+    /// Defaults to `.automatic` — mirror to the private database of whichever iCloud
+    /// container `project.yml`'s entitlement names — rather than a literal container
+    /// identifier. `.automatic` reads that container out of the app's own entitlements
+    /// at runtime, so this file never duplicates the container ID string that
+    /// `project.yml` already owns; the two cannot drift apart because there is only one
+    /// copy. The schema was already built to CloudKit's restrictions by MAX-020 — no
+    /// unique constraints, no relationships, defaults on every non-optional property —
+    /// so turning this on is configuration, not a redesign.
+    ///
+    /// **What this puts in the user's private CloudKit database:** every record in
+    /// `MaximizeSchemaV1.models` — workouts, HR curves, routes, derived metrics, scores,
+    /// annotations, chat threads, the plan, rest-day overrides, and settings. That is
+    /// health data leaving the device. It is *not* the same exposure as a third-party
+    /// server (CLAUDE.md's "Health and privacy" section): it is the user's own private
+    /// CloudKit database, under their Apple ID, encrypted in transit and at rest by
+    /// Apple's iCloud infrastructure, and never visible to this app's developer or
+    /// anyone else. But it is data leaving the phone, which CLAUDE.md's "health data
+    /// never leaves the device except as prompt context" line does not anticipate — so
+    /// the position is stated here explicitly rather than assumed: private-database
+    /// CloudKit sync between a user's own devices is treated as a deliberate, in-bounds
+    /// exception to that rule, not a violation of it. Flagged for `/security-review` in
+    /// MAX-021's PR per CLAUDE.md's "any PR touching what enters a Claude prompt" rule
+    /// or its neighbors — this doesn't touch a Claude prompt, but it does change where
+    /// health data can live, which is the same family of concern.
+    ///
+    /// **What stays off CloudKit, on purpose:**
+    /// - The HealthKit query anchor (`FileWorkoutQueryAnchorStore`) — a separate,
+    ///   non-SwiftData file store, untouched by this configuration. See R12 in
+    ///   `PROJECT_TRACKER.md`: an anchor that synced would let a second device resume
+    ///   past workouts it never ingested, and skip them silently and permanently.
+    /// - The Anthropic API key (`KeychainAnthropicAPIKeyStore`) — Keychain, not
+    ///   SwiftData, and explicitly written with `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`
+    ///   plus `kSecAttrSynchronizable = false` (A5). Unaffected by and unrelated to this
+    ///   change; noted here only to be complete about what does and doesn't sync.
+    ///
+    /// **A known gap this ticket found but did not fix:** `AppSettingsRecord` bundles
+    /// genuine user preferences (`restDayBudgetDaysPerWeek`, `distanceUnitRawValue`,
+    /// `appearanceRawValue` — reasonable to sync) together with three fields that
+    /// mirror *this device's* OS accessibility settings (`reducesTransparency`,
+    /// `increasesContrast`, `reducesMotion`). Those three are device-scoped, not
+    /// user-scoped: syncing them means device A's Reduce Transparency setting can
+    /// overwrite device B's. Today this is inert — nothing yet reads
+    /// `UIAccessibility` to seed these fields (`AppSettings`'s own doc comment: "the
+    /// app layer is responsible for seeding them from the system values", and no call
+    /// site does that yet). It stops being inert the moment MAX-064 wires that up.
+    /// Two fixes are available then, neither needed now: split these three fields into
+    /// a second, non-CloudKit local store (the same shape as the anchor split), or —
+    /// simpler — have whichever code seeds them from `UIAccessibility` re-run on every
+    /// foreground activation, so a synced-in stale value from another device is
+    /// overwritten by this device's real state before it is ever read. Left for
+    /// MAX-064 to decide, since that ticket is the one that actually populates these
+    /// fields; recorded here rather than silently redesigning `AppSettingsRecord` on a
+    /// ticket that owns sync configuration, not the settings schema.
     static func makeOnDisk(
-        cloudKitDatabase: ModelConfiguration.CloudKitDatabase = .none
+        cloudKitDatabase: ModelConfiguration.CloudKitDatabase = .automatic
     ) throws -> ModelContainer {
         let url = try prepareStoreURL()
         let configuration = ModelConfiguration(
@@ -76,11 +126,18 @@ enum MaximizeModelContainer {
 
     /// An in-memory container, for previews and for anything that wants a store without
     /// touching the athlete's real history.
+    ///
+    /// `cloudKitDatabase: .none` is passed explicitly, not left to whatever default the
+    /// SDK's in-memory initializer happens to have. `makeOnDisk` above now defaults to
+    /// `.automatic`, and previews/tests are exactly the callers that must never mirror
+    /// to the real athlete's iCloud container regardless of what that default is —
+    /// making the choice explicit here means this store's CloudKit behavior does not
+    /// depend on staying in sync with a decision made in a different function.
     static func makeInMemory() throws -> ModelContainer {
         try ModelContainer(
             for: Schema(versionedSchema: MaximizeSchemaV1.self),
             migrationPlan: MaximizeMigrationPlan.self,
-            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         )
     }
 

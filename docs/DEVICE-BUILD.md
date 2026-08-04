@@ -74,10 +74,54 @@ This is why the local build matters rather than a CI simulator artifact.
 | **HealthKit background delivery** | **no — unsupported by Apple** | yes |
 | Watch → iPhone sync timing | no | yes |
 | Whether zero-touch capture works at all | no | **yes** |
+| **CloudKit sync between two devices** | no — needs a second real device | yes |
 
 Background delivery not working in the Simulator is Apple's documented behaviour, not a
 limitation of this project's setup. It is the single reason a simulator build cannot
 verify the product's central claim.
+
+## Verifying CloudKit sync (MAX-021)
+
+Same story as background delivery: nothing in CI touches this, and there is no
+simulator substitute — CloudKit sync needs two real endpoints signed into the same
+iCloud account, and the Simulator's iCloud support is unreliable enough that it is not
+trustworthy for this even as a first check. This needs a human on real hardware.
+
+**What to check:**
+
+1. **Both devices signed into the same Apple ID**, with iCloud Drive/iCloud enabled in
+   Settings (Settings → [your name] → check the account matches on both).
+2. Install on device A (`⌘R`). Let a workout ingest (or wait for the next real run —
+   ingestion itself is not this ticket's concern, only whether what lands in the store
+   reaches device B).
+3. Install on device B, signed into the *same* Apple ID. Open the app. Within a few
+   minutes to an hour (CloudKit sync is opportunistic, not instant — see `project.yml`'s
+   note on the omitted push-notification background mode), the workout from device A
+   should appear.
+4. **Delete-and-reinstall check (the actual D6 requirement):** delete the app from
+   device A, reinstall, sign into the same Apple ID, open it. Workout history should
+   reappear without a fresh HealthKit ingest — this is the "survives reinstall" half of
+   D6, and it is the one CI can least stand in for.
+5. **First-sync duplicate check:** if a workout is recorded on both devices before
+   either has synced (e.g. both were offline, or the app was just installed on both),
+   confirm it appears once, not twice, on each device after sync catches up. Two
+   `WorkoutRecord`s for the same `workoutUUID` can legitimately exist transiently —
+   `MaximizeStore` resolves to the oldest by `ingestedAt` — but the UI should not show a
+   duplicate workout once both devices have synced.
+6. **What NOT to see:** on a device that has never had HealthKit access granted or has
+   never ingested a given workout locally, that workout's *HealthKit anchor position*
+   should not silently skip past workouts it never fetched. This is R12 in
+   `PROJECT_TRACKER.md` and is why the anchor file is deliberately excluded from
+   CloudKit — there's no positive way to observe this from the UI, only its absence:
+   watch for any workout that HealthKit has but the app never shows on a device where
+   ingestion should still be running.
+
+If step 3 or 4 does not happen within a reasonable window, check Settings → [your
+name] → iCloud → that this app (once it has a real bundle ID and provisioning, not the
+placeholder) is listed and not disabled, and that the CloudKit container was actually
+provisioned — the first signed run with the iCloud capability is normally what creates
+it; the CloudKit Dashboard (icloud.developer.apple.com) can confirm the container and
+schema exist under your team.
 
 ## Expected behaviour right now
 
