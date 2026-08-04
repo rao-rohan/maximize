@@ -80,6 +80,38 @@ targets:
     # app does not read. Apple warns that App Review may reject apps enabling it
     # without using the data.
     #
+    # MAX-021 / D6. Turns on CloudKit mirroring for the SwiftData workout store so
+    # history survives a reinstall and reaches a second device signed into the same
+    # iCloud account. Two keys, matching what Xcode itself writes when you enable the
+    # iCloud → CloudKit capability in the UI:
+    #
+    #   com.apple.developer.icloud-container-identifiers
+    #     The CloudKit container(s) this app may use. `iCloud.$(CFBundleIdentifier)`
+    #     is Xcode's own default pattern, used here instead of a literal container ID
+    #     so the value tracks PRODUCT_BUNDLE_IDENTIFIER automatically — CI and a
+    #     fresh clone get `iCloud.com.example.maximize.app` from the placeholder in
+    #     Support/Signing.xcconfig, and a signed device build gets the developer's own
+    #     container from Support/Signing.local.xcconfig, with no edit needed here and
+    #     no account identifier ever committed.
+    #
+    #   com.apple.developer.icloud-services
+    #     Which iCloud service the container is used for. `CloudKit` only — this app
+    #     does not use iCloud Documents/Drive.
+    #
+    # NOT included: `aps-environment` / `UIBackgroundModes: [remote-notification]`.
+    # Those enable silent push so CloudKit sync can happen while the app is
+    # suspended; without them, sync still runs, just only around foreground
+    # launches/activations. Deliberately left out of this ticket's scope — D6's
+    # requirement is "survives reinstall / reaches a second device," not
+    # real-time delivery, and background push is its own entitlement surface to get
+    # right. A future ticket can add it if sync latency turns out to matter.
+    #
+    # This does not create or provision a CloudKit container by itself — that step
+    # happens once, per Apple ID, the first time Xcode signs and runs a build with
+    # this capability (or via the CloudKit Dashboard). CI's unsigned build compiles
+    # and links against this entitlement without needing one to exist; see MAX-021's
+    # PR for the device-side setup this still needs.
+    #
     # Written to Support/ rather than App/ deliberately: App/ is this target's sources
     # path, and a generated file dropped among hand-written sources is one XcodeGen
     # file-type heuristic away from being copied into the bundle as a resource.
@@ -88,6 +120,10 @@ targets:
       properties:
         com.apple.developer.healthkit: true
         com.apple.developer.healthkit.background-delivery: true
+        com.apple.developer.icloud-container-identifiers:
+          - iCloud.$(CFBundleIdentifier)
+        com.apple.developer.icloud-services:
+          - CloudKit
 
     # Signing and bundle identifier come from here, not from `settings` below, so a
     # local device build can override them without touching a committed file.
