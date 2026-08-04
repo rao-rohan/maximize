@@ -131,10 +131,33 @@ jobs:
       # device/OS pinned, so this doesn't depend on which simulator runtimes happen
       # to be pre-provisioned on the runner. This proves the app target compiles and
       # links MaximizeCore; it does not run the app or verify anything visually.
+      # Teed for the same reason the core job tees its build: xcodebuild prints the
+      # whole compile graph, and a failed run's log tail is the *last* files it was
+      # working on, not the one that failed. The error itself lands thousands of lines
+      # earlier and is effectively unreachable without this.
       - name: Build for iOS Simulator (unsigned)
         run: |
+          set -o pipefail
           xcodebuild build \
             -project Maximize.xcodeproj \
             -scheme Maximize \
             -destination 'generic/platform=iOS Simulator' \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee /tmp/xcodebuild.log
+
+      # Puts the diagnostics in the job summary, where they are the first thing visible
+      # rather than something to go hunting for. The two lines after each error are kept
+      # because Swift prints the offending source line and a caret underneath it, and
+      # the message alone is often ambiguous without them.
+      - name: Surface compiler errors
+        if: failure()
+        run: |
+          {
+            echo "### Diagnostics"
+            echo
+            echo '```'
+            grep -E -A 2 "error:" /tmp/xcodebuild.log 2>/dev/null | head -60 \
+              || echo "No error: lines found — the failure was not a compile error."
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "--- diagnostics ---"
+          grep -E -A 2 "error:" /tmp/xcodebuild.log 2>/dev/null | head -60 || true
