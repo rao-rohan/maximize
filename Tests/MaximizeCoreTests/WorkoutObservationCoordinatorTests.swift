@@ -145,18 +145,46 @@ final class WorkoutObservationCoordinatorTests: XCTestCase {
         XCTAssertEqual(ingester.ingestCallCount, 8)
     }
 
-    func testThePlaceholderIngesterSatisfiesTheSeamWithoutFailing() async {
-        // MAX-031 has not landed. The wake path must still be complete and
-        // acknowledge correctly, so that swapping in the real ingester changes one
-        // line in the app's composition root and nothing on this path.
+    func testARealAnchoredIngesterIsDrivenByAWakeAndAcknowledged() async throws {
+        // The seam, with MAX-031's actual implementation on the far side of it rather
+        // than a fake: a wake performs an anchored fetch and is acknowledged exactly once.
+        let fetcher = FakeWorkoutFetcher()
+        let anchorStore = InMemoryWorkoutQueryAnchorStore()
         let acknowledgements = AcknowledgementRecorder()
         let coordinator = WorkoutObservationCoordinator(
-            ingester: UningestedWorkoutsPlaceholder()
+            ingester: AnchoredWorkoutIngester(
+                fetcher: fetcher,
+                anchorStore: anchorStore,
+                sink: RecordingWorkoutIngestionSink()
+            )
+        )
+
+        await coordinator.workoutsMayHaveChanged(acknowledge: acknowledgements.handler())
+
+        XCTAssertEqual(fetcher.fetchCount, 1)
+        XCTAssertEqual(acknowledgements.acknowledgementCount, 1)
+    }
+
+    func testAWakeIsStillAcknowledgedWhenTheAnchoredIngesterFails() async {
+        // The load-bearing pairing (tracker R9): the anchored ingester leaves its anchor
+        // untouched on failure, and the coordinator acknowledges anyway. Neither half is
+        // safe without the other.
+        let fetcher = FakeWorkoutFetcher()
+        fetcher.failNextFetch(with: IngestionFailure.simulated)
+        let anchorStore = InMemoryWorkoutQueryAnchorStore()
+        let acknowledgements = AcknowledgementRecorder()
+        let coordinator = WorkoutObservationCoordinator(
+            ingester: AnchoredWorkoutIngester(
+                fetcher: fetcher,
+                anchorStore: anchorStore,
+                sink: RecordingWorkoutIngestionSink()
+            )
         )
 
         await coordinator.workoutsMayHaveChanged(acknowledge: acknowledgements.handler())
 
         XCTAssertEqual(acknowledgements.acknowledgementCount, 1)
+        XCTAssertNil(anchorStore.currentAnchor)
     }
 }
 

@@ -1,9 +1,10 @@
 /// Fetches and stores workouts that have appeared since the last successful ingest.
 ///
-/// **This is the seam MAX-031 → MAX-033 fill in.** MAX-030 builds only the wake-up
+/// **This is the seam MAX-030 hands off through.** MAX-030 builds only the wake-up
 /// path: something notices new workouts may exist, and this protocol is where the
-/// consequence is handed off. The real implementation is the anchored incremental
-/// fetch (MAX-031, FR-0.2), full-fidelity sample extraction (MAX-032, FR-0.3), and
+/// consequence is handed off. `AnchoredWorkoutIngester` (MAX-031, FR-0.2) is the
+/// implementation; what it does with each workout it finds continues behind
+/// `WorkoutIngestionSink`, into full-fidelity sample extraction (MAX-032, FR-0.3) and
 /// the dedupe/derive/store/score pipeline (MAX-033, FR-0.5, D2).
 ///
 /// Two obligations on implementations, both inherited from how the platform behaves
@@ -22,19 +23,4 @@
 public protocol WorkoutIngesting: Sendable {
     /// Ingests everything not yet ingested. Safe to call repeatedly.
     func ingestPendingWorkouts() async throws
-}
-
-/// Stand-in `WorkoutIngesting` for the window between MAX-030 and MAX-031.
-///
-/// Deliberately not a silent no-op in disguise: the wake path is fully wired and
-/// exercised end to end with this in place, so when MAX-031 swaps in the anchored
-/// fetch, the only thing that changes is one line in the app's composition root. It
-/// does nothing because there is nothing yet to do, not because the call was
-/// forgotten.
-public struct UningestedWorkoutsPlaceholder: WorkoutIngesting {
-    public init() {}
-
-    public func ingestPendingWorkouts() async throws {
-        // MAX-031: anchored `HKAnchoredObjectQuery` with a persisted anchor.
-    }
 }
