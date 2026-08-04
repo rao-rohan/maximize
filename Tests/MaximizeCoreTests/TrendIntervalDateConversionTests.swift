@@ -18,20 +18,45 @@ final class TrendIntervalDateConversionTests: XCTestCase {
 
     // MARK: - The half-open boundary
 
-    /// A run starting at the last second of the final day is inside; the next
-    /// morning's midnight is not. This is the property the whole shape exists for —
-    /// no sub-second gap between one interval's end and the next one's start.
+    /// The range ends at the first instant of the day *after* `through`, so a run
+    /// beginning at 23:59:59 on the final day is inside it and one beginning the next
+    /// morning is not.
+    ///
+    /// Asserted on the bounds themselves rather than through `DateInterval.contains(_:)`,
+    /// because Foundation's `contains` is **closed at both ends** and would call the
+    /// exclusive upper bound a member. The half-open reading is the repository's
+    /// (`WorkoutRepository.workouts(startingIn:)` documents `start <= x < end`); the
+    /// `DateInterval` is a pair of instants here, not a membership test.
     func testTheRangeEndsAtTheFirstInstantAfterTheFinalDay() throws {
         guard let zone = newYork else { return XCTFail("missing time zone") }
+        let through = try CalendarDay(year: 2026, month: 3, day: 8)
         let range = try interval(
+            from: try CalendarDay(year: 2026, month: 3, day: 2),
+            through: through
+        ).dateInterval(in: zone)
+
+        XCTAssertEqual(range.start, try CalendarDay(year: 2026, month: 3, day: 2).firstInstant(in: zone))
+        XCTAssertEqual(range.end, try through.adding(days: 1).firstInstant(in: zone))
+    }
+
+    /// The reason the upper bound must be treated as exclusive, pinned so nobody
+    /// "fixes" the repository predicate back to `<=`: consecutive intervals share that
+    /// instant, so a closed reading puts a run starting exactly at midnight into both.
+    func testTheSharedBoundaryInstantIsTheStartOfTheLaterIntervalOnly() throws {
+        guard let zone = newYork else { return XCTFail("missing time zone") }
+        let earlier = try interval(
             from: try CalendarDay(year: 2026, month: 3, day: 2),
             through: try CalendarDay(year: 2026, month: 3, day: 8)
         ).dateInterval(in: zone)
+        let later = try interval(
+            from: try CalendarDay(year: 2026, month: 3, day: 9),
+            through: try CalendarDay(year: 2026, month: 3, day: 15)
+        ).dateInterval(in: zone)
 
-        let lastSecond = range.end.addingTimeInterval(-1)
-        XCTAssertTrue(range.contains(range.start))
-        XCTAssertTrue(range.contains(lastSecond))
-        XCTAssertFalse(range.contains(range.end))
+        XCTAssertEqual(earlier.end, later.start)
+        // Foundation's own membership test is closed, which is exactly why the
+        // repository does not use it.
+        XCTAssertTrue(earlier.contains(earlier.end))
     }
 
     func testAdjacentIntervalsMeetExactlyWithNoGapOrOverlap() throws {

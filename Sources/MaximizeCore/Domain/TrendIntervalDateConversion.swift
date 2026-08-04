@@ -30,6 +30,13 @@ extension TrendInterval {
     /// beginning at 00:00:00 the next morning is not, with no sub-second gap between the
     /// two where a workout could fall through.
     ///
+    /// **`DateInterval.contains(_:)` is the wrong way to ask.** Foundation's interval is
+    /// closed at both ends, so it calls the exclusive upper bound a member. Since
+    /// consecutive intervals share that instant, a closed reading double-counts a run
+    /// starting exactly at midnight. `WorkoutRepository.workouts(startingIn:)` documents
+    /// and implements the half-open comparison instead; the `DateInterval` returned here
+    /// is a pair of bounds, not a membership test.
+    ///
     /// - Parameter timeZone: the zone whose midnights bound the days. This is the
     ///   athlete's zone, not the device's current one, wherever the two differ.
     public func dateInterval(in timeZone: TimeZone) throws -> DateInterval {

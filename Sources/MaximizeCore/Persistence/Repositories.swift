@@ -79,6 +79,14 @@ public protocol WorkoutRepository: Sendable {
     ///
     /// Start, not end: a workout belongs to the day it was begun, which is how a person
     /// describes it and how `Workout.calendarDay(in:)` resolves it.
+    ///
+    /// **Half-open: `start <= workout.start < end`.** This deliberately contradicts
+    /// `DateInterval`, whose own `contains(_:)` is closed at both bounds — the type is a
+    /// convenient pair of instants here, not a statement about membership. Closed would
+    /// double-count: `TrendInterval.dateInterval(in:)` ends one interval at the same
+    /// instant the next begins, so a run starting exactly at midnight would land in both
+    /// the week that just ended and the week beginning, and every tally spanning that
+    /// boundary would disagree with itself by one workout.
     func workouts(startingIn interval: DateInterval) async throws -> [Workout]
 
     /// Inserts the workout, or updates the existing record with the same identifier.
