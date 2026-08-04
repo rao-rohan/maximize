@@ -31,6 +31,13 @@ Carthage/Build/
 # macOS
 .DS_Store
 
+# Claude Code local state. Worktrees are ephemeral agent workspaces — nested
+# checkouts that must never be committed. settings.local.json is per-developer.
+# Both are covered by a machine-global ignore on some setups, but that does not
+# travel with the repo, so they are declared here too.
+.claude/worktrees/
+.claude/settings.local.json
+
 # Secrets — never commit API keys or signing material
 *.xcconfig.local
 secrets.json
