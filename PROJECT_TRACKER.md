@@ -3,7 +3,7 @@
 **Last updated:** 2026-08-04
 **Spec:** [docs/PRD.md](./docs/PRD.md) + [docs/PRD-AMENDMENTS.md](./docs/PRD-AMENDMENTS.md) (amendments win)
 **Architecture:** Fully on-device. No backend.
-**Pipeline status:** 🟢 CI green — core build/test, architecture guard, and unsigned iOS Simulator app build
+**Pipeline status:** 🟢 CI green — 325 tests. Core build/test, architecture guard, colour-token guard, unsigned iOS Simulator app build.
 
 ---
 
@@ -66,12 +66,12 @@ network.
 | ID | Ticket | Spec | Tier | Status | Depends on |
 |---|---|---|---|---|---|
 | MAX-010 | Domain value types: Workout, HR series, route, Plan, PlanDay, Score, Annotation | §8 | **Opus** | ✅ | — |
-| MAX-011 | Versioned plan + `PlanDay` calendar resolution | D1, §8 | **Opus** | 🔄 | MAX-010 |
+| MAX-011 | Versioned plan + `PlanDay` calendar resolution | D1, §8 | **Opus** | ✅ | MAX-010 |
 | MAX-012 | Derived metrics: time-above-cap, HR drift, avg cadence, grade-adjusted pace, zone splits | §9, D2 | **Opus** | ✅ | MAX-010 |
 | MAX-013 | Workout classification (easy / hard / long / other) from type + HR profile | §10.2 | **Opus** | ✅ | MAX-012 |
-| MAX-014 | Context builder — the single assembler of what Claude sees | D3 | **Opus** | ⬜ | MAX-011, MAX-013 |
+| MAX-014 | Context builder — the single assembler of what Claude sees | D3 | **Opus** | 🔲 | MAX-011, MAX-013 |
 | MAX-015 | Scoring rubric application + effective threshold + rationale contract | §10, D1 | **Opus** | ⬜ | MAX-014 |
-| MAX-016 | Rest-day budget: automatic conversion of missed days | D9, A6 | Sonnet | ⬜ | MAX-011 |
+| MAX-016 | Rest-day budget: automatic conversion of missed days | D9, A6 | Sonnet | 🔲 | MAX-011 |
 | MAX-017 | Tallies: workout-days, effective-days, avg score, streak, current week | FR-3.4, §8 | Sonnet | ⬜ | MAX-015, MAX-016 |
 
 MAX-013 is Opus despite looking small: PRD §13 names plan/actual misclassification as
