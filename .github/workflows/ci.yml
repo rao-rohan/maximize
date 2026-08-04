@@ -32,13 +32,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # MaximizeCore must not depend on UI or platform frameworks; that is what
-      # keeps it testable in CI without a simulator. See CLAUDE.md.
+      # MaximizeCore must not depend on UI, persistence, or platform frameworks; that
+      # is what keeps the scoring and metrics logic testable in CI without a
+      # simulator or a device. See CLAUDE.md.
       - name: Reject platform imports in MaximizeCore
         run: |
-          if grep -rEn '^\s*import\s+(SwiftUI|UIKit|HealthKit)\b' Sources/MaximizeCore; then
-            echo "::error::MaximizeCore must not import SwiftUI, UIKit, or HealthKit."
-            echo "Define a protocol in the core and implement it in the app layer instead."
+          BANNED='SwiftUI|UIKit|HealthKit|SwiftData|CloudKit|MapKit|Charts'
+          if grep -rEn "^\s*import\s+($BANNED)\b" Sources/MaximizeCore; then
+            echo "::error::MaximizeCore must not import platform frameworks ($BANNED)."
+            echo "Define a protocol or value type in the core; implement it in the app layer."
             exit 1
           fi
           echo "OK: no platform framework imports in MaximizeCore."

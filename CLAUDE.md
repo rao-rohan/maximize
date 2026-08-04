@@ -1,7 +1,24 @@
 # Maximize — Engineering Conventions
 
-iOS workout tracker with AI features. This file is the contract every contributor —
-human or agent — works under. Read it before writing code.
+Automated workout capture, scoring, and analysis. See [docs/PRD.md](./docs/PRD.md)
+for what we are building and why. This file is the contract every contributor —
+human or agent — works under. Read both before writing code.
+
+## Repository layout
+
+```
+Package.swift          MaximizeCore — pure domain logic, no frameworks
+Sources/MaximizeCore/  metrics, scoring, plan, context builder, tallies
+Tests/                 unit tests — the merge gate
+App/                   SwiftUI app + platform adapters   (arrives in MAX-006)
+docs/PRD.md            the spec, as received
+docs/PRD-AMENDMENTS.md where we deliberately deviate from it, and why
+```
+
+**There is no backend.** The app is fully on-device: SwiftData for storage, CloudKit
+for backup, Claude called directly from the app. See `docs/PRD-AMENDMENTS.md` — the
+PRD as written specifies a FastAPI/Postgres/Redis backend, and that has been
+superseded. Do not build server components.
 
 ## Architecture: thin shell, fat core
 
@@ -55,15 +72,40 @@ State the latter.
 
 ## Health and privacy
 
-Workout and biometric data is sensitive. Until the PRD says otherwise, assume:
+Health data never leaves the device except as prompt context in a Claude call. That
+is a strong default and it is worth keeping.
 
-- Health data stays on device by default.
-- Anything sent to an AI backend is opt-in, minimized, and documented in the PR.
-- No API keys, tokens, or secrets in the repo. Ever. They go in
-  `.xcconfig.local` / environment, which `.gitignore` excludes.
+- **The Anthropic API key lives in Keychain, on-device.** This is a deliberate
+  weakening of PRD §6, acceptable only because the app is single-user and never
+  distributed. **Tripwire: if this app is ever shipped to anyone else, the key must
+  move behind a server first.** Do not treat "it's already on-device" as precedent.
+- **Health data is PII.** Rely on iOS file protection; do not copy workout data into
+  logs, analytics, crash reports, or plaintext scratch files.
+- **No secrets in the repo. Ever.** Not in source, not in `project.yml`, not in a
+  test fixture. `.gitignore` covers the usual paths but is not a substitute for care.
+- Only what the scorer or chat actually needs goes into a Claude prompt. The context
+  builder (D3) is the single place that decides this — never assemble prompt context
+  anywhere else.
 
-Any PR that moves health data off device gets a `/security-review` before merge, no
-exceptions.
+Any PR touching Keychain, key handling, or what enters a Claude prompt gets a
+`/security-review` before merge, no exceptions.
+
+## Determinism rules from the PRD
+
+Three locked decisions are load-bearing and easy to violate by accident. Treat them
+as invariants:
+
+- **D1 — the plan is versioned data, not code.** Thresholds, HR cap, cadence band,
+  and the scoring rubric live in a versioned plan record. Changing a threshold is a
+  new plan version, never a code change. Scoring reads the version in effect on the
+  workout's date, so historical scores stay reproducible.
+- **D2/D3 — derived metrics are computed once at ingestion and stored; one context
+  builder feeds both scorer and chat.** Never recompute a metric at display time, and
+  never build a second notion of "what Claude knows about this run." Both drift, and
+  the drift is invisible until a number disagrees with itself on screen.
+- **D8 — auto-scores are immutable.** Manual corrections are additive annotation
+  records. The divergence between the two is the scorer-quality metric (PRD §2).
+  Overwriting a score destroys exactly the telemetry we want.
 
 ## Style
 
