@@ -218,4 +218,58 @@ final class HeartRateCurveTests: XCTestCase {
         let mean = try XCTUnwrap(curve.timeWeightedMeanBPM(from: -1_000, to: 1_000))
         XCTAssertEqual(mean, 150, accuracy: 1e-9)
     }
+
+    // MARK: - excursionsAbove (MAX-042: the shape a chart shades)
+
+    /// The reference ramp crosses 150 bpm at t = 300 s (same crossing `secondsAbove(150)`
+    /// pins) and stays above it to the end of the curve — one excursion, closed at the
+    /// crossing and at the curve's own endpoint.
+    func testExcursionAboveCapOnTheReferenceRampClosesAtTheSameCrossingSecondsAboveUses() throws {
+        let excursions = try referenceRamp().excursionsAbove(150)
+
+        XCTAssertEqual(excursions.count, 1)
+        let excursion = try XCTUnwrap(excursions.first)
+        XCTAssertEqual(excursion.count, 2)
+        XCTAssertEqual(excursion[0].offsetSeconds, 300, accuracy: 1e-9)
+        XCTAssertEqual(excursion[0].beatsPerMinute, 150, accuracy: 1e-9)
+        XCTAssertEqual(excursion[1].offsetSeconds, 600, accuracy: 1e-9)
+        XCTAssertEqual(excursion[1].beatsPerMinute, 180, accuracy: 1e-9)
+    }
+
+    /// A curve that rises above the cap, falls back under it, then rises again produces
+    /// two separate, independently closed excursions rather than one that bridges the
+    /// dip.
+    func testACurveThatDipsBelowTheCapAndBackProducesTwoExcursions() throws {
+        // (0,160) → (100,140): descending crossing at 0 + (150−160)/(140−160)×100 = 50 s.
+        // (100,140) → (200,160): ascending crossing at 100 + (150−140)/(160−140)×100 = 150 s.
+        let curve = try MetricsFixture.curve([(0, 160), (100, 140), (200, 160)])
+        let excursions = curve.excursionsAbove(150)
+
+        XCTAssertEqual(excursions.count, 2)
+
+        XCTAssertEqual(excursions[0].count, 2)
+        XCTAssertEqual(excursions[0][0].offsetSeconds, 0, accuracy: 1e-9)
+        XCTAssertEqual(excursions[0][0].beatsPerMinute, 160, accuracy: 1e-9)
+        XCTAssertEqual(excursions[0][1].offsetSeconds, 50, accuracy: 1e-9)
+        XCTAssertEqual(excursions[0][1].beatsPerMinute, 150, accuracy: 1e-9)
+
+        XCTAssertEqual(excursions[1].count, 2)
+        XCTAssertEqual(excursions[1][0].offsetSeconds, 150, accuracy: 1e-9)
+        XCTAssertEqual(excursions[1][0].beatsPerMinute, 150, accuracy: 1e-9)
+        XCTAssertEqual(excursions[1][1].offsetSeconds, 200, accuracy: 1e-9)
+        XCTAssertEqual(excursions[1][1].beatsPerMinute, 160, accuracy: 1e-9)
+    }
+
+    func testExcursionsAboveCapAreEmptyWhenTheCurveNeverExceedsIt() throws {
+        // A perfectly held easy run: the whole ramp stays at or below the cap.
+        let curve = try MetricsFixture.curve([(0, 120), (600, 140)])
+        XCTAssertTrue(curve.excursionsAbove(150).isEmpty)
+    }
+
+    func testExcursionsAboveCapAreEmptyWhenTheCurveTouchesButNeverExceedsTheCap() throws {
+        // §9's "strictly above" boundary applies to the shading too: sitting exactly on
+        // the cap is not an excursion.
+        let curve = try MetricsFixture.curve([(0, 150), (100, 150)])
+        XCTAssertTrue(curve.excursionsAbove(150).isEmpty)
+    }
 }
