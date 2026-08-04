@@ -168,6 +168,35 @@ probe in `HealthKitWorkoutFetcher` (one extra query per outdoor workout, needed 
 | MAX-043 | Cadence vs target band | FR-1.3 | Sonnet | ✅ | MAX-042 |
 | MAX-044 | Route map — outdoor only, omitted cleanly for treadmill | FR-1.4 | Sonnet | ✅ | MAX-040 |
 | MAX-045 | Splits + summary tiles | FR-1.5 | Sonnet | 🔲 | MAX-040 |
+| MAX-046 | Per-split pace breakdown: compute at ingestion, store, display | FR-1.5, D2 | **Opus** | 🔲 | MAX-045, MAX-033 |
+| MAX-047 | Make `AppSettings.distanceUnit` load-bearing, or delete it | FR-1.5, FR-4.5 | Sonnet | 🔲 | MAX-045 |
+
+**MAX-045 delivers the summary tiles but not the splits, and that is not a shortfall in
+the ticket — it is a missing data source.** FR-1.5 asks for a per-km/mile pace
+breakdown; the only thing `DerivedMetrics` stores under that name is `zoneSplits`, which
+is time per heart-rate zone, a different measurement entirely. MAX-045 correctly refused
+to compute a split breakdown in the view or in a display-time helper: D2 says a metric is
+computed once at ingestion and stored, and a second place that derives pace-per-kilometre
+is exactly the drift D2 exists to prevent.
+
+So **MAX-046 is an ingestion ticket wearing a display ticket's clothes**, which is why it
+is tiered Opus rather than following MAX-045's Sonnet. It has to decide what a split
+*is* against a route whose GPS fixes are irregular (and absent entirely on a treadmill),
+compute it in the pipeline, add it to the stored schema under CloudKit's constraints, and
+only then render it. The display is the last and smallest part.
+
+**MAX-047 is a live inert control.** `AppSettings.distanceUnit` is persisted, has a
+working Settings picker from MAX-064, and is read by nothing — every distance in the app,
+including the pre-existing `WorkoutDisplayFormatting.distance(meters:)`, hardcodes
+kilometres. MAX-045 matched that convention rather than making its own tile the single
+unit-aware figure on the screen, which was the right call for its scope and leaves the
+inconsistency in one place instead of two.
+
+This is the same defect I removed from MAX-064's accessibility toggles: a switch that
+persists a value nothing consumes is worse than no switch, because it looks like one.
+The ticket is deliberately phrased as a choice — wire it through every display path, or
+delete the field and its picker. Either is defensible; a persisted setting that silently
+does nothing is not.
 
 FR-1.5 is explicitly "thin — displayed because cheap, not lovingly built," which is why
 MAX-045 was originally tiered Haiku. **Re-tiered to Sonnet before dispatch.** The tier
