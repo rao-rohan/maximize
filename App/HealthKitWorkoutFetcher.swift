@@ -47,7 +47,7 @@ final class HealthKitWorkoutFetcher: WorkoutFetching, @unchecked Sendable {
         var workouts: [Workout] = []
         var unrepresentable = 0
         for sample in raw.samples {
-            if let workout = await workout(from: sample, ingestedAt: ingestedAt) {
+            if let workout = await makeWorkout(from: sample, ingestedAt: ingestedAt) {
                 workouts.append(workout)
             } else {
                 unrepresentable += 1
@@ -135,7 +135,7 @@ final class HealthKitWorkoutFetcher: WorkoutFetching, @unchecked Sendable {
 
     // MARK: - HealthKit → core
 
-    private func workout(from sample: HKSample, ingestedAt: Date) async -> Workout? {
+    private func makeWorkout(from sample: HKSample, ingestedAt: Date) async -> Workout? {
         guard let captured = sample as? HKWorkout else { return nil }
 
         let isIndoor = (captured.metadata?[HKMetadataKeyIndoorWorkout] as? Bool) ?? false

@@ -125,7 +125,7 @@ public final class FakeWorkoutFetcher: WorkoutFetching, @unchecked Sendable {
     }
 
     public func fetchWorkouts(_ request: WorkoutFetchRequest) async throws -> WorkoutFetchBatch {
-        let (error, rejects) = lock.locked {
+        let (error, rejects) = lock.locked { () -> (Error?, Bool) in
             let error = errorForNextFetch
             errorForNextFetch = nil
             requests.append(request)
@@ -135,7 +135,9 @@ public final class FakeWorkoutFetcher: WorkoutFetching, @unchecked Sendable {
         if let error { throw error }
         if rejects, request.anchor != nil { throw WorkoutFetchError.unusableAnchor }
 
-        let next = lock.locked { queued.isEmpty ? nil : queued.removeFirst() }
+        let next = lock.locked { () -> WorkoutFetchBatch? in
+            queued.isEmpty ? nil : queued.removeFirst()
+        }
         if let next { return next }
 
         return try WorkoutFetchBatch(workouts: [], anchor: lock.locked { emptyBatchAnchor })

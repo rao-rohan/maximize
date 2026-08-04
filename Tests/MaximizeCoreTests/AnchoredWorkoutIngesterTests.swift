@@ -536,13 +536,21 @@ final class AnchoredWorkoutIngesterTests: XCTestCase {
         policy: AnchoredIngestionPolicy = .standard,
         diagnostics: DiagnosticRecorder? = nil
     ) -> AnchoredWorkoutIngester {
-        AnchoredWorkoutIngester(
+        let fixedNow = Self.testNow
+        let report: @Sendable (IngestionDiagnostic) -> Void
+        if let diagnostics {
+            report = diagnostics.handler()
+        } else {
+            report = { _ in }
+        }
+
+        return AnchoredWorkoutIngester(
             fetcher: fetcher,
             anchorStore: anchorStore,
             sink: sink,
             policy: policy,
-            now: { Self.testNow },
-            report: diagnostics?.handler() ?? { _ in }
+            now: { fixedNow },
+            report: report
         )
     }
 }
