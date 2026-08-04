@@ -78,7 +78,12 @@ enum IngestionComposition {
                 case let .sampleExtraction(event):
                     ingestionLog.info("Sample extraction gap: \(String(describing: event), privacy: .public)")
                 case let .storedWithoutPlan(reason):
-                    ingestionLog.notice("Workout stored without derived metrics (\(String(describing: reason), privacy: .public)); it will be completed once a plan governs it.")
+                    // MAX-034: the workout's samples are stored either way; only the
+                    // derived metrics are missing here. `.workoutPredatesEveryPlan` never
+                    // resolves — MAX-011 forbids a later plan version from back-dating
+                    // before an earlier one — so only `.noPlanAuthored` is actually
+                    // completed once a plan exists.
+                    ingestionLog.notice("Workout's samples stored without derived metrics (\(String(describing: reason), privacy: .public)).")
                 case let .enrichmentFailed(stage):
                     ingestionLog.error("Enrichment failed at \(String(describing: stage), privacy: .public); the workout is stored and can be completed later.")
                 case let .leftUnscored(reason):

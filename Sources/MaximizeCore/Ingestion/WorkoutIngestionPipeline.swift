@@ -253,8 +253,57 @@ public actor WorkoutIngestionPipeline: WorkoutIngestionSink {
     /// error from here would reach `WorkoutIngestionSink.ingest`, pin the anchor, and
     /// re-offer this workout on every wake forever. Each stage therefore reports what it
     /// could not do and returns.
+    ///
+    /// ## Samples first, plan second (MAX-034)
+    ///
+    /// The heart-rate series, route and step count are facts about the run, not about
+    /// the plan — a plan only supplies the cap and rubric that *derived metrics* are
+    /// measured against. So sample extraction and storage happen unconditionally, before
+    /// the plan is even looked up. Only the second half — metrics, classification,
+    /// scoring, all of which are meaningless without a governing plan (§9) — is gated on
+    /// `PlanCalendar.plan(on:)` returning non-nil.
+    ///
+    /// Getting this order backwards is exactly the bug this fixed: the old code checked
+    /// for a plan first and returned before `WorkoutSampleExtractor.extract` ever ran,
+    /// so a workout on a day no plan governs — every run present before the athlete
+    /// authors their first plan version — kept no curve. D7 stores curves so MAX-062's
+    /// drift overlay can read them; a run that never gets a curve is permanently outside
+    /// that dataset, because MAX-031's anchor has already moved past it by the time
+    /// anyone would notice.
     private func enrich(_ workout: Workout, scoringBudgetSeconds: TimeInterval?) async {
         let zone = timeZone()
+
+        let input: DerivedMetricsInput
+        do {
+            input = try await WorkoutSampleExtractor.extract(
+                for: workout,
+                using: samples,
+                policy: policy.sampleExtraction,
+                report: forwardedSampleDiagnostics()
+            )
+        } catch {
+            // MAX-032 degrades a failed heart-rate, route or step fetch to absence on its
+            // own, so reaching here means the input could not be assembled at all.
+            report(.enrichmentFailed(stage: .sampleExtraction))
+            return
+        }
+
+        // D7: the curves are stored whole, and separately from the metrics derived from
+        // them — and, as of MAX-034, separately from whether a plan governs this day at
+        // all. A failure here is reported and stepped over rather than returned on: the
+        // metrics (when a plan exists to compute them against) are derived from the
+        // values already in hand, and losing the curve to a storage hiccup is no reason
+        // to lose the numbers too.
+        do {
+            if let series = input.heartRateSeries {
+                try await workouts.store(series)
+            }
+            if let route = input.route {
+                try await workouts.store(route)
+            }
+        } catch {
+            report(.enrichmentFailed(stage: .storage))
+        }
 
         let calendar: PlanCalendar
         do {
@@ -278,40 +327,11 @@ public actor WorkoutIngestionPipeline: WorkoutIngestionSink {
 
         // Nil is a real state, not a defect: the athlete existed before the app did, and
         // `PlanCalendar` answers nil rather than inventing an ask. Every §9 metric is
-        // measured against the plan's cap, so there is nothing to compute either.
+        // measured against the plan's cap, so there is nothing to compute either — but
+        // the samples above are already durable regardless of this answer.
         guard let plan = calendar.plan(on: day) else {
             report(.storedWithoutPlan(reason: .workoutPredatesEveryPlan))
             return
-        }
-
-        let input: DerivedMetricsInput
-        do {
-            input = try await WorkoutSampleExtractor.extract(
-                for: workout,
-                using: samples,
-                policy: policy.sampleExtraction,
-                report: forwardedSampleDiagnostics()
-            )
-        } catch {
-            // MAX-032 degrades a failed heart-rate, route or step fetch to absence on its
-            // own, so reaching here means the input could not be assembled at all.
-            report(.enrichmentFailed(stage: .sampleExtraction))
-            return
-        }
-
-        // D7: the curves are stored whole, and separately from the metrics derived from
-        // them. A failure here is reported and stepped over rather than returned on — the
-        // metrics are computed from the values already in hand, and losing the curve to
-        // a storage hiccup is no reason to lose the numbers too.
-        do {
-            if let series = input.heartRateSeries {
-                try await workouts.store(series)
-            }
-            if let route = input.route {
-                try await workouts.store(route)
-            }
-        } catch {
-            report(.enrichmentFailed(stage: .storage))
         }
 
         // MAX-012's purity is what makes this two-pass shape well-defined: drift is gated

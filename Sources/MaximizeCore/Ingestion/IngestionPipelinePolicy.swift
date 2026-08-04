@@ -122,10 +122,18 @@ public enum IngestionPipelineDiagnostic: Hashable, Sendable {
     /// Forwarded verbatim from `WorkoutSampleExtractor` (MAX-032).
     case sampleExtraction(SampleExtractionDiagnostic)
 
-    /// The workout was stored, but nothing could be derived from it because no plan
-    /// governs it. Not a failure: scoring against no plan would be a number with no
-    /// stated meaning (`ScoringError.noPlanInEffect`). The lazy path enriches it once a
-    /// plan exists.
+    /// The workout was stored, and its samples — heart rate, route, step count — were
+    /// captured and stored right along with it (MAX-034), but no *derived metrics* exist
+    /// because no plan governs it. Not a failure: every §9 metric is measured against a
+    /// plan's cap, so scoring against no plan would be a number with no stated meaning
+    /// (`ScoringError.noPlanInEffect`). The lazy path fills in metrics once a plan exists
+    /// — see `MissingPlanReason.workoutPredatesEveryPlan` for the one case where it
+    /// cannot.
+    ///
+    /// This case does **not** mean the workout has no samples. A missing sample is its
+    /// own diagnostic (`sampleExtraction`, or `enrichmentFailed(stage: .sampleExtraction)`
+    /// for a total extraction failure) and can fire independently of this one, including
+    /// on the very same workout.
     case storedWithoutPlan(reason: MissingPlanReason)
 
     /// A stage of enrichment failed. The workout itself is already durable; what is
@@ -143,8 +151,20 @@ public enum IngestionPipelineDiagnostic: Hashable, Sendable {
 
     public enum MissingPlanReason: Hashable, Sendable {
         /// No plan version has been authored yet — the state of a fresh install.
+        ///
+        /// Recoverable: `completeIngestion(forWorkout:)` re-resolves the plan calendar
+        /// on every call, so the first plan the athlete ever authors can cover this
+        /// workout's day retroactively (MAX-011 does not restrict where a *first*
+        /// version's `effectiveFrom` may fall) and the lazy path fills in metrics then.
         case noPlanAuthored
         /// Plans exist, but the workout's day precedes every one of them.
+        ///
+        /// Not recoverable. `PlanCalendar` requires `version` to ascend with
+        /// `effectiveFrom` (MAX-011), so no later plan version can ever open with an
+        /// `effectiveFrom` earlier than one that already exists — that is what "no
+        /// back-dating" means. Once any plan version exists, a workout on a day before
+        /// all of them is stuck in this state permanently: `completeIngestion` will keep
+        /// re-reporting it rather than ever finding a plan that governs the day.
         case workoutPredatesEveryPlan
     }
 
