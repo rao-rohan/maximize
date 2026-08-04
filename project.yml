@@ -1,0 +1,57 @@
+# XcodeGen spec for the Maximize iOS app shell (MAX-006).
+#
+# The generated .xcodeproj is NOT checked in (see .gitignore) — a hand-maintained
+# .xcodeproj is an unreviewable blob, and this repo's verification story depends on
+# changes being readable in a diff. Regenerate locally with:
+#
+#   xcodegen generate
+#
+# CI regenerates it fresh on every run (.github/workflows/ci.yml) so this file is the
+# only source of truth for the project's shape.
+
+name: Maximize
+
+options:
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+
+configs:
+  Debug: debug
+  Release: release
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    # Unsigned, always. No team ID, no signing identity belongs in this repo — CI
+    # builds for the simulator only, and local device installs are a human's problem
+    # to solve with their own signing config, never checked in here.
+    CODE_SIGNING_ALLOWED: NO
+    CODE_SIGNING_REQUIRED: NO
+    CODE_SIGN_IDENTITY: ""
+    DEVELOPMENT_TEAM: ""
+
+packages:
+  MaximizeCore:
+    path: .
+
+targets:
+  Maximize:
+    type: application
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: App
+    dependencies:
+      - package: MaximizeCore
+    settings:
+      base:
+        # PLACEHOLDER — see options.bundleIdPrefix above.
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.maximize.app
+        TARGETED_DEVICE_FAMILY: "1" # iPhone only for now; PRD doesn't call out iPad
+        # No physical Info.plist checked in — Xcode's modern build-setting-driven
+        # generation (the same default a fresh SwiftUI App template uses) covers the
+        # two keys an App-lifecycle target needs. Nothing here is a styling choice.
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
