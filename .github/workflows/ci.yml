@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build & test MaximizeCore
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: swift --version
+
+      - name: Build
+        run: swift build --build-tests
+
+      - name: Test
+        run: swift test
+
+  architecture:
+    name: Core stays platform-free
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # MaximizeCore must not depend on UI or platform frameworks; that is what
+      # keeps it testable in CI without a simulator. See CLAUDE.md.
+      - name: Reject platform imports in MaximizeCore
+        run: |
+          if grep -rEn '^\s*import\s+(SwiftUI|UIKit|HealthKit)\b' Sources/MaximizeCore; then
+            echo "::error::MaximizeCore must not import SwiftUI, UIKit, or HealthKit."
+            echo "Define a protocol in the core and implement it in the app layer instead."
+            exit 1
+          fi
+          echo "OK: no platform framework imports in MaximizeCore."
