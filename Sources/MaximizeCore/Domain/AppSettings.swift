@@ -99,10 +99,11 @@ public enum AppearancePreference: String, Hashable, Sendable, Codable, CaseItera
 
 /// User settings (PRD §8 `settings`).
 ///
-/// The accessibility flags mirror OS settings the app must honour (FR-4.5). They live
-/// here as *app-level* overrides so the core can reason about them in tests; the app
-/// layer is responsible for seeding them from the system values, since reading those
-/// requires UIKit and the core does not import it.
+/// The accessibility flags mirror OS settings the app must honour (FR-4.5, and
+/// `reducesMotion` for FR-4.4's motion work). They live here as *app-level* overrides
+/// so the core can reason about them in tests; the app layer is responsible for
+/// seeding them from the system values, since reading those requires UIKit and the
+/// core does not import it.
 public struct AppSettings: Hashable, Sendable, Codable {
     public let restDayBudget: RestDayBudget
     public let distanceUnit: DistanceUnit
@@ -110,19 +111,26 @@ public struct AppSettings: Hashable, Sendable, Codable {
     /// Forces solid chrome instead of Liquid Glass (FR-4.5).
     public let reducesTransparency: Bool
     public let increasesContrast: Bool
+    /// Mirrors `UIAccessibility.isReduceMotionEnabled` (FR-4.4/4.5). No motion exists
+    /// yet for this to gate (MAX-070 is a design-system completion pass, not a motion
+    /// ticket) — it is here so whichever ticket adds the first animation has
+    /// somewhere to read the preference from without importing UIKit into the core.
+    public let reducesMotion: Bool
 
     public init(
         restDayBudget: RestDayBudget = .standard,
         distanceUnit: DistanceUnit = .miles,
         appearance: AppearancePreference = .dark,
         reducesTransparency: Bool = false,
-        increasesContrast: Bool = false
+        increasesContrast: Bool = false,
+        reducesMotion: Bool = false
     ) {
         self.restDayBudget = restDayBudget
         self.distanceUnit = distanceUnit
         self.appearance = appearance
         self.reducesTransparency = reducesTransparency
         self.increasesContrast = increasesContrast
+        self.reducesMotion = reducesMotion
     }
 
     public static let standard = AppSettings()

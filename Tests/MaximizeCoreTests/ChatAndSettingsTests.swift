@@ -112,6 +112,8 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(settings.appearance, .dark, "FR-4.3 is dark-first")
         XCTAssertEqual(settings.restDayBudget, RestDayBudget.standard)
         XCTAssertFalse(settings.reducesTransparency)
+        XCTAssertFalse(settings.increasesContrast)
+        XCTAssertFalse(settings.reducesMotion)
     }
 
     func testRoundTripsThroughJSON() throws {
@@ -120,7 +122,8 @@ final class SettingsTests: XCTestCase {
             distanceUnit: .kilometers,
             appearance: .system,
             reducesTransparency: true,
-            increasesContrast: true
+            increasesContrast: true,
+            reducesMotion: true
         )
         XCTAssertEqual(try roundTripped(settings), settings)
     }
