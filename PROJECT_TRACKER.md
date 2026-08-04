@@ -95,8 +95,8 @@ layer implements them and maps across the boundary.
 
 | ID | Ticket | Spec | Tier | Status | Depends on |
 |---|---|---|---|---|---|
-| MAX-020 | SwiftData models + mapping to/from core types + repository implementations | §8, A1 | **Opus** | 🔄 | MAX-006, MAX-010 |
-| MAX-021 | CloudKit sync so history survives reinstall | D6, A1 | Sonnet | ⬜ | MAX-020 |
+| MAX-020 | SwiftData models + mapping to/from core types + repository implementations | §8, A1 | **Opus** | ✅ | MAX-006, MAX-010 |
+| MAX-021 | CloudKit sync so history survives reinstall | D6, A1 | Sonnet | 🔲 | MAX-020 |
 | MAX-022 | Keychain-backed Anthropic key storage + settings entry point | A5, §11 | Sonnet 🔒 | ✅ | MAX-006 |
 | MAX-023 | Claude client: scoring call | §10, §11 | Sonnet 🔒 | ⬜ | MAX-022, MAX-015 |
 | MAX-024 | Claude client: streaming chat transport | D10, FR-2.4 | **Opus** | 🔲 | MAX-022, MAX-014 |
@@ -117,6 +117,12 @@ not block on device runs — but every PR here states plainly what a human must 
 | MAX-032 | Full-fidelity extraction: HR series, route, cadence, energy; indoor runs first-class | FR-0.3, FR-0.6 | Sonnet | ✅ | MAX-031 |
 | MAX-033 | Ingestion pipeline: dedupe on `workoutUUID`, compute + store derived metrics, trigger scoring | FR-0.5, D2, A2 | **Opus** | ⬜ | MAX-032, MAX-020, MAX-023 |
 
+**MAX-033 must treat an already-recorded automatic score as success, not failure.**
+MAX-020 flagged this: `automaticScoreAlreadyRecorded` is what D8 immutability looks
+like on a replayed workout, and replays are normal here — dedupe absorbs them by
+design. Treating it as an error would leave the anchor pinned forever, which is R11
+arriving through the one path the pipeline is guaranteed to take.
+
 **The ingestion pipeline is deliberately pinned until MAX-033 lands.** MAX-031's
 placeholder sink *throws*, which holds the anchor in place so no workout is skipped in
 the meantime. On a device today the expected symptom is one logged ingestion failure
@@ -133,7 +139,7 @@ probe in `HealthKitWorkoutFetcher` (one extra query per outdoor workout, needed 
 | ID | Ticket | Spec | Tier | Status | Depends on |
 |---|---|---|---|---|---|
 | MAX-040 | Design system: dark-first tokens, score bands, accent, Liquid Glass on chrome only, flat content surfaces | FR-4.1–4.4, A7 | **Opus** | ✅ | MAX-006 |
-| MAX-041 | Detail view: plan-verdict header | FR-1.1 | Sonnet | ⬜ | MAX-020, MAX-040 |
+| MAX-041 | Detail view: plan-verdict header | FR-1.1 | Sonnet | 🔲 | MAX-020, MAX-040 |
 | MAX-042 | HR curve with cap line + time-above-cap shading | FR-1.2 | Sonnet | ⬜ | MAX-040, MAX-012 |
 | MAX-043 | Cadence vs target band | FR-1.3 | Sonnet | ⬜ | MAX-042 |
 | MAX-044 | Route map — outdoor only, omitted cleanly for treadmill | FR-1.4 | Sonnet | ⬜ | MAX-040 |
@@ -146,18 +152,18 @@ Haiku to keep it that way.
 
 | ID | Ticket | Spec | Tier | Status | Depends on |
 |---|---|---|---|---|---|
-| MAX-050 | Per-workout thread persistence | D6, FR-2.3 | Sonnet | ⬜ | MAX-020 |
+| MAX-050 | Per-workout thread persistence | D6, FR-2.3 | Sonnet | 🔲 | MAX-020 |
 | MAX-051 | Chat UI with token-streaming reveal | FR-2.1–2.4, D10 | Sonnet | ⬜ | MAX-024, MAX-041, MAX-050 |
 
 ### Phase 6 — Dashboard
 
 | ID | Ticket | Spec | Tier | Status | Depends on |
 |---|---|---|---|---|---|
-| MAX-060 | Interval selector: week / month / custom | FR-3.1 | Haiku | ⬜ | MAX-020 |
+| MAX-060 | Interval selector: week / month / custom | FR-3.1 | Haiku | 🔲 | MAX-020 |
 | MAX-061 | Score-colored calendar, type glyph, auto-converted rest days | FR-3.2, D4, D9, A6 | Sonnet | ⬜ | MAX-017, MAX-060, MAX-040 |
 | MAX-062 | **Cross-run HR-drift overlay** on %-elapsed axis | FR-3.3, D5 | **Opus** | ⬜ | MAX-060, MAX-040, MAX-012 |
 | MAX-063 | Summary tiles: mileage vs arc, effective days, streak, avg score | FR-3.4 | Haiku | ⬜ | MAX-017, MAX-060 |
-| MAX-064 | Settings: rest-days-per-week, display/accessibility prefs | §8 | Haiku | ⬜ | MAX-020 |
+| MAX-064 | Settings: rest-days-per-week, display/accessibility prefs | §8 | Haiku | 🔲 | MAX-020 |
 
 MAX-064 rewrites `SettingsView`, which MAX-022 left with two cosmetic rough edges to
 clean up then: `isCheckingStatus` is dead state (set and unset inside one synchronous
@@ -212,6 +218,44 @@ change rather than four.
 Separately, `CalendarDay` lacks day/week arithmetic — MAX-013 carried a private day
 number to work around it. **MAX-011 owns that** now (`CalendarDayArithmetic`).
 
+## Why the HealthKit anchor must never share a store with workouts
+
+Recording this at length because the tracker previously said the opposite, and the
+opposite is a data-loss bug rather than a missed optimisation.
+
+An `HKQueryAnchor` is a position in **one device's** HealthKit change history. The
+workout store is CloudKit-mirrored (A1, D6). Put the anchor in that store and it syncs
+— so a second device picks up the first device's anchor and resumes *past* workouts it
+never ingested. They are skipped silently and permanently, which is precisely the
+failure the whole anchored design exists to prevent, arrived at through the back door.
+
+The obvious escape does not help either: a second `ModelConfiguration` with
+`cloudKitDatabase: .none` is a separate store file, hence a separate transaction, so it
+would not close R12 anyway.
+
+**The two stores are required, not incidental.** `FileWorkoutQueryAnchorStore` stays
+where it is. R12's crash window is the accepted cost of that, and it fails to the safe
+side: a re-delivered batch is absorbed by dedupe.
+
+Found by MAX-020, which was explicitly told to close R12 and correctly declined.
+
+## Constraints CloudKit imposes on the schema
+
+Verified against Apple's documentation at MAX-020, and binding on **MAX-021**:
+
+- **`@Attribute(.unique)` is unsupported.** So FR-0.5's dedupe on `workoutUUID` cannot
+  be a schema constraint. It is a write-path invariant at a single upsert chokepoint,
+  and reads tolerate a duplicate, resolving deterministically by oldest `ingestedAt`.
+  The realistic path to a duplicate is two devices ingesting the same workout before
+  either syncs — second-device setup, not an exotic case.
+- Relationships must be optional and have an inverse; Deny delete is unsupported.
+  MAX-020 dropped SwiftData relationships in favour of `workoutUUID` keys and pays for
+  cascade delete with an enum the delete path switches over exhaustively, so a future
+  per-workout record type cannot compile without handling deletion.
+- **A promoted CloudKit schema is additive only** — after promotion you may add record
+  types and fields, but never rename, retype or delete. MAX-021 must get the schema
+  right *before* promoting it.
+
 ## Calling conventions a type cannot enforce
 
 Obligations that live in a caller rather than in a signature. Each was found by the
@@ -246,7 +290,7 @@ and CI selects a 26.x toolchain explicitly rather than trusting the runner defau
 | R8 | Background-delivery wake windows are short; scoring makes a network call | Scoring may not finish in the wake window (PRD §2 p50 < 2 min) | MAX-033 to score lazily on first view if the wake budget is exceeded. Compounded: MAX-030 notes `.immediate` frequency is a *request* iOS may clamp, so the p50 target has a second uncontrolled factor |
 | **R9** | **MAX-030 acknowledges every background wake, including failed ones — so iOS never retries.** This is only safe because a missed wake is recovered by the next anchored fetch | If MAX-031 lands a fetch that is not anchored or not idempotent, missed workouts are lost permanently and silently | **Constraint on MAX-031, not a risk to monitor.** The reasoning is documented in `WorkoutObservationCoordinator`; if the anchor guarantee changes, that decision must be revisited |
 | **R11** | **A permanently unacceptable workout wedges the whole pipeline.** If the sink throws deterministically for one workout, the anchor never advances past it, so it is refetched and rethrown on every pass forever — and every later workout queues behind it | Zero-touch capture stops entirely, and the symptom is silence | **MAX-033 must handle this.** Found by MAX-031, which deliberately did not build a poison-pill escape: "give up on this workout" is a data decision belonging to whoever owns the store. The obligation is documented on `WorkoutIngestionSink` |
-| R12 | The anchor write and the workout write are two separate stores, so the window between them exists by construction | A crash between them re-delivers the batch — absorbed by dedupe, so this is the safe side | Accepted. **MAX-020** can close it entirely by moving the anchor into the same SwiftData transaction as the workout write; `WorkoutQueryAnchorStore` is the seam that makes that a drop-in |
+| R12 | The anchor write and the workout write are two separate stores, so the window between them exists by construction | A crash between them re-delivers the batch — absorbed by dedupe, so this is the safe side | **Accepted permanently. Do not "fix" this.** ~~MAX-020 can close it by moving the anchor into the same SwiftData transaction~~ — that earlier note was wrong and MAX-020 correctly refused it. See below |
 | R10 | The app cannot know whether Health *read* access was granted — `authorizationStatus(for:)` reports share status only, by Apple's design | No UI can honestly display "Health connected"; a permission problem is indistinguishable from "no workouts recorded yet" | Accepted, Apple-imposed. Found at MAX-030. Any future settings or onboarding UI must not claim read access it cannot verify |
 
 ## Decision log
