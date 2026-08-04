@@ -19,7 +19,10 @@ xcuserdata/
 .build/
 .swiftpm/
 Packages/
-Package.resolved
+# Package.resolved is deliberately NOT ignored. This repo ships an application,
+# not a library, so the exact resolved dependency versions belong in version
+# control — otherwise CI and a developer's machine can silently resolve
+# different versions of the same dependency.
 
 # CocoaPods / Carthage (not used, guarded anyway)
 Pods/
