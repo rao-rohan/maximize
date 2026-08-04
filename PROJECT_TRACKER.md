@@ -3,7 +3,7 @@
 **Last updated:** 2026-08-04
 **Spec:** [docs/PRD.md](./docs/PRD.md) + [docs/PRD-AMENDMENTS.md](./docs/PRD-AMENDMENTS.md) (amendments win)
 **Architecture:** Fully on-device. No backend.
-**Pipeline status:** 🟢 CI green — 325 tests. Core build/test, architecture guard, colour-token guard, unsigned iOS Simulator app build.
+**Pipeline status:** 🟢 CI green — 411+ tests. Core build/test, architecture guard, colour-token guard, unsigned iOS Simulator app build.
 
 ---
 
@@ -70,9 +70,9 @@ network.
 | MAX-012 | Derived metrics: time-above-cap, HR drift, avg cadence, grade-adjusted pace, zone splits | §9, D2 | **Opus** | ✅ | MAX-010 |
 | MAX-013 | Workout classification (easy / hard / long / other) from type + HR profile | §10.2 | **Opus** | ✅ | MAX-012 |
 | MAX-014 | Context builder — the single assembler of what Claude sees | D3 | **Opus** | ✅ | MAX-011, MAX-013 |
-| MAX-015 | Scoring rubric application + effective threshold + rationale contract | §10, D1 | **Opus** | 🔄 | MAX-014 |
+| MAX-015 | Scoring rubric application + effective threshold + rationale contract | §10, D1 | **Opus** | ✅ | MAX-014 |
 | MAX-016 | Rest-day budget: automatic conversion of missed days | D9, A6 | Sonnet | ✅ | MAX-011 |
-| MAX-017 | Tallies: workout-days, effective-days, avg score, streak, current week | FR-3.4, §8 | Sonnet | ⬜ | MAX-015, MAX-016 |
+| MAX-017 | Tallies: workout-days, effective-days, avg score, streak, current week | FR-3.4, §8 | Sonnet | 🔲 | MAX-015, MAX-016 |
 
 MAX-013 is Opus despite looking small: PRD §13 names plan/actual misclassification as
 a risk that "poisons the score," and every downstream number inherits its mistakes.
@@ -96,9 +96,9 @@ layer implements them and maps across the boundary.
 | ID | Ticket | Spec | Tier | Status | Depends on |
 |---|---|---|---|---|---|
 | MAX-020 | SwiftData models + mapping to/from core types + repository implementations | §8, A1 | **Opus** | ✅ | MAX-006, MAX-010 |
-| MAX-021 | CloudKit sync so history survives reinstall | D6, A1 | Sonnet | 🔲 | MAX-020 |
+| MAX-021 | CloudKit sync so history survives reinstall | D6, A1 | Sonnet | ✅ | MAX-020 |
 | MAX-022 | Keychain-backed Anthropic key storage + settings entry point | A5, §11 | Sonnet 🔒 | ✅ | MAX-006 |
-| MAX-023 | Claude client: scoring call | §10, §11 | Sonnet 🔒 | ⬜ | MAX-022, MAX-015 |
+| MAX-023 | Claude client: scoring call | §10, §11 | Sonnet 🔒 | 🔄 | MAX-022, MAX-015 |
 | MAX-024 | Claude client: streaming chat transport | D10, FR-2.4 | **Opus** | 🔲 | MAX-022, MAX-014 |
 
 🔒 = requires `/security-review` before merge.
@@ -115,7 +115,7 @@ not block on device runs — but every PR here states plainly what a human must 
 | MAX-030 | `HKObserverQuery` + background delivery + entitlement | FR-0.1 | **Opus** | ✅ | MAX-006 |
 | MAX-031 | Anchored incremental fetch with persisted anchor | FR-0.2 | **Opus** | ✅ | MAX-030 |
 | MAX-032 | Full-fidelity extraction: HR series, route, cadence, energy; indoor runs first-class | FR-0.3, FR-0.6 | Sonnet | ✅ | MAX-031 |
-| MAX-033 | Ingestion pipeline: dedupe on `workoutUUID`, compute + store derived metrics, trigger scoring | FR-0.5, D2, A2 | **Opus** | ⬜ | MAX-032, MAX-020, MAX-023 |
+| MAX-033 | Ingestion pipeline: dedupe on `workoutUUID`, compute + store derived metrics, trigger scoring | FR-0.5, D2, A2 | **Opus** | 🔄 | MAX-032, MAX-020, MAX-023 |
 
 **MAX-033 must treat an already-recorded automatic score as success, not failure.**
 MAX-020 flagged this: `automaticScoreAlreadyRecorded` is what D8 immutability looks
@@ -139,11 +139,11 @@ probe in `HealthKitWorkoutFetcher` (one extra query per outdoor workout, needed 
 | ID | Ticket | Spec | Tier | Status | Depends on |
 |---|---|---|---|---|---|
 | MAX-040 | Design system: dark-first tokens, score bands, accent, Liquid Glass on chrome only, flat content surfaces | FR-4.1–4.4, A7 | **Opus** | ✅ | MAX-006 |
-| MAX-041 | Detail view: plan-verdict header | FR-1.1 | Sonnet | 🔲 | MAX-020, MAX-040 |
-| MAX-042 | HR curve with cap line + time-above-cap shading | FR-1.2 | Sonnet | ⬜ | MAX-040, MAX-012 |
+| MAX-041 | Detail view: plan-verdict header | FR-1.1 | Sonnet | ✅ | MAX-020, MAX-040 |
+| MAX-042 | HR curve with cap line + time-above-cap shading | FR-1.2 | Sonnet | 🔲 | MAX-040, MAX-012 |
 | MAX-043 | Cadence vs target band | FR-1.3 | Sonnet | ⬜ | MAX-042 |
-| MAX-044 | Route map — outdoor only, omitted cleanly for treadmill | FR-1.4 | Sonnet | ⬜ | MAX-040 |
-| MAX-045 | Splits + summary tiles | FR-1.5 | Haiku | ⬜ | MAX-040 |
+| MAX-044 | Route map — outdoor only, omitted cleanly for treadmill | FR-1.4 | Sonnet | 🔲 | MAX-040 |
+| MAX-045 | Splits + summary tiles | FR-1.5 | Haiku | 🔲 | MAX-040 |
 
 FR-1.5 is explicitly "thin — displayed because cheap, not lovingly built." Tiered
 Haiku to keep it that way.
@@ -163,7 +163,7 @@ Haiku to keep it that way.
 | MAX-061 | Score-colored calendar, type glyph, auto-converted rest days | FR-3.2, D4, D9, A6 | Sonnet | ⬜ | MAX-017, MAX-060, MAX-040 |
 | MAX-062 | **Cross-run HR-drift overlay** on %-elapsed axis | FR-3.3, D5 | **Opus** | ⬜ | MAX-060, MAX-040, MAX-012 |
 | MAX-063 | Summary tiles: mileage vs arc, effective days, streak, avg score | FR-3.4 | Haiku | ⬜ | MAX-017, MAX-060 |
-| MAX-064 | Settings: rest-days-per-week, display/accessibility prefs | §8 | Haiku | 🔲 | MAX-020 |
+| MAX-064 | Settings: rest-days-per-week, display/accessibility prefs | §8 | Haiku | ✅ | MAX-020 |
 
 MAX-064 rewrites `SettingsView`, which MAX-022 left with two cosmetic rough edges to
 clean up then: `isCheckingStatus` is dead state (set and unset inside one synchronous
@@ -175,7 +175,7 @@ function, so its branch never renders), and `enteredKey` is not cleared on the
 | ID | Ticket | Spec | Tier | Status | Depends on |
 |---|---|---|---|---|---|
 | MAX-070 | Accessibility: Reduce Transparency / Increase Contrast degrade to solid chrome | FR-4.5 | Sonnet | ✅ | MAX-040 |
-| MAX-071 | Scoring fixture suite: known-good runs → expected score bands | R7 | Sonnet | ⬜ | MAX-015 |
+| MAX-071 | Scoring fixture suite: known-good runs → expected score bands | R7 | Sonnet | 🔲 | MAX-015 |
 | MAX-072 | Security review: Keychain handling, data at rest, prompt minimization, distribution tripwire | §11, A5 | **Opus** 🔒 | ⬜ | MAX-023, MAX-024 |
 
 ### Deliberately not built
