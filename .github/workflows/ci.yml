@@ -113,4 +113,56 @@ jobs:
             -project Maximize.xcodeproj \
             -scheme Maximize \
             -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build/DerivedData \
             CODE_SIGNING_ALLOWED=NO
+
+      # Package the built .app so a human can actually run it. Everything else in this
+      # pipeline verifies that code compiles and its logic behaves; nothing until now
+      # produced something anyone could look at.
+      #
+      # Deliberately a *simulator* build: it needs no Apple account, no certificate and
+      # no secret, so it works on every commit for anyone. The limitation is real and
+      # specific — HealthKit background delivery does not function in the Simulator
+      # (Apple's own documentation says so, confirmed at MAX-030), and there is no real
+      # Health data there. So this artifact is for reviewing the interface, not for
+      # testing capture. A device build is the only way to exercise the actual product.
+      - name: Package the simulator app
+        run: |
+          APP=$(find build/DerivedData/Build/Products -maxdepth 2 -name '*.app' -type d | head -1)
+          if [ -z "$APP" ]; then
+            echo "::error::No .app produced — the build step's output layout changed."
+            find build/DerivedData/Build/Products -maxdepth 3 || true
+            exit 1
+          fi
+          echo "Packaging $APP"
+          mkdir -p artifact
+          ditto -c -k --sequesterRsrc --keepParent "$APP" artifact/Maximize-Simulator.zip
+          echo "APP_PATH=$APP" >> "$GITHUB_ENV"
+
+      - name: Upload the simulator app
+        uses: actions/upload-artifact@v4
+        with:
+          name: Maximize-Simulator-${{ github.sha }}
+          path: artifact/Maximize-Simulator.zip
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Explain how to run it
+        run: |
+          {
+            echo "### Simulator build ready"
+            echo
+            echo "Download **Maximize-Simulator-\`${GITHUB_SHA:0:7}\`** from this run's Artifacts, then:"
+            echo
+            echo '```sh'
+            echo "unzip Maximize-Simulator.zip"
+            echo "xcrun simctl boot 'iPhone 17 Pro'   # or any installed iOS 26 simulator"
+            echo "open -a Simulator"
+            echo "xcrun simctl install booted Maximize.app"
+            echo "xcrun simctl launch booted com.example.maximize.app"
+            echo '```'
+            echo
+            echo "**This runs in the Simulator only.** HealthKit background delivery does not"
+            echo "work there and there is no real Health data, so it shows the interface, not"
+            echo "the capture pipeline. Testing zero-touch capture needs a signed device build."
+          } >> "$GITHUB_STEP_SUMMARY"
