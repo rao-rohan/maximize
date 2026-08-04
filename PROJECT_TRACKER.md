@@ -113,9 +113,20 @@ not block on device runs — but every PR here states plainly what a human must 
 | ID | Ticket | Spec | Tier | Status | Depends on |
 |---|---|---|---|---|---|
 | MAX-030 | `HKObserverQuery` + background delivery + entitlement | FR-0.1 | **Opus** | ✅ | MAX-006 |
-| MAX-031 | Anchored incremental fetch with persisted anchor | FR-0.2 | **Opus** | 🔄 | MAX-030 |
-| MAX-032 | Full-fidelity extraction: HR series, route, cadence, energy; indoor runs first-class | FR-0.3, FR-0.6 | Sonnet | ⬜ | MAX-031 |
+| MAX-031 | Anchored incremental fetch with persisted anchor | FR-0.2 | **Opus** | ✅ | MAX-030 |
+| MAX-032 | Full-fidelity extraction: HR series, route, cadence, energy; indoor runs first-class | FR-0.3, FR-0.6 | Sonnet | 🔲 | MAX-031 |
 | MAX-033 | Ingestion pipeline: dedupe on `workoutUUID`, compute + store derived metrics, trigger scoring | FR-0.5, D2, A2 | **Opus** | ⬜ | MAX-032, MAX-020, MAX-023 |
+
+**The ingestion pipeline is deliberately pinned until MAX-033 lands.** MAX-031's
+placeholder sink *throws*, which holds the anchor in place so no workout is skipped in
+the meantime. On a device today the expected symptom is one logged ingestion failure
+per background wake and no anchor advancement — that is correct behaviour, not a bug.
+Everything captured meanwhile drains on the first wake after MAX-033 ships.
+
+MAX-032 inherits two things from MAX-031: the sink hands over a domain `Workout` whose
+`start`/`end` window is the predicate every sample query needs, and the route-existence
+probe in `HealthKitWorkoutFetcher` (one extra query per outdoor workout, needed to fill
+`Workout.hasRoute` truthfully) **should be subsumed** by the route fetch itself.
 
 ### Phase 4 — Design system & detail view
 
@@ -225,6 +236,8 @@ and CI selects a 26.x toolchain explicitly rather than trusting the runner defau
 | R7 | Claude's *judgment* can't be unit-tested, only the rubric plumbing | Scoring regressions could pass CI green | MAX-071: fixture runs with known-good expected bands |
 | R8 | Background-delivery wake windows are short; scoring makes a network call | Scoring may not finish in the wake window (PRD §2 p50 < 2 min) | MAX-033 to score lazily on first view if the wake budget is exceeded. Compounded: MAX-030 notes `.immediate` frequency is a *request* iOS may clamp, so the p50 target has a second uncontrolled factor |
 | **R9** | **MAX-030 acknowledges every background wake, including failed ones — so iOS never retries.** This is only safe because a missed wake is recovered by the next anchored fetch | If MAX-031 lands a fetch that is not anchored or not idempotent, missed workouts are lost permanently and silently | **Constraint on MAX-031, not a risk to monitor.** The reasoning is documented in `WorkoutObservationCoordinator`; if the anchor guarantee changes, that decision must be revisited |
+| **R11** | **A permanently unacceptable workout wedges the whole pipeline.** If the sink throws deterministically for one workout, the anchor never advances past it, so it is refetched and rethrown on every pass forever — and every later workout queues behind it | Zero-touch capture stops entirely, and the symptom is silence | **MAX-033 must handle this.** Found by MAX-031, which deliberately did not build a poison-pill escape: "give up on this workout" is a data decision belonging to whoever owns the store. The obligation is documented on `WorkoutIngestionSink` |
+| R12 | The anchor write and the workout write are two separate stores, so the window between them exists by construction | A crash between them re-delivers the batch — absorbed by dedupe, so this is the safe side | Accepted. **MAX-020** can close it entirely by moving the anchor into the same SwiftData transaction as the workout write; `WorkoutQueryAnchorStore` is the seam that makes that a drop-in |
 | R10 | The app cannot know whether Health *read* access was granted — `authorizationStatus(for:)` reports share status only, by Apple's design | No UI can honestly display "Health connected"; a permission problem is indistinguishable from "no workouts recorded yet" | Accepted, Apple-imposed. Found at MAX-030. Any future settings or onboarding UI must not claim read access it cannot verify |
 
 ## Decision log

@@ -1,0 +1,37 @@
+// Signing configuration for the Maximize app target.
+//
+// The defaults below are what CI uses: fully unsigned, placeholder bundle ID, no
+// team. They are also what you get on a fresh clone, which is why `xcodegen generate`
+// followed by a simulator build works with no setup at all.
+//
+// A device build needs a real signing identity, and that is personal to whoever is
+// building. So it goes in a file this repo never sees:
+//
+//     Support/Signing.local.xcconfig      <- gitignored, yours
+//
+// Copy Signing.local.xcconfig.example to that path, fill in your team ID and a bundle
+// identifier you own, regenerate, and build to your phone. See docs/DEVICE-BUILD.md.
+//
+// The `#include?` below is optional-include: absent file, no error. That is what lets
+// one committed config serve both an unsigned CI runner and a signed local device
+// build without either knowing about the other.
+//
+// Order matters. Defaults first, then the optional include, so anything you set in
+// your local file wins.
+
+// MARK: - Defaults (CI, and a fresh clone)
+
+PRODUCT_BUNDLE_IDENTIFIER = com.example.maximize.app
+
+// Unsigned by default. CI also passes CODE_SIGNING_ALLOWED=NO on the xcodebuild
+// command line, which outranks everything here — belt and braces, because a CI run
+// that silently started signing would be a much worse surprise than a failed build.
+CODE_SIGNING_ALLOWED = NO
+CODE_SIGNING_REQUIRED = NO
+CODE_SIGN_IDENTITY =
+CODE_SIGN_STYLE = Manual
+DEVELOPMENT_TEAM =
+
+// MARK: - Your local overrides, if the file exists
+
+#include? "Signing.local.xcconfig"

@@ -1,0 +1,25 @@
+// Copy this file to `Support/Signing.local.xcconfig` and fill in your own values.
+// That path is gitignored — nothing here is ever committed.
+//
+//     cp Support/Signing.local.xcconfig.example Support/Signing.local.xcconfig
+//
+// Then edit the two values below, run `xcodegen generate`, and open Maximize.xcodeproj.
+
+// MARK: - The two you must change
+
+// A bundle identifier you own. It must be globally unique across the App Store, so
+// reverse-DNS on a domain or handle you control. Do NOT keep com.example.* — that
+// prefix is reserved for documentation and will collide.
+PRODUCT_BUNDLE_IDENTIFIER = com.yourname.maximize
+
+// Your 10-character Team ID.
+//   Paid account:  developer.apple.com/account -> Membership -> Team ID
+//   Free account:  Xcode -> Settings -> Accounts -> your Apple ID -> the team row
+DEVELOPMENT_TEAM = ABCDE12345
+
+// MARK: - Turning signing on (leave these as-is)
+
+CODE_SIGNING_ALLOWED = YES
+CODE_SIGNING_REQUIRED = YES
+CODE_SIGN_IDENTITY = Apple Development
+CODE_SIGN_STYLE = Automatic

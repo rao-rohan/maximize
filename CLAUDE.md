@@ -13,7 +13,14 @@ Tests/                 unit tests — the merge gate
 App/                   SwiftUI app + platform adapters   (arrives in MAX-006)
 docs/PRD.md            the spec, as received
 docs/PRD-AMENDMENTS.md where we deliberately deviate from it, and why
+docs/DEVICE-BUILD.md   how to get a build onto a real iPhone
 ```
+
+**CI never produces an installable build.** Signing needs credentials this repo does
+not hold, and the Simulator cannot run HealthKit background delivery — so a simulator
+artifact could not verify the product's central claim anyway. Device builds are local:
+see `docs/DEVICE-BUILD.md`. Signing lives in `Support/Signing.local.xcconfig`, which is
+gitignored; never move a team ID or bundle identifier into a committed file.
 
 **There is no backend.** The app is fully on-device: SwiftData for storage, CloudKit
 for backup, Claude called directly from the app. See `docs/PRD-AMENDMENTS.md` — the
