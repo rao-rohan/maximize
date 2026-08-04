@@ -20,11 +20,35 @@ jobs:
       - name: Show toolchain
         run: swift --version
 
+      # Output is teed so the failure step below can find the diagnostics. A Swift
+      # build emits hundreds of warning lines, and a compiler error lands somewhere in
+      # the middle of them — so a failed run's log tail is almost always warnings and
+      # cleanup, with the one line that matters scrolled out of reach.
       - name: Build
-        run: swift build --build-tests
+        run: |
+          set -o pipefail
+          swift build --build-tests 2>&1 | tee /tmp/swift-build.log
 
       - name: Test
-        run: swift test
+        run: |
+          set -o pipefail
+          swift test 2>&1 | tee /tmp/swift-test.log
+
+      # Puts the diagnostics in the job summary, where they are the first thing visible
+      # rather than something to go hunting for.
+      - name: Surface compiler errors and test failures
+        if: failure()
+        run: |
+          {
+            echo "### Diagnostics"
+            echo
+            echo '```'
+            grep -hE "error:|XCTAssert.*failed|failed \\(" /tmp/swift-build.log /tmp/swift-test.log 2>/dev/null | head -40 \
+              || echo "No error: lines found — the failure was not a compile or assertion error."
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "--- diagnostics ---"
+          grep -hE "error:|XCTAssert.*failed|failed \\(" /tmp/swift-build.log /tmp/swift-test.log 2>/dev/null | head -40 || true
 
   architecture:
     name: Core stays platform-free
