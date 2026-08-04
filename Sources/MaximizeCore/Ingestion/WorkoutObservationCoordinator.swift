@@ -26,8 +26,9 @@
 ///   concludes the app cannot receive data and stops delivering background updates
 ///   altogether. That state is silent and does not repair itself.
 /// - **Acknowledge on every path.** A failed wake is simply lost. But it is lost into
-///   a pipeline built to survive exactly that: the anchored query (MAX-031, FR-0.2)
-///   persists its anchor, so the next wake — from the next workout, or from the app
+///   a pipeline built to survive exactly that: the anchored query
+///   (`AnchoredWorkoutIngester`, MAX-031, FR-0.2) persists its anchor only once a batch
+///   has been durably handled, so the next wake — from the next workout, or from the app
 ///   coming to the foreground — refetches everything since the anchor and the missed
 ///   workout is picked up with no special handling.
 ///
@@ -44,8 +45,9 @@ public actor WorkoutObservationCoordinator: WorkoutChangeResponding {
     private let reportFailure: @Sendable (Error) -> Void
 
     /// - Parameters:
-    ///   - ingester: the work a wake triggers. `UningestedWorkoutsPlaceholder` until
-    ///     MAX-031 lands.
+    ///   - ingester: the work a wake triggers — `AnchoredWorkoutIngester` in the app,
+    ///     whose anchored, idempotent fetch is what makes the acknowledgement policy
+    ///     above survivable.
     ///   - reportFailure: called when an ingestion attempt throws, and when the
     ///     observation mechanism itself reports an error. Defaults to discarding,
     ///     which is the honest default for a type that has no opinion about logging.
