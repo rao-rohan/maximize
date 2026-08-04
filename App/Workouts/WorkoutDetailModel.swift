@@ -83,4 +83,20 @@ final class WorkoutDetailModel {
             state = .failed
         }
     }
+
+    /// R8's lazy path (MAX-033): scores a run the background wake could not score.
+    ///
+    /// Called unconditionally, and that is deliberate — whether this run needs anything
+    /// is `WorkoutIngestionPipeline.completeIngestion(forWorkout:)`'s decision, made in
+    /// `MaximizeCore` where CI runs it, and it returns immediately for a workout that
+    /// already has a score. A view asking "is this unscored?" for itself would be a
+    /// business rule in the shell.
+    ///
+    /// Reloads afterwards, because a score that arrives while the screen is open should
+    /// appear on it. A no-op completion reloads too; a second read of three local records
+    /// is cheaper than a rule for when to skip it.
+    func scoreIfNeeded() async {
+        await IngestionComposition.completeIngestion(forWorkout: workoutID)
+        await load()
+    }
 }

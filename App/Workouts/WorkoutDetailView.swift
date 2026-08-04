@@ -24,7 +24,14 @@ struct WorkoutDetailView: View {
         .contentSurface(.screen)
         .navigationTitle("Workout")
         .navigationBarTitleDisplayMode(.inline)
-        .task { await model.load() }
+        .task {
+            // Render what is stored first, then give a workout the background wake could
+            // not score its chance (R8, MAX-033). Both steps are no-ops when there is
+            // nothing to do, and neither decides anything: `scoreIfNeeded` forwards to the
+            // core, which is where "does this run need a score?" is answered and tested.
+            await model.load()
+            await model.scoreIfNeeded()
+        }
     }
 
     @ViewBuilder

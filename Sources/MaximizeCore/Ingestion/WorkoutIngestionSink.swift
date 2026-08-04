@@ -49,16 +49,23 @@ public protocol WorkoutIngestionSink: Sendable {
     func discardWorkout(id: UUID) async throws
 }
 
-/// Stand-in `WorkoutIngestionSink` for the window between MAX-031 and MAX-033.
+/// A `WorkoutIngestionSink` that refuses every workout, keeping the anchor pinned.
 ///
 /// It **throws**, and that is the entire point of it. A sink that quietly accepted and
 /// dropped workouts would let the anchor advance past real runs, and they would be gone —
 /// no error, no retry, nothing on screen, nothing in CI. Throwing keeps the anchor
 /// pinned: every wake refetches the same pending workouts, fails, and acknowledges, until
-/// MAX-032/033 land and the backlog drains on the next wake.
+/// something can accept them, and then the backlog drains on the next wake.
 ///
-/// The visible cost until then is one reported failure per background wake. That is the
-/// correct symptom for "the pipeline is half-built" — loud, harmless, and self-clearing.
+/// It held the pipeline open between MAX-031 and MAX-033. MAX-033's
+/// `WorkoutIngestionPipeline` has since taken over, and this remains as the app's
+/// fallback for the one case that pipeline cannot serve: a workout store that could not
+/// be opened at all. That is a transient, whole-store condition, so pinning is the right
+/// answer to it — the same reasoning, arrived at from the other end.
+///
+/// The visible cost while it is in use is one reported failure per background wake. That
+/// is the correct symptom for "there is nowhere to put this yet" — loud, harmless, and
+/// self-clearing.
 public struct AwaitingPipelineWorkoutSink: WorkoutIngestionSink {
     public init() {}
 

@@ -22,8 +22,8 @@ let ingestionLog = Logger(
 /// Composition root for the zero-touch capture pipeline (PRD §7.0).
 ///
 /// Everything the wake path needs is assembled here, once, so that the pieces
-/// themselves stay ignorant of each other. MAX-031 → MAX-033 land by replacing exactly
-/// one line below.
+/// themselves stay ignorant of each other. MAX-033 landed by replacing one argument
+/// below — `sink` — and MAX-023 lands by replacing one more: `model`.
 @MainActor
 enum IngestionComposition {
     /// One store for the whole app. Apple: "You need only a single HealthKit store per
@@ -31,20 +31,71 @@ enum IngestionComposition {
     /// reference for later use."
     private static let healthStore = HKHealthStore()
 
+    /// MAX-033's pipeline (FR-0.5, D2), or a sink that pins the anchor if there is no
+    /// store to write to.
+    ///
+    /// **This is the line that un-pins the pipeline.** Every decision inside it lives in
+    /// `MaximizeCore` and is tested there; what happens here is only the joining up.
+    ///
+    /// `ScoringModelInvoking` is MAX-023's, and until it lands the placeholder throws.
+    /// That is safe in a way `AwaitingPipelineWorkoutSink` was not: a failed scoring call
+    /// leaves a stored, measured, classified workout with no score, which is a first-class
+    /// state (and the app's real steady state before an API key is entered). Capture
+    /// works today; scores arrive when MAX-023 replaces one argument below.
+    ///
+    /// The store comes from `PersistenceComposition` (MAX-020/MAX-041) rather than from a
+    /// container opened here. Two `ModelContainer`s over one SQLite file is not a
+    /// duplicated object, it is two SwiftData stacks writing the same store, and the
+    /// background wake would be the writer nobody was watching.
+    ///
+    /// A store that could not be opened is the *transient* case, so the placeholder sink
+    /// stays: pinning the anchor keeps the pending workouts waiting for a launch where the
+    /// container opens, rather than acknowledging wakes whose data went nowhere.
+    private static let pipeline: WorkoutIngestionPipeline? = {
+        guard let workoutStore = PersistenceComposition.store else {
+            ingestionLog.error("The workout store is unavailable; ingestion will hold the anchor until it opens.")
+            return nil
+        }
+        return WorkoutIngestionPipeline(
+            workouts: workoutStore,
+            scores: workoutStore,
+            plans: workoutStore,
+            samples: HealthKitWorkoutSampleFetcher(healthStore: healthStore),
+            model: AwaitingTransportScoringModel(),
+            report: { diagnostic in
+                // Reasons only — `IngestionPipelineDiagnostic` carries no health data, no
+                // identifiers and no dates, and that is only worth anything if the sink
+                // for it respects it.
+                switch diagnostic {
+                case let .sampleExtraction(event):
+                    ingestionLog.info("Sample extraction gap: \(String(describing: event), privacy: .public)")
+                case let .storedWithoutPlan(reason):
+                    ingestionLog.notice("Workout stored without derived metrics (\(String(describing: reason), privacy: .public)); it will be completed once a plan governs it.")
+                case let .enrichmentFailed(stage):
+                    ingestionLog.error("Enrichment failed at \(String(describing: stage), privacy: .public); the workout is stored and can be completed later.")
+                case let .leftUnscored(reason):
+                    ingestionLog.notice("Workout stored but unscored (\(String(describing: reason), privacy: .public)); scoring is retried on first view.")
+                case let .workoutAbandoned(step):
+                    // R11's escape actually firing. Loud, because it is the one place the
+                    // pipeline gives up on a workout permanently.
+                    ingestionLog.error("Gave up on a workout at \(String(describing: step), privacy: .public) so the anchor could advance past it.")
+                }
+            }
+        )
+    }()
+
+    private static let sink: WorkoutIngestionSink = { () -> WorkoutIngestionSink in
+        guard let pipeline else { return AwaitingPipelineWorkoutSink() }
+        return pipeline
+    }()
+
     /// MAX-031's anchored incremental fetch (FR-0.2), assembled from three parts that know
     /// nothing about each other: a HealthKit query, a file holding the anchor, and the
     /// core's rules about when that anchor may move.
-    ///
-    /// **The MAX-032/033 seam is now `sink`.** `AwaitingPipelineWorkoutSink` throws, which
-    /// is deliberate and safe: a sink that silently accepted workouts would let the anchor
-    /// advance past real runs and lose them. Throwing pins the anchor, so every pending
-    /// workout is still waiting — and is picked up on the first wake after MAX-032/033
-    /// land. Until then this logs one failure per wake, which is the correct symptom for a
-    /// half-built pipeline.
     private static let ingester = AnchoredWorkoutIngester(
         fetcher: HealthKitWorkoutFetcher(healthStore: healthStore),
         anchorStore: FileWorkoutQueryAnchorStore(),
-        sink: AwaitingPipelineWorkoutSink(),
+        sink: sink,
         report: { diagnostic in
             // Counts and reasons only — `IngestionDiagnostic` carries no health data, and
             // that is only worth anything if the sink for it respects it.
@@ -86,6 +137,19 @@ enum IngestionComposition {
                 ingestionLog.error("Foreground ingestion pass failed: \(String(describing: error), privacy: .public)")
             }
         }
+    }
+
+    /// Scores a workout that was captured but left unscored — R8's lazy path.
+    ///
+    /// The detail view (MAX-041) is the natural caller: it is the screen that renders the
+    /// unscored state, and the athlete looking at a run is the moment a network call is
+    /// both affordable and wanted. Idempotent and cheap when there is nothing to do, so a
+    /// view may call it unconditionally on appear.
+    /// Awaitable rather than fire-and-forget: the caller is a screen that wants to redraw
+    /// once the score has landed, and a detached task would have it redraw before.
+    static func completeIngestion(forWorkout id: UUID) async {
+        guard let pipeline else { return }
+        await pipeline.completeIngestion(forWorkout: id)
     }
 }
 
