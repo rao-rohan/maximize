@@ -66,9 +66,9 @@ network.
 | ID | Ticket | Spec | Tier | Status | Depends on |
 |---|---|---|---|---|---|
 | MAX-010 | Domain value types: Workout, HR series, route, Plan, PlanDay, Score, Annotation | §8 | **Opus** | ✅ | — |
-| MAX-011 | Versioned plan + `PlanDay` calendar resolution | D1, §8 | **Opus** | 🔲 | MAX-010 |
+| MAX-011 | Versioned plan + `PlanDay` calendar resolution | D1, §8 | **Opus** | 🔄 | MAX-010 |
 | MAX-012 | Derived metrics: time-above-cap, HR drift, avg cadence, grade-adjusted pace, zone splits | §9, D2 | **Opus** | ✅ | MAX-010 |
-| MAX-013 | Workout classification (easy / hard / long / other) from type + HR profile | §10.2 | **Opus** | 🔄 | MAX-012 |
+| MAX-013 | Workout classification (easy / hard / long / other) from type + HR profile | §10.2 | **Opus** | ✅ | MAX-012 |
 | MAX-014 | Context builder — the single assembler of what Claude sees | D3 | **Opus** | ⬜ | MAX-011, MAX-013 |
 | MAX-015 | Scoring rubric application + effective threshold + rationale contract | §10, D1 | **Opus** | ⬜ | MAX-014 |
 | MAX-016 | Rest-day budget: automatic conversion of missed days | D9, A6 | Sonnet | ⬜ | MAX-011 |
@@ -183,6 +183,24 @@ establish.
 directly, and §5's "no other app can draw this" is the actual differentiator. It is
 tiered Opus and must not be starved by polish on splits or the route map. PRD §13 names
 scope discipline as the top execution risk, above any technical unknown.
+
+## Gaps in the plan model
+
+D1 says every threshold is versioned plan data, never a constant in code. Implementing
+tickets have found four places the `Plan` record cannot yet express what the code needs.
+None is urgent; all are the same shape, and they should land together as one plan-model
+change rather than four.
+
+| # | Gap | Found by | Consequence today |
+|---|---|---|---|
+| P1 | `Plan` cannot express the *shape* of classification rules, so four dimensionless ratios live in `WorkoutClassificationPolicy` | MAX-013 | Real D1 leak, but bounded: they are ratios, never a bpm, metre or minute, so changing the cap or arc still moves the thresholds. A `classification` block on a future plan version fixes it |
+| P2 | Same, for the cap-anchored zone multipliers in `HeartRateZoneModel` | MAX-012 | As P1 |
+| P3 | `Plan` records **no durations at all**, so the "too short to classify" floor can only be distance-based | MAX-013 | A mis-started treadmill run with HR but no distance is not caught and reaches the scorer. Wants `minimumSessionDuration` |
+| P4 | `ScheduledSession` cannot express interval structure (e.g. 6×800m) | MAX-013 | The scorer sees "hard" but not the prescribed shape, so it cannot judge whether the session was executed as written |
+
+Separately, `CalendarDay` lacks day/week arithmetic — MAX-013 carried a private day
+number to work around it. **MAX-011 should own that**, since plan-day resolution needs
+the same thing.
 
 ## Open questions
 
