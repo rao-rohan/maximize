@@ -133,4 +133,37 @@ enum Fixture {
             ingestedAt: epoch.addingTimeInterval(durationSeconds + 120)
         )
     }
+
+    static func score(
+        points: Int,
+        threshold: Int = 70,
+        workoutID: UUID = Fixture.workoutID
+    ) throws -> Score {
+        try Score(
+            workoutID: workoutID,
+            planVersion: PlanVersion(1),
+            scheduledSession: ScheduledSession(kind: .easy, distanceMeters: 8_000),
+            actualClassification: .easy,
+            value: ScoreValue(points),
+            effectiveThreshold: ScoreValue(threshold),
+            rubricBandIdentifier: "easy.onCap.lowDrift",
+            rationale: "Held the cap with minimal drift.",
+            scoredAt: epoch
+        )
+    }
+
+    static func annotation(
+        points: Int,
+        at offsetSeconds: Double = 0,
+        workoutID: UUID = Fixture.workoutID,
+        id: UUID = UUID()
+    ) throws -> ScoreAnnotation {
+        try ScoreAnnotation(
+            id: id,
+            workoutID: workoutID,
+            manualScore: ScoreValue(points),
+            note: "Felt harder than it looked",
+            createdAt: epoch.addingTimeInterval(offsetSeconds)
+        )
+    }
 }
