@@ -111,12 +111,28 @@ layer implements them and maps across the boundary.
 | ID | Ticket | Spec | Tier | Status | Depends on |
 |---|---|---|---|---|---|
 | MAX-020 | SwiftData models + mapping to/from core types + repository implementations | §8, A1 | **Opus** | ✅ | MAX-006, MAX-010 |
-| MAX-021 | CloudKit sync so history survives reinstall | D6, A1 | Sonnet | ✅ | MAX-020 |
+| MAX-021 | CloudKit sync so history survives reinstall | D6, A1 | Sonnet | ✅ ⏸️ | MAX-020 |
 | MAX-022 | Keychain-backed Anthropic key storage + settings entry point | A5, §11 | Sonnet 🔒 | ✅ | MAX-006 |
 | MAX-023 | Claude client: scoring call | §10, §11 | Sonnet 🔒 | ✅ | MAX-022, MAX-015 |
 | MAX-024 | Claude client: streaming chat transport | D10, FR-2.4 | **Opus** | ✅ | MAX-022, MAX-014 |
 
-🔒 = requires `/security-review` before merge.
+🔒 = requires `/security-review` before merge. ⏸️ = merged but switched off.
+
+**MAX-021 is merged and inert (A8).** The app is signed with a free personal team,
+which does not grant the iCloud entitlements, so requesting them made the device build
+unsignable — and the device build is the only one that can exercise zero-touch capture,
+since the Simulator cannot run HealthKit background delivery. The entitlements are out
+of `project.yml` and `makeOnDisk` now defaults to `cloudKitDatabase: .none`.
+
+That default mattered more than it looks: `.automatic` against a build with no iCloud
+entitlement fails container creation, which makes `PersistenceComposition.store` nil and
+leaves the app running with **no storage at all** — capturing nothing while appearing to
+work, because every failure on that path is deliberately survivable.
+
+The code and the schema constraints stay exactly as MAX-021 left them. Re-enabling is
+the entitlements block plus that one default; nothing here needs rewriting when a paid
+membership arrives. **D6 is downgraded in the meantime:** threads survive relaunch, not
+reinstall.
 
 ### Phase 3 — Ingestion (zero-touch capture)
 

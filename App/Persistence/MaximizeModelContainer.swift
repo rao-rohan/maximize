@@ -102,8 +102,15 @@ enum MaximizeModelContainer {
     /// MAX-064 to decide, since that ticket is the one that actually populates these
     /// fields; recorded here rather than silently redesigning `AppSettingsRecord` on a
     /// ticket that owns sync configuration, not the settings schema.
+    /// - Parameter cloudKitDatabase: `.none` by default — see **A8** in
+    ///   `docs/PRD-AMENDMENTS.md`. The iCloud entitlements were removed from
+    ///   `project.yml` because free Apple Developer provisioning does not grant them,
+    ///   and `.automatic` against a build with no iCloud entitlement is not a no-op:
+    ///   container creation fails, `PersistenceComposition.store` becomes nil, and the
+    ///   app runs with no storage at all — capturing nothing, while looking like it
+    ///   works. Mirroring is one argument away when the entitlement comes back.
     static func makeOnDisk(
-        cloudKitDatabase: ModelConfiguration.CloudKitDatabase = .automatic
+        cloudKitDatabase: ModelConfiguration.CloudKitDatabase = .none
     ) throws -> ModelContainer {
         let url = try prepareStoreURL()
         let configuration = ModelConfiguration(
@@ -128,11 +135,12 @@ enum MaximizeModelContainer {
     /// touching the athlete's real history.
     ///
     /// `cloudKitDatabase: .none` is passed explicitly, not left to whatever default the
-    /// SDK's in-memory initializer happens to have. `makeOnDisk` above now defaults to
-    /// `.automatic`, and previews/tests are exactly the callers that must never mirror
-    /// to the real athlete's iCloud container regardless of what that default is —
-    /// making the choice explicit here means this store's CloudKit behavior does not
-    /// depend on staying in sync with a decision made in a different function.
+    /// SDK's in-memory initializer happens to have. Previews and tests are exactly the
+    /// callers that must never mirror to the real athlete's iCloud container, whatever
+    /// `makeOnDisk` currently defaults to — making the choice explicit here means this
+    /// store's CloudKit behavior does not depend on staying in sync with a decision made
+    /// in a different function. That independence is why this line did not have to
+    /// change when A8 flipped the on-disk default.
     static func makeInMemory() throws -> ModelContainer {
         try ModelContainer(
             for: Schema(versionedSchema: MaximizeSchemaV1.self),

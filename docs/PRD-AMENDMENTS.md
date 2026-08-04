@@ -91,6 +91,42 @@ to widen the budget.
 Non-blocking, as the PRD notes. MAX-040 (design system) will define it as a single
 token so changing it later is a one-line edit.
 
+## A8 — CloudKit backup is deferred. D6 is downgraded to on-device durability.
+
+**Amends A1**, which named CloudKit as the backup half of the on-device architecture.
+
+The app is signed with a free Apple Developer personal team, and free provisioning does
+not grant the iCloud container or CloudKit service entitlements. Requesting them made
+the device build unsignable — and the device build is the only build that can exercise
+zero-touch capture at all, since the Simulator cannot run HealthKit background delivery.
+Given the choice between the backup path and the product's central claim, the central
+claim wins.
+
+**What this costs, stated plainly.** D6 says chat threads are persisted and survive
+reinstall. They now survive *relaunch*, not reinstall: delete the app and the history
+goes with it, and a second device starts empty. Nothing else regresses — capture,
+scoring, metrics, chat and every screen are local and unaffected.
+
+**Why the schema does not change.** MAX-020 built every model to CloudKit's
+restrictions: no `@Attribute(.unique)`, no non-optional property without a default, no
+required relationships. Those constraints are now unenforced by anything, and they stay
+anyway. They cost nothing to keep and they are what makes re-enabling mirroring a
+two-line change — the entitlements block in `project.yml` and `makeOnDisk`'s
+`cloudKitDatabase` default — rather than a migration of an already-populated store.
+Removing them would be spending real future work to buy nothing today.
+
+**The trap this closed on the way past.** `makeOnDisk` defaulted to
+`cloudKitDatabase: .automatic`, and against a build with no iCloud entitlement that is
+not a harmless no-op: container creation fails, `PersistenceComposition.store` becomes
+nil, and the app runs with no storage — capturing nothing while appearing to work,
+because every failure on that path is already designed to be survivable. The default is
+now `.none`.
+
+**Tripwire, in the same spirit as A5's:** if this app is ever distributed, or if a
+second device is ever expected to see the same history, CloudKit is not optional and
+D6 is not satisfied. Do not let "it has worked fine for months" stand in for backup —
+it has worked fine because there is only one device and nobody has reinstalled.
+
 ---
 
 ## Requirements unaffected

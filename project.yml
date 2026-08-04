@@ -122,10 +122,13 @@ targets:
       properties:
         com.apple.developer.healthkit: true
         com.apple.developer.healthkit.background-delivery: true
-        com.apple.developer.icloud-container-identifiers:
-          - iCloud.$(CFBundleIdentifier)
-        com.apple.developer.icloud-services:
-          - CloudKit
+        # The two iCloud entitlements were here and are deferred — see A8 in
+        # docs/PRD-AMENDMENTS.md. Free Apple Developer provisioning does not grant
+        # them, and this app is currently signed with a personal team, so requesting
+        # them made the device build unsignable. Restoring them is this block plus
+        # flipping `makeOnDisk`'s `cloudKitDatabase` default back to `.automatic`;
+        # MAX-020's schema is still built to CloudKit's restrictions so that stays a
+        # two-line change rather than a migration.
 
     # Signing and bundle identifier come from here, not from `settings` below, so a
     # local device build can override them without touching a committed file.
