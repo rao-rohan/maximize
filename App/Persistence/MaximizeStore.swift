@@ -69,8 +69,11 @@ extension MaximizeStore: WorkoutRepository {
         let upperBound = interval.end
         let records = try modelContext.fetch(
             FetchDescriptor<WorkoutRecord>(
+                // Half-open, per the protocol's contract: `<` on the upper bound, not
+                // `<=`. Closed would put a run starting exactly on an interval boundary
+                // into both adjacent intervals.
                 predicate: #Predicate<WorkoutRecord> {
-                    $0.start >= lowerBound && $0.start <= upperBound
+                    $0.start >= lowerBound && $0.start < upperBound
                 },
                 sortBy: [SortDescriptor<WorkoutRecord>(\.start, order: .forward)]
             )
