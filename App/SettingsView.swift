@@ -6,7 +6,8 @@ import MaximizeCore
 /// Manages:
 /// - Rest days per week (D9/A6): how many missed days per week can be converted to rest
 /// - Display preferences: distance unit (km/miles), appearance (system/light/dark)
-/// - Accessibility: Reduce Transparency, Increase Contrast, Reduce Motion overrides
+/// Accessibility is deliberately absent — the app honours the OS settings directly
+/// rather than offering its own switches. See the note further down for why.
 /// - Anthropic API key (MAX-022): entry point for authentication
 /// - Health access (MAX-030): HealthKit permission request
 ///
@@ -51,9 +52,6 @@ struct SettingsView: View {
 
             // MAX-064: Display preferences
             displaySection
-
-            // MAX-064: Accessibility preferences
-            accessibilitySection
 
             // MAX-022: Anthropic API key section (keep styled consistently)
             Section("Anthropic API key") {
@@ -133,27 +131,28 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Accessibility preferences section
-
-    @ViewBuilder
-    private var accessibilitySection: some View {
-        Section("Accessibility") {
-            Toggle("Reduce Transparency", isOn: $appSettings.reducesTransparency)
-
-            Toggle("Increase Contrast", isOn: $appSettings.increasesContrast)
-
-            Toggle("Reduce Motion", isOn: $appSettings.reducesMotion)
-        }
-        .onChange(of: appSettings.reducesTransparency) { _, _ in
-            Task { await saveSettings() }
-        }
-        .onChange(of: appSettings.increasesContrast) { _, _ in
-            Task { await saveSettings() }
-        }
-        .onChange(of: appSettings.reducesMotion) { _, _ in
-            Task { await saveSettings() }
-        }
-    }
+    // MARK: - Accessibility
+    //
+    // There are deliberately no accessibility toggles here, and the omission is the
+    // decision rather than an oversight.
+    //
+    // FR-4.5 asks the app to *honour* Reduce Transparency and Increase Contrast, and
+    // MAX-040 already does: `glassChrome(_:)` reads the system value from
+    // `@Environment(\.accessibilityReduceTransparency)`, and every colour token is a
+    // four-way `Ink` whose high-contrast variants the OS selects on a trait change.
+    // Nothing in the app reads `AppSettings` for any of this.
+    //
+    // So an in-app toggle would have been inert — it would persist a value nothing
+    // consumes, which is worse than no control at all because it looks like one. And
+    // wiring it up naively would be worse still: a switch that turns Reduce
+    // Transparency *off* while iOS has it *on* is an accessibility regression wearing
+    // a preference's clothing.
+    //
+    // `AppSettings` keeps the three fields — its own documentation calls them
+    // *overrides* the app layer must seed from system values. Whichever ticket first
+    // consumes them owes two things this ticket was not scoped to decide: seeding from
+    // the system, and override-up-only semantics, so a user may strengthen an
+    // accessibility setting but never defeat one the OS has asked for.
 
     // MARK: - Settings persistence
 
