@@ -23,7 +23,9 @@ let ingestionLog = Logger(
 ///
 /// Everything the wake path needs is assembled here, once, so that the pieces
 /// themselves stay ignorant of each other. MAX-033 landed by replacing one argument
-/// below — `sink` — and MAX-023 lands by replacing one more: `model`.
+/// below — `sink` — and MAX-023 by replacing one more, `model`. With both in place the
+/// loop is closed: a finished run is captured, measured, classified, scored and stored
+/// without anyone touching the phone.
 @MainActor
 enum IngestionComposition {
     /// One store for the whole app. Apple: "You need only a single HealthKit store per
@@ -37,11 +39,11 @@ enum IngestionComposition {
     /// **This is the line that un-pins the pipeline.** Every decision inside it lives in
     /// `MaximizeCore` and is tested there; what happens here is only the joining up.
     ///
-    /// `ScoringModelInvoking` is MAX-023's, and until it lands the placeholder throws.
+    /// `ScoringModelInvoking` is MAX-023's, wired below to the real Anthropic transport.
     /// That is safe in a way `AwaitingPipelineWorkoutSink` was not: a failed scoring call
     /// leaves a stored, measured, classified workout with no score, which is a first-class
     /// state (and the app's real steady state before an API key is entered). Capture
-    /// works today; scores arrive when MAX-023 replaces one argument below.
+    /// therefore never depends on scoring succeeding.
     ///
     /// The store comes from `PersistenceComposition` (MAX-020/MAX-041) rather than from a
     /// container opened here. Two `ModelContainer`s over one SQLite file is not a
@@ -61,7 +63,13 @@ enum IngestionComposition {
             scores: workoutStore,
             plans: workoutStore,
             samples: HealthKitWorkoutSampleFetcher(healthStore: healthStore),
-            model: AwaitingTransportScoringModel(),
+            // MAX-023's real transport. It reads the key from Keychain on each call and
+            // throws `ScoringModelError.noAPIKeyStored` when there is none — which the
+            // pipeline treats exactly as it treated the placeholder that preceded it: the
+            // workout is still captured, measured, classified and stored, just without a
+            // score, and `completeIngestion(forWorkout:)` fills it in later. The no-key
+            // path is the app's ordinary state on the day it is installed, not an error.
+            model: AnthropicScoringModelClient(keyStore: KeychainAnthropicAPIKeyStore()),
             report: { diagnostic in
                 // Reasons only — `IngestionPipelineDiagnostic` carries no health data, no
                 // identifiers and no dates, and that is only worth anything if the sink
