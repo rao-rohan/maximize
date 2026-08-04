@@ -30,7 +30,17 @@ final class AnthropicScoringModelClient: ScoringModelInvoking, @unchecked Sendab
     /// executes it, and swift build fails loudly if this string is ever mistyped.
     static let model = "claude-opus-5"
 
-    private static let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
+    /// Fixed and hardcoded — never derived from user input, plan data or a server
+    /// response, so there is no surface here for redirecting a request carrying health
+    /// data somewhere it should not go.
+    ///
+    /// Held as a string and parsed at call time rather than as a force-unwrapped `URL`.
+    /// The parse cannot fail for this literal, but CLAUDE.md's ban on force unwraps is
+    /// written without a "unless it is provably safe" exception, and the codebase
+    /// already has a pattern for exactly this: `CalendarDay.civilAnchor()` throws on a
+    /// case it documents as unreachable, so an unreachable case stays unreachable
+    /// rather than becoming a crash.
+    private static let endpointURLString = "https://api.anthropic.com/v1/messages"
     private static let apiVersion = "2023-06-01"
 
     /// Generous headroom for a reply that, on the happy path, is a JSON object
@@ -104,6 +114,11 @@ final class AnthropicScoringModelClient: ScoringModelInvoking, @unchecked Sendab
         key: AnthropicAPIKey,
         timeout: TimeInterval
     ) throws -> URLRequest {
+        guard let endpoint = URL(string: endpointURLString) else {
+            // Unreachable for a compile-time constant. Surfaced as an error rather than
+            // a force unwrap so it cannot become a crash on a background wake.
+            throw ScoringModelError.requestFailed
+        }
         var request = URLRequest(url: endpoint, timeoutInterval: timeout)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "content-type")
