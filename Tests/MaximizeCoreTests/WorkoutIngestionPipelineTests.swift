@@ -264,6 +264,9 @@ final class WorkoutIngestionPipelineTests: XCTestCase {
         try await harness.pipeline.ingest(harness.workout)
 
         XCTAssertEqual(harness.store.storedWorkouts.map(\.id), [harness.workout.id])
+        // MAX-034: the curve is a fact about the run, not about the plan, so it is
+        // captured and stored even though there is nothing yet to measure it against.
+        XCTAssertEqual(harness.store.allSeries.map(\.workoutID), [harness.workout.id])
         XCTAssertNil(harness.store.storedMetrics(forWorkout: harness.workout.id))
         XCTAssertEqual(harness.diagnostics.reported, [.storedWithoutPlan(reason: .noPlanAuthored)])
 
@@ -294,7 +297,52 @@ final class WorkoutIngestionPipelineTests: XCTestCase {
         try await harness.pipeline.ingest(harness.workout)
 
         XCTAssertEqual(harness.store.storedWorkouts.map(\.id), [harness.workout.id])
+        // MAX-034: unlike `.noPlanAuthored` above, this reason never resolves — MAX-011
+        // forbids a later plan version from opening earlier than one that already
+        // exists — but the curve is not held hostage to that either.
+        XCTAssertEqual(harness.store.allSeries.map(\.workoutID), [harness.workout.id])
         XCTAssertEqual(harness.diagnostics.reported, [.storedWithoutPlan(reason: .workoutPredatesEveryPlan)])
+    }
+
+    // MARK: - MAX-034: samples are captured independently of plan coverage
+
+    func testAWorkoutOnADayNoPlanGovernsStillGetsItsHeartRateSeriesAndRouteStored() async throws {
+        // The bug this ticket fixes: `enrich` used to return before
+        // `WorkoutSampleExtractor.extract` ever ran when no plan governed the workout's
+        // day, so the HR curve (and the route) were never fetched or stored — a loss
+        // MAX-031's advancing anchor makes permanent. The curve is a fact about the run,
+        // not about the plan, and must survive regardless.
+        let harness = try Harness(routePoints: 3)
+        harness.store.setPlanCalendar(nil)
+
+        try await harness.pipeline.ingest(harness.workout)
+
+        let series = try XCTUnwrap(harness.store.allSeries.first)
+        XCTAssertEqual(series.workoutID, harness.workout.id)
+        XCTAssertEqual(series.samples.count, 3)
+        XCTAssertEqual(harness.store.allRoutes.first?.points.count, 3)
+        // And, symmetrically, no derived metrics — those genuinely have nothing to be
+        // measured against.
+        XCTAssertNil(harness.store.storedMetrics(forWorkout: harness.workout.id))
+        XCTAssertNil(harness.store.storedScore(forWorkout: harness.workout.id))
+    }
+
+    func testAPartialSampleFailureIsReportedAlongsideNoPlanAndDoesNotThrow() async throws {
+        // Two independent gaps in one enrichment: a route that failed to fetch, and a
+        // day no plan governs. Neither may throw (R11), and the diagnostics for each
+        // must stay distinguishable rather than collapsing into one.
+        let harness = try Harness(routePoints: 3)
+        harness.samples.failRouteFetch(with: InMemoryWorkoutStore.Failure.storageUnavailable)
+        harness.store.setPlanCalendar(nil)
+
+        try await harness.pipeline.ingest(harness.workout)
+
+        XCTAssertEqual(harness.store.allSeries.first?.samples.count, 3, "the HR series is unaffected by the route failing")
+        XCTAssertNil(harness.store.allRoutes.first)
+        XCTAssertEqual(
+            Set(harness.diagnostics.reported),
+            [.sampleExtraction(.routeFetchFailed), .storedWithoutPlan(reason: .noPlanAuthored)]
+        )
     }
 
     func testARubricWithNoMatchingBandLeavesTheWorkoutUnscoredWithoutCallingTheModel() async throws {
