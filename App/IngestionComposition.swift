@@ -31,14 +31,36 @@ enum IngestionComposition {
     /// reference for later use."
     private static let healthStore = HKHealthStore()
 
-    /// **The MAX-031 → MAX-033 seam.**
+    /// MAX-031's anchored incremental fetch (FR-0.2), assembled from three parts that know
+    /// nothing about each other: a HealthKit query, a file holding the anchor, and the
+    /// core's rules about when that anchor may move.
     ///
-    /// Replace `UningestedWorkoutsPlaceholder()` with the real ingester — anchored
-    /// incremental fetch (MAX-031), sample extraction (MAX-032), dedupe/derive/store
-    /// (MAX-033) — and the entire wake path above it is already built, tested, and
-    /// unchanged.
+    /// **The MAX-032/033 seam is now `sink`.** `AwaitingPipelineWorkoutSink` throws, which
+    /// is deliberate and safe: a sink that silently accepted workouts would let the anchor
+    /// advance past real runs and lose them. Throwing pins the anchor, so every pending
+    /// workout is still waiting — and is picked up on the first wake after MAX-032/033
+    /// land. Until then this logs one failure per wake, which is the correct symptom for a
+    /// half-built pipeline.
+    private static let ingester = AnchoredWorkoutIngester(
+        fetcher: HealthKitWorkoutFetcher(healthStore: healthStore),
+        anchorStore: FileWorkoutQueryAnchorStore(),
+        sink: AwaitingPipelineWorkoutSink(),
+        report: { diagnostic in
+            // Counts and reasons only — `IngestionDiagnostic` carries no health data, and
+            // that is only worth anything if the sink for it respects it.
+            switch diagnostic {
+            case let .storedAnchorDiscarded(reason):
+                ingestionLog.notice("Stored workout anchor discarded (\(String(describing: reason), privacy: .public)); refetching the backfill window.")
+            case let .workoutsUnrepresentable(count):
+                ingestionLog.error("\(count, privacy: .public) health-store object(s) could not be represented as workouts; the anchor has moved past them.")
+            case let .passTruncated(batchesProcessed):
+                ingestionLog.info("Ingestion pass stopped after \(batchesProcessed, privacy: .public) batches; the remainder resumes on the next pass.")
+            }
+        }
+    )
+
     private static let coordinator = WorkoutObservationCoordinator(
-        ingester: UningestedWorkoutsPlaceholder(),
+        ingester: ingester,
         reportFailure: { error in
             // Pipeline state only, per `ingestionLog`'s contract above.
             ingestionLog.error("Workout ingestion failed: \(String(describing: error), privacy: .public)")
@@ -49,6 +71,22 @@ enum IngestionComposition {
         healthStore: healthStore,
         responder: coordinator
     )
+
+    /// Runs an ingestion pass outside the wake path.
+    ///
+    /// The anchored fetch recovers a failed or missed wake on the *next* pass, and a wake
+    /// only happens when new data arrives. Without this, a workout whose ingestion failed
+    /// would wait for the next workout to be recorded. Opening the app is the other
+    /// natural trigger, and it costs one query when there is nothing to do.
+    static func ingestPendingWorkouts() {
+        Task {
+            do {
+                try await ingester.ingestPendingWorkouts()
+            } catch {
+                ingestionLog.error("Foreground ingestion pass failed: \(String(describing: error), privacy: .public)")
+            }
+        }
+    }
 }
 
 /// Exists for one reason: HealthKit observer queries must be registered from
@@ -73,5 +111,15 @@ final class MaximizeAppDelegate: NSObject, UIApplicationDelegate {
         // is registered and simply never fires.
         IngestionComposition.workoutObserver.startObservingWorkouts()
         return true
+    }
+
+    /// A second, non-wake trigger for the anchored fetch.
+    ///
+    /// Recovery from a failed wake is "the next pass picks it up", and a wake only happens
+    /// when HealthKit has something new. Opening the app is the other moment a pass can
+    /// run, and it is what keeps "delayed" from meaning "delayed until the next workout".
+    /// Cheap when there is nothing pending: one anchored query returning nothing.
+    func applicationDidBecomeActive(_ application: UIApplication) {
+        IngestionComposition.ingestPendingWorkouts()
     }
 }
