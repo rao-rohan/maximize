@@ -70,8 +70,8 @@ network.
 | MAX-012 | Derived metrics: time-above-cap, HR drift, avg cadence, grade-adjusted pace, zone splits | §9, D2 | **Opus** | ✅ | MAX-010 |
 | MAX-013 | Workout classification (easy / hard / long / other) from type + HR profile | §10.2 | **Opus** | ✅ | MAX-012 |
 | MAX-014 | Context builder — the single assembler of what Claude sees | D3 | **Opus** | ✅ | MAX-011, MAX-013 |
-| MAX-015 | Scoring rubric application + effective threshold + rationale contract | §10, D1 | **Opus** | 🔲 | MAX-014 |
-| MAX-016 | Rest-day budget: automatic conversion of missed days | D9, A6 | Sonnet | 🔄 | MAX-011 |
+| MAX-015 | Scoring rubric application + effective threshold + rationale contract | §10, D1 | **Opus** | 🔄 | MAX-014 |
+| MAX-016 | Rest-day budget: automatic conversion of missed days | D9, A6 | Sonnet | ✅ | MAX-011 |
 | MAX-017 | Tallies: workout-days, effective-days, avg score, streak, current week | FR-3.4, §8 | Sonnet | ⬜ | MAX-015, MAX-016 |
 
 MAX-013 is Opus despite looking small: PRD §13 names plan/actual misclassification as
@@ -114,7 +114,7 @@ not block on device runs — but every PR here states plainly what a human must 
 |---|---|---|---|---|---|
 | MAX-030 | `HKObserverQuery` + background delivery + entitlement | FR-0.1 | **Opus** | ✅ | MAX-006 |
 | MAX-031 | Anchored incremental fetch with persisted anchor | FR-0.2 | **Opus** | ✅ | MAX-030 |
-| MAX-032 | Full-fidelity extraction: HR series, route, cadence, energy; indoor runs first-class | FR-0.3, FR-0.6 | Sonnet | 🔄 | MAX-031 |
+| MAX-032 | Full-fidelity extraction: HR series, route, cadence, energy; indoor runs first-class | FR-0.3, FR-0.6 | Sonnet | ✅ | MAX-031 |
 | MAX-033 | Ingestion pipeline: dedupe on `workoutUUID`, compute + store derived metrics, trigger scoring | FR-0.5, D2, A2 | **Opus** | ⬜ | MAX-032, MAX-020, MAX-023 |
 
 **The ingestion pipeline is deliberately pinned until MAX-033 lands.** MAX-031's
