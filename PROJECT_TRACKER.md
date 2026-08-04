@@ -166,11 +166,16 @@ probe in `HealthKitWorkoutFetcher` (one extra query per outdoor workout, needed 
 | MAX-041 | Detail view: plan-verdict header | FR-1.1 | Sonnet | ✅ | MAX-020, MAX-040 |
 | MAX-042 | HR curve with cap line + time-above-cap shading | FR-1.2 | Sonnet | ✅ | MAX-040, MAX-012 |
 | MAX-043 | Cadence vs target band | FR-1.3 | Sonnet | ✅ | MAX-042 |
-| MAX-044 | Route map — outdoor only, omitted cleanly for treadmill | FR-1.4 | Sonnet | 🔲 | MAX-040 |
-| MAX-045 | Splits + summary tiles | FR-1.5 | Haiku | 🔲 | MAX-040 |
+| MAX-044 | Route map — outdoor only, omitted cleanly for treadmill | FR-1.4 | Sonnet | ✅ | MAX-040 |
+| MAX-045 | Splits + summary tiles | FR-1.5 | Sonnet | 🔲 | MAX-040 |
 
-FR-1.5 is explicitly "thin — displayed because cheap, not lovingly built." Tiered
-Haiku to keep it that way.
+FR-1.5 is explicitly "thin — displayed because cheap, not lovingly built," which is why
+MAX-045 was originally tiered Haiku. **Re-tiered to Sonnet before dispatch.** The tier
+was chosen to keep the *ticket* thin, but the last Haiku ticket (MAX-064) pushed a
+branch without opening a PR — so CI never ran — and reported "compiles" for code that
+had never been built; three real compile errors surfaced afterwards. The saving was
+smaller than the three rounds of repair it cost. Scope, not tier, is what keeps FR-1.5
+thin, and the brief carries that instruction explicitly.
 
 ### Phase 5 — Contextual chat
 
