@@ -30,9 +30,10 @@ enum Fixture {
     }
 
     /// A rubric shaped like PRD §10.3's worked example, written entirely as data.
-    static func rubric(effectiveThreshold: Int = 70) throws -> ScoringRubric {
+    static func rubric(effectiveThreshold: Int = 70, marginalThreshold: Int = 45) throws -> ScoringRubric {
         try ScoringRubric(
             effectiveThreshold: ScoreValue(effectiveThreshold),
+            marginalThreshold: ScoreValue(marginalThreshold),
             bands: [
                 RubricBand(
                     identifier: "easy.onCap.lowDrift",
@@ -134,18 +135,31 @@ enum Fixture {
         )
     }
 
+    /// The band is derived here only because this is test scaffolding standing in for
+    /// a scorer. Production code must not turn a number into a `ScoreBand`; that
+    /// decision belongs to MAX-015, reading the plan version's thresholds.
     static func score(
         points: Int,
         threshold: Int = 70,
+        marginal: Int = 45,
         workoutID: UUID = Fixture.workoutID
     ) throws -> Score {
-        try Score(
+        let band: ScoreBand
+        if points >= threshold {
+            band = .effective
+        } else if points >= marginal {
+            band = .marginal
+        } else {
+            band = .ineffective
+        }
+        return try Score(
             workoutID: workoutID,
             planVersion: PlanVersion(1),
             scheduledSession: ScheduledSession(kind: .easy, distanceMeters: 8_000),
             actualClassification: .easy,
             value: ScoreValue(points),
             effectiveThreshold: ScoreValue(threshold),
+            band: band,
             rubricBandIdentifier: "easy.onCap.lowDrift",
             rationale: "Held the cap with minimal drift.",
             scoredAt: epoch

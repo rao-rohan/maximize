@@ -36,6 +36,16 @@ public struct Score: Hashable, Sendable, Codable, Identifiable {
     /// The effective-day threshold from the rubric in force when this was scored.
     public let effectiveThreshold: ScoreValue
 
+    /// The band the scorer resolved against that plan version, stored rather than
+    /// recomputed (D2 applied to a classification). Nothing here turns a number into a
+    /// band — `ScoreBand` deliberately has no `init(score:)`, and adding one in this
+    /// type would be the same mistake wearing a different hat. What the initializer
+    /// *does* enforce is that a stored band cannot contradict the stored threshold:
+    /// `.effective` and a sub-threshold score is not a state worth representing. The
+    /// marginal/ineffective split stays the scorer's judgement, made against the
+    /// rubric's `marginalThreshold`.
+    public let band: ScoreBand
+
     /// The rubric band that matched, when the scorer can name one. Provenance for
     /// "why did this run get a 62"; optional because a scorer that free-scores rather
     /// than band-matches should not have to invent an identifier.
@@ -55,10 +65,17 @@ public struct Score: Hashable, Sendable, Codable, Identifiable {
         actualClassification: WorkoutClassification,
         value: ScoreValue,
         effectiveThreshold: ScoreValue,
+        band: ScoreBand,
         rubricBandIdentifier: String? = nil,
         rationale: String,
         scoredAt: Date
     ) throws {
+        guard (value >= effectiveThreshold) == (band == .effective) else {
+            throw DomainError.inconsistent(
+                reason: "Score band \(band.rawValue) contradicts score \(value) against threshold "
+                    + "\(effectiveThreshold)"
+            )
+        }
         try Validate.nonEmpty(rationale, "Score.rationale")
         guard !rationale.contains(where: { $0.isNewline }) else {
             throw DomainError.inconsistent(reason: "Score.rationale must be a single line")
@@ -72,6 +89,7 @@ public struct Score: Hashable, Sendable, Codable, Identifiable {
         self.actualClassification = actualClassification
         self.value = value
         self.effectiveThreshold = effectiveThreshold
+        self.band = band
         self.rubricBandIdentifier = rubricBandIdentifier
         self.rationale = rationale
         self.scoredAt = scoredAt
@@ -82,7 +100,7 @@ public struct Score: Hashable, Sendable, Codable, Identifiable {
 
     private enum CodingKeys: String, CodingKey {
         case workoutID, planVersion, scheduledSession, actualClassification
-        case value, effectiveThreshold, rubricBandIdentifier, rationale, scoredAt
+        case value, effectiveThreshold, band, rubricBandIdentifier, rationale, scoredAt
     }
 
     public init(from decoder: any Decoder) throws {
@@ -94,6 +112,7 @@ public struct Score: Hashable, Sendable, Codable, Identifiable {
             actualClassification: container.decode(WorkoutClassification.self, forKey: .actualClassification),
             value: container.decode(ScoreValue.self, forKey: .value),
             effectiveThreshold: container.decode(ScoreValue.self, forKey: .effectiveThreshold),
+            band: container.decode(ScoreBand.self, forKey: .band),
             rubricBandIdentifier: container.decodeIfPresent(String.self, forKey: .rubricBandIdentifier),
             rationale: container.decode(String.self, forKey: .rationale),
             scoredAt: container.decode(Date.self, forKey: .scoredAt)

@@ -141,10 +141,30 @@ public struct ScoringRubric: Hashable, Sendable, Codable {
     /// retroactively rewrite last month's calendar.
     public let effectiveThreshold: ScoreValue
 
+    /// Score at or above which a miss is a *near* miss rather than a failure — the
+    /// amber/red cut in D4's calendar, i.e. the `ScoreBand.marginal` /
+    /// `.ineffective` boundary.
+    ///
+    /// It lives here for the same reason `effectiveThreshold` does. `ScoreBand`
+    /// deliberately cannot compute itself from a number, which means *something* has
+    /// to supply the cut points, and D1 says that something is versioned plan data
+    /// rather than a constant in the scorer. Two thresholds, three bands.
+    public let marginalThreshold: ScoreValue
+
     /// Ordered; first match wins.
     public let bands: [RubricBand]
 
-    public init(effectiveThreshold: ScoreValue, bands: [RubricBand]) throws {
+    public init(
+        effectiveThreshold: ScoreValue,
+        marginalThreshold: ScoreValue,
+        bands: [RubricBand]
+    ) throws {
+        guard marginalThreshold <= effectiveThreshold else {
+            throw DomainError.inconsistent(
+                reason: "ScoringRubric.marginalThreshold (\(marginalThreshold)) must not exceed "
+                    + "effectiveThreshold (\(effectiveThreshold))"
+            )
+        }
         guard !bands.isEmpty else {
             throw DomainError.empty(field: "ScoringRubric.bands")
         }
@@ -155,6 +175,7 @@ public struct ScoringRubric: Hashable, Sendable, Codable {
             }
         }
         self.effectiveThreshold = effectiveThreshold
+        self.marginalThreshold = marginalThreshold
         self.bands = bands
     }
 
@@ -168,13 +189,14 @@ public struct ScoringRubric: Hashable, Sendable, Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case effectiveThreshold, bands
+        case effectiveThreshold, marginalThreshold, bands
     }
 
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         try self.init(
             effectiveThreshold: container.decode(ScoreValue.self, forKey: .effectiveThreshold),
+            marginalThreshold: container.decode(ScoreValue.self, forKey: .marginalThreshold),
             bands: container.decode([RubricBand].self, forKey: .bands)
         )
     }

@@ -4,7 +4,7 @@ import XCTest
 
 final class ScoringRubricTests: XCTestCase {
     func testRejectsAnEmptyRubric() throws {
-        assertThrows(.empty, try ScoringRubric(effectiveThreshold: ScoreValue(70), bands: []))
+        assertThrows(.empty, try ScoringRubric(effectiveThreshold: ScoreValue(70), marginalThreshold: ScoreValue(45), bands: []))
     }
 
     func testRejectsDuplicateBandIdentifiers() throws {
@@ -15,7 +15,11 @@ final class ScoringRubricTests: XCTestCase {
         )
         assertThrows(
             .duplicate,
-            try ScoringRubric(effectiveThreshold: ScoreValue(70), bands: [band, band])
+            try ScoringRubric(
+                effectiveThreshold: ScoreValue(70),
+                marginalThreshold: ScoreValue(45),
+                bands: [band, band]
+            )
         )
     }
 
@@ -97,5 +101,13 @@ final class ScoringRubricTests: XCTestCase {
         let strict = try Fixture.rubric(effectiveThreshold: 85)
         XCTAssertEqual(strict.effectiveThreshold.points, 85)
         XCTAssertEqual(try Fixture.rubric().effectiveThreshold, ScoreValue.defaultEffectiveThreshold)
+    }
+
+    /// Three bands need two cut points, and both are versioned plan data — `ScoreBand`
+    /// cannot compute itself precisely so that these live here (D1).
+    func testMarginalThresholdMustNotExceedTheEffectiveOne() throws {
+        XCTAssertEqual(try Fixture.rubric().marginalThreshold.points, 45)
+        assertThrows(.inconsistent, try Fixture.rubric(effectiveThreshold: 40, marginalThreshold: 60))
+        XCTAssertNoThrow(try Fixture.rubric(effectiveThreshold: 70, marginalThreshold: 70))
     }
 }

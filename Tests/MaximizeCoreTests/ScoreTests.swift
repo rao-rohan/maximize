@@ -30,6 +30,7 @@ final class ScoreTests: XCTestCase {
                 actualClassification: .easy,
                 value: ScoreValue(80),
                 effectiveThreshold: ScoreValue(70),
+                band: .effective,
                 rationale: "   ",
                 scoredAt: Fixture.epoch
             )
@@ -43,10 +44,53 @@ final class ScoreTests: XCTestCase {
                 actualClassification: .easy,
                 value: ScoreValue(80),
                 effectiveThreshold: ScoreValue(70),
+                band: .effective,
                 rationale: "Held the cap.\nDrifted late.",
                 scoredAt: Fixture.epoch
             )
         )
+    }
+
+    /// The band is stored, not computed — `ScoreBand` has no `init(score:)` and this
+    /// type does not add one. What it will not accept is a band that contradicts the
+    /// threshold it was scored against.
+    func testStoredBandCannotContradictTheThreshold() throws {
+        assertThrows(
+            .inconsistent,
+            try Score(
+                workoutID: Fixture.workoutID,
+                planVersion: PlanVersion(1),
+                scheduledSession: .rest,
+                actualClassification: .easy,
+                value: ScoreValue(40),
+                effectiveThreshold: ScoreValue(70),
+                band: .effective,
+                rationale: "Claims effective at 40 against a threshold of 70.",
+                scoredAt: Fixture.epoch
+            )
+        )
+        assertThrows(
+            .inconsistent,
+            try Score(
+                workoutID: Fixture.workoutID,
+                planVersion: PlanVersion(1),
+                scheduledSession: .rest,
+                actualClassification: .easy,
+                value: ScoreValue(90),
+                effectiveThreshold: ScoreValue(70),
+                band: .marginal,
+                rationale: "Claims marginal at 90 against a threshold of 70.",
+                scoredAt: Fixture.epoch
+            )
+        )
+    }
+
+    /// Both sub-threshold bands are accepted: the marginal/ineffective split is the
+    /// scorer's call against the rubric's marginalThreshold, not this type's.
+    func testEitherSubThresholdBandIsAccepted() throws {
+        XCTAssertEqual(try Fixture.score(points: 55, threshold: 70, marginal: 45).band, .marginal)
+        XCTAssertEqual(try Fixture.score(points: 20, threshold: 70, marginal: 45).band, .ineffective)
+        XCTAssertEqual(try Fixture.score(points: 88, threshold: 70).band, .effective)
     }
 
     func testRoundTripsThroughJSON() throws {
