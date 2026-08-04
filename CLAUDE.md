@@ -22,10 +22,17 @@ artifact could not verify the product's central claim anyway. Device builds are 
 see `docs/DEVICE-BUILD.md`. Signing lives in `Support/Signing.local.xcconfig`, which is
 gitignored; never move a team ID or bundle identifier into a committed file.
 
-**There is no backend.** The app is fully on-device: SwiftData for storage, CloudKit
-for backup, Claude called directly from the app. See `docs/PRD-AMENDMENTS.md` — the
-PRD as written specifies a FastAPI/Postgres/Redis backend, and that has been
-superseded. Do not build server components.
+**There is no backend.** The app is fully on-device: SwiftData for storage, Claude
+called directly from the app. See `docs/PRD-AMENDMENTS.md` — the PRD as written
+specifies a FastAPI/Postgres/Redis backend, and that has been superseded. Do not build
+server components.
+
+**CloudKit backup is deferred (A8), and the schema still obeys its rules.** Free
+provisioning does not grant the iCloud entitlements, so mirroring is off and history no
+longer survives a reinstall. Every model nonetheless keeps CloudKit's restrictions — no
+`@Attribute(.unique)`, no non-optional property without a default, no required
+relationship — because they cost nothing to keep and are what makes re-enabling
+mirroring two lines instead of a migration. Do not "clean them up".
 
 ## Architecture: thin shell, fat core
 
