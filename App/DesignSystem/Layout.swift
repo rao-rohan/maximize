@@ -41,7 +41,7 @@ enum CornerRadius {
 }
 
 /// Screen-level layout constants.
-enum Layout {
+enum LayoutMetrics {
     /// Horizontal inset from the screen edge to content. Wide on purpose.
     static let screenMargin: CGFloat = 20
 

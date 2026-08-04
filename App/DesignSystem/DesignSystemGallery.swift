@@ -15,7 +15,7 @@ import MaximizeCore
 struct DesignSystemGallery: View {
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: Layout.sectionSpacing) {
+            VStack(alignment: .leading, spacing: LayoutMetrics.sectionSpacing) {
                 surfacesSection
                 typographySection
                 scoreBandSection
@@ -69,7 +69,7 @@ struct DesignSystemGallery: View {
                 ForEach(0..<4, id: \.self) { _ in
                     Rectangle()
                         .fill(Color.chartGridline)
-                        .frame(height: Layout.hairline)
+                        .frame(height: LayoutMetrics.hairline)
                 }
             }
             Rectangle()

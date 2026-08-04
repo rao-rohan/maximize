@@ -64,7 +64,7 @@ enum ContentSurface {
     fileprivate var padding: CGFloat {
         switch self {
         case .screen: return 0
-        case .card: return Layout.surfacePadding
+        case .card: return LayoutMetrics.surfacePadding
         case .tile: return Spacing.compact
         case .inset: return Spacing.snug
         }
@@ -85,12 +85,12 @@ extension View {
         modifier(ContentSurfaceModifier(surface: surface))
     }
 
-    /// Standard horizontal inset from the screen edge (`Layout.screenMargin`).
+    /// Standard horizontal inset from the screen edge (`LayoutMetrics.screenMargin`).
     ///
     /// Separate from `contentSurface(.screen)` because a scrolling screen usually
     /// wants its background edge-to-edge and its content inset.
     func screenMargins() -> some View {
-        padding(.horizontal, Layout.screenMargin)
+        padding(.horizontal, LayoutMetrics.screenMargin)
     }
 }
 
