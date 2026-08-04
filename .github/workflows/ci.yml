@@ -27,13 +27,23 @@ jobs:
     # had grown a platform dependency the guard was supposed to prevent.
     runs-on: ubuntu-latest
     container: swift:6.0
+    # Inside a container GitHub defaults `shell:` to `sh`, not `bash`, and the build
+    # steps below use `set -o pipefail` — a bashism that `sh` rejects outright with
+    # "Illegal option -o pipefail" before the compiler is ever invoked. Setting it once
+    # here beats remembering it per step.
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
 
       # swift-corelibs-foundation reads real time-zone data for anything involving a
-      # named zone, and the Swift images do not always carry tzdata. Several tests turn
-      # a civil day into an instant in America/New_York or Asia/Kathmandu — without this
-      # they would fail on a missing zone rather than on anything real.
+      # named zone. Several tests turn a civil day into an instant in America/New_York
+      # or Asia/Kathmandu, so a missing tzdata would fail them on the zone rather than
+      # on anything real.
+      #
+      # `swift:6.0` turns out to already carry it — this is insurance against an image
+      # that stops doing so, and it costs one apt index fetch.
       - name: Install time zone data
         run: apt-get update && apt-get install -y --no-install-recommends tzdata
 
