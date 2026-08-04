@@ -23,7 +23,7 @@ final class WorkoutIngestionPipelineTests: XCTestCase {
         XCTAssertEqual(harness.store.storedWorkouts.map(\.id), [harness.workout.id])
 
         let metrics = try XCTUnwrap(harness.store.storedMetrics(forWorkout: harness.workout.id))
-        XCTAssertEqual(metrics.planVersion, PlanVersion(1))
+        XCTAssertEqual(metrics.planVersion, try PlanVersion(1))
         XCTAssertEqual(metrics.averageHeartRateBPM, 140)
 
         let score = try XCTUnwrap(harness.store.storedScore(forWorkout: harness.workout.id))
