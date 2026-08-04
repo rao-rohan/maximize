@@ -14,6 +14,13 @@ let package = Package(
     ],
     targets: [
         .target(name: "MaximizeCore"),
-        .testTarget(name: "MaximizeCoreTests", dependencies: ["MaximizeCore"]),
+        // Test doubles (e.g. FakeAnthropicAPIKeyStore) shared by test targets. Kept
+        // out of the MaximizeCore product itself so scaffolding never ships in the
+        // app binary — see MAX-022.
+        .target(name: "MaximizeCoreTestSupport", dependencies: ["MaximizeCore"]),
+        .testTarget(
+            name: "MaximizeCoreTests",
+            dependencies: ["MaximizeCore", "MaximizeCoreTestSupport"]
+        ),
     ]
 )
