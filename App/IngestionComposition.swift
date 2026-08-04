@@ -113,8 +113,20 @@ enum IngestionComposition {
     private static let coordinator = WorkoutObservationCoordinator(
         ingester: ingester,
         reportFailure: { error in
-            // Pipeline state only, per `ingestionLog`'s contract above.
-            ingestionLog.error("Workout ingestion failed: \(String(describing: error), privacy: .public)")
+            // `.private`, unlike the diagnostics above, and the difference is the point.
+            // Those interpolate payload-free enums whose cases carry no measurement, date
+            // or identifier, so publishing them is safe and useful. This one interpolates
+            // an *arbitrary* `Error`, and MAX-033 made real store failures reachable here
+            // for the first time. A Core Data validation error can carry
+            // `NSValidationErrorObject` in its `userInfo`, which would print stored row
+            // values — health data, in a log, which CLAUDE.md forbids without qualification.
+            //
+            // Reaching it is unlikely: MAX-020's schema defaults every non-optional
+            // property and the values written are pre-validated domain types, so realistic
+            // failures are I/O rather than validation. But "unlikely to contain PII" is not
+            // the bar, and `.private` still shows the full error to a debugger attached in
+            // Xcode — the only place anyone actually reads it.
+            ingestionLog.error("Workout ingestion failed: \(String(describing: error), privacy: .private)")
         }
     )
 
@@ -134,7 +146,9 @@ enum IngestionComposition {
             do {
                 try await ingester.ingestPendingWorkouts()
             } catch {
-                ingestionLog.error("Foreground ingestion pass failed: \(String(describing: error), privacy: .public)")
+                // `.private` for the same reason as `reportFailure` above: this is an
+                // arbitrary `Error`, not one of the payload-free pipeline diagnostics.
+                ingestionLog.error("Foreground ingestion pass failed: \(String(describing: error), privacy: .private)")
             }
         }
     }
