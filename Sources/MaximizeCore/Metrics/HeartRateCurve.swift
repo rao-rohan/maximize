@@ -170,6 +170,67 @@ struct HeartRateCurve {
         return total
     }
 
+    /// The curve's shape where it is strictly above `thresholdBPM`, split into separate
+    /// excursions and closed exactly at the interpolated threshold crossing at each end
+    /// — the polygon a chart fills to shade "time above cap" (FR-1.2).
+    ///
+    /// **This exists to draw a shape, not to measure one.** It shares the same crossing
+    /// formula `secondsAbove(_:)` uses, so the region a view shades and the duration §9
+    /// defines are never in tension about *where* the curve crosses the cap — but
+    /// nothing here sums an excursion's width back into seconds, and nothing calling
+    /// this may do so either. The stated figure (`DerivedMetrics.timeAboveCapSeconds`,
+    /// computed once at ingestion, D2) is what gets displayed as text; this is only
+    /// consulted for *where to fill*. `HeartRateChartData.init` is the one caller, and
+    /// it keeps the two values structurally apart — see its type documentation.
+    ///
+    /// Empty when the curve never exceeds `thresholdBPM`, which is a real state (a
+    /// perfectly held easy run), not a bug.
+    func excursionsAbove(_ thresholdBPM: Double) -> [[HeartRateChartData.Point]] {
+        var excursions: [[HeartRateChartData.Point]] = []
+        var current: [HeartRateChartData.Point] = []
+
+        forEachSubInterval(from: startOffsetSeconds, to: endOffsetSeconds) { start, end, startBPM, endBPM in
+            let startAbove = startBPM > thresholdBPM
+            let endAbove = endBPM > thresholdBPM
+
+            if startAbove && endAbove {
+                if current.isEmpty {
+                    current.append(HeartRateChartData.Point(offsetSeconds: start, beatsPerMinute: startBPM))
+                }
+                current.append(HeartRateChartData.Point(offsetSeconds: end, beatsPerMinute: endBPM))
+            } else if !startAbove && !endAbove {
+                if !current.isEmpty {
+                    excursions.append(current)
+                    current = []
+                }
+            } else {
+                // Exactly one end is above, so the values differ and the crossing is
+                // well defined — the same formula `secondsAbove(_:)` uses.
+                let duration = end - start
+                let crossing = start + (thresholdBPM - startBPM) / (endBPM - startBPM) * duration
+                let crossingPoint = HeartRateChartData.Point(offsetSeconds: crossing, beatsPerMinute: thresholdBPM)
+                if startAbove {
+                    // Descending through the threshold: close the excursion here.
+                    if current.isEmpty {
+                        current.append(HeartRateChartData.Point(offsetSeconds: start, beatsPerMinute: startBPM))
+                    }
+                    current.append(crossingPoint)
+                    excursions.append(current)
+                    current = []
+                } else {
+                    // Ascending through the threshold: begin a new excursion.
+                    current = [crossingPoint, HeartRateChartData.Point(offsetSeconds: end, beatsPerMinute: endBPM)]
+                }
+            }
+        }
+
+        if !current.isEmpty {
+            excursions.append(current)
+        }
+
+        return excursions
+    }
+
     /// Walks the parts of `[from, to]` that lie inside the covered span, one
     /// sample-to-sample segment at a time, handing each piece its interpolated end
     /// values. Every seconds-valued metric here is built on this so they cannot drift
