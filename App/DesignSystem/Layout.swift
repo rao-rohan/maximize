@@ -58,4 +58,10 @@ enum LayoutMetrics {
     /// FR-3.3 both plot fine lines against a threshold; squeezing them is how the cap
     /// line becomes decoration.
     static let minimumChartHeight: CGFloat = 220
+
+    /// Height of a single-value chart plotted on one axis only — the cadence band
+    /// track (FR-1.3). Shorter than `minimumChartHeight` on purpose: there is no
+    /// vertical dimension of data to protect here, only a horizontal position, so the
+    /// full chart height would just be empty space above and below the marker.
+    static let compactChartHeight: CGFloat = 96
 }
