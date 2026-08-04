@@ -3,7 +3,7 @@
 **Last updated:** 2026-08-04
 **Spec:** [docs/PRD.md](./docs/PRD.md) + [docs/PRD-AMENDMENTS.md](./docs/PRD-AMENDMENTS.md) (amendments win)
 **Architecture:** Fully on-device. No backend.
-**Pipeline status:** 🟢 CI green — `swift build` + `swift test` verified running on macOS
+**Pipeline status:** 🟢 CI green — core build/test, architecture guard, and unsigned iOS Simulator app build
 
 ---
 
@@ -40,7 +40,7 @@ and a code review has run. Definition of done lives in [CLAUDE.md](./CLAUDE.md).
 
 ## Board
 
-Status key: ✅ merged · 🔲 ready · ⬜ blocked on dependencies
+Status key: ✅ merged · 🔄 in progress · 🔲 ready · ⬜ blocked on dependencies
 
 ### Phase 0 — Foundation
 
@@ -51,7 +51,7 @@ Status key: ✅ merged · 🔲 ready · ⬜ blocked on dependencies
 | MAX-003 | CI: build, test, architecture guard | — | — | ✅ | — |
 | MAX-004 | Project tracker | — | — | ✅ | — |
 | MAX-005 | Vendor PRD, record amendments, revise conventions for on-device | A1–A7 | — | ✅ | — |
-| MAX-006 | App shell: XcodeGen spec, iOS 26 SDK, simulator build in CI | §7.4 | Sonnet | 🔲 | MAX-005 |
+| MAX-006 | App shell: XcodeGen spec, iOS 26 SDK, simulator build in CI | §7.4 | Sonnet | ✅ | MAX-005 |
 
 Phase 0 was done directly by the overseer — delegating a `.gitignore` costs more than
 it saves.
@@ -65,7 +65,7 @@ network.
 
 | ID | Ticket | Spec | Tier | Status | Depends on |
 |---|---|---|---|---|---|
-| MAX-010 | Domain value types: Workout, HR series, route, Plan, PlanDay, Score, Annotation | §8 | **Opus** | 🔲 | — |
+| MAX-010 | Domain value types: Workout, HR series, route, Plan, PlanDay, Score, Annotation | §8 | **Opus** | 🔄 | — |
 | MAX-011 | Versioned plan + `PlanDay` calendar resolution | D1, §8 | **Opus** | ⬜ | MAX-010 |
 | MAX-012 | Derived metrics: time-above-cap, HR drift, avg cadence, grade-adjusted pace, zone splits | §9, D2 | **Opus** | ⬜ | MAX-010 |
 | MAX-013 | Workout classification (easy / hard / long / other) from type + HR profile | §10.2 | **Opus** | ⬜ | MAX-012 |
@@ -101,7 +101,7 @@ not block on device runs — but every PR here states plainly what a human must 
 
 | ID | Ticket | Spec | Tier | Status | Depends on |
 |---|---|---|---|---|---|
-| MAX-030 | `HKObserverQuery` + background delivery + entitlement | FR-0.1 | **Opus** | ⬜ | MAX-006 |
+| MAX-030 | `HKObserverQuery` + background delivery + entitlement | FR-0.1 | **Opus** | 🔲 | MAX-006 |
 | MAX-031 | Anchored incremental fetch with persisted anchor | FR-0.2 | Sonnet | ⬜ | MAX-030 |
 | MAX-032 | Full-fidelity extraction: HR series, route, cadence, energy; indoor runs first-class | FR-0.3, FR-0.6 | Sonnet | ⬜ | MAX-031 |
 | MAX-033 | Ingestion pipeline: dedupe on `workoutUUID`, compute + store derived metrics, trigger scoring | FR-0.5, D2, A2 | **Opus** | ⬜ | MAX-032, MAX-020, MAX-023 |
@@ -110,7 +110,7 @@ not block on device runs — but every PR here states plainly what a human must 
 
 | ID | Ticket | Spec | Tier | Status | Depends on |
 |---|---|---|---|---|---|
-| MAX-040 | Design system: dark-first tokens, score bands, accent, Liquid Glass on chrome only, flat content surfaces | FR-4.1–4.4, A7 | **Opus** | ⬜ | MAX-006 |
+| MAX-040 | Design system: dark-first tokens, score bands, accent, Liquid Glass on chrome only, flat content surfaces | FR-4.1–4.4, A7 | **Opus** | 🔲 | MAX-006 |
 | MAX-041 | Detail view: plan-verdict header | FR-1.1 | Sonnet | ⬜ | MAX-020, MAX-040 |
 | MAX-042 | HR curve with cap line + time-above-cap shading | FR-1.2 | Sonnet | ⬜ | MAX-040, MAX-012 |
 | MAX-043 | Cadence vs target band | FR-1.3 | Sonnet | ⬜ | MAX-042 |
@@ -173,10 +173,11 @@ scope discipline as the top execution risk, above any technical unknown.
 | # | Question | Blocks | Status |
 |---|---|---|---|
 | Q1 | Accent color for the on-plan/effective state (PRD §14.2) | MAX-040 | Open, non-blocking — will land as a single token |
-| Q2 | Do GitHub macOS runners offer Xcode 26 for the iOS 26 SDK / Liquid Glass? | MAX-006 | Overseer to verify at MAX-006 |
 
 Resolved: backend architecture (→ A1, on-device) · existing-code question (greenfield) ·
-rest-day conversion (→ A6, automatic).
+rest-day conversion (→ A6, automatic) · **Q2 Xcode 26 availability** — yes, verified
+against `actions/runner-images` at MAX-006; `macos-26` has been GA since 2026-02-26
+and CI selects a 26.x toolchain explicitly rather than trusting the runner default.
 
 ## Risks
 
@@ -185,7 +186,7 @@ rest-day conversion (→ A6, automatic).
 | R1 | No Swift toolchain in the dev container; `download.swift.org` blocked | CI is the only gate | Accepted — mitigated by fat-core architecture + macOS CI |
 | R2 | No device/simulator in the loop | HealthKit flows, UI, on-device performance unverified until a human checks | Accepted per direction. PRs must list what needs device verification |
 | R3 | Anthropic key on-device | Weakens PRD §6 | Accepted for single-user (A5). **Tripwire: blocks any distribution** |
-| R5 | `com.apple.developer.healthkit.background-delivery` entitlement — PRD flags moderate confidence on the exact key | If wrong, the wake silently never happens and zero-touch capture dies | Open — MAX-030 verifies against Apple docs *first*, not last |
+| R5 | `com.apple.developer.healthkit.background-delivery` entitlement — PRD flags moderate confidence on the exact key | If wrong, the wake silently never happens and zero-touch capture dies | Open — MAX-030 verifies against Apple docs *first*, not last. Note: no physical `Info.plist` exists; entitlement keys go in `project.yml` target settings |
 | R6 | Scoring correctness; auto-vs-manual divergence is the quality signal | Loop loses trust fast if scores disagree with judgment | D8 telemetry + MAX-071 fixtures; revisit rubric after real runs |
 | R7 | Claude's *judgment* can't be unit-tested, only the rubric plumbing | Scoring regressions could pass CI green | MAX-071: fixture runs with known-good expected bands |
 | R8 | Background-delivery wake windows are short; scoring makes a network call | Scoring may not finish in the wake window (PRD §2 p50 < 2 min) | MAX-033 to score lazily on first view if the wake budget is exceeded |
@@ -203,3 +204,7 @@ rest-day conversion (→ A6, automatic).
 | 2026-08-04 | API key in Keychain, with a distribution tripwire (A5) | Accepted cost of A1 — bounded by "never shipped to anyone else" |
 | 2026-08-04 | Rest-day conversion is automatic (A6) | Consistent with the zero-touch north star; a conversion tap is the bookkeeping the product exists to remove |
 | 2026-08-04 | PRD preserved verbatim; deltas recorded in a separate amendments file | Keeps the original reasoning legible and the deviations reviewable |
+| 2026-08-04 | Xcode project generated from a checked-in XcodeGen `project.yml`; the `.xcodeproj` is gitignored | A hand-maintained `.xcodeproj` is an unreviewable blob; this repo's verification story depends on changes being readable in a diff |
+| 2026-08-04 | CI selects Xcode 26 explicitly and fails loudly if absent | A silent fallback to an older SDK would build a non-Liquid-Glass app that still passes CI — the worst failure mode, because it looks green |
+| 2026-08-04 | **iOS 26.0 deployment floor** — no back-compatibility to earlier iOS | PRD §7.4 is written around iOS 26 Liquid Glass. Supporting iOS 17+ with conditional enhancement would roughly double the design surface for zero benefit: this is a single-user app and the user controls the only device it runs on |
+| 2026-08-04 | Bundle ID `com.example.maximize.app` is a deliberate placeholder | Must be replaced before any signed build; flagged in `project.yml` rather than inventing something that looks official |
