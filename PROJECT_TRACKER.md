@@ -22,12 +22,27 @@ get one scoped ticket with acceptance criteria — never an open-ended goal.
 
 | Tier | Use for | Examples here |
 |---|---|---|
-| **Haiku** | Mechanical, fully specified, low blast radius. The answer is known; it needs typing. | Summary tiles, interval selector, settings screen, fixtures |
+| **Haiku** | Mechanical, fully specified, low blast radius. The answer is known; it needs typing. | *Currently unused — see below* |
 | **Sonnet** | Standard feature work against a clear spec. Judgment within known patterns. | A screen, a chart, an adapter, a test suite |
 | **Opus** | Architecture, numerically subtle, or expensive to get wrong. | Domain types, plan versioning, derived metrics, classification, scorer, streaming, drift overlay, HealthKit background delivery |
 
 Escalation rule: a Haiku/Sonnet ticket that turns out to need a design decision gets
 reported back, not decided unilaterally. The overseer re-tiers it.
+
+**The Haiku tier is empty on purpose, and this is a revision of the original policy.**
+Summary tiles (MAX-045), the interval selector (MAX-060), the settings screen (MAX-064)
+and the fixture suite (MAX-071) were all tiered Haiku here on the reasoning that the
+work was mechanical. The one that actually ran as Haiku, MAX-064, pushed a branch
+without opening a PR — so CI never ran — and reported "compiles" for code that had
+never been built; three real compile errors and a set of inert accessibility toggles
+had to be repaired afterwards. The repair cost more than the tier saved.
+
+The mistake in the original reasoning is that **no ticket in this repo is verified
+locally.** There is no Swift toolchain in an agent's container, so every ticket ends in
+"I could not build this; CI is the first compile" — which means the tier is not buying
+typing speed against a compiler, it is buying the care to get code right *without* one,
+plus the discipline to open the PR that runs CI at all. That is not mechanical work at
+any tier. Scope is what keeps a thin ticket thin; the brief says so explicitly.
 
 ## Ticket lifecycle
 
@@ -99,7 +114,7 @@ layer implements them and maps across the boundary.
 | MAX-021 | CloudKit sync so history survives reinstall | D6, A1 | Sonnet | ✅ | MAX-020 |
 | MAX-022 | Keychain-backed Anthropic key storage + settings entry point | A5, §11 | Sonnet 🔒 | ✅ | MAX-006 |
 | MAX-023 | Claude client: scoring call | §10, §11 | Sonnet 🔒 | ✅ | MAX-022, MAX-015 |
-| MAX-024 | Claude client: streaming chat transport | D10, FR-2.4 | **Opus** | 🔲 | MAX-022, MAX-014 |
+| MAX-024 | Claude client: streaming chat transport | D10, FR-2.4 | **Opus** | ✅ | MAX-022, MAX-014 |
 
 🔒 = requires `/security-review` before merge.
 
@@ -167,7 +182,7 @@ probe in `HealthKitWorkoutFetcher` (one extra query per outdoor workout, needed 
 | MAX-042 | HR curve with cap line + time-above-cap shading | FR-1.2 | Sonnet | ✅ | MAX-040, MAX-012 |
 | MAX-043 | Cadence vs target band | FR-1.3 | Sonnet | ✅ | MAX-042 |
 | MAX-044 | Route map — outdoor only, omitted cleanly for treadmill | FR-1.4 | Sonnet | ✅ | MAX-040 |
-| MAX-045 | Splits + summary tiles | FR-1.5 | Sonnet | 🔲 | MAX-040 |
+| MAX-045 | Splits + summary tiles | FR-1.5 | Sonnet | ✅ | MAX-040 |
 | MAX-046 | Per-split pace breakdown: compute at ingestion, store, display | FR-1.5, D2 | **Opus** | 🔲 | MAX-045, MAX-033 |
 | MAX-047 | Make `AppSettings.distanceUnit` load-bearing, or delete it | FR-1.5, FR-4.5 | Sonnet | 🔲 | MAX-045 |
 
