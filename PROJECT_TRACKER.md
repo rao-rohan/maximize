@@ -69,9 +69,9 @@ network.
 | MAX-011 | Versioned plan + `PlanDay` calendar resolution | D1, §8 | **Opus** | ✅ | MAX-010 |
 | MAX-012 | Derived metrics: time-above-cap, HR drift, avg cadence, grade-adjusted pace, zone splits | §9, D2 | **Opus** | ✅ | MAX-010 |
 | MAX-013 | Workout classification (easy / hard / long / other) from type + HR profile | §10.2 | **Opus** | ✅ | MAX-012 |
-| MAX-014 | Context builder — the single assembler of what Claude sees | D3 | **Opus** | 🔲 | MAX-011, MAX-013 |
-| MAX-015 | Scoring rubric application + effective threshold + rationale contract | §10, D1 | **Opus** | ⬜ | MAX-014 |
-| MAX-016 | Rest-day budget: automatic conversion of missed days | D9, A6 | Sonnet | 🔲 | MAX-011 |
+| MAX-014 | Context builder — the single assembler of what Claude sees | D3 | **Opus** | ✅ | MAX-011, MAX-013 |
+| MAX-015 | Scoring rubric application + effective threshold + rationale contract | §10, D1 | **Opus** | 🔲 | MAX-014 |
+| MAX-016 | Rest-day budget: automatic conversion of missed days | D9, A6 | Sonnet | 🔄 | MAX-011 |
 | MAX-017 | Tallies: workout-days, effective-days, avg score, streak, current week | FR-3.4, §8 | Sonnet | ⬜ | MAX-015, MAX-016 |
 
 MAX-013 is Opus despite looking small: PRD §13 names plan/actual misclassification as
@@ -95,11 +95,11 @@ layer implements them and maps across the boundary.
 
 | ID | Ticket | Spec | Tier | Status | Depends on |
 |---|---|---|---|---|---|
-| MAX-020 | SwiftData models + mapping to/from core types + repository implementations | §8, A1 | **Opus** | 🔲 | MAX-006, MAX-010 |
+| MAX-020 | SwiftData models + mapping to/from core types + repository implementations | §8, A1 | **Opus** | 🔄 | MAX-006, MAX-010 |
 | MAX-021 | CloudKit sync so history survives reinstall | D6, A1 | Sonnet | ⬜ | MAX-020 |
 | MAX-022 | Keychain-backed Anthropic key storage + settings entry point | A5, §11 | Sonnet 🔒 | ✅ | MAX-006 |
 | MAX-023 | Claude client: scoring call | §10, §11 | Sonnet 🔒 | ⬜ | MAX-022, MAX-015 |
-| MAX-024 | Claude client: streaming chat transport | D10, FR-2.4 | **Opus** | ⬜ | MAX-022, MAX-014 |
+| MAX-024 | Claude client: streaming chat transport | D10, FR-2.4 | **Opus** | 🔲 | MAX-022, MAX-014 |
 
 🔒 = requires `/security-review` before merge.
 
@@ -114,7 +114,7 @@ not block on device runs — but every PR here states plainly what a human must 
 |---|---|---|---|---|---|
 | MAX-030 | `HKObserverQuery` + background delivery + entitlement | FR-0.1 | **Opus** | ✅ | MAX-006 |
 | MAX-031 | Anchored incremental fetch with persisted anchor | FR-0.2 | **Opus** | ✅ | MAX-030 |
-| MAX-032 | Full-fidelity extraction: HR series, route, cadence, energy; indoor runs first-class | FR-0.3, FR-0.6 | Sonnet | 🔲 | MAX-031 |
+| MAX-032 | Full-fidelity extraction: HR series, route, cadence, energy; indoor runs first-class | FR-0.3, FR-0.6 | Sonnet | 🔄 | MAX-031 |
 | MAX-033 | Ingestion pipeline: dedupe on `workoutUUID`, compute + store derived metrics, trigger scoring | FR-0.5, D2, A2 | **Opus** | ⬜ | MAX-032, MAX-020, MAX-023 |
 
 **The ingestion pipeline is deliberately pinned until MAX-033 lands.** MAX-031's
@@ -210,8 +210,17 @@ change rather than four.
 | P4 | `ScheduledSession` cannot express interval structure (e.g. 6×800m) | MAX-013 | The scorer sees "hard" but not the prescribed shape, so it cannot judge whether the session was executed as written |
 
 Separately, `CalendarDay` lacks day/week arithmetic — MAX-013 carried a private day
-number to work around it. **MAX-011 should own that**, since plan-day resolution needs
-the same thing.
+number to work around it. **MAX-011 owns that** now (`CalendarDayArithmetic`).
+
+## Calling conventions a type cannot enforce
+
+Obligations that live in a caller rather than in a signature. Each was found by the
+ticket that could not close it, and each fails quietly rather than loudly.
+
+| # | Obligation | Why the type can't enforce it |
+|---|---|---|
+| C1 | **Always resolve rest-day budgets over whole Monday-first weeks — never split one week across two calls.** | `RestDayBudgeting` (MAX-016) is a pure function over the days it is handed. Ranking is relative to the misses in a week, so the same day can rank differently in two partial slices of that week. A function taking a day-set cannot tell a partial week from a short one |
+| C2 | **A `WorkoutIngestionSink` must not return before its write is durable.** | MAX-031's no-retry guarantee depends on it: acknowledging a wake whose data was not durably stored loses the workout permanently, and only the implementation knows when its write has landed |
 
 ## Open questions
 
