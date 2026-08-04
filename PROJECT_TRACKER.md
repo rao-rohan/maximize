@@ -67,8 +67,8 @@ network.
 |---|---|---|---|---|---|
 | MAX-010 | Domain value types: Workout, HR series, route, Plan, PlanDay, Score, Annotation | §8 | **Opus** | ✅ | — |
 | MAX-011 | Versioned plan + `PlanDay` calendar resolution | D1, §8 | **Opus** | 🔲 | MAX-010 |
-| MAX-012 | Derived metrics: time-above-cap, HR drift, avg cadence, grade-adjusted pace, zone splits | §9, D2 | **Opus** | 🔄 | MAX-010 |
-| MAX-013 | Workout classification (easy / hard / long / other) from type + HR profile | §10.2 | **Opus** | ⬜ | MAX-012 |
+| MAX-012 | Derived metrics: time-above-cap, HR drift, avg cadence, grade-adjusted pace, zone splits | §9, D2 | **Opus** | ✅ | MAX-010 |
+| MAX-013 | Workout classification (easy / hard / long / other) from type + HR profile | §10.2 | **Opus** | 🔄 | MAX-012 |
 | MAX-014 | Context builder — the single assembler of what Claude sees | D3 | **Opus** | ⬜ | MAX-011, MAX-013 |
 | MAX-015 | Scoring rubric application + effective threshold + rationale contract | §10, D1 | **Opus** | ⬜ | MAX-014 |
 | MAX-016 | Rest-day budget: automatic conversion of missed days | D9, A6 | Sonnet | ⬜ | MAX-011 |
@@ -76,6 +76,17 @@ network.
 
 MAX-013 is Opus despite looking small: PRD §13 names plan/actual misclassification as
 a risk that "poisons the score," and every downstream number inherits its mistakes.
+
+MAX-031 was **re-tiered from Sonnet to Opus** after MAX-030 landed. The original
+estimate treated it as a routine fetch; R9 made it the thing standing between a failed
+background wake and permanent silent data loss.
+
+**Process note for parallel work.** MAX-012 was branched before MAX-030 and MAX-070
+merged, so its PR diff showed both tickets' files as deletions — merging it unrebased
+would have silently reverted them. Rebase every long-running agent branch onto `main`
+before opening its PR, and check the diff is additions-only where it should be.
+Related: dispatch briefs must be self-contained, because an agent's worktree only sees
+`main` as it stood when the worktree was made.
 
 ### Phase 2 — Persistence & platform adapters
 
@@ -102,7 +113,7 @@ not block on device runs — but every PR here states plainly what a human must 
 | ID | Ticket | Spec | Tier | Status | Depends on |
 |---|---|---|---|---|---|
 | MAX-030 | `HKObserverQuery` + background delivery + entitlement | FR-0.1 | **Opus** | ✅ | MAX-006 |
-| MAX-031 | Anchored incremental fetch with persisted anchor | FR-0.2 | Sonnet | 🔲 | MAX-030 |
+| MAX-031 | Anchored incremental fetch with persisted anchor | FR-0.2 | **Opus** | 🔄 | MAX-030 |
 | MAX-032 | Full-fidelity extraction: HR series, route, cadence, energy; indoor runs first-class | FR-0.3, FR-0.6 | Sonnet | ⬜ | MAX-031 |
 | MAX-033 | Ingestion pipeline: dedupe on `workoutUUID`, compute + store derived metrics, trigger scoring | FR-0.5, D2, A2 | **Opus** | ⬜ | MAX-032, MAX-020, MAX-023 |
 
@@ -146,7 +157,7 @@ function, so its branch never renders), and `enteredKey` is not cleared on the
 
 | ID | Ticket | Spec | Tier | Status | Depends on |
 |---|---|---|---|---|---|
-| MAX-070 | Accessibility: Reduce Transparency / Increase Contrast degrade to solid chrome | FR-4.5 | Sonnet | 🔄 | MAX-040 |
+| MAX-070 | Accessibility: Reduce Transparency / Increase Contrast degrade to solid chrome | FR-4.5 | Sonnet | ✅ | MAX-040 |
 | MAX-071 | Scoring fixture suite: known-good runs → expected score bands | R7 | Sonnet | ⬜ | MAX-015 |
 | MAX-072 | Security review: Keychain handling, data at rest, prompt minimization, distribution tripwire | §11, A5 | **Opus** 🔒 | ⬜ | MAX-023, MAX-024 |
 
@@ -219,5 +230,7 @@ and CI selects a 26.x toolchain explicitly rather than trusting the runner defau
 | 2026-08-04 | `ScoreBand` lives in the core, with no `init(score:)` | It is domain vocabulary — produced by the scorer, aggregated by tallies, persisted beside the immutable auto-score. A parallel app-layer copy would drift. Refusing `init(score:)` is D1: only the scorer, reading the plan version in effect on the workout's date, may turn a number into a band |
 | 2026-08-04 | Glass-over-data asserts in debug, degrades to opaque in release | FR-4.2 exists because translucency destroys chart legibility. A release fallback means a user never sees the illegible version; the debug assert catches it during development. The rejected alternative — render it wrong so someone notices — trades a real user-facing defect for a diagnostic |
 | 2026-08-04 | CI rejects raw color literals outside `ColorTokens.swift` | Suggested by MAX-040 against its own work: the design system is only worth having if views name meaning, not appearance. A palette erodes quietly — nothing breaks, the colors just stop agreeing |
+| 2026-08-04 | Palette values live in `MaximizeCore` as `DesignPalette`; `ColorTokens` consumes them | MAX-070 needed the values reachable without UIKit to compute WCAG contrast in a unit test. Colors are not domain, so this is a deliberate exception — bought because it turns "is this readable" from a thing nobody in this pipeline can see into a thing CI checks every commit |
+| 2026-08-04 | The color-literal guard now admits **no** exceptions in `App/` | Consequence of the above: `App/` is entirely literal-free, so any color value there is one escaping the contrast suite that guards it. Verified the tightened guard catches a literal planted in `ColorTokens.swift` itself |
 | 2026-08-04 | `Score` stores its band and validates it against the stored threshold, but does not compute it | Storing follows D2 (compute once). Refusing to compute follows D1 (the threshold is versioned). Rejecting a band that contradicts its threshold costs nothing and makes an incoherent score unrepresentable; the marginal/ineffective split stays the scorer's judgement |
 | 2026-08-04 | Rubric carries `marginalThreshold` alongside `effectiveThreshold` | Three bands need two cut points. Since `ScoreBand` cannot compute itself, something must supply them, and D1 says that is versioned plan data rather than a constant in the scorer |
