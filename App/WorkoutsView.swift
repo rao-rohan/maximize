@@ -1,18 +1,53 @@
 import SwiftUI
+import MaximizeCore
 
-/// Placeholder. The real workout list and detail view (plan-verdict header, HR
-/// curve, cadence, route map, splits) arrive with MAX-041 onward, once the design
-/// system (MAX-040) and persistence layer (MAX-020) exist.
-///
-/// Still a placeholder — the only change MAX-040 made here was to put it on the
-/// standard opaque content background, so the shell is not the one screen in the app
-/// that ignores the design system. Real content is MAX-041's job.
+/// The workout list — the minimum surrounding view MAX-041 needs to reach the detail
+/// screen's plan-verdict header (FR-1.1). Rows are deliberately plain (see
+/// `WorkoutRow`); everything richer belongs to later tickets.
 struct WorkoutsView: View {
+    @State private var model = WorkoutsListModel()
+
     var body: some View {
-        Text("Workouts")
-            .font(.screenTitle)
-            .foregroundStyle(Color.textPrimary)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .contentSurface(.screen)
+        NavigationStack {
+            content
+                .navigationTitle("Workouts")
+                .contentSurface(.screen)
+                .navigationDestination(for: UUID.self) { workoutID in
+                    WorkoutDetailView(workoutID: workoutID)
+                }
+        }
+        .task { await model.load() }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch model.state {
+        case .loading:
+            ProgressView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .failed:
+            Text("Could not load workouts.")
+                .font(.bodyCopy)
+                .foregroundStyle(Color.textSecondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case let .loaded(workouts) where workouts.isEmpty:
+            Text("No workouts yet.")
+                .font(.bodyCopy)
+                .foregroundStyle(Color.textSecondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case let .loaded(workouts):
+            ScrollView {
+                LazyVStack(spacing: Spacing.compact) {
+                    ForEach(workouts) { workout in
+                        NavigationLink(value: workout.id) {
+                            WorkoutRow(workout: workout)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .screenMargins()
+                .padding(.vertical, Spacing.regular)
+            }
+        }
     }
 }
