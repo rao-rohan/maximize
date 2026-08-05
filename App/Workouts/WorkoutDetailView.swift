@@ -13,9 +13,10 @@ struct WorkoutDetailView: View {
     @State private var model: WorkoutDetailModel
 
     /// Kept alongside `model` (rather than read back out of it) purely so `content`
-    /// below can hand it to `WorkoutChatView`, which owns its own `WorkoutChatModel`
-    /// (MAX-051) and is loaded independently of `WorkoutDetailModel`'s read-only
-    /// snapshot — chat is live and bidirectional, not another `WorkoutDetailData` field.
+    /// below can hand it to `WorkoutChatSectionView`, whose sheet owns its own
+    /// `WorkoutChatModel` (MAX-051) and is loaded independently of
+    /// `WorkoutDetailModel`'s read-only snapshot — chat is live and bidirectional, not
+    /// another `WorkoutDetailData` field.
     private let workoutID: UUID
 
     init(workoutID: UUID) {
@@ -63,7 +64,7 @@ struct WorkoutDetailView: View {
                 RouteMapView(data: data.routeMap)
                 SplitsView(data: data.splits)
                 SummaryTilesView(data: data.summaryTiles)
-                WorkoutChatView(workoutID: workoutID)
+                WorkoutChatSectionView(workoutID: workoutID)
             }
         }
     }
