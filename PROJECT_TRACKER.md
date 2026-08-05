@@ -1,6 +1,9 @@
 # Maximize — Project Tracker
 
-**Last updated:** 2026-08-04
+**Last updated:** 2026-08-05
+**Status: every PRD ticket is merged.** FR-0 through FR-4 are built and CI-green; the
+capture-to-score loop is confirmed working on a real iPhone. What remains is device
+verification of the surfaces nobody has looked at yet, and the post-PRD backlog below.
 **Spec:** [docs/PRD.md](./docs/PRD.md) + [docs/PRD-AMENDMENTS.md](./docs/PRD-AMENDMENTS.md) (amendments win)
 **Architecture:** Fully on-device. No backend.
 **Pipeline status:** 🟢 CI green — 700+ tests, core suite on Linux. **Capture-to-score loop closed (MAX-033), and verified on a real iPhone: background delivery woke the app, the anchored fetch ran, and captured workouts render.** Core build/test, architecture guard, colour-token guard, unsigned iOS Simulator app build.
@@ -199,8 +202,8 @@ probe in `HealthKitWorkoutFetcher` (one extra query per outdoor workout, needed 
 | MAX-043 | Cadence vs target band | FR-1.3 | Sonnet | ✅ | MAX-042 |
 | MAX-044 | Route map — outdoor only, omitted cleanly for treadmill | FR-1.4 | Sonnet | ✅ | MAX-040 |
 | MAX-045 | Splits + summary tiles | FR-1.5 | Sonnet | ✅ | MAX-040 |
-| MAX-046 | Per-split pace breakdown: compute at ingestion, store, display | FR-1.5, D2 | **Opus** | 🔲 | MAX-045, MAX-033 |
-| MAX-047 | Make `AppSettings.distanceUnit` load-bearing, or delete it | FR-1.5, FR-4.5 | Sonnet | 🔲 | MAX-045 |
+| MAX-046 | Per-split pace breakdown: compute at ingestion, store, display | FR-1.5, D2 | **Opus** | ✅ | MAX-045, MAX-033 |
+| MAX-047 | Make `AppSettings.distanceUnit` load-bearing, or delete it | FR-1.5, FR-4.5 | Sonnet | ✅ | MAX-045 |
 
 **MAX-045 delivers the summary tiles but not the splits, and that is not a shortfall in
 the ticket — it is a missing data source.** FR-1.5 asks for a per-km/mile pace
@@ -301,7 +304,7 @@ schema change and therefore its own ticket.
 | MAX-060 | Interval selector: week / month / custom | FR-3.1 | Sonnet | ✅ | MAX-020 |
 | MAX-061 | Score-colored calendar, type glyph, auto-converted rest days | FR-3.2, D4, D9, A6 | Sonnet | ✅ | MAX-017, MAX-060, MAX-040 |
 | MAX-062 | **Cross-run HR-drift overlay** on %-elapsed axis | FR-3.3, D5 | **Opus** | ✅ | MAX-060, MAX-040, MAX-012 |
-| MAX-065 | Drift trendline over stored per-run figures | FR-3.3 | Sonnet | 🔲 | MAX-062 |
+| MAX-065 | Drift trendline over stored per-run figures | FR-3.3 | Sonnet | ✅ | MAX-062 |
 
 **MAX-062 landed the overlay; MAX-065 is the half it reported rather than silently
 dropping.** FR-3.3 says the drift comparison should *ideally* carry a trendline. That is
@@ -361,7 +364,7 @@ function, so its branch never renders), and `enteredKey` is not cleared on the
 |---|---|---|---|---|---|
 | MAX-070 | Accessibility: Reduce Transparency / Increase Contrast degrade to solid chrome | FR-4.5 | Sonnet | ✅ | MAX-040 |
 | MAX-071 | Scoring fixture suite: known-good runs → expected score bands | R7 | Sonnet | ✅ | MAX-015 |
-| MAX-072 | Security review: Keychain handling, data at rest, prompt minimization, distribution tripwire | §11, A5 | **Opus** 🔒 | 🔲 | MAX-023, MAX-024 |
+| MAX-072 | Security review: Keychain handling, data at rest, prompt minimization, distribution tripwire | §11, A5 | **Opus** 🔒 | ✅ | MAX-023, MAX-024 |
 
 ### Deliberately not built
 
@@ -461,6 +464,48 @@ Resolved: backend architecture (→ A1, on-device) · existing-code question (gr
 rest-day conversion (→ A6, automatic) · **Q2 Xcode 26 availability** — yes, verified
 against `actions/runner-images` at MAX-006; `macos-26` has been GA since 2026-02-26
 and CI selects a 26.x toolchain explicitly rather than trusting the runner default.
+
+## Post-PRD backlog
+
+Every ticket tracing to the PRD is merged. These came out of the work itself — reported
+by the agents that found them rather than fixed in place, per the standing instruction —
+and none of them is required for the PRD to be complete.
+
+| ID | Ticket | Source | Tier |
+|---|---|---|---|
+| MAX-066 | Treadmill splits from a distance-sample series | MAX-046 | Sonnet |
+| MAX-067 | Backfill splits for runs ingested before MAX-046 | MAX-046 | Sonnet |
+| MAX-068 | Decide whether splits enter the Claude prompt | MAX-046 | **Opus** 🔒 |
+| MAX-069 | Extend file protection over Core Data's external-storage directory | MAX-072 R1 | Sonnet 🔒 |
+
+**MAX-066.** Splits currently need a GPS track, so a treadmill run has none — correctly
+rendered as an absence rather than fabricated. `distanceWalkingRunning` is already
+authorised, and a distance *sample series* would give an indoor run a real
+time-against-distance relation. It needs a new `WorkoutSampleFetching` requirement, an
+extractor path and a HealthKit adapter, which is why MAX-046 reported it instead.
+
+**MAX-067.** Every run already on the device predates MAX-046 and shows "no splits
+recorded". A backfill does not fall out for free: `completeIngestion(forWorkout:)`
+returns immediately for any workout that already has a score, which all of them do. The
+ticket has to decide whether re-running enrichment is compatible with D8's immutable
+auto-score, and whether it runs in the foreground or on demand.
+
+**MAX-068 is the one worth thinking about.** Splits are stored but do not enter the
+Claude prompt — `WorkoutContextBuilder` and `WorkoutFactSheet` are unchanged. FR-2's own
+worked example is *"why did my HR drift at mile 3"*, which is a question the model
+currently cannot answer well, because the fact sheet has no per-split structure to ground
+it in. Adding them is a D3 decision about what Claude sees, so it belongs to whoever owns
+the context builder and gets a `/security-review` — more data in a prompt is more health
+data leaving the device.
+
+**MAX-069.** From the security review's R1. Three `.externalStorage` blobs — the HR curve,
+the GPS track and the chat transcript — are protected by the *directory* attribute set in
+`prepareStoreURL`, not by `applyFileProtection`'s explicit list. The bytes are protected
+today; the gap is that a future edit removing the directory attribute as redundant would
+silently uncover them. Belt-and-braces parity means walking Core Data's support
+directory, which depends on an implementation detail and should be verified on a device.
+
+---
 
 ## Risks
 
