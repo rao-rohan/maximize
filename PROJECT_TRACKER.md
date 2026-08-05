@@ -536,21 +536,21 @@ feature was governed by a plan that could not exist).
 | MAX-083 | Week / month / year intervals, each with a fitting representation | Owner | **Opus** ✅ |
 | MAX-084 | Fix score-band and chart contrast; resolve A7 | MAX-082 | Sonnet ✅ |
 | MAX-085 | **The tab bar, once**: Plan becomes a third tab, iOS 26 `Tab` builder, `.tint()`, surface elevation, Liquid Glass chrome | MAX-082, Owner | **Opus** ✅ |
-| MAX-086 | Wire `AppearancePreference` — a setting that silently does nothing | MAX-082 | Sonnet |
+| MAX-086 | Wire `AppearancePreference` — a setting that silently does nothing | MAX-082 | Sonnet ✅ |
 | MAX-087 | A non-hue channel for the year heatmap's 6pt cells | MAX-084 | Sonnet ✅ |
 | MAX-127 | **Widen the surface fill ramp and re-tune the chart palette against it, together** — the finding MAX-085 left | MAX-085 | Sonnet ✅ |
 | MAX-105 | **The plan on the dashboard calendar** — scheduled beneath actual | Owner | **Opus** ✅ |
 | MAX-106 | The UI standard, written into `CLAUDE.md` | Owner | Sonnet ✅ |
 | MAX-107 | Chat stream framing: close a frame without a blank line | Device report | Sonnet 🔒 ✅ |
 | MAX-108 | Tap a calendar day → its workouts; swipe between two on one day | Owner | Sonnet ✅ |
-| MAX-109 | **Plans cover lifting as well as running** — spec first | Owner | **Opus** |
-| MAX-110 | **Tallies count future scheduled days as missed** — the streak tile reads 0 for most of every month | MAX-105 | Sonnet |
+| MAX-109 | **Plans cover lifting as well as running** — spec first | Owner | **Opus** ✅ |
+| MAX-110 | **Tallies count future scheduled days as missed** — the streak tile reads 0 for most of every month | MAX-105 | Sonnet ✅ |
 | MAX-111 | **Stop scoring lifts against the running rubric** — stop-gap ahead of MAX-109 | MAX-109 (spec) | Sonnet ✅ |
 | MAX-090 | Chat-first product spec: plan generation and Q&A through chat | Owner | **Opus** 🔒 ✅ |
 | MAX-091 | Run both Claude clients on the Sonnet tier at `medium` effort | Owner, cost | Sonnet 🔒 ✅ |
 | MAX-092 … MAX-104 | The chat-first build, decomposed from MAX-090 | MAX-090 | see below |
 | MAX-109 | Lifting product spec: plans account for lifting and running | Owner | **Opus** ✅ |
-| MAX-110 … MAX-125 | The lifting build, decomposed from MAX-109 | MAX-109 | see below |
+| MAX-128 … MAX-143 | The lifting build, decomposed from MAX-109 | MAX-109 | see below |
 | MAX-126 | **"No verdict by design" is a state** — a lift stops being drawn and spoken as a run awaiting a score | MAX-111 | **Opus** ✅ |
 
 **MAX-066.** Splits currently need a GPS track, so a treadmill run has none — correctly
@@ -1051,7 +1051,7 @@ twelve and is dispatchable immediately.
 | MAX-099 | `PlanProposal` — type, parse, schema derived from core enums | 095 | **Opus** 🔒 ✅ |
 | MAX-100 | The Anthropic client for plan proposals | 099 | Sonnet 🔒 |
 | MAX-101 | Conversational plan authoring; proposal card; handoff | 098, 100 | **Opus** |
-| MAX-102 | **The read-only plan screen with version history** | — | Sonnet |
+| MAX-102 | **The read-only plan screen with version history** | — | Sonnet ✅ |
 | MAX-103 | "Runs in this conversation" strip | 098 | Sonnet |
 | MAX-104 | Copy and absence voice, **app-wide** — absorbs MAX-086's other half | 098, 102 | Sonnet |
 
@@ -1232,46 +1232,80 @@ The three decisions worth knowing without reading all of it:
 **One escalation, and it is not a ticket's to make.** §11.4 / A21: the lift scores already
 written are wrong, D8 forbids overwriting them, and they are not scorer misjudgements —
 counting them as such corrupts the correction-rate signal D8 exists to protect. The
-recorded lean is to label them; the decision is the owner's, tracked as MAX-125.
+recorded lean is to label them; the decision is the owner's, tracked as MAX-143.
+
+**The spec's numbering collides with shipped work.** LIFTING-SPEC §14 was written while
+MAX-110 (the tallies' future-days fix) and MAX-129 (the stop-gap scoring gate) were in
+flight, so its MAX-110 … MAX-143 sequence reuses two IDs that are already taken. Its
+MAX-110 has been renumbered **MAX-128** and is built; **the rest of the sequence has not
+been renumbered**, and 129 in particular still names two different tickets. Resolving that
+is the overseer's, not a ticket's — flagged here rather than done.
 
 | ID | Ticket | Depends on | Tier |
 |---|---|---|---|
-| MAX-110 | `Discipline`, and `.lift` on both classification enums | — | **Opus** |
-| MAX-111 | The per-discipline prescription; the no-op decode test | 110 | **Opus** |
-| MAX-112 | Discipline-gated derived metrics; stop fabricating cadence | 110 | **Opus** |
-| MAX-113 | Rubric vocabulary for lifts — **closes gap P3** | 110 | **Opus** |
-| MAX-114 | Seed bands for lift days; the `easy.wellOverCap` shadow | 113 | Sonnet |
-| MAX-115 | Match a workout to its own discipline's ask | 111, 113 | **Opus** |
-| MAX-116 | Obligations, not days: tallies, streak, rest-day budget | 111, 115 | **Opus** |
-| MAX-117 | The calendar's mixed day | 116, **105** | **Opus** |
-| MAX-118 | Context and fact sheet learn discipline | 111, 112 | **Opus** 🔒 |
-| MAX-119 | Plan authoring for two slots | 111 | Sonnet |
-| MAX-120 | The plan screen shows both | 111 | Sonnet |
-| MAX-121 | Workout detail for a lift | 112, 115 | Sonnet |
-| MAX-122 | Trend tiles, honestly ("days run", the effective denominator) | 116 | Sonnet |
-| MAX-123 | `PlanProposal` covers lift days | 111, **099** | Sonnet 🔒 |
-| MAX-124 | `TrainingContext` is per-session, not per-run | 111, **095** | **Opus** 🔒 |
-| MAX-125 | **Decide what to do with lifts already scored as runs** | 110 | Owner / overseer |
+| MAX-128 | `Discipline`, and `.lift` on both classification enums (spec's MAX-110) | — | **Opus** ✅ |
+| MAX-129 | The per-discipline prescription; the no-op decode test | 128 | **Opus** |
+| MAX-130 | Discipline-gated derived metrics; stop fabricating cadence | 128 | **Opus** |
+| MAX-131 | Rubric vocabulary for lifts — **closes gap P3** | 128 | **Opus** |
+| MAX-132 | Seed bands for lift days; the `easy.wellOverCap` shadow | 131 | Sonnet |
+| MAX-133 | Match a workout to its own discipline's ask | 129, 131 | **Opus** |
+| MAX-134 | Obligations, not days: tallies, streak, rest-day budget | 129, 133 | **Opus** |
+| MAX-135 | The calendar's mixed day | 134, **105** | **Opus** |
+| MAX-136 | Context and fact sheet learn discipline | 129, 130 | **Opus** 🔒 |
+| MAX-137 | Plan authoring for two slots | 129 | Sonnet |
+| MAX-138 | The plan screen shows both | 129 | Sonnet |
+| MAX-139 | Workout detail for a lift | 130, 133 | Sonnet |
+| MAX-140 | Trend tiles, honestly ("days run", the effective denominator) | 134 | Sonnet |
+| MAX-141 | `PlanProposal` covers lift days | 129, **099** | Sonnet 🔒 |
+| MAX-142 | `TrainingContext` is per-session, not per-run | 129, **095** | **Opus** 🔒 |
+| MAX-143 | **Decide what to do with lifts already scored as runs** | 128 | Owner / overseer |
 
 **Four collisions the overseer must respect.**
 
-1. **MAX-105 before MAX-117, and MAX-105's brief must carry A17** — see the MAX-105 note
-   above. Sequence 111 → 105 → 117.
+1. **MAX-105 before MAX-135, and MAX-105's brief must carry A17** — see the MAX-105 note
+   above. Sequence 129 → 105 → 135.
 2. ~~**MAX-095's brief must carry LIFTING-SPEC §10.2 before it is written.**~~ **Done —
-   MAX-095 landed briefed, so MAX-124 is not needed.** Its roll-up is one line per
+   MAX-095 landed briefed, so MAX-142 is not needed.** Its roll-up is one line per
    *session*, discipline-tagged, with fields that do not apply omitted rather than
    nil-rendered, and the cap counts sessions. The plan block renders the whole stored
-   `WeeklyTemplate`, so the lift slot appears there the moment MAX-113/114 adds one — no
+   `WeeklyTemplate`, so the lift slot appears there the moment MAX-131/132 adds one — no
    further edit to `Context/` is required for it.
-3. **MAX-110 adds `.lift` to `RestDayBudgeting.costTier` without reordering the existing
-   cases.** The tiers are ordinal and conversion outcomes depend on relative order — a
-   reorder silently rewrites the calendar's past. `Domain/ScheduledSession.swift` is touched
-   by 110, 111 and 113 and they are already in dependency order.
-4. **MAX-104 runs after 117–122.** It already absorbs MAX-086's absence-voice half; it
+3. ~~**MAX-110 adds `.lift` to `RestDayBudgeting.costTier` without reordering the existing
+   cases.**~~ **Respected — MAX-128 inserted `.lift` between `.easy` and `.hard` and
+   renumbered nothing else**, so every existing comparison is unchanged and no historical
+   day converts differently. `Domain/ScheduledSession.swift` is still touched by 129 and
+   131 and they are in dependency order.
+4. **MAX-104 runs after 135–140.** It already absorbs MAX-086's absence-voice half; it
    should absorb the lifting surfaces in the same pass rather than spawning a follow-up.
 
-Suggested order: **105 (briefed) → 110 → 111 → (112 ‖ 113) → 114 → 115 → 116 → 117**, with
-118 parallel after 112, 120 then 119 parallel after 111, and 121/122 last.
+Suggested order: **105 (briefed) → 128 → 129 → (130 ‖ 131) → 132 → 133 → 134 → 135**, with
+136 parallel after 130, 138 then 137 parallel after 129, and 139/140 last.
+
+**MAX-128 — the vocabulary, and nothing else.** `Discipline` is a closed two-case enum
+(`.run` / `.lift`) with the one mapping from `ActivityType` beside `isRun`, and both
+classification enums carry `.lift`. **No behaviour changes**: nothing produces a `.lift`
+classification (the classifier still answers `.other` for every non-run), nothing can
+prescribe one (the weekly template has one slot until MAX-129, and
+`ScheduledSessionKind.prescribable` keeps the authoring picker offering exactly the five
+kinds it offered before), and no stored record moves — both enums are `String`-backed and
+decoded by raw value, so a case nothing has written is additive on the wire and the plan
+blob needs no migration.
+
+`isRun` is now expressed *through* `discipline` — `guard discipline == .run` before the
+existing comparison — which is what stops them becoming two notions of the same thing. They
+are deliberately not the same predicate: `discipline` says which slot judges a workout, and
+a ride is `.run` by slot without being a run, so the containment is one-way and pinned by a
+test over every named activity type.
+
+**Left alone and reported: `WorkoutClassifier`'s residual.** MAX-126's finding — that "not a
+run" and "a run whose curve could not be read" share `.other` — is only half-addressed by
+having a `.lift` word for it. A ride and an unreadable run would still collapse, so
+separating them is a rework of what the classifier's residual *means*, not a case added to
+its vocabulary. Also not taken: mapping HealthKit's `.functionalStrengthTraining` to a
+first-class `ActivityType` (LIFTING-SPEC §14 puts it in this ticket). It changes the
+activity type a real workout is stored under, which is behaviour, and this ticket's brief
+forbade any. It is a one-line fetcher change plus one row in `ActivityType.discipline`,
+and it wants the ticket that is already opening `App/HealthKitWorkoutFetcher.swift`.
 
 **MAX-093 landed the stored record.** `StoredChatThread` is columnar —
 `subjectKindRawValue`, `workoutUUID` (a fixed sentinel for a training row),

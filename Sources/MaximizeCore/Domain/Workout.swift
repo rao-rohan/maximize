@@ -23,10 +23,43 @@ public struct ActivityType: RawRepresentable, Hashable, Sendable, Codable, Custo
     public static let traditionalStrengthTraining = ActivityType(rawValue: "traditionalStrengthTraining")
     public static let other = ActivityType(rawValue: "other")
 
-    /// Whether this type is one the plan scores as a run. Strength work is explicitly
-    /// out of scope for HR scoring (PRD §3 non-goals).
+    /// Which of the plan's two prescriptions a workout of this type is judged against
+    /// (A17). Total by construction: every activity type, named or not, maps to exactly
+    /// one, because `PlanDay` has to be able to resolve an ask for either slot.
+    ///
+    /// **The one place this mapping lives.** `Discipline`'s own documentation explains
+    /// why `.run` is the residual: a ride, a hike and a walk occupy the run slot as
+    /// `.other` sessions, which is what they are today, and A17 is explicit that they
+    /// are not disciplines of their own.
+    ///
+    /// Only `.traditionalStrengthTraining` is a lift so far. HealthKit's
+    /// `.functionalStrengthTraining` is not mapped to an `ActivityType` at all yet — it
+    /// arrives as `.other` — so naming it here would be a case nothing can produce; the
+    /// ticket that maps it in `HealthKitWorkoutFetcher` adds it here in the same change.
+    public var discipline: Discipline {
+        switch self {
+        case .traditionalStrengthTraining: return .lift
+        default: return .run
+        }
+    }
+
+    /// Whether this type is one the plan's rubric scores as a run. Strength work is
+    /// explicitly out of scope for HR scoring (PRD §3 non-goals, narrowed by A16).
+    ///
+    /// **Narrower than `discipline == .run`, and that gap is the whole relationship
+    /// between the two.** `discipline` says which slot's ask a workout is measured
+    /// against; this says which activities the run rubric's bands — written about
+    /// distance, cadence and an easy-run heart-rate cap — actually describe. A ride is
+    /// `.run` by slot and `false` here, so neither predicate is a rename of the other
+    /// and collapsing them would score a bike ride as a bad easy run.
+    ///
+    /// The guard is what stops them disagreeing rather than merely happening to agree:
+    /// nothing that is a lift can reach the comparison below, whatever activity types
+    /// are named later. It is redundant today by inspection, and `DisciplineTests` pins
+    /// the implication over every named type so it stays that way.
     public var isRun: Bool {
-        self == .running || self == .treadmillRunning
+        guard discipline == .run else { return false }
+        return self == .running || self == .treadmillRunning
     }
 
     /// Whether the activity is expected to carry a GPS route. Indoor runs answering

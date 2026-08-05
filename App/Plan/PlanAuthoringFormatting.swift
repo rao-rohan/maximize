@@ -28,6 +28,10 @@ enum PlanAuthoringFormatting {
         case .hard: return "Hard session"
         case .rest: return "Rest"
         case .other: return "Other"
+        // Unreachable from this screen: the picker is driven by
+        // `ScheduledSessionKind.prescribable`, which excludes `.lift` until the template
+        // has a slot for it. Spelled out rather than defaulted so the sweep is visible.
+        case .lift: return "Lift"
         }
     }
 

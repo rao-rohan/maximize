@@ -100,6 +100,11 @@ enum ScoreCalendarFormatting {
         // ahead of today, so `.forthcoming` never carries `.rest`. Mapped rather than
         // defaulted so a future `ScheduledSessionKind` case fails to compile here.
         case .rest: return "moon.zzz.fill"
+        // Also unreachable until the weekly template can prescribe a lift (MAX-111).
+        // The same glyph a recorded strength session already draws below, so the two
+        // read as one activity across the substrate and the figure — which is what
+        // MAX-117 will need when a lift day becomes drawable.
+        case .lift: return "figure.strengthtraining.traditional"
         }
     }
 
@@ -228,6 +233,10 @@ enum ScoreCalendarFormatting {
         case .hard: return "hard session"
         case .other: return "session"
         case .rest: return "rest day" // unreachable — `PlanDay.canBeMissed` excludes it.
+        // Unreachable until a template can prescribe one (MAX-111). Reads correctly in
+        // every sentence this feeds: "missed lift", "lift scheduled, not yet due",
+        // "As planned: lift."
+        case .lift: return "lift"
         }
     }
 
@@ -240,6 +249,11 @@ enum ScoreCalendarFormatting {
         case .long: return "long"
         case .hard: return "hard"
         case .other: return "something else"
+        // Unreachable: no stored `Score` carries `.lift`, so `planClause`'s "…; ran
+        // \(classificationLabel(performed))." cannot be built from one yet. The verb in
+        // that sentence stops being right the day it can be, and rewording it needs the
+        // mixed-day cell it belongs to — MAX-117, with MAX-104's copy pass behind it.
+        case .lift: return "a lift"
         }
     }
 }
