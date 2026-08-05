@@ -526,7 +526,7 @@ feature was governed by a plan that could not exist).
 | MAX-082 | Design review of the whole app | Device report | **Opus** ✅ |
 | MAX-083 | Week / month / year intervals, each with a fitting representation | Owner | **Opus** ✅ |
 | MAX-084 | Fix score-band and chart contrast; resolve A7 | MAX-082 | Sonnet ✅ |
-| MAX-085 | **The tab bar, once**: Plan becomes a third tab, iOS 26 `Tab` builder, `.tint()`, surface elevation, Liquid Glass chrome | MAX-082, Owner | **Opus** |
+| MAX-085 | **The tab bar, once**: Plan becomes a third tab, iOS 26 `Tab` builder, `.tint()`, surface elevation, Liquid Glass chrome | MAX-082, Owner | **Opus** ✅ |
 | MAX-086 | Wire `AppearancePreference` — a setting that silently does nothing | MAX-082 | Sonnet |
 | MAX-087 | A non-hue channel for the year heatmap's 6pt cells | MAX-084 | Sonnet ✅ |
 | MAX-105 | **The plan on the dashboard calendar** — scheduled beneath actual | Owner | **Opus** ✅ |
@@ -685,6 +685,34 @@ making deliberately rather than as a side effect of a `Tab` being easy to add.
 
 MAX-102 delivers the tab's *content* as a tab root and is explicitly barred from
 `RootTabView.swift`; MAX-085 mounts it. Sequence: 102 → 085 → 098.
+
+**MAX-085 landed.** Four things, and one of them is a finding rather than a change.
+
+- **`RootTab` is in the core** (`Sources/MaximizeCore/Navigation/RootTab.swift`), holding
+  the order, labels and SF Symbols, with `RootTabTests` pinning them — including a test
+  named for the fact that Settings is not a tab, so putting it back fails with MAX-081's
+  reason attached. `RootTabView` is left with nothing to decide.
+- **The bar is current.** iOS 26 `Tab` builder, `.tabBarMinimizeBehavior(.onScrollDown)`
+  (all three tabs are long scrolling columns, so scrolling down should give the height
+  back), and `.tint(.accent)` at the root — the one line that finally connects MAX-084's
+  settled violet to everything the *system* draws. No `glassChrome(.tabBar)`: the system
+  bar brings its own, and re-applying it is the mistake `SettingsToolbar` documents.
+- **Cards have an edge.** New `surfaceBorder` token, hairline, on `ContentSurface.card`
+  only — not tiles (a grid of outlines is a wire mesh), not insets (a second line 16pt
+  inside the first). Increase Contrast strengthens it to a genuine 3:1 graphical object
+  against the screen instead of flattening it.
+- **The finding: the fill ramp cannot be widened by this ticket.** The design review's
+  preferred fix (§2.1a, lift `surfaceElevated` and `surfaceInset`) is blocked, because
+  `surfaceInset` is the surface every chart plots on and MAX-084 tuned every chart mark
+  against it to within hundredths of its floor — `chartGridline` sits at 1.43:1 against a
+  1.4 floor. Lifting the plot surface re-opens the whole chart palette, which is a chart
+  ticket. The edge carries the boundary instead; the reasoning and the four measured
+  values are in `DesignPalette.surfaceBorder`.
+
+Nothing here is provable by CI, and the PR says so at length. The open device questions
+are whether the bar reads as current-generation iOS, whether the violet looks right in
+place rather than in a swatch, and whether an edged card next to an unedged tile grid
+reads as deliberate or as unfinished.
 
 **MAX-105 — the plan on the dashboard calendar.** The owner's ask, and the most interesting
 design problem currently open, so it is Opus and it should be argued rather than assumed.
