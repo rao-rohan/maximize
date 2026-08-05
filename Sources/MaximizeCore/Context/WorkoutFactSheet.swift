@@ -234,10 +234,11 @@ extension WorkoutContext {
             parts.append("muscle groups: "
                 + session.muscleGroups.ordered.map(\.rawValue).joined(separator: ", "))
         }
-        if let note = session.note, !note.isEmpty {
-            parts.append("(\(note))")
-        }
-        return parts.joined(separator: ", ")
+        let prescription = parts.joined(separator: ", ")
+        // The note trails the list rather than joining it: it is a gloss on the whole
+        // ask, not another item in it, and ", (upper body)" reads as a fourth field.
+        guard let note = session.note, !note.isEmpty else { return prescription }
+        return "\(prescription) (\(note))"
     }
 
     // MARK: - Lines that must explain their own absence
