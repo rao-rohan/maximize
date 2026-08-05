@@ -1281,6 +1281,37 @@ carrying forward:
 
 ### Phase 9 — Lifting (MAX-109)
 
+**MAX-144 is decided, by the owner: A22.** *"You can set the muscle group in the detail view
+of the workout if it is strength training."* That is the first of the three costed options —
+the athlete confirms afterwards — and the only one that makes a lift's prescription a
+**standard** rather than documentation. The manual-entry non-goal is spent deliberately and
+narrowly, the way A10 was: one field, one kind of workout, on the screen where you are
+already looking at that session.
+
+**MAX-145 builds it, and the interesting part is not the picker.** Two consequences fall out
+that a ticket written as "add a muscle-group control" would miss:
+
+- **A lift cannot be scored at ingestion any more.** D2 computes metrics once when a workout
+  arrives and D8 makes an auto-score immutable — but the groups arrive *later*, whenever the
+  athlete opens the screen. A lift scored at ingestion would have been judged against
+  information nobody had yet, and revising it afterwards is exactly what D8 forbids. So a
+  lift waits: not awaiting a model, not permanently unscoreable, but **awaiting the athlete**.
+  A third state beside MAX-126's `noVerdict`, and a better one, because it is the app asking
+  a question rather than guessing an answer. It is also the feature's own onboarding — a lift
+  on the calendar saying *"tell me what you trained"* is how the field gets discovered.
+- **The entry does not belong on `Workout`.** That record mirrors what HealthKit reported and
+  nothing else writes to it. This is athlete-supplied truth *about* a session, which is the
+  shape `ScoreAnnotation` already has: additive, timestamped, never overwriting what was
+  captured. And "I have not told you yet" must stay distinct from "I trained nothing" — only
+  the first should prompt.
+
+It also unblocks the rubric half. MAX-131 was told its vocabulary must not *require* muscle
+groups, because nothing could supply them; that still holds, since a lift the athlete never
+annotates has to score somehow. But MAX-132's seed bands can now judge
+prescribed-versus-actual, which is what A20's adherence was always reaching for.
+
+
+
 **MAX-109 is the lifting product spec, and it is delivered:**
 [`docs/LIFTING-SPEC.md`](./docs/LIFTING-SPEC.md) plus amendments **A16–A21**. Nothing in it
 is built. It came from one sentence from the owner — *"Plans should account for both
@@ -1365,6 +1396,8 @@ is the overseer's, not a ticket's — flagged here rather than done.
 | MAX-141 | `PlanProposal` covers lift days | 129, **099** | Sonnet 🔒 |
 | MAX-142 | `TrainingContext` is per-session, not per-run | 129, **095** | **Opus** 🔒 |
 | MAX-143 | **Decide what to do with lifts already scored as runs** | 128 | Owner / overseer |
+| MAX-144 | ~~How adherence to a muscle-group prescription is judged~~ — **decided (A22)** | 129 | Owner ✅ |
+| MAX-145 | **Enter muscle groups on a strength workout's detail screen** (A22) | 129, 144 | **Opus** |
 
 **Four collisions the overseer must respect.**
 
