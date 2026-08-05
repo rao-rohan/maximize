@@ -203,15 +203,15 @@ public struct ScheduledSession: Hashable, Sendable, Codable {
         case kind, distanceMeters, durationSeconds, note, muscleGroups
     }
 
-    /// `durationSeconds` is written with `encodeIfPresent` and read with
-    /// `decodeIfPresent`, for the reason MAX-129 gave for `liftSession` and
-    /// `muscleGroups`: every `ScheduledSession` already on disk — inside a stored plan,
-    /// and inside every stored `Score`, which is immutable under D8 — prescribes no
-    /// duration, so omitting the key leaves those bytes exactly as they are and a plan
-    /// authored before this ticket decodes to a plan that prescribed no duration, which
-    /// is precisely what it meant.
+    /// **`durationSeconds` is omitted when absent** (MAX-131), for the reason MAX-129
+    /// gave for `liftSession` and `muscleGroups`: every `ScheduledSession` already on
+    /// disk — inside a stored plan, and inside every stored `Score`, which is immutable
+    /// under D8 — prescribes no duration, so leaving the key out leaves those bytes
+    /// exactly as they are, and a plan authored before this ticket decodes to a plan that
+    /// prescribed no duration, which is precisely what it meant.
     ///
-    /// Written as a **canonically ordered array**, and omitted entirely when empty.
+    /// **`muscleGroups` is written as a canonically ordered array**, and omitted entirely
+    /// when empty.
     ///
     /// Ordered because a `Set`'s iteration order is not stable, and `PersistencePayload`
     /// leans on an unchanged value re-encoding to identical bytes. Omitted when empty
