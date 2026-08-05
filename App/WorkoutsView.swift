@@ -15,6 +15,10 @@ struct WorkoutsView: View {
                 .navigationDestination(for: UUID.self) { workoutID in
                     WorkoutDetailView(workoutID: workoutID)
                 }
+                // MAX-081: settings is a button on both tabs, not a tab of its own.
+                // Attached to the root only — pushing a workout should show that
+                // screen's own bar, not carry an app-level control into it.
+                .settingsToolbarItem()
         }
         .task { await model.load() }
     }

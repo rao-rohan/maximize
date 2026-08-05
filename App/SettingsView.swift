@@ -39,6 +39,11 @@ struct SettingsView: View {
     @State private var enteredKey = ""
     @State private var keyStatusMessage: String?
 
+    /// MAX-081. The key field is the only text entry on this screen, so one flag is
+    /// enough; it exists so saving, clearing, and the keyboard's own Done button can
+    /// all put the keyboard away, which nothing here could do before.
+    @FocusState private var isKeyFieldFocused: Bool
+
     /// - Parameters:
     ///   - keyStore: where the Anthropic API key lives. Defaults to the real Keychain
     ///     store; a test or preview passes a fake.
@@ -73,9 +78,19 @@ struct SettingsView: View {
             Section("Anthropic API key") {
                 Text(isKeyStored ? "A key is stored." : "No key is stored.")
 
+                // MAX-081. `SecureField` is single-line, so the return key really does
+                // submit: `.done` names the action the key press performs, and
+                // `onSubmit` runs the same save the button does rather than leaving
+                // Return inert. Autocapitalization is switched off explicitly because
+                // an API key is case-sensitive and a capitalized first character is a
+                // key that silently fails to authenticate.
                 SecureField("Anthropic API key", text: $enteredKey)
                     .textContentType(.password)
                     .disableAutocorrection(true)
+                    .textInputAutocapitalization(.never)
+                    .focused($isKeyFieldFocused)
+                    .submitLabel(.done)
+                    .onSubmit(saveKey)
 
                 Button("Save", action: saveKey)
                     .disabled(enteredKey.isEmpty)
@@ -89,6 +104,17 @@ struct SettingsView: View {
                         .font(.metricLabel)
                         .foregroundStyle(Color.textSecondary)
                 }
+            }
+        }
+        // MAX-081: two ways out of the keyboard, neither of which existed before — a
+        // drag anywhere on the form, and an explicit button above the keyboard for
+        // anyone who cannot make that gesture (FR-4.5).
+        .scrollDismissesKeyboard(.interactively)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { isKeyFieldFocused = false }
+                    .accessibilityHint("Dismisses the keyboard")
             }
         }
         .task {
@@ -251,6 +277,10 @@ struct SettingsView: View {
             let key = try AnthropicAPIKey(enteredKey)
             try keyStore.store(key)
             enteredKey = ""
+            // MAX-081: only the success path resigns focus. Both failures below leave
+            // the keyboard up because both leave the user with something to type — an
+            // empty field to fill in, or a cleared one to re-enter.
+            isKeyFieldFocused = false
             keyStatusMessage = "Key saved."
             refreshStoredKeyStatus()
         } catch AnthropicAPIKeyError.emptyKey {
