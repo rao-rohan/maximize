@@ -31,7 +31,7 @@ final class SummaryTileDataTests: XCTestCase {
 
     func testDistanceIsReadFromTheWorkoutVerbatim() throws {
         let workout = try Fixture.workout(distanceMeters: 8_420)
-        let data = SummaryTileData(workout: workout, metrics: nil)
+        let data = SummaryTileData(workout: workout, metrics: nil, distanceUnit: .kilometers)
 
         XCTAssertEqual(data.distance?.value, "8.42")
         XCTAssertEqual(data.distance?.caption, "km")
@@ -39,7 +39,7 @@ final class SummaryTileDataTests: XCTestCase {
 
     func testDurationIsReadFromTheWorkoutVerbatim() throws {
         let workout = try Fixture.workout(durationSeconds: 462)
-        let data = SummaryTileData(workout: workout, metrics: nil)
+        let data = SummaryTileData(workout: workout, metrics: nil, distanceUnit: .kilometers)
 
         XCTAssertEqual(data.duration.value, "7:42")
     }
@@ -48,7 +48,8 @@ final class SummaryTileDataTests: XCTestCase {
         let workout = try Fixture.workout()
         let data = SummaryTileData(
             workout: workout,
-            metrics: try metrics(averageHeartRateBPM: 152, maximumHeartRateBPM: 179)
+            metrics: try metrics(averageHeartRateBPM: 152, maximumHeartRateBPM: 179),
+            distanceUnit: .kilometers
         )
 
         XCTAssertEqual(data.averageHeartRate?.value, "152")
@@ -57,7 +58,7 @@ final class SummaryTileDataTests: XCTestCase {
 
     func testActiveEnergyIsReadFromTheWorkoutVerbatim() throws {
         let workout = try Fixture.workout()
-        let data = SummaryTileData(workout: workout, metrics: nil)
+        let data = SummaryTileData(workout: workout, metrics: nil, distanceUnit: .kilometers)
 
         // Fixture.workout hardcodes 700 kcal.
         XCTAssertEqual(data.activeEnergy?.value, "700")
@@ -66,7 +67,9 @@ final class SummaryTileDataTests: XCTestCase {
 
     func testHeartRateDriftIsReadFromMetricsVerbatim() throws {
         let workout = try Fixture.workout()
-        let data = SummaryTileData(workout: workout, metrics: try metrics(heartRateDriftFraction: -0.024))
+        let data = SummaryTileData(
+            workout: workout, metrics: try metrics(heartRateDriftFraction: -0.024), distanceUnit: .kilometers
+        )
 
         XCTAssertEqual(data.heartRateDrift?.value, "-2.4")
     }
@@ -75,24 +78,42 @@ final class SummaryTileDataTests: XCTestCase {
         let workout = try Fixture.workout()
         let data = SummaryTileData(
             workout: workout,
-            metrics: try metrics(gradeAdjustedPaceSecondsPerKilometer: 312)
+            metrics: try metrics(gradeAdjustedPaceSecondsPerKilometer: 312),
+            distanceUnit: .kilometers
         )
 
         XCTAssertEqual(data.gradeAdjustedPace?.value, "5:12")
+        XCTAssertEqual(data.gradeAdjustedPace?.caption, "grade-adj. pace /km")
+    }
+
+    /// MAX-047: the stored figure is always seconds-per-kilometre (D2); a mile is
+    /// longer than a kilometre, so the per-mile pace is proportionally slower — this
+    /// pins the conversion factor, not just that a number changes.
+    func testGradeAdjustedPaceConvertsToSecondsPerMileWhenUnitIsMiles() throws {
+        let workout = try Fixture.workout()
+        let data = SummaryTileData(
+            workout: workout,
+            metrics: try metrics(gradeAdjustedPaceSecondsPerKilometer: 312),
+            distanceUnit: .miles
+        )
+
+        // 312 s/km * 1.609344 = 502.1... s/mi = 8:22.
+        XCTAssertEqual(data.gradeAdjustedPace?.value, "8:22")
+        XCTAssertEqual(data.gradeAdjustedPace?.caption, "grade-adj. pace /mi")
     }
 
     // MARK: - Absent is not zero
 
     func testNoDistanceStaysAbsentRatherThanBecomingZero() throws {
         let workout = try Fixture.workout(distanceMeters: nil, hasRoute: false)
-        let data = SummaryTileData(workout: workout, metrics: nil)
+        let data = SummaryTileData(workout: workout, metrics: nil, distanceUnit: .kilometers)
 
         XCTAssertNil(data.distance)
     }
 
     func testNilMetricsLeavesEveryMetricsDerivedTileAbsent() throws {
         let workout = try Fixture.workout()
-        let data = SummaryTileData(workout: workout, metrics: nil)
+        let data = SummaryTileData(workout: workout, metrics: nil, distanceUnit: .kilometers)
 
         XCTAssertNil(data.averageHeartRate)
         XCTAssertNil(data.maximumHeartRate)
@@ -106,7 +127,8 @@ final class SummaryTileDataTests: XCTestCase {
         let workout = try Fixture.workout()
         let data = SummaryTileData(
             workout: workout,
-            metrics: try metrics(averageHeartRateBPM: nil, maximumHeartRateBPM: nil)
+            metrics: try metrics(averageHeartRateBPM: nil, maximumHeartRateBPM: nil),
+            distanceUnit: .kilometers
         )
 
         XCTAssertNil(data.averageHeartRate)
@@ -118,7 +140,9 @@ final class SummaryTileDataTests: XCTestCase {
         // no way to tell that apart from "no HR data at all" and does not try to —
         // both simply omit the tile.
         let workout = try Fixture.workout()
-        let data = SummaryTileData(workout: workout, metrics: try metrics(heartRateDriftFraction: nil))
+        let data = SummaryTileData(
+            workout: workout, metrics: try metrics(heartRateDriftFraction: nil), distanceUnit: .kilometers
+        )
 
         XCTAssertNil(data.heartRateDrift)
     }
@@ -127,7 +151,8 @@ final class SummaryTileDataTests: XCTestCase {
         let workout = try Fixture.workout(hasRoute: false)
         let data = SummaryTileData(
             workout: workout,
-            metrics: try metrics(gradeAdjustedPaceSecondsPerKilometer: nil)
+            metrics: try metrics(gradeAdjustedPaceSecondsPerKilometer: nil),
+            distanceUnit: .kilometers
         )
 
         XCTAssertNil(data.gradeAdjustedPace)
@@ -135,7 +160,7 @@ final class SummaryTileDataTests: XCTestCase {
 
     func testDurationIsNeverAbsentEvenWithNoOtherData() throws {
         let workout = try Fixture.workout(distanceMeters: nil, hasRoute: false)
-        let data = SummaryTileData(workout: workout, metrics: nil)
+        let data = SummaryTileData(workout: workout, metrics: nil, distanceUnit: .kilometers)
 
         // Duration is never optional on `Workout`, so its tile is never optional here.
         XCTAssertFalse(data.duration.value.isEmpty)
@@ -145,7 +170,7 @@ final class SummaryTileDataTests: XCTestCase {
 
     func testTilesOmitsAbsentFiguresRatherThanPaddingWithPlaceholders() throws {
         let workout = try Fixture.workout(distanceMeters: nil, hasRoute: false)
-        let data = SummaryTileData(workout: workout, metrics: nil)
+        let data = SummaryTileData(workout: workout, metrics: nil, distanceUnit: .kilometers)
 
         // Only duration and active energy (Fixture.workout always sets energy) survive.
         XCTAssertEqual(data.tiles.count, 2)
@@ -153,7 +178,7 @@ final class SummaryTileDataTests: XCTestCase {
 
     func testTilesFollowsFR15sStatedOrderWhenEveryFigureIsPresent() throws {
         let workout = try Fixture.workout(durationSeconds: 462, distanceMeters: 8_420)
-        let data = SummaryTileData(workout: workout, metrics: try metrics())
+        let data = SummaryTileData(workout: workout, metrics: try metrics(), distanceUnit: .kilometers)
 
         XCTAssertEqual(data.tiles.count, 7)
         XCTAssertEqual(data.tiles[0].caption, "km")
@@ -162,7 +187,7 @@ final class SummaryTileDataTests: XCTestCase {
         XCTAssertEqual(data.tiles[3].caption, "max bpm")
         XCTAssertEqual(data.tiles[4].caption, "kcal")
         XCTAssertEqual(data.tiles[5].caption, "% drift")
-        XCTAssertEqual(data.tiles[6].caption, "grade-adj. pace")
+        XCTAssertEqual(data.tiles[6].caption, "grade-adj. pace /km")
     }
 
     // MARK: - Duration formatting
@@ -191,13 +216,36 @@ final class SummaryTileDataTests: XCTestCase {
 
     func testFormattedSignedPercentPositive() throws {
         let workout = try Fixture.workout()
-        let data = SummaryTileData(workout: workout, metrics: try metrics(heartRateDriftFraction: 0.031))
+        let data = SummaryTileData(
+            workout: workout, metrics: try metrics(heartRateDriftFraction: 0.031), distanceUnit: .kilometers
+        )
         XCTAssertEqual(data.heartRateDrift?.value, "+3.1")
     }
 
     func testFormattedSignedPercentZeroStillShowsPlusSign() throws {
         let workout = try Fixture.workout()
-        let data = SummaryTileData(workout: workout, metrics: try metrics(heartRateDriftFraction: 0))
+        let data = SummaryTileData(
+            workout: workout, metrics: try metrics(heartRateDriftFraction: 0), distanceUnit: .kilometers
+        )
         XCTAssertEqual(data.heartRateDrift?.value, "+0.0")
+    }
+
+    // MARK: - Distance formatting, unit-aware (MAX-047)
+
+    func testDistanceConvertsToMilesWhenUnitIsMiles() throws {
+        // 8,420 m / 1,609.344 m per mile = 5.23...
+        let workout = try Fixture.workout(distanceMeters: 8_420)
+        let data = SummaryTileData(workout: workout, metrics: nil, distanceUnit: .miles)
+
+        XCTAssertEqual(data.distance?.value, "5.23")
+        XCTAssertEqual(data.distance?.caption, "mi")
+    }
+
+    func testDistanceStaysInKilometersWhenUnitIsKilometers() throws {
+        let workout = try Fixture.workout(distanceMeters: 8_420)
+        let data = SummaryTileData(workout: workout, metrics: nil, distanceUnit: .kilometers)
+
+        XCTAssertEqual(data.distance?.value, "8.42")
+        XCTAssertEqual(data.distance?.caption, "km")
     }
 }

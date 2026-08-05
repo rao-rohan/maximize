@@ -87,6 +87,19 @@ public enum DistanceUnit: String, Hashable, Sendable, Codable, CaseIterable {
     public func converted(fromMeters meters: Double) -> Double {
         meters / metersPerUnit
     }
+
+    /// The short label a tile or row prints next to a converted figure — "km" or "mi".
+    /// Centralized here so every display site that shows a distance or a pace uses the
+    /// same word for the same unit (`SummaryTileData`, `TrendTileData`,
+    /// `WorkoutDisplayFormatting`); a caption spelled out independently in each of
+    /// those would be exactly the kind of drift D2 exists to prevent, just for a label
+    /// instead of a number.
+    public var abbreviation: String {
+        switch self {
+        case .kilometers: return "km"
+        case .miles: return "mi"
+        }
+    }
 }
 
 /// App appearance preference. The plan is dark-first (FR-4.3), so `.system` is not
