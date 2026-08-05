@@ -1046,7 +1046,7 @@ twelve and is dispatchable immediately.
 | MAX-094 | Shared fact-sheet formatting — pure extraction | — | Sonnet ✅ |
 | MAX-095 | `TrainingContext` + one context entry point | 092, 094 | **Opus** 🔒 ✅ |
 | MAX-096 | `ChatModel` generalised; transcript cap; training task text | 095 | **Opus** 🔒 ✅ |
-| MAX-097 | Thread list, derived titles, new chat, scope subtitle | 093, 096 | Sonnet |
+| MAX-097 | Thread list, derived titles, new chat, scope subtitle | 093, 096 | Sonnet ✅ |
 | MAX-098 | The persistent glass button | 097 | Sonnet |
 | MAX-099 | `PlanProposal` — type, parse, schema derived from core enums | 095 | **Opus** 🔒 ✅ |
 | MAX-100 | The Anthropic client for plan proposals | 099 | Sonnet 🔒 |
@@ -1172,6 +1172,61 @@ Five things are worth carrying forward:
 now hold two copies of the same code-fence handling. Extracting a shared envelope helper
 means editing `Scoring/`, which this ticket does not own; a test pins that the two tolerate
 the same formatting, so the duplication cannot drift unnoticed. **Worth a small follow-up.**
+
+**MAX-097 gave the sheet a past.** `ChatSheet` now owns one `NavigationStack` holding the
+open conversation and, pushed on top of it, the thread list — `WorkoutChatSectionView`'s
+"Open chat" button presents `ChatSheet(subject: .workout(workoutID))` in place of the bare
+transcript screen it opened before, and the workout path renders identically once inside it.
+Four things worth carrying forward:
+
+- **The title and subtitle are read off `ChatModel`, never re-derived.** `ChatModel` gained
+  two computed properties, `title` and `subtitle` — the first calls `ChatThreadTitle.derive`
+  against the loaded thread (falling back to "Chat" before one exists, matching this
+  screen's title before this ticket); the second calls a new `ChatThreadSubtitle.text(for:)`
+  (core, beside `ChatThreadTitle`) and needs no load at all, since a subject's scope is
+  known immediately. `ChatModel` also grew a public `workoutFacts`, resolved the moment the
+  workout is (even through `.notYetScored`/`.noVerdict`), so the title can name the run in
+  every state that has one.
+- **The scope-mismatch note is one pure function.** `ChatScopeNotice.text(for:currentInterval:)`
+  (core) is nil for a workout subject unconditionally and nil for a training subject whose
+  frozen scope still matches the resolved current interval; otherwise it names both windows.
+  `ChatConversationView` renders it as a quiet banner above the transcript, tappable through
+  to the same **New chat** action the toolbar button performs.
+- **Subject-dependent copy for the conversation surface moved to core too.**
+  `ChatConversationCopy` (failed-to-load, the empty-transcript invitation, the composer
+  placeholder) mirrors `ChatModel.userFacingMessage(for:)`'s established "worded from the
+  subject" pattern; the workout strings are pinned byte-for-byte to what shipped before this
+  ticket.
+- **"New chat" resolves the *current* interval, not a stored one.** `ChatSheet` freezes a
+  fresh `TrainingScope` from `currentInterval` (defaulting to "this week" when no live
+  dashboard selection is handed in — today's only caller, the workout entry point, has
+  none) and reassigns its active subject; `ChatThreadRepository.mostRecentThread(for:)`
+  is what decides whether that resumes an existing thread or starts a genuinely new one,
+  unchanged. Selecting a row in the thread list does the same reassignment and pops back to
+  the conversation.
+
+**What MAX-098 inherits.** The persistent Ask button presents `ChatSheet(subject:
+currentInterval:)` exactly as `WorkoutChatSectionView` does — `ChatSheet`'s own doc comment
+gives the call. `App/RootTabView.swift` is untouched, per this ticket's brief.
+
+**One thing this ticket deliberately left alone.** The "runs in this conversation" strip
+(§2.2, MAX-103's board) is not built — the sheet has no runs strip yet.
+
+**Review found a real defect in the first pass, and it is fixed.** Selecting a thread-list
+row originally reassigned the sheet's *subject* rather than opening the tapped thread by
+identity — harmless for a workout thread (one thread per run, by policy) but wrong for
+training: two training threads can legitimately share an identical frozen `TrainingScope`
+(`ChatThreadRepository` deliberately does not deduplicate them — **New chat** over an
+unchanged window is still a real action), and resolving by subject after a tap would
+silently reopen whichever of the two is newest, not the one shown. `ChatModel` now has two
+entry points — `init(subject:...)`, unchanged, for the Ask button and **New chat**; and a
+new `init(threadID:...)` for the thread list, which reads the subject off the *stored*
+thread rather than trusting a caller-supplied one, so a row tap can never open a different
+thread than the one tapped. A thread id that no longer resolves (deleted from another
+screen) is `ChatModel.LoadState.threadNotFound` — ordinary, not a failure.
+`ChatModelTests.testOpeningByIDReturnsExactlyThatThreadEvenWhenAnotherSharesItsScope` is
+the regression test: it reproduces the ambiguity (asserting subject-based resolution really
+does pick the wrong one), then asserts opening by id picks the right one anyway.
 
 ### Phase 9 — Lifting (MAX-109)
 
