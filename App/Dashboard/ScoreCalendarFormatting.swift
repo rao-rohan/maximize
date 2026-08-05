@@ -30,7 +30,21 @@ import MaximizeCore
 ///   facts, and activity is the one this function is named for.
 /// - **VoiceOver label.** Every state gets a full sentence, not just a glyph name —
 ///   the strongest channel of all, since it does not depend on shape recognition
-///   either. This one *does* already name the band.
+///   either. This one *does* already name the band, and since MAX-105 it also names the
+///   plan: what was prescribed, and whether what happened matches it.
+///
+/// ## Why the plan is spoken in more detail than it is drawn (MAX-105)
+///
+/// The plan layer draws one bit — the cell is ringed, or it is not. The core knows more
+/// than that: `ScoreCalendarDay.prescription` carries the session the versioned plan
+/// asked for, and `.agreement` carries whether the run performed was that kind. Neither
+/// is drawn, because a ~42pt cell already holds a fill, a date, a glyph and a band pip,
+/// and a fourth visual distinction is the cell that needs a legend.
+///
+/// A sentence has no such budget. So the spoken label carries the whole comparison — "as
+/// planned: easy run", "planned a long run, ran easy", "not on the plan" — which means
+/// the athlete using VoiceOver gets *more* of the plan layer than the sighted one, not
+/// less. That is the right way round for the asymmetry to fall.
 enum ScoreCalendarFormatting {
 
     // MARK: - Glyph
@@ -47,8 +61,37 @@ enum ScoreCalendarFormatting {
             return "moon.zzz"
         case .scheduledRest:
             return "moon.zzz.fill"
+        case .forthcoming(let scheduledKind):
+            return systemImageName(forScheduled: scheduledKind)
         case .unplanned:
             return "minus"
+        }
+    }
+
+    /// The glyph a day that has not happened yet carries: **what the plan asks for**,
+    /// since there is no activity to report.
+    ///
+    /// This is the one place the calendar's glyph channel points forward rather than
+    /// back, and it is what makes a future day answer "what am I doing Thursday" without
+    /// a tap. It cannot be confused with a performed activity even though `.easy` shares
+    /// `figure.run` with a recorded run: a forthcoming cell is drawn unfilled
+    /// (`ScoreCalendarDayState.isDrawnUnfilledInTheDayGrid`), and no cell showing a
+    /// performed activity ever is.
+    ///
+    /// `.long` takes the same runner inside a ring — the week's headline session as
+    /// "more of the same thing", which is what a long run is — rather than a second,
+    /// unrelated figure. `.hard` takes a bolt because intensity, not distance, is what
+    /// separates it.
+    private static func systemImageName(forScheduled kind: ScheduledSessionKind) -> String {
+        switch kind {
+        case .easy: return "figure.run"
+        case .long: return "figure.run.circle"
+        case .hard: return "bolt"
+        case .other: return "figure.mixed.cardio"
+        // Unreachable: a scheduled rest day is `.scheduledRest` whether it is behind or
+        // ahead of today, so `.forthcoming` never carries `.rest`. Mapped rather than
+        // defaulted so a future `ScheduledSessionKind` case fails to compile here.
+        case .rest: return "moon.zzz.fill"
         }
     }
 
@@ -66,10 +109,11 @@ enum ScoreCalendarFormatting {
 
     // MARK: - VoiceOver label
 
-    /// - Parameter date: for the leading "day N" clause; the state describes the
-    ///   rest of the sentence.
-    static func accessibilityLabel(for state: ScoreCalendarDayState, on date: CalendarDay) -> String {
-        label(for: state, prefixedBy: "Day \(date.day)")
+    /// The whole day, not just its state: the plan clause below needs the day's
+    /// prescription and its agreement, which live beside the state rather than inside
+    /// it (see `ScoreCalendarDay`).
+    static func accessibilityLabel(for day: ScoreCalendarDay) -> String {
+        label(for: day, prefixedBy: "Day \(day.date.day)")
     }
 
     /// The same sentence, dated with its month.
@@ -78,11 +122,28 @@ enum ScoreCalendarFormatting {
     /// of twelve possible days — VoiceOver is the *only* channel that can disambiguate a
     /// heatmap cell, which makes it the one place the extra words are worth their
     /// length. See `ScoreCalendarRepresentation.weekColumnHeatmap`.
-    static func heatmapAccessibilityLabel(for state: ScoreCalendarDayState, on date: CalendarDay) -> String {
-        label(for: state, prefixedBy: "\(TrendIntervalFormatting.shortMonthName(for: date)) \(date.day)")
+    ///
+    /// It carries the plan clause too, and there it does more work than anywhere else:
+    /// the year heatmap draws no plan layer at all
+    /// (`ScoreCalendarRepresentation.drawsThePlanLayer`), so this sentence is the only
+    /// place a year's prescriptions exist.
+    static func heatmapAccessibilityLabel(for day: ScoreCalendarDay) -> String {
+        label(
+            for: day,
+            prefixedBy: "\(TrendIntervalFormatting.shortMonthName(for: day.date)) \(day.date.day)"
+        )
     }
 
-    private static func label(for state: ScoreCalendarDayState, prefixedBy dayText: String) -> String {
+    private static func label(for day: ScoreCalendarDay, prefixedBy dayText: String) -> String {
+        let outcome = outcomeClause(for: day.state, prefixedBy: dayText)
+        guard let plan = planClause(for: day) else { return outcome }
+        return "\(outcome) \(plan)"
+    }
+
+    private static func outcomeClause(
+        for state: ScoreCalendarDayState,
+        prefixedBy dayText: String
+    ) -> String {
         switch state {
         case .scored(let band, let activityType):
             return "\(dayText): \(WorkoutDisplayFormatting.describe(activityType)), \(bandLabel(band))."
@@ -94,8 +155,39 @@ enum ScoreCalendarFormatting {
             return "\(dayText): rest — converted from a missed \(kindLabel(scheduledKind))."
         case .scheduledRest:
             return "\(dayText): scheduled rest day."
+        case .forthcoming(let scheduledKind):
+            // Not "missed", and not merely the absence of one: the sentence says what is
+            // coming, in the future tense, because that is the difference the whole
+            // state exists to carry.
+            return "\(dayText): \(kindLabel(scheduledKind)) scheduled, not yet due."
         case .unplanned:
             return "\(dayText): no plan for this day."
+        }
+    }
+
+    /// The plan clause, appended only where the outcome clause has not already said what
+    /// the plan asked.
+    ///
+    /// `.missed`, `.convertedRest`, `.scheduledRest`, `.forthcoming` and `.unplanned`
+    /// are each already a statement about the plan, so a second clause would repeat
+    /// itself — "missed easy run. Planned: easy run." VoiceOver users hear every word,
+    /// and a calendar is read cell after cell; a redundant clause per day is a real cost.
+    private static func planClause(for day: ScoreCalendarDay) -> String? {
+        switch day.agreement {
+        case .asPrescribed(let kind)?:
+            return "As planned: \(kindLabel(kind))."
+        case .divergent(let prescribed, let performed)?:
+            return "Planned \(kindLabel(prescribed)); ran \(classificationLabel(performed))."
+        case .unprescribed?:
+            return "Not on the plan."
+        case nil:
+            // No score yet, so no classification to compare against (D2). The ask is
+            // still worth speaking — it is the whole reason the cell is ringed.
+            guard case .awaitingScore = day.state else { return nil }
+            guard let prescription = day.prescription, prescription.canBeMissed else {
+                return "Not on the plan."
+            }
+            return "Planned: \(kindLabel(prescription.scheduledSession.kind))."
         }
     }
 
@@ -114,6 +206,18 @@ enum ScoreCalendarFormatting {
         case .hard: return "hard session"
         case .other: return "session"
         case .rest: return "rest day" // unreachable — `PlanDay.canBeMissed` excludes it.
+        }
+    }
+
+    /// What the athlete actually did, as MAX-013's classifier judged it. Kept separate
+    /// from `kindLabel` even though the words coincide: one describes an ask and the
+    /// other a performance, and `WorkoutClassification` has no `.rest` to describe.
+    private static func classificationLabel(_ classification: WorkoutClassification) -> String {
+        switch classification {
+        case .easy: return "easy"
+        case .long: return "long"
+        case .hard: return "hard"
+        case .other: return "something else"
         }
     }
 }
