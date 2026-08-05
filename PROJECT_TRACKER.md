@@ -1451,7 +1451,7 @@ is the overseer's, not a ticket's — flagged here rather than done.
 | MAX-139 | Workout detail for a lift | 130, 133 | Sonnet |
 | MAX-140 | Trend tiles, honestly ("days run", the effective denominator) | 134 | Sonnet |
 | MAX-141 | `PlanProposal` covers lift days | 129, **099** | Sonnet 🔒 |
-| MAX-142 | `TrainingContext` is per-session, not per-run | 129, **095** | **Opus** 🔒 |
+| MAX-142 | ~~`TrainingContext` is per-session, not per-run~~ — **not needed**, MAX-095 landed briefed | 129, **095** | — ✅ |
 | MAX-143 | **Decide what to do with lifts already scored as runs** | 128 | Owner / overseer |
 | MAX-144 | ~~How adherence to a muscle-group prescription is judged~~ — **decided (A22)** | 129 | Owner ✅ |
 | MAX-145 | **Enter muscle groups on a strength workout's detail screen** (A22) | 129, 144 | **Opus** ✅ |
@@ -1838,6 +1838,42 @@ scope, newest `lastActivityAt` with `id` breaking a tie, the same rule
 | **R11** | **A permanently unacceptable workout wedges the whole pipeline.** If the sink throws deterministically for one workout, the anchor never advances past it, so it is refetched and rethrown on every pass forever — and every later workout queues behind it | Zero-touch capture stops entirely, and the symptom is silence | **MAX-033 must handle this.** Found by MAX-031, which deliberately did not build a poison-pill escape: "give up on this workout" is a data decision belonging to whoever owns the store. The obligation is documented on `WorkoutIngestionSink` |
 | R12 | The anchor write and the workout write are two separate stores, so the window between them exists by construction | A crash between them re-delivers the batch — absorbed by dedupe, so this is the safe side | **Accepted permanently. Do not "fix" this.** ~~MAX-020 can close it by moving the anchor into the same SwiftData transaction~~ — that earlier note was wrong and MAX-020 correctly refused it. See below |
 | R10 | The app cannot know whether Health *read* access was granted — `authorizationStatus(for:)` reports share status only, by Apple's design | No UI can honestly display "Health connected"; a permission problem is indistinguishable from "no workouts recorded yet" | Accepted, Apple-imposed. Found at MAX-030. Any future settings or onboarding UI must not claim read access it cannot verify |
+
+## Overseer failure modes
+
+Failures the orchestration itself caused, recorded so the next context window does not
+re-derive them. These are not risks to monitor; they are mistakes with known signatures.
+
+**A ticket is done when it is merged, not when the overseer decides it is.** MAX-086 sat
+open while the board said shipped, so an appearance fix the board claimed was on the
+device was not. Tick a row against a merge commit, never against memory.
+
+**Two PRs that each pass CI can break the base branch together.** Each was tested against
+a base that did not contain the other; the merge is textually clean and semantically
+broken; no review catches it because neither diff is wrong alone. The signature is
+distinctive — *every* open branch fails at once, including ones touching nothing near the
+error, because one bad file fails a whole test module. After a wave where two merges touch
+overlapping types, re-check that the base branch still builds.
+
+**Two parallel tickets can define the same type twice, and a merge will keep both.**
+MAX-137 nested an `ObligationSummary` inside `PlanDraft.DayDraft`; MAX-138 introduced the
+shared one in `Domain/ScheduledSession.swift` and wrote the app's formatter against it.
+Both merged green. The next branch to merge main resolved the conflict by keeping both, so
+the nested twin shadowed the shared type and the formatter overload stopped matching —
+surfacing as `no exact matches in call to static method 'describe'` in a branch whose own
+diff touched neither file. **Decomposition owns this**: when two tickets in one wave answer
+the same question, one of them writes the type and the other imports it, and the brief
+says which. Naming the files each ticket touches is what makes the collision visible before
+it is a merge conflict.
+
+**A worktree's `cd` persists across shell calls.** A branch created from the overseer's
+shell while its working directory had drifted into an agent's worktree inherited that
+agent's unmerged commits, and merging it shipped a ticket's partial work. Pass absolute
+paths; check `git log --oneline -1` before branching.
+
+**Put the push instruction last in an agent brief.** Agents that were asked to run a
+security review *after* the push line ran the review and never pushed — twice. The commits
+sat in a local worktree and the failure was silent.
 
 ## Decision log
 
