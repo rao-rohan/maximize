@@ -1,4 +1,5 @@
 import SwiftUI
+import MaximizeCore
 
 /// The dashboard tab (FR-3): a trends surface scoped to an interval.
 ///
@@ -42,6 +43,18 @@ struct DashboardView: View {
                         ScoreCalendarView(interval: interval)
                         DriftOverlayView(interval: interval)
                         TrendTilesView(interval: interval)
+                    } else {
+                        // MAX-154. This branch did not exist: with no interval — the
+                        // selector's `.failed` state, i.e. a system clock outside
+                        // `CalendarDay`'s domain — the screen drew the selector's one
+                        // line and then nothing at all, three sections deep. A blank is
+                        // not a designed state, and "the whole dashboard is missing" is
+                        // the one thing a person could not work out from a caption on a
+                        // control above it.
+                        Text(FailureCopy.dashboardUnavailableWithoutToday)
+                            .font(.bodyCopy)
+                            .foregroundStyle(Color.textSecondary)
+                            .contentSurface(.card)
                     }
                 }
                 .screenMargins()

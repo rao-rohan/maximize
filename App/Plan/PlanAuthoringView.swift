@@ -60,10 +60,7 @@ struct PlanAuthoringView: View {
                 ProgressView()
             case .failed:
                 Section {
-                    quietText(
-                        "The plan store is unavailable right now, so a plan could not be "
-                            + "loaded and nothing written here would be saved."
-                    )
+                    quietText(FailureCopy.couldNotLoad(.planAuthoring))
                 }
             case let .editing(editing):
                 editingSections(editing)

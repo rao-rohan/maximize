@@ -302,7 +302,7 @@ final class PlanAuthoringModel {
             editing.problem = error.description
         } catch {
             editing.governedDays = []
-            editing.problem = "This plan could not be prepared. Check the values above."
+            editing.problem = FailureCopy.planCouldNotBePrepared
         }
         return editing
     }
@@ -336,7 +336,7 @@ final class PlanAuthoringModel {
             markProblem(error.description, on: editing)
             return
         } catch {
-            markProblem("This plan version could not be saved. Try again.", on: editing)
+            markProblem(FailureCopy.planVersionCouldNotBeSaved, on: editing)
             return
         }
 
