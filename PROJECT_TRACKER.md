@@ -1200,13 +1200,24 @@ Four things worth carrying forward:
 currentInterval:)` exactly as `WorkoutChatSectionView` does — `ChatSheet`'s own doc comment
 gives the call. `App/RootTabView.swift` is untouched, per this ticket's brief.
 
-**Two things this ticket deliberately left alone.** The "runs in this conversation" strip
-(§2.2, MAX-103's board) is not built — the sheet has no runs strip yet. And a training
-thread's specific *by-id* selection in the list resolves through `ChatModel`'s existing
-subject-based lookup (`mostRecentThread(for:)`) rather than a new by-id load path; this is
-exact for the common case and for a workout subject (deduplicated to one thread by policy)
-and is a known, narrow imprecision only for two training threads sharing an identical
-frozen scope — flagged in the PR rather than fixed by widening `ChatModel`'s contract.
+**One thing this ticket deliberately left alone.** The "runs in this conversation" strip
+(§2.2, MAX-103's board) is not built — the sheet has no runs strip yet.
+
+**Review found a real defect in the first pass, and it is fixed.** Selecting a thread-list
+row originally reassigned the sheet's *subject* rather than opening the tapped thread by
+identity — harmless for a workout thread (one thread per run, by policy) but wrong for
+training: two training threads can legitimately share an identical frozen `TrainingScope`
+(`ChatThreadRepository` deliberately does not deduplicate them — **New chat** over an
+unchanged window is still a real action), and resolving by subject after a tap would
+silently reopen whichever of the two is newest, not the one shown. `ChatModel` now has two
+entry points — `init(subject:...)`, unchanged, for the Ask button and **New chat**; and a
+new `init(threadID:...)` for the thread list, which reads the subject off the *stored*
+thread rather than trusting a caller-supplied one, so a row tap can never open a different
+thread than the one tapped. A thread id that no longer resolves (deleted from another
+screen) is `ChatModel.LoadState.threadNotFound` — ordinary, not a failure.
+`ChatModelTests.testOpeningByIDReturnsExactlyThatThreadEvenWhenAnotherSharesItsScope` is
+the regression test: it reproduces the ambiguity (asserting subject-based resolution really
+does pick the wrong one), then asserts opening by id picks the right one anyway.
 
 ### Phase 9 — Lifting (MAX-109)
 
