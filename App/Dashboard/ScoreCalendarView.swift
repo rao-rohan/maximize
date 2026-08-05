@@ -75,6 +75,52 @@ import MaximizeCore
 /// day with no verdict is not a fourth saturated band) but each still gets its own
 /// glyph and its own sentence, so "the plan asked for rest" and "a miss was forgiven"
 /// never read as the same fact even though neither is a judgment.
+///
+/// ## The plan layer (MAX-105)
+///
+/// Everything above describes what *happened*. The plan is what was *prescribed*, and
+/// until this ticket it was visible only where nothing happened — `.missed`,
+/// `.convertedRest`, `.scheduledRest` are all plan statements, but a day the athlete
+/// actually ran said nothing about whether the run was asked for.
+///
+/// **The prescription is the ground; the outcome is the figure drawn on it.** A cell the
+/// plan asks a session of is ringed at its own edge (`Color.accent`, the token reserved
+/// for the on-plan state), and its state fill is inset inside that ring. A cell the plan
+/// asks nothing of has no ring. That is the entire channel — one bit, no legend beyond
+/// "the plan asked for something here" — and it reads:
+///
+/// - **ring + band fill** — you trained on a day you were asked to. Agreement.
+/// - **ring + red and a ×** — you were asked and did not. Divergence, loudly.
+/// - **ring + nothing inside** — `.forthcoming`: asked, not yet due. A slot with your
+///   name on it (`ScoreCalendarDayState.isDrawnUnfilledInTheDayGrid`).
+/// - **no ring + band fill** — you trained on a rest day or off-plan. Divergence the
+///   other way, and the one the athlete would otherwise never see.
+///
+/// Two properties of that choice are load-bearing:
+///
+/// 1. **It costs nothing from the band contrast budget.** The ring never distinguishes
+///    one band from another and never sits on a band fill — the gutter keeps it on the
+///    calendar card, where a single measured pairing (`accent` on `surfaceElevated`,
+///    5.89:1 dark / 5.81:1 light) is all it has to survive. MAX-084 closed hue-only
+///    band encoding and MAX-087 spent mark *size* closing it at year density; neither is
+///    touched here.
+/// 2. **Presence, not hue, is the signal.** A reader who cannot see violet still sees a
+///    stroke where there was none. Under Increase Contrast the token brightens and the
+///    stroke thickens (`LayoutMetrics.planRingWidthIncreasedContrast`); under Reduce
+///    Transparency nothing changes, because there is no translucency in it to remove.
+///
+/// **What the ring deliberately does not encode** is *which* session was prescribed, or
+/// whether the session performed was the kind asked for. Both are known — the core
+/// resolves `ScoreCalendarDay.prescription` and `.agreement` — and both are spoken in
+/// full by VoiceOver. Neither is drawn, because a 42pt cell already carries a fill, a
+/// glyph and a band pip, and a fourth visual distinction inside it is the cell that needs
+/// a legend. Kind-level divergence has a home with room for it: the workout detail's
+/// verdict header, which shows scheduled against actual for the day you tapped.
+///
+/// The year heatmap has no plan layer at all;
+/// `ScoreCalendarRepresentation.drawsThePlanLayer` carries that decision and its
+/// argument. `.forthcoming` still applies there — it is drawn as an ordinary neutral
+/// mark, never as the hollow outline `.missed` uses.
 struct ScoreCalendarView: View {
     let interval: TrendInterval
 
@@ -194,7 +240,9 @@ struct ScoreCalendarView: View {
 }
 
 /// One calendar cell in the dated day grid. Its fill and glyph are read from
-/// `day.state`; nothing here branches on a threshold or a raw score.
+/// `day.state`, its ring from `day.prescribesASession`; nothing here branches on a
+/// threshold, a raw score, or a date comparison — `MaximizeCore.ScoreCalendar` decided
+/// all three before this view saw the day.
 private struct ScoreCalendarDayCell: View {
     let day: ScoreCalendarDay
 
@@ -208,6 +256,22 @@ private struct ScoreCalendarDayCell: View {
     /// cell's content grew would shrink out of the design at accessibility sizes,
     /// exactly when the reader needs it most.
     @ScaledMetric(relativeTo: .caption2) private var markSize = LayoutMetrics.scoreBandMarkSize
+
+    /// The plan ring's gutter, scaled with the cell's own text for the same reason the
+    /// two marks above are: at accessibility sizes the cell grows and a fixed 3pt gutter
+    /// would close up against a fill that had grown around it.
+    @ScaledMetric(relativeTo: .caption2) private var ringGutter = LayoutMetrics.planRingGutter
+
+    /// Increase Contrast thickens the ring. `Ink` already brightens the accent itself
+    /// (MAX-070); this is the non-colour half design review §8.3 says nothing in this
+    /// app currently does.
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+
+    private var ringWidth: CGFloat {
+        colorSchemeContrast == .increased
+            ? LayoutMetrics.planRingWidthIncreasedContrast
+            : LayoutMetrics.planRingWidth
+    }
 
     var body: some View {
         // The square is driven by the column's width alone, never by what is drawn
@@ -243,19 +307,48 @@ private struct ScoreCalendarDayCell: View {
             .overlay(alignment: .topTrailing) {
                 if let band = day.state.scoredBand {
                     ScoreBandMarkView(band: band, diameter: markSize)
-                        .padding(Spacing.tight)
+                        // Measured from the *fill's* corner, not the cell's: the fill
+                        // moved inward by `ringGutter` when the plan layer landed, and
+                        // a pip still padded from the footprint would have sat a point
+                        // inside the colour it is drawn on. This keeps MAX-084's
+                        // original inset from the corner the reader actually sees.
+                        .padding(ringGutter + Spacing.tight)
                 }
             }
         // Not `.contentSurface(.tile)`: that fixes the fill to `.surfaceElevated`,
         // and this cell's fill is exactly the thing D4 asks it to carry — the score
         // band. `CornerRadius.tile` is reused anyway, matching `ContentSurface`'s own
         // note that a calendar cell is a tile-scale surface.
-        .background(
-            ScoreCalendarPalette.fill(for: day.state),
-            in: RoundedRectangle(cornerRadius: CornerRadius.tile, style: .continuous)
-        )
+        //
+        // Inset by the ring's gutter rather than drawn at the footprint (MAX-105), and
+        // inset on every cell rather than only the ringed ones, so the grid's fills
+        // stay one size. The radius shrinks with the inset so the fill's corners stay
+        // concentric with the ring's instead of reading as a rounder shape inside a
+        // squarer one.
+        .background {
+            if !day.state.isDrawnUnfilledInTheDayGrid {
+                RoundedRectangle(cornerRadius: insetCornerRadius, style: .continuous)
+                    .fill(ScoreCalendarPalette.fill(for: day.state))
+                    .padding(ringGutter)
+            }
+        }
+        // The plan layer: the ground the outcome above is drawn on. Last, so it sits at
+        // the cell's own edge with the fill inside it — never over a band colour.
+        .overlay {
+            if day.prescribesASession {
+                RoundedRectangle(cornerRadius: CornerRadius.tile, style: .continuous)
+                    .strokeBorder(Color.accent, lineWidth: ringWidth)
+            }
+        }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(ScoreCalendarFormatting.accessibilityLabel(for: day.state, on: day.date))
+        .accessibilityLabel(ScoreCalendarFormatting.accessibilityLabel(for: day))
+    }
+
+    /// The fill's corner radius, concentric with the ring's `CornerRadius.tile`.
+    /// Floored at zero because `ringGutter` grows with Dynamic Type and would otherwise
+    /// go negative at accessibility sizes, which `RoundedRectangle` treats as undefined.
+    private var insetCornerRadius: CGFloat {
+        max(0, CornerRadius.tile - ringGutter)
     }
 }
 
@@ -284,10 +377,14 @@ private struct ScoreCalendarHeatmapCell: View {
     /// but not always at the mark's full footprint: `ScoreBandHeatmapMarkView` sizes it
     /// by `ScoreBand.heatmapMark` (MAX-087), the channel that separates `.effective`
     /// from `.marginal` from `.ineffective` now that there is no room for a corner pip.
-    /// A day with no band at all — rest, awaiting-score, unplanned — draws unchanged
-    /// from before this ticket: a plain full-footprint fill. The three cases never
-    /// compete for the same cell, so a reader is never asked to read two channels in
-    /// the same glance.
+    /// A day with no band at all — rest, awaiting-score, forthcoming, unplanned — draws
+    /// a plain full-footprint fill. The three cases never compete for the same cell, so
+    /// a reader is never asked to read two channels in the same glance.
+    ///
+    /// `.forthcoming` (MAX-105) lands in that last group deliberately. Hollow already
+    /// means "asked and not delivered" here, and a day that has not arrived is the one
+    /// thing that must never read that way; a neutral mark says "nothing here yet",
+    /// which is the truth.
     @ViewBuilder
     private var background: some View {
         if let day, day.state.isDrawnHollowAtHeatmapDensity {
@@ -306,7 +403,7 @@ private struct ScoreCalendarHeatmapCell: View {
 
     private var accessibilityLabel: String {
         guard let day else { return "" }
-        return ScoreCalendarFormatting.heatmapAccessibilityLabel(for: day.state, on: day.date)
+        return ScoreCalendarFormatting.heatmapAccessibilityLabel(for: day)
     }
 }
 
@@ -325,7 +422,11 @@ private enum ScoreCalendarPalette {
             // which is also what makes a score-band heatmap a legitimate use of them
             // rather than a fourth surface borrowing the product's one signal.
             return Color.scoreIneffective
-        case .awaitingScore, .convertedRest, .scheduledRest, .unplanned:
+        case .awaitingScore, .convertedRest, .scheduledRest, .forthcoming, .unplanned:
+            // `.forthcoming` is listed here for the year heatmap, where every
+            // no-verdict day draws the same neutral mark. In the day grid it is drawn
+            // with no fill at all — see `isDrawnUnfilledInTheDayGrid` — so this value
+            // is never reached there.
             return Color.surfaceInset
         }
     }
@@ -334,7 +435,10 @@ private enum ScoreCalendarPalette {
         switch state {
         case .scored, .missed:
             return Color.textOnSaturatedFill
-        case .awaitingScore, .convertedRest, .scheduledRest, .unplanned:
+        case .awaitingScore, .convertedRest, .scheduledRest, .forthcoming, .unplanned:
+            // `.forthcoming`'s date and glyph sit on the calendar card rather than on
+            // `surfaceInset`, since the cell has no fill. `textSecondary` is a text
+            // token designed for both — it is the same ink the card's own labels use.
             return Color.textSecondary
         }
     }

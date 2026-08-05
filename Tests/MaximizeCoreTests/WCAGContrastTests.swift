@@ -164,6 +164,56 @@ final class DesignPaletteContrastTests: XCTestCase {
         }
     }
 
+    // MARK: The plan layer's ring (MAX-105)
+
+    /// The plan ring is a graphical object carrying meaning, so WCAG 1.4.11's 3:1 is
+    /// the bar it has to clear — against the calendar card, which is the *only* ground
+    /// it is ever drawn on.
+    ///
+    /// That "only" is the design decision this test pins. The ring sits at the cell's
+    /// edge with the state fill inset inside it (`LayoutMetrics.planRingGutter`), so it
+    /// never touches a score-band fill. That matters because no ink in this palette
+    /// survives both grounds: a near-white stroke measures ~1.2:1 on `scoreEffective`
+    /// and a near-black one ~1.2:1 on `surfaceInset`, so a ring drawn *on* the fill
+    /// would have been invisible on one state or another whatever colour it was given.
+    /// Keeping it on the card is what makes one token — and one measurement — enough.
+    func testThePlanRingIsLegibleOnTheCalendarCard() {
+        assertAA(
+            DesignPalette.accent.dark, DesignPalette.surfaceElevated.dark,
+            .largeTextOrNonText, "plan ring on the calendar card [dark]"
+        )
+        assertAA(
+            DesignPalette.accent.light, DesignPalette.surfaceElevated.light,
+            .largeTextOrNonText, "plan ring on the calendar card [light]"
+        )
+        assertAA(
+            DesignPalette.accent.darkHighContrast, DesignPalette.surfaceElevated.darkHighContrast,
+            .largeTextOrNonText, "plan ring on the calendar card [dark, Increase Contrast]"
+        )
+        assertAA(
+            DesignPalette.accent.lightHighContrast, DesignPalette.surfaceElevated.lightHighContrast,
+            .largeTextOrNonText, "plan ring on the calendar card [light, Increase Contrast]"
+        )
+    }
+
+    /// Increase Contrast must never make the ring *harder* to see — the same property
+    /// `testIncreaseContrastNeverLowersAChartMarksContrast` asserts for chart marks.
+    /// The ring also thickens under that setting
+    /// (`LayoutMetrics.planRingWidthIncreasedContrast`), which is the half of contrast
+    /// this suite cannot measure.
+    func testIncreaseContrastNeverLowersThePlanRingsContrast() {
+        assertRaised(
+            DesignPalette.accent.darkHighContrast, on: DesignPalette.surfaceElevated.darkHighContrast,
+            isAtLeast: DesignPalette.accent.dark, on: DesignPalette.surfaceElevated.dark,
+            "plan ring [dark]"
+        )
+        assertRaised(
+            DesignPalette.accent.lightHighContrast, on: DesignPalette.surfaceElevated.lightHighContrast,
+            isAtLeast: DesignPalette.accent.light, on: DesignPalette.surfaceElevated.light,
+            "plan ring [light]"
+        )
+    }
+
     // MARK: Score bands against *each other* — the gap MAX-084 found
 
     /// The check this suite was missing, and the reason a 1.02:1 pair shipped.

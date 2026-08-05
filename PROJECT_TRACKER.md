@@ -492,6 +492,7 @@ ticket that could not close it, and each fails quietly rather than loudly.
 |---|---|---|
 | C1 | **Always resolve rest-day budgets over whole Monday-first weeks — never split one week across two calls.** | `RestDayBudgeting` (MAX-016) is a pure function over the days it is handed. Ranking is relative to the misses in a week, so the same day can rank differently in two partial slices of that week. A function taking a day-set cannot tell a partial week from a short one |
 | C2 | **A `WorkoutIngestionSink` must not return before its write is durable.** | MAX-031's no-retry guarantee depends on it: acknowledging a wake whose data was not durably stored loses the workout permanently, and only the implementation knows when its write has landed |
+| C3 | **A caller that knows what day it is must tell `RestDayBudgeting`, via `outcomesUnknownFrom`.** | MAX-105. Forgiving a day that has not happened spends a small weekly budget on a non-event and leaves a real miss earlier in the same week unforgiven — but `RestDayBudgeting` is a pure function of the days it is handed, and a day-set carries no clock. `ScoreCalendar` passes it; `TalliesCalculator` cannot yet (→ MAX-107) |
 
 ## Open questions
 
@@ -528,8 +529,9 @@ feature was governed by a plan that could not exist).
 | MAX-085 | **The tab bar, once**: Plan becomes a third tab, iOS 26 `Tab` builder, `.tint()`, surface elevation, Liquid Glass chrome | MAX-082, Owner | **Opus** |
 | MAX-086 | Wire `AppearancePreference` — a setting that silently does nothing | MAX-082 | Sonnet |
 | MAX-087 | A non-hue channel for the year heatmap's 6pt cells | MAX-084 | Sonnet ✅ |
-| MAX-105 | **The plan on the dashboard calendar** — scheduled beneath actual | Owner | **Opus** |
+| MAX-105 | **The plan on the dashboard calendar** — scheduled beneath actual | Owner | **Opus** ✅ |
 | MAX-106 | The UI standard, written into `CLAUDE.md` | Owner | Sonnet ✅ |
+| MAX-107 | Tallies count future scheduled days as missed — effective-day rate and streak | MAX-105 | Sonnet |
 | MAX-090 | Chat-first product spec: plan generation and Q&A through chat | Owner | **Opus** 🔒 ✅ |
 | MAX-091 | Run both Claude clients on the Sonnet tier at `medium` effort | Owner, cost | Sonnet 🔒 ✅ |
 | MAX-092 … MAX-104 | The chat-first build, decomposed from MAX-090 | MAX-090 | see below |
@@ -661,6 +663,44 @@ Two consequences that make this more than decoration:
 
 D1 and D2 are untouched: the plan layer reads the versioned record in effect on each day
 through `PlanCalendar`, never a literal and never a recomputation.
+
+**Shipped. What it decided, and what it found.**
+
+*The encoding.* The prescription is a ring at the cell's own edge (`Color.accent`, the
+token already reserved for the on-plan state); the state fill is inset inside it. One bit
+— asked, or not asked — so no legend is needed. A cell reads as ring + band (trained when
+asked), ring + red × (asked, didn't), ring + nothing inside (asked, not yet due), or band
+with no ring (trained off-plan, the divergence nothing previously showed). The ring never
+touches a band fill, which is why it costs nothing from the contrast budget MAX-084 and
+MAX-087 spent: `accent` on `surfaceElevated` is the only pairing it has to survive, and
+`WCAGContrastTests` now pins it in all four appearances. **Not drawn at year density** —
+`ScoreCalendarRepresentation.drawsThePlanLayer` carries that decision and the argument for
+it, which is that a ring around a 6pt mark would be paid for out of MAX-087's channel.
+
+*Kind-level divergence is modelled and spoken, not drawn.* `ScoreCalendarDay.agreement`
+compares the prescription against `Score.actualClassification` — both already stored, so
+no new reads and no re-derivation (D2) — and VoiceOver says "planned a long run; ran
+easy". It is deliberately not a fourth visual distinction in a cell that already carries
+three; the verdict header is where a single day's scheduled-versus-actual has room.
+
+*The future/missed defect was real and was on the device.* `resolve` had no notion of
+today, so the remainder of the current month rendered red. Fixed as a state
+(`.forthcoming`) reached before `.missed` can be, not as a filter in a view — and
+`today` is now a parameter, so the distinction is testable.
+
+**The tallies still think the future is missed.** Found while fixing the calendar,
+reported rather than fixed. `TalliesCalculator` has no `today`, so a future scheduled day
+enters `EffectiveDayTally.eligibleCount` and drags the rate down, and worse,
+`Tallies.currentStreak` walks back from `input.through` and breaks on the first future
+scheduled day it meets — which for the "this month" interval is usually the 31st, so the
+streak tile reads 0 for most of every month. The calendar half is closed by passing
+`RestDayBudgeting`'s new `outcomesUnknownFrom` (now **C3**); the tallies half needs
+`today` on `TalliesInput` and changes numbers on a surface MAX-063 owns. → **MAX-107**.
+
+*Also noticed, not acted on.* `docs/DESIGN-REVIEW.md` §5.4 proposed "a 1pt accent ring on
+the current day" for the missing today-marker. MAX-105 has spent exactly that device on
+the plan, so whoever takes §5.4 needs a different one — and may not need one at all: the
+boundary between filled cells and unfilled forthcoming ones now *is* today.
 
 **MAX-091.** Both Claude clients moved from the Opus tier to the Sonnet tier at `medium`
 effort, on the owner's cost instruction. Three things came with the model that are not
