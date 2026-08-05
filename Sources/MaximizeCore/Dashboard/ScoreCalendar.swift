@@ -105,6 +105,43 @@ public enum PlanExecutionAgreement: Hashable, Sendable {
     case unprescribed(performed: WorkoutClassification)
 }
 
+/// What tapping a calendar day should do (MAX-108) — "is there anything behind this
+/// day" is a core decision, not a view's opinion, the same way `state` and
+/// `agreement` are.
+///
+/// ## Why this cannot be read off `state` alone
+///
+/// A day with nothing recorded reaches this type's empty cases from five different
+/// `ScoreCalendarDayState` cases — `.missed`, `.convertedRest`, `.scheduledRest`,
+/// `.forthcoming`, `.unplanned` — and only one of those, `.forthcoming`, names its own
+/// tense. `.scheduledRest` and `.unplanned` carry none: a rest day can be scheduled
+/// for tomorrow exactly as it can for yesterday, and a query reaching earlier than
+/// every plan version is `.unplanned` whether the day itself is behind the athlete or
+/// still ahead. Matching on `state`'s case would get a future scheduled-rest day or a
+/// future unplanned day wrong — both would read as an inert dead end rather than as
+/// "this hasn't happened yet." So `resolve` decides this the same way it decides
+/// `.forthcoming` itself: against `today`, independent of which of the five empty
+/// states the day landed in.
+public enum ScoreCalendarDayDestination: Hashable, Sendable {
+    /// One or more workouts were recorded on the day, ordered by start time — the
+    /// order a swipe between two same-day workouts should present. A single element
+    /// is the ordinary case; two or more is the day this ticket exists to serve.
+    case workouts([UUID])
+
+    /// Nothing was recorded, and the day has not happened yet (on or after `today`,
+    /// the same strict boundary `.forthcoming` uses — a scheduled run at six in the
+    /// morning has not been skipped, so today itself lands here, not below). Opening
+    /// a workout that does not exist would be a broken tap; a door here should say
+    /// what the calendar's glyph and VoiceOver label already say, not pretend to be
+    /// one.
+    case notYetDue
+
+    /// Nothing was recorded, and the day is behind the athlete. A true dead end —
+    /// there is nothing to navigate to — but not a silent one; see
+    /// `ScoreCalendarFormatting` for what a tap on it should say.
+    case nothingRecorded
+}
+
 /// One resolved calendar cell: a day, the state it is in, and the plan underneath it.
 ///
 /// ## Two layers, deliberately not merged (MAX-105)
@@ -139,16 +176,23 @@ public struct ScoreCalendarDay: Hashable, Sendable, Identifiable {
     /// the classification this compares against is stored on the score (D2).
     public let agreement: PlanExecutionAgreement?
 
+    /// What a tap on this day should do (MAX-108). See
+    /// `ScoreCalendarDayDestination`'s own documentation for why this is not derived
+    /// from `state` at the view layer.
+    public let destination: ScoreCalendarDayDestination
+
     public init(
         date: CalendarDay,
         state: ScoreCalendarDayState,
         prescription: PlanDay? = nil,
-        agreement: PlanExecutionAgreement? = nil
+        agreement: PlanExecutionAgreement? = nil,
+        destination: ScoreCalendarDayDestination = .nothingRecorded
     ) {
         self.date = date
         self.state = state
         self.prescription = prescription
         self.agreement = agreement
+        self.destination = destination
     }
 
     /// Whether the plan asks for a *session* on this day, as opposed to rest or
@@ -269,6 +313,7 @@ public enum ScoreCalendar {
         return try CalendarDay.days(from: from, through: through).map { day in
             let planDay = planDaysInRange[day]
             let dayWorkouts = workoutsByDay[day] ?? []
+            let outcomeIsKnown = day < today
             let best = bestScoredPair(
                 dayWorkouts.compactMap { workout in
                     scoreLedgers[workout.id].map { (workout, $0) }
@@ -279,15 +324,36 @@ public enum ScoreCalendar {
                 bestScored: best,
                 planDay: planDay,
                 isConverted: convertedDates.contains(day),
-                outcomeIsKnown: day < today
+                outcomeIsKnown: outcomeIsKnown
             )
             return ScoreCalendarDay(
                 date: day,
                 state: state,
                 prescription: planDay,
-                agreement: agreement(planDay: planDay, score: best?.1.automatic)
+                agreement: agreement(planDay: planDay, score: best?.1.automatic),
+                destination: destination(dayWorkouts: dayWorkouts, outcomeIsKnown: outcomeIsKnown)
             )
         }
+    }
+
+    // MARK: - MAX-108: is there anything behind this day
+
+    /// `dayWorkouts` empty is exactly the condition every empty `ScoreCalendarDayState`
+    /// case above is reached under (see `dayState`) — this does not re-derive that,
+    /// it reads the same input. `outcomeIsKnown` is `dayState`'s own `today` boundary,
+    /// threaded through unchanged rather than recomputed, so the two decisions can
+    /// never disagree about which side of today a day falls on.
+    private static func destination(
+        dayWorkouts: [Workout],
+        outcomeIsKnown: Bool
+    ) -> ScoreCalendarDayDestination {
+        guard !dayWorkouts.isEmpty else {
+            return outcomeIsKnown ? .nothingRecorded : .notYetDue
+        }
+        // Ascending by start — the order a swipe between them should present, and the
+        // same tiebreak `bestScoredPair` and the `.awaitingScore` picker above both use,
+        // so three different reads of "which workout is first" never disagree.
+        return .workouts(dayWorkouts.sorted { $0.start < $1.start }.map(\.id))
     }
 
     // MARK: - C1: rest-day conversion over whole weeks (mirrors TalliesCalculator)
