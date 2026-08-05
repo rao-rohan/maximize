@@ -448,7 +448,7 @@ change rather than four.
 |---|---|---|---|
 | P1 | `Plan` cannot express the *shape* of classification rules, so four dimensionless ratios live in `WorkoutClassificationPolicy` | MAX-013 | Real D1 leak, but bounded: they are ratios, never a bpm, metre or minute, so changing the cap or arc still moves the thresholds. A `classification` block on a future plan version fixes it |
 | P2 | Same, for the cap-anchored zone multipliers in `HeartRateZoneModel` | MAX-012 | As P1 |
-| P3 | ~~`Plan` records **no durations at all**~~ **Closed by MAX-131**: `ScheduledSession.durationSeconds` is the plan's first duration, and `RubricReference.scheduledDuration(fraction:)` is how a band names it | MAX-013 | The rubric half is closed. **The classifier half is not**: `WorkoutClassifier.isFragment` still tests distance only, so a mis-started treadmill run with HR but no distance still reaches the scorer. The plan can now express the floor it wants — a `minimumSessionDuration`, or the ask's own duration — and the ticket that changes the classifier is a behaviour change nobody has picked up |
+| P3 | ~~`Plan` records **no durations at all**~~ **Expressible in both halves; not yet effective.** MAX-131 gave the plan `ScheduledSession.durationSeconds` and `RubricReference.scheduledDuration(fraction:)` (the rubric half); **MAX-149 gives `Plan.minimumSessionDurationSeconds`** and teaches `WorkoutClassifier.isFragment` to read it (the classifier half) | MAX-013 | **Do not tick this closed yet.** The plan can now *express* a duration floor, and `isFragment` reads it — but **nothing authors one**: neither `StandardPlanSeed` nor the authoring screen sets `minimumSessionDurationSeconds`, so every plan on disk has `nil` and the floor never fires. A mis-started treadmill run still reaches the scorer today. **MAX-151 wires it**; until that merges, this gap is closed in vocabulary only, which is the same shape MAX-131 and MAX-132 had between them |
 | P4 | `ScheduledSession` cannot express interval structure (e.g. 6×800m) | MAX-013 | The scorer sees "hard" but not the prescribed shape, so it cannot judge whether the session was executed as written |
 
 Separately, `CalendarDay` lacks day/week arithmetic — MAX-013 carried a private day
@@ -1645,6 +1645,9 @@ is the overseer's, not a ticket's — flagged here rather than done.
 | MAX-143 | **Decide what to do with lifts already scored as runs** | 128 | Owner / overseer |
 | MAX-144 | ~~How adherence to a muscle-group prescription is judged~~ — **decided (A22)** | 129 | Owner ✅ |
 | MAX-145 | **Enter muscle groups on a strength workout's detail screen** (A22) | 129, 144 | **Opus** ✅ |
+| MAX-147 | The scorer's task text learns discipline (source: MAX-133) | 133, 136 | Sonnet ✅ |
+| MAX-149 | Duration floor for fragments — **the classifier half of gap P3**; not yet wired to any author | 013, 131 | Sonnet ✅ |
+| MAX-151 | **Author the duration floor** — `StandardPlanSeed` states one, the authoring screen edits it, `PlanProposal` can propose it. Without this MAX-149 never fires | 149, 146, 148 | Sonnet |
 
 **Four collisions the overseer must respect.**
 
@@ -2013,10 +2016,61 @@ The two that were not are now `RubricCondition.actualDiscipline(oneOf:)` and
   Neither is editable: **MAX-137 gives the screen its editor**, and **MAX-141** is what
   lets a chat-authored proposal state one. Until then nothing authors a duration, which is
   why this ticket adds none to `StandardPlanSeed`.
-- **Reported, not done: the classifier half of P3.** `WorkoutClassifier.isFragment` still
+- ~~**Reported, not done: the classifier half of P3.** `WorkoutClassifier.isFragment` still
   tests distance only, so an HR-only treadmill fragment still reaches the scorer.
   LIFTING-SPEC §9.2 wants a duration floor there; the plan can now express one, and
-  changing the classifier is a behaviour change this ticket's brief forbade.
+  changing the classifier is a behaviour change this ticket's brief forbade.~~ **Closed by
+  MAX-149.**
+
+**MAX-149 — the classifier half of P3, and the argument for where the floor lives.** A
+mis-started or accidentally split treadmill run — heart-rate data, no distance sample —
+passed `WorkoutClassifier.isFragment`'s distance test (there was no distance to fail it
+on) and reached the scorer as a real session, an immutable wrong score under D8.
+LIFTING-SPEC §9.2 names this exactly and asks for a duration floor; MAX-131 reported it
+rather than building it, because its brief forbade a behaviour change.
+
+- **`Plan.minimumSessionDurationSeconds`, not a `WorkoutClassificationPolicy` fraction.**
+  The two candidates were an absolute figure the plan version states — `heartRateCapBPM`'s
+  own shape — or a third fraction alongside `fragmentDistanceFraction` in
+  `WorkoutClassificationPolicy`. Rejected the second: that type's own doc already names its
+  fractions a known, temporary gap against D1, held open only because they are *ratios* of
+  a plan-stated quantity (the shortest prescribed run, the cap) rather than absolutes,
+  pending "a `classification` block on a future plan version". Filing a brand-new
+  free-standing threshold into a struct whose own comment says "this shouldn't really be
+  here" would grow that gap rather than close it. A plan-relative fraction of the shortest
+  prescribed run's *duration* was considered too, and rejected for a sharper reason:
+  `ScheduledSession.durationSeconds` on the run slot is still carried-but-uneditable —
+  MAX-137 and MAX-141 landed, but neither put a control on it, so nothing authors one — so
+  a plan-relative floor would silently never fire for any plan on disk, which is the
+  opposite of what the ticket is for. `minimumSessionDurationSeconds` sits directly on `Plan`, optional
+  (defaulting nil, matching every field MAX-129/MAX-131 added), resolved once per plan
+  version exactly like the cap.
+- **Distance-tested runs are unaffected; the floor only ever answers the question the
+  distance test could not ask.** `isFragment` now branches on whether the workout has a
+  distance at all: if it does, the existing distance-fraction test runs exactly as before
+  — a duration floor calibrated for "did this happen" has no business overruling a run
+  whose distance already answered that, and a fixture pins a case where the two would
+  disagree. Only a distance-less workout falls through to the duration floor, and only
+  when the plan states one; a plan with no opinion asks no duration question, the same "no
+  guessed threshold" rule the distance test already followed.
+- **A lift cannot be caught by this floor, and it is not by luck.** `classify()` answers
+  `.other` for any non-run before `isFragment` runs at all — `isFragment` is unreachable
+  for a lift regardless of how aggressive the floor is. Pinned with a fixture using a
+  floor long enough to catch a 45-minute lift, to make the claim more than "nothing tests
+  it".
+- **Nothing stored moves.** A hand-written pre-MAX-149 `Plan` payload — every key `Plan`
+  already carried, no `minimumSessionDurationSeconds` key — decodes to a plan equal to the
+  one this build authors with no floor stated, and the same fragment call matches under
+  both. A plan that states no floor re-encodes without the key.
+- **Reported, not done: authoring cannot carry the floor forward.**
+  `PlanAuthoringSession.plan(from:effectiveFrom:)` builds every `Plan` field from
+  `PlanDraft`, and `PlanDraft`/`PlanAuthoring.swift` are owned by MAX-148, in flight in
+  parallel — out of this ticket's scope to touch. So a plan revision saved through the
+  authoring screen today always produces `minimumSessionDurationSeconds == nil`, same as
+  `StandardPlanSeed` (MAX-146, also out of scope here) never setting one. The domain type
+  and the classifier are ready; nothing in this build can author a floor yet. That is
+  follow-on ticket work, the same shape MAX-131 left `durationSeconds` in before MAX-137
+  gave it an editor.
 
 **MAX-132 — `StandardPlanSeed` learns to speak the vocabulary MAX-131 gave it, and closes
 the shadow §11.4 escalates.** Two changes to `Sources/MaximizeCore/Plan/StandardPlanSeed.swift`,
@@ -2239,6 +2293,58 @@ settings, and they were being printed under "The plan" as though they governed a
   `Context/TrainingFactSheet.swift` plus a decision about whether an all-rest lift column
   is stated once or per weekday; this ticket's brief scoped it to `WorkoutFactSheet`,
   `WorkoutContext` and `WorkoutContextBuilder`, so it was left alone.
+
+**MAX-147 — the task text learns discipline too.** MAX-133's report named this exactly:
+`WorkoutScorer`'s stable half still opened *"You are scoring one running workout"* for
+every call, lift included. This is the fix, one level up from MAX-136's fact sheet.
+
+- **Decided: one function with a discipline branch, not two independent string
+  literals.** The rejection rule, the rationale contract (`RationaleContract
+  .instructionText`) and the JSON reply format (`ScoreProposal
+  .responseFormatDescription`) are the same contract for either discipline — only the
+  opening sentence and the first instruction's wording (which measured facts to weigh)
+  differ. Two complete literals would have duplicated those shared paragraphs and let
+  them drift apart the next time either was edited on its own ticket, which is exactly
+  the failure `WorkoutFactSheet.factSheet()` avoids by staying one renderer with one
+  discipline branch (A12, MAX-136). `WorkoutScorer.taskDescription(for:)` makes the
+  identical choice at the scale of the instruction that wraps that fact sheet. **Rejected:
+  a single text with inline conditionals** ("if this is a lift, ignore the pace
+  instruction below") — that keeps the running vocabulary physically present in every
+  lift prompt, which is the exact hazard being closed, just moved from "stated" to
+  "stated and then retracted".
+- **The branch is on `Discipline`, not `ActivityType.isRun`**, for the reason the fact
+  sheet's is: A17's slot is what a workout is judged against, so a hike or a ride sits in
+  the run slot and reads the unchanged run text.
+- **The lift branch says what to weigh, not only what to ignore.** LIFTING-SPEC §8.3:
+  adherence is whether the prescribed session happened, on the prescribed day, for
+  roughly the prescribed length — so the lift instruction says that positively rather
+  than listing absent running figures a second time; MAX-136's `disciplineFraming` on the
+  fact sheet already carries that disclaimer once, and repeating it in the task text
+  would be the same fact stated twice at two removes from each other, free to drift.
+  Carries none of `pace`, `cadence`, `cap`, `splits` or `distance` — nothing describes a
+  lift's fact sheet by those words — and says nothing about load or volume, because §8.3
+  is explicit that no such number is in the record; a task that invited the model to
+  weigh either would be inviting it to invent one. Tested by asserting the absence of
+  each term against the rendered instruction, not by reading the source.
+- **The run branch is pinned as a literal** (`ScorerTaskTextTests
+  .testTheRunTaskTextIsUnchanged`), so an edit made in service of the lift branch cannot
+  drift it silently. The two shared paragraphs it does not own — `RationaleContract`'s
+  wording and `ScoreProposal`'s reply format — are read live from those types rather than
+  duplicated a second time in the pinned literal, so a future edit to either does not fail
+  this ticket's test for a reason that has nothing to do with it.
+- **`ScoringInstruction.task`'s doc comment now says "stable per discipline"** rather than
+  "identical for every workout" — still true, still cacheable, still free of health data;
+  there are simply two stable values instead of one. No caller assumed a single global
+  literal: the one place that read the doc comment for a caching decision
+  (`AnthropicScoringModelClient`) sends whatever `instruction.task` resolves to as the
+  system block already, so a second stable value costs it nothing.
+- **No new data enters a prompt.** `context.discipline` selects between two fixed
+  literals; it is read, not assembled — `WorkoutScorer` already read the equivalent
+  (`context.workout.activityType.discipline`) for its own guard checks before this
+  ticket. D3 is unmoved: the fact sheet stays `WorkoutContextBuilder`'s alone to compose,
+  and this ticket touches only the instruction wrapped around it.
+- **No rescore, no backfill** (D8). Every score already written keeps the task text it was
+  produced under; this changes what a *future* call sends, nothing already stored.
 
 **MAX-093 landed the stored record.** `StoredChatThread` is columnar —
 `subjectKindRawValue`, `workoutUUID` (a fixed sentinel for a training row),

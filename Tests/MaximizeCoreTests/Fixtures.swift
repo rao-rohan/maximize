@@ -150,7 +150,11 @@ enum Fixture {
         )
     }
 
-    static func plan(version: Int = 1, heartRateCapBPM: Double = 150) throws -> Plan {
+    static func plan(
+        version: Int = 1,
+        heartRateCapBPM: Double = 150,
+        minimumSessionDurationSeconds: Double? = nil
+    ) throws -> Plan {
         try Plan(
             version: PlanVersion(version),
             effectiveFrom: day(2026, 1, 1),
@@ -163,7 +167,8 @@ enum Fixture {
             heartRateCapBPM: heartRateCapBPM,
             cadenceTarget: CadenceBand(lowStepsPerMinute: 165, highStepsPerMinute: 170),
             rubric: rubric(),
-            goals: PlanGoals(statements: ["Run a sub-4:00 marathon"], targetDay: day(2026, 4, 20))
+            goals: PlanGoals(statements: ["Run a sub-4:00 marathon"], targetDay: day(2026, 4, 20)),
+            minimumSessionDurationSeconds: minimumSessionDurationSeconds
         )
     }
 
