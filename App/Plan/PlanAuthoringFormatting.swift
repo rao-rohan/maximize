@@ -59,8 +59,10 @@ enum PlanAuthoringFormatting {
     }
 
     /// The compact caption above a weekday's two pickers — what a scanning eye reads
-    /// before either slot's own detail.
-    static func describe(_ summary: PlanDraft.DayDraft.ObligationSummary) -> String {
+    /// before either slot's own detail. `ObligationSummary` is shared with the
+    /// read-only plan screen (MAX-138), so this copy is also what a governed week's
+    /// own summary would say, if it needed one.
+    static func describe(_ summary: ObligationSummary) -> String {
         switch summary {
         case .rest: return "Rest"
         case .runOnly: return "Run only"

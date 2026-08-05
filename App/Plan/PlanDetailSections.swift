@@ -100,6 +100,16 @@ struct PlanDetailSections: View {
 
     // MARK: - Weekly template
 
+    /// Both slots (A17): a week is fourteen asks now, not seven, and this section
+    /// already made its density call for seven rows before lifting existed. That call
+    /// is kept rather than doubled — one row per weekday, still — because the
+    /// alternative (two rows per weekday) makes the section that exists to be read at
+    /// a glance the least scannable thing on the screen, and because a fourteen-row
+    /// list makes the common case — rest on both slots — cost exactly as much visual
+    /// weight as a day carrying two real sessions, which is the thing this ticket's
+    /// brief specifically warns against. A day that is busier gets a taller row, via a
+    /// second line of value text (`PlanFormatting.weekdayLines`); a rest-on-both day
+    /// stays the one short line it always was.
     private var weekCard: some View {
         VStack(alignment: .leading, spacing: Spacing.compact) {
             Text("Weekly template")
@@ -108,7 +118,7 @@ struct PlanDetailSections: View {
 
             VStack(alignment: .leading, spacing: Spacing.snug) {
                 ForEach(detail.week) { day in
-                    row(PlanFormatting.weekday(day.weekday), weekdayValue(day))
+                    weekdayRow(day)
                 }
             }
         }
@@ -116,15 +126,23 @@ struct PlanDetailSections: View {
         .contentSurface(.card)
     }
 
-    private func weekdayValue(_ day: PlanDisplayData.WeekdayRow) -> String {
-        var text = PlanFormatting.sessionKind(day.kind)
-        if let meters = day.distanceMeters {
-            text += " · " + PlanFormatting.distance(meters, unit: distanceUnit)
+    private func weekdayRow(_ day: PlanDisplayData.WeekdayRow) -> some View {
+        HStack(alignment: .top) {
+            Text(PlanFormatting.weekday(day.weekday))
+                .foregroundStyle(Color.textPrimary)
+            Spacer()
+            VStack(alignment: .trailing, spacing: Spacing.tight) {
+                ForEach(PlanFormatting.weekdayLines(day, unit: distanceUnit), id: \.self) { line in
+                    Text(line)
+                        .foregroundStyle(Color.textSecondary)
+                }
+            }
         }
-        if let note = day.note, !note.isEmpty {
-            text += " · " + note
-        }
-        return text
+        .font(.bodyCopy)
+        // A two-line day is one fact, not two: "Tuesday, easy run 8 km, lift chest and
+        // shoulders" as a single VoiceOver stop rather than fragments that arrive
+        // separated from the weekday they belong to.
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: - Long-run arc
@@ -189,18 +207,5 @@ struct PlanDetailSections: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentSurface(.card)
-    }
-
-    // MARK: - Shared row
-
-    private func row(_ label: String, _ value: String) -> some View {
-        HStack {
-            Text(label)
-                .foregroundStyle(Color.textPrimary)
-            Spacer()
-            Text(value)
-                .foregroundStyle(Color.textSecondary)
-        }
-        .font(.bodyCopy)
     }
 }
