@@ -213,7 +213,7 @@ public enum ChatThreadListPresentation {
         // `ChatThreadRecency.allCases` is declared newest-first, so iterating it is the
         // section order — no sort, and no way for a new band to be added without being
         // given a position.
-        return ChatThreadRecency.allCases.compactMap { recency in
+        return ChatThreadRecency.allCases.compactMap { (recency) -> ChatThreadListSection? in
             guard let rows = banded[recency], !rows.isEmpty else { return nil }
             return ChatThreadListSection(recency: recency, rows: rows)
         }
