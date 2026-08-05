@@ -45,6 +45,16 @@ import MaximizeCore
 /// see `HeartRateDriftTrendlineData` for why those are different questions — and it is
 /// built from the exact same `data.curves` this view already draws, so the two halves
 /// of this screen can never disagree about which runs are in the picture.
+///
+/// ## At a year, the trendline is the whole section (MAX-083)
+///
+/// `DriftSectionRepresentation.trendlineOnly` drops the curve overlay entirely and
+/// promotes the trendline to headline. The overlay compares a handful of runs by shape;
+/// at ~200 runs its stack limit would draw the last three weeks and call it a year, while
+/// the trendline is the chart that finally has enough points to say something. That
+/// choice, and the fact that it also means not reading 200 stored heart-rate curves to
+/// render one screen, is made in `MaximizeCore` — this view renders whichever state the
+/// model was handed.
 struct DriftOverlayView: View {
     let interval: TrendInterval
 
@@ -52,7 +62,7 @@ struct DriftOverlayView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.compact) {
-            Text("HR drift across runs")
+            Text(interval.kind.driftSectionRepresentation.title)
                 .font(.sectionHeading)
                 .foregroundStyle(Color.textPrimary)
 
@@ -65,14 +75,52 @@ struct DriftOverlayView: View {
                 Text("Couldn't load the runs in this interval.")
                     .font(.metricLabel)
                     .foregroundStyle(Color.textSecondary)
-            case .loaded(let data):
+            case .overlay(let data):
                 loaded(data)
+            case .trendline(let selection):
+                trendlineOnly(selection)
             }
         }
         .contentSurface(.card)
         .task(id: interval) {
             await model.load(for: interval)
         }
+    }
+
+    // MARK: - Year: the trendline alone
+
+    /// No curve stack, no legend, no stacking toggles — there is nothing to un-stack when
+    /// nothing is stacked. What survives is the chart, the count it covers, and the same
+    /// "what is missing, and why" sentences the overlay prints, so a year with two
+    /// hundred runs and forty unscored ones still says so.
+    @ViewBuilder
+    private func trendlineOnly(_ selection: DriftFigureSelection) -> some View {
+        if selection.isEmpty {
+            Text(
+                selection.candidateCount == 0
+                    ? "No runs in this interval."
+                    : "No run in this interval carries a stored drift figure."
+            )
+            .font(.bodyCopy)
+            .foregroundStyle(Color.textSecondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentSurface(.inset)
+        } else {
+            trendlineChart(selection.trendline)
+            Text(selection.summary)
+                .font(.metricLabel)
+                .foregroundStyle(Color.textSecondary)
+            if selection.trendline.fit == nil {
+                Text(
+                    selection.trendline.points.count == 1
+                        ? "One run with a stored drift figure — not enough yet for a trend line."
+                        : "These runs share one date, so there's no spread to fit a trend line to."
+                )
+                .font(.microLabel)
+                .foregroundStyle(Color.textTertiary)
+            }
+        }
+        notes(selection.exclusionNotes)
     }
 
     // MARK: - Loaded
@@ -91,7 +139,7 @@ struct DriftOverlayView: View {
         } else {
             emptyState(data)
         }
-        notes(data)
+        notes(data.exclusionNotes)
     }
 
     /// No curve qualified. Said as a sentence — never as an empty axis, and never as a
@@ -360,10 +408,10 @@ struct DriftOverlayView: View {
     // MARK: - What is not on the chart, and why
 
     @ViewBuilder
-    private func notes(_ data: HeartRateDriftOverlayData) -> some View {
-        if !data.exclusionNotes.isEmpty {
+    private func notes(_ exclusionNotes: [String]) -> some View {
+        if !exclusionNotes.isEmpty {
             VStack(alignment: .leading, spacing: Spacing.tight) {
-                ForEach(data.exclusionNotes, id: \.self) { note in
+                ForEach(exclusionNotes, id: \.self) { note in
                     Text(note)
                         .font(.microLabel)
                         .foregroundStyle(Color.textTertiary)

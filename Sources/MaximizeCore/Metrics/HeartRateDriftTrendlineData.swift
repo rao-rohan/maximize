@@ -27,6 +27,11 @@ import Foundation
 /// means this trendline can only ever cover exactly the runs whose shape is drawn above
 /// it — there is no second filter to keep in sync.
 ///
+/// MAX-083 added one further door, `init(points:)`, for the year span — the one place
+/// where there is no overlay on screen for this line to disagree with, and where the
+/// overlay's shape-drawing rules would exclude runs whose stored figure is perfectly
+/// good. See that initializer and `DriftFigureSelection` for the full argument.
+///
 /// A curve with no stored drift figure (`driftFraction == nil`) contributes no point.
 /// Never a zero — the same "absent, not zero" discipline `NormalizedHeartRateCurve`
 /// documents for the number itself.
@@ -66,11 +71,12 @@ public struct HeartRateDriftTrendlineData: Hashable, Sendable {
     ///
     /// ### Why ordinary least squares
     ///
-    /// One scalar per run, an arbitrary and usually small number of points (the
-    /// overlay's stack limit caps this at twelve), and no claim beyond "the line
-    /// minimising squared vertical distance to these points" — the ordinary, legible
-    /// choice for exactly this shape of data, and simple enough that a test can pin its
-    /// arithmetic by hand rather than trusting a library.
+    /// One scalar per run — a dozen points behind the overlay at a week or a month, a
+    /// couple of hundred at a year — and no claim beyond "the line minimising squared
+    /// vertical distance to these points". The ordinary, legible choice for exactly this
+    /// shape of data, and simple enough that a test can pin its arithmetic by hand rather
+    /// than trusting a library. Centering on the first point (below) is what keeps it
+    /// well-conditioned as the span grows.
     public struct Fit: Hashable, Sendable {
         /// The date the fit is centered on for evaluation — `points.first?.date` by
         /// construction. Not meant to be read directly: call `value(at:)`, which
@@ -127,15 +133,34 @@ public struct HeartRateDriftTrendlineData: Hashable, Sendable {
     ///   (a raw candidate list, a hand-filtered subset) defeats the guarantee that this
     ///   trendline covers exactly the runs the overlay draws.
     public init(curves: [NormalizedHeartRateCurve]) {
-        let points = curves
-            .compactMap { curve -> Point? in
+        self.init(
+            points: curves.compactMap { curve -> Point? in
                 guard let driftFraction = curve.driftFraction else { return nil }
                 return Point(workoutID: curve.workoutID, date: curve.start, driftFraction: driftFraction)
             }
-            .sorted { $0.date < $1.date }
+        )
+    }
 
-        self.points = points
-        self.fit = Self.leastSquares(through: points)
+    /// The trendline over points a caller has already selected.
+    ///
+    /// **The `curves:` initializer above remains the only correct door wherever the
+    /// overlay is on screen**, and the reasoning in this type's documentation is
+    /// unchanged: a legend built from the overlay's stack and a line built from a
+    /// separately-filtered set would silently describe different runs.
+    ///
+    /// This door exists for the one span where there is no overlay to disagree with. At a
+    /// year `DriftSectionRepresentation.trendlineOnly` draws this chart alone, over
+    /// `DriftFigureSelection`'s wider set — every run whose stored drift figure is
+    /// meaningful, not only those whose curve was long enough to resample — and that type
+    /// owns the eligibility rules and states what it left out. Nothing else should call
+    /// this: a caller assembling points by hand is exactly the second filter the
+    /// `curves:` path exists to prevent.
+    ///
+    /// - Parameter points: in any order; this initializer sorts by date.
+    public init(points: [Point]) {
+        let ordered = points.sorted { $0.date < $1.date }
+        self.points = ordered
+        self.fit = Self.leastSquares(through: ordered)
     }
 
     private static func leastSquares(through points: [Point]) -> Fit? {
