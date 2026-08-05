@@ -28,9 +28,66 @@ import MaximizeCore
 /// argument for the navigation bar and the sheet. Reduce Transparency is therefore the
 /// system's business here too, and it handles it.
 ///
-/// MAX-098's persistent chat accessory attaches to this `TabView` next, as a
-/// `tabViewBottomAccessory`; nothing here is in its way.
+/// ## The persistent Ask control (MAX-098, §2.1 / §7)
+///
+/// Chat's one door is mounted here, on the `TabView` itself, so every tab gets it and
+/// pushing a workout detail does not stack a second one. Three things about it are
+/// decided in this file and nowhere else:
+///
+/// - **It is the `TabView`'s bottom accessory, not an overlay.** Spec §7.2 named the
+///   accessory as preferred and could not verify it existed; it does, and it is the
+///   better of the two for a reason beyond idiom — the system insets the tab content's
+///   safe area around it and moves it with the tab bar as that bar minimises. An
+///   overlay does neither: it would sit permanently on top of the bottom-trailing
+///   corner of three dense scrolling screens, and §7.3's "it never disappears, it may
+///   move" would have to be hand-written against `.tabBarMinimizeBehavior(.onScrollDown)`.
+///   The cost of the choice is stated plainly: the accessory is a full-width bar, so
+///   this is *not* §2.1's bottom-trailing capsule. See the PR.
+/// - **What it says is not decided here.** `ChatEntryPoint.resolve(focus:currentInterval:)`
+///   (`MaximizeCore`) turns "a run is on screen, or none is" into the subject, the
+///   label, and what VoiceOver reads. This file supplies the two facts and draws the
+///   result.
+/// - **A14 — no unattended chat call.** The button presents a sheet and nothing else.
+///   `ChatSheet` is constructed only when presented, and `ChatModel.load()` reads stored
+///   records; the model is called when the athlete sends a message.
+///
+/// ## Why the dashboard's interval model is owned up here
+///
+/// §3.4 makes the interval selector the app's single notion of "what period are we
+/// talking about", and a training thread freezes that window at creation. The Ask
+/// button needs it on every tab, so the model that holds it lives at the root and
+/// `DashboardView` is handed the same instance it used to own. One control, one window
+/// — a second notion of scope is precisely the class of mistake D2 and D3 exist to
+/// prevent.
 struct RootTabView: View {
+
+    /// The app's one interval selection (§3.4). `DashboardView` renders and mutates it;
+    /// the Ask button reads it to know which window a training thread would be about.
+    @State private var intervalModel = TrendIntervalSelectionModel()
+
+    /// What screen the Ask button is sitting on top of (§7.5). Put in the environment
+    /// so `WorkoutDetailView` — the one screen with something to report — can say so.
+    @State private var chatEntryPoint = ChatEntryPointModel()
+
+    /// Non-nil exactly while the chat sheet is up. Carries the subject captured **at the
+    /// moment of the tap** rather than re-reading it while the sheet is open, so what
+    /// opens is what the button said it would open.
+    @State private var chatOpening: ChatOpening?
+
+    /// `ChatSubject` is `Hashable`, which is all `sheet(item:)` needs of an identifier,
+    /// and it is the right one: two taps on the same subject are the same presentation.
+    private struct ChatOpening: Identifiable {
+        let subject: ChatSubject
+        var id: ChatSubject { subject }
+    }
+
+    private var entryPoint: ChatEntryPoint? {
+        ChatEntryPoint.resolve(
+            focus: chatEntryPoint.focus,
+            currentInterval: intervalModel.state.interval
+        )
+    }
+
     var body: some View {
         // The iOS 26 `Tab` builder, not `tabItem` (design review T2 / FR-4.1). The old
         // shape still compiles, and that is the problem with it: it renders a bar that
@@ -45,7 +102,7 @@ struct RootTabView: View {
             }
 
             Tab(RootTab.dashboard.title, systemImage: RootTab.dashboard.symbolName) {
-                DashboardView()
+                DashboardView(intervalModel: intervalModel)
             }
 
             Tab(RootTab.plan.title, systemImage: RootTab.plan.symbolName) {
@@ -59,6 +116,40 @@ struct RootTabView: View {
         // behaviour is the platform's judgement about a generic app, and this one is
         // three scroll views.
         .tabBarMinimizeBehavior(.onScrollDown)
+        // §7.2 / §7.3. The accessory is the slot above the tab bar that travels with it
+        // as it minimises, which is the whole reason it beats an overlay here: the
+        // control never disappears, it moves, and it does so because the platform moves
+        // it rather than because this file tried to.
+        //
+        // Nothing glasses this. The system draws the accessory's own container in
+        // Liquid Glass, exactly as it draws the tab bar's — see `ChatEntryButton` for
+        // why `glassChrome(.floatingControl)` would be the wrong call here, and the
+        // "Chrome" note above for the same argument about the bar.
+        //
+        // `entryPoint` is nil only when no run is on screen *and* the interval model is
+        // `.failed`, i.e. a system clock outside `CalendarDay`'s domain. Drawing nothing
+        // is the honest answer: there would be no subject to open a conversation about.
+        .tabViewBottomAccessory {
+            if let entryPoint {
+                ChatEntryButton(entryPoint: entryPoint) {
+                    chatOpening = ChatOpening(subject: entryPoint.subject)
+                }
+            }
+        }
+        // Attached to the `TabView` rather than inside the accessory so the sheet is
+        // presented by the app's root and covers the tab bar, matching how the workout
+        // detail screen has presented this same sheet since MAX-097.
+        //
+        // `currentInterval` is read live rather than captured with the subject: it is
+        // what §3.6(b)'s scope-mismatch note compares the thread's frozen window
+        // against, and what **New chat** freezes a fresh one from — both of which want
+        // the dashboard's window now, not the window at the instant of a tap.
+        .sheet(item: $chatOpening) { opening in
+            ChatSheet(subject: opening.subject, currentInterval: intervalModel.state.interval)
+        }
+        // Read by `chatEntryPointFocus(workoutID:)` on the workout detail screen. Set on
+        // the `TabView` so every tab's navigation stack inherits it.
+        .environment(chatEntryPoint)
         // The single line that makes the accent visible (design review §3.1). MAX-084
         // settled a violet, measured it, wrote it into amendment A7 — and it reached two
         // call sites, both at the bottom of one screen's scroll, because `.tint()` was

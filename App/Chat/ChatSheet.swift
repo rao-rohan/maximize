@@ -41,23 +41,20 @@ import MaximizeCore
 /// longer describes," `ChatModel`'s own documentation). A fresh `ChatModel` for the new
 /// opening is the correct way to honour that, not a workaround around it.
 ///
-/// ## What MAX-098 will need
+/// ## Who presents this (MAX-098)
 ///
-/// The persistent Ask button presents this exact type — `ChatSheet(subject:
-/// currentInterval:)` — the same way `WorkoutChatSectionView` does today:
+/// One caller: the persistent Ask button, from `RootTabView`. The workout detail
+/// screen's card presented it until MAX-098 and no longer does — two chat buttons on one
+/// screen opening the same conversation is worse than either alone (§2.1).
 ///
-/// ```swift
-/// .sheet(isPresented: $isPresentingChat) {
-///     ChatSheet(subject: subject, currentInterval: dashboardIntervalModel.state.interval)
-/// }
-/// ```
-///
-/// `currentInterval` should be the dashboard's live `TrendIntervalSelectionModel`
-/// selection, threaded down to wherever the Ask button lives — that plumbing is 098's
-/// job. This ticket's one caller (the workout entry point) has no such control on
-/// screen, so it omits the parameter and this type falls back to "this week," matching
-/// `TrendIntervalSelectionModel`'s own default (§3.4: "opened from anywhere else, the
-/// same default `TrendIntervalModel` uses").
+/// `currentInterval` is the dashboard's live `TrendIntervalSelectionModel` selection,
+/// which `RootTabView` owns so that every tab's Ask button reads the same one (§3.4:
+/// one control, one notion of "what period are we talking about"). It is read at
+/// presentation rather than captured with the subject, because it is what §3.6(b)'s
+/// mismatch note compares the thread's *frozen* window against and what **New chat**
+/// freezes a fresh scope from — both of which want the window the dashboard is on now.
+/// The parameter keeps its default so a caller with no such control still gets "this
+/// week", matching `TrendIntervalSelectionModel`'s own default.
 struct ChatSheet: View {
     private enum Route: Hashable {
         case threadList
