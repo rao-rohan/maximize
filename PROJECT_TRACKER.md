@@ -532,7 +532,7 @@ feature was governed by a plan that could not exist).
 | MAX-105 | **The plan on the dashboard calendar** — scheduled beneath actual | Owner | **Opus** ✅ |
 | MAX-106 | The UI standard, written into `CLAUDE.md` | Owner | Sonnet ✅ |
 | MAX-107 | Chat stream framing: close a frame without a blank line | Device report | Sonnet 🔒 ✅ |
-| MAX-108 | Tap a calendar day → its workouts; swipe between two on one day | Owner | Sonnet |
+| MAX-108 | Tap a calendar day → its workouts; swipe between two on one day | Owner | Sonnet ✅ |
 | MAX-109 | **Plans cover lifting as well as running** — spec first | Owner | **Opus** |
 | MAX-110 | **Tallies count future scheduled days as missed** — the streak tile reads 0 for most of every month | MAX-105 | Sonnet |
 | MAX-090 | Chat-first product spec: plan generation and Q&A through chat | Owner | **Opus** 🔒 ✅ |
@@ -616,13 +616,53 @@ fake was ever tested. CI never opens a socket, so nothing mechanical could see i
 test constructs the input a real adapter would produce, that construction is part of the
 contract and deserves the same scrutiny as the code.
 
-**MAX-108 — the calendar's days should be doors.** From the owner. Tapping a day in the
-week or month view goes to that day's workouts; where a day holds two, a swipe moves
+**MAX-108 — the calendar's days should be doors. Shipped.** From the owner. Tapping a day in
+the week or month view goes to that day's workouts; where a day holds two, a swipe moves
 between them rather than making the athlete go back and re-enter. Blocked until MAX-105
 landed, since both are in `ScoreCalendarView.swift`; now dispatchable. The two-workout case
 is the interesting half — a day with two runs is exactly the day you most want to compare,
 and back-out-and-re-enter is what makes comparison not worth doing. A day with **no**
 workout still needs an answer rather than a dead tap.
+
+**Which days are doors is a core decision.** `ScoreCalendarDay.destination`
+(`Sources/MaximizeCore/Dashboard/ScoreCalendar.swift`) is a new `ScoreCalendarDayDestination`
+— `.workouts([UUID])`, `.notYetDue`, `.nothingRecorded` — resolved in `ScoreCalendar.resolve`
+alongside `state` and `agreement`, and unit tested there rather than left for a view to
+infer from `state`'s case. That distinction turned out to matter: five of
+`ScoreCalendarDayState`'s cases share "nothing recorded" (`.missed`, `.convertedRest`,
+`.scheduledRest`, `.forthcoming`, `.unplanned`), and only `.forthcoming` names its own
+tense — `.scheduledRest` and `.unplanned` read identically whether the day is behind the
+athlete or still ahead. `destination` is decided against `today` instead, independent of
+which of the five a day landed in, so a future scheduled-rest or future-unplanned day
+correctly reads `.notYetDue` rather than a dead end. New tests pin both directions for
+each ambiguous state, plus the ordinary one/two/three-workout cases.
+
+**The transition.** `App/Dashboard/ScoreCalendarView.swift` turns the core's decision into
+one of three things, all sharing the exact cell visual MAX-105/MAX-084/MAX-087 already
+drew — no restyling, per the brief: a single workout pushes `WorkoutDetailView` directly on
+`DashboardView`'s existing `NavigationStack` (registered via a `ScoreCalendarDoorRoute`
+`navigationDestination` declared beside the cells, so `DashboardView.swift` — and, per the
+brief, `RootTabView.swift`, which MAX-085 now owns — needed no changes at all); two or more
+pushes the new `App/Workouts/DayWorkoutsView.swift`, a `TabView(.page)` over
+`WorkoutDetailView` with explicit previous/next buttons in a `.bottomBar` toolbar group (not
+the swipe alone — the accessibility brief requires the move be reachable without a gesture)
+and no page dots, since the "N of M" numeral already carries that; an empty destination
+shows a `.alert` carrying the *exact* sentence `ScoreCalendarFormatting.accessibilityLabel`
+already speaks to VoiceOver, so a sighted tap and a VoiceOver swipe learn the same fact
+instead of the tap reading as broken.
+
+**Every day-grid cell is a real `Button`/`NavigationLink` now**, `.buttonStyle(.plain)` to
+keep the default press/tint chrome from leaking onto MAX-105's fill and ring, with a
+`LayoutMetrics.minimumTapTarget` (44pt, Apple's own minimum) floored via
+`.frame(minWidth:minHeight:)` + `.contentShape` — sized independently of the drawn cell so a
+future ticket that shrinks the visual square still clears 44pt without this one having grown
+it. The year heatmap is explicitly untouched — its ~6pt marks are nowhere near a real tap
+target, and pretending otherwise would be worse than leaving it read-only, per the brief.
+
+**Needs device verification**, and the PR leads with it: the two-workout swipe (both the
+physical gesture and the previous/next buttons), the empty-day alert's wording, and a
+VoiceOver pass over a one-workout day, a two-workout day, and each of the three
+no-workout states.
 
 **MAX-109 — plans cover lifting as well as running. Spec first.** From the owner, and
 bigger than one sentence suggests: §10.2's classification reads a heart-rate profile
