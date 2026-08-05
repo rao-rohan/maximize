@@ -332,6 +332,66 @@ final class DerivedMetricsCalculatorTests: XCTestCase {
         XCTAssertEqual(metrics.zoneSplits.totalSeconds, 3_600, accuracy: 1e-9)
     }
 
+    // MARK: - MAX-111: a workout that is not a run gets no running-only metrics
+
+    /// The confirmed defect: a strength session was storing a "cadence" — its incidental
+    /// between-sets step count divided by the session's duration — and `WorkoutFactSheet`
+    /// was sending that number to Claude as a measured fact about the workout.
+    func testStrengthTrainingGetsNoCadence() throws {
+        let workout = try Fixture.workout(
+            activityType: .traditionalStrengthTraining,
+            distanceMeters: nil,
+            hasRoute: false
+        )
+        let input = try DerivedMetricsInput(
+            workout: workout,
+            heartRateSeries: try MetricsFixture.series([(0, 120), (3_600, 180)]),
+            totalStepCount: 9_900
+        )
+
+        let metrics = try DerivedMetricsCalculator.compute(input, plan: try Fixture.plan())
+
+        // Absent, not zero — the distinction this whole file is written around. A zero
+        // would be averaged into the dashboard's cadence trend and drawn on the cadence
+        // band as a session with no turnover at all.
+        XCTAssertNil(metrics.averageCadenceStepsPerMinute)
+
+        // The heart rate the athlete genuinely produced is still measured. Whether a lift
+        // should be read against a cap of its own is a plan-model question (MAX-109), not
+        // a reason to throw away the reading.
+        XCTAssertEqual(try XCTUnwrap(metrics.averageHeartRateBPM), 150, accuracy: 1e-9)
+        XCTAssertEqual(try XCTUnwrap(metrics.maximumHeartRateBPM), 180, accuracy: 1e-9)
+        XCTAssertEqual(try XCTUnwrap(metrics.timeAboveCapSeconds), 1_800, accuracy: 1e-9)
+        XCTAssertEqual(metrics.zoneSplits.totalSeconds, 3_600, accuracy: 1e-9)
+    }
+
+    /// The same gate on a workout that *would* have produced the running numbers: a hike
+    /// carries a route and a recorded distance, so before this it got a pace off Minetti's
+    /// cost-of-**running** curve and a set of running pace splits.
+    func testANonRunWithARouteGetsNoRunningPaceOrSplits() throws {
+        let input = try DerivedMetricsInput(
+            workout: try Fixture.workout(activityType: .hiking),
+            route: try matchingRoute(),
+            totalStepCount: 9_900
+        )
+
+        let metrics = try DerivedMetricsCalculator.compute(input, plan: try Fixture.plan())
+
+        XCTAssertNil(metrics.gradeAdjustedPaceSecondsPerKilometer)
+        XCTAssertNil(metrics.distanceSplits)
+        XCTAssertNil(metrics.averageCadenceStepsPerMinute)
+        // MAX-067's backfill selects on this flag; leaving it false would have the sweep
+        // re-fetch a hike's samples on every launch, forever, hunting splits it will never
+        // be allowed to compute.
+        XCTAssertTrue(metrics.distanceSplitsComputed)
+    }
+
+    // The other half of the gate — that `isRun` still admits the treadmill, so an indoor
+    // run is not quietly demoted to a non-run — is already pinned above by
+    // `testIndoorRunHasNoGradeAdjustedPaceAndKeepsEverythingElse` (cadence 165) and
+    // `testTreadmillDistanceSplitsAreComputedOnTheMetricsRecordFromDistanceSamples`
+    // (a real breakdown). Both fail if the discipline check ever narrows to outdoor runs.
+
     // MARK: - Input invariants
 
     func testSeriesFromAnotherWorkoutIsRejected() throws {
