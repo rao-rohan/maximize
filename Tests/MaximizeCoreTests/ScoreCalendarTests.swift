@@ -200,29 +200,216 @@ final class ScoreCalendarTests: XCTestCase {
 
     // MARK: - .awaitingScore
 
-    func testARecordedButUnscoredWorkoutIsAwaitingScore() throws {
+    func testARecordedButUnscoredRunIsAwaitingScore() throws {
         let workoutID = UUID()
         let days = try resolve(
             from: "2026-01-06", through: "2026-01-06",
-            workouts: [try workout(id: workoutID, on: "2026-01-06", activityType: .hiking)],
+            workouts: [try workout(id: workoutID, on: "2026-01-06", activityType: .running)],
             scoreLedgers: [:],
             planCalendar: try calendar()
         )
-        XCTAssertEqual(try state(days, on: "2026-01-06"), .awaitingScore(activityType: .hiking))
+        XCTAssertEqual(try state(days, on: "2026-01-06"), .awaitingScore(activityType: .running))
     }
 
-    func testMultipleUnscoredWorkoutsPickTheEarliestDeterministically() throws {
+    /// Both runs, deliberately: with two *kinds* of scoreless day since MAX-126, a
+    /// mixed pair would leave this assertion satisfiable by either the earliest-start
+    /// tiebreak or the run-before-non-run precedence, and it is the tiebreak this test
+    /// is named for. The precedence has tests of its own below.
+    func testMultipleUnscoredRunsPickTheEarliestDeterministically() throws {
         let earlier = UUID()
         let later = UUID()
         let workouts = [
             try workout(id: earlier, on: "2026-01-06", activityType: .running, startOffsetSeconds: 0),
-            try workout(id: later, on: "2026-01-06", activityType: .cycling, startOffsetSeconds: 3_600 * 4),
+            try workout(
+                id: later, on: "2026-01-06",
+                activityType: .treadmillRunning, startOffsetSeconds: 3_600 * 4
+            ),
         ]
         let days = try resolve(
             from: "2026-01-06", through: "2026-01-06",
             workouts: workouts, scoreLedgers: [:], planCalendar: try calendar()
         )
         XCTAssertEqual(try state(days, on: "2026-01-06"), .awaitingScore(activityType: .running))
+    }
+
+    // MARK: - MAX-126: .noVerdict — recorded, and no score is coming
+
+    /// The defect this state exists to fix. Before MAX-126 a lift resolved to
+    /// `.awaitingScore`, which the calendar draws — and VoiceOver speaks — as a run the
+    /// app has not got round to yet. Since MAX-111 no score is ever attempted for it, so
+    /// that was a wait with nothing at the end of it.
+    func testARecordedNonRunHasNoVerdictRatherThanAwaitingOne() throws {
+        let days = try resolve(
+            from: "2026-01-06", through: "2026-01-06",
+            workouts: [
+                try workout(
+                    on: "2026-01-06",
+                    activityType: .traditionalStrengthTraining
+                )
+            ],
+            scoreLedgers: [:],
+            planCalendar: try calendar()
+        )
+        XCTAssertEqual(
+            try state(days, on: "2026-01-06"),
+            .noVerdict(activityType: .traditionalStrengthTraining)
+        )
+    }
+
+    /// Every non-run, not just the lift MAX-109 is about: the split is
+    /// `ActivityType.isRun`, so a ride, a hike and a walk are in exactly the same
+    /// position and must not read as runs the app owes a verdict to.
+    func testEveryNonRunActivityResolvesToNoVerdict() throws {
+        for activityType: ActivityType in [.cycling, .hiking, .walking, .other] {
+            let days = try resolve(
+                from: "2026-01-06", through: "2026-01-06",
+                workouts: [try workout(on: "2026-01-06", activityType: activityType)],
+                scoreLedgers: [:],
+                planCalendar: try calendar()
+            )
+            XCTAssertEqual(
+                try state(days, on: "2026-01-06"),
+                .noVerdict(activityType: activityType),
+                "\(activityType)"
+            )
+        }
+    }
+
+    func testMultipleUnscoredNonRunsPickTheEarliestDeterministically() throws {
+        let workouts = [
+            try workout(
+                on: "2026-01-06", activityType: .traditionalStrengthTraining,
+                startOffsetSeconds: 3_600 * 6
+            ),
+            try workout(on: "2026-01-06", activityType: .cycling, startOffsetSeconds: 3_600),
+        ]
+        let days = try resolve(
+            from: "2026-01-06", through: "2026-01-06",
+            workouts: workouts, scoreLedgers: [:], planCalendar: try calendar()
+        )
+        XCTAssertEqual(try state(days, on: "2026-01-06"), .noVerdict(activityType: .cycling))
+    }
+
+    /// A lift on a day the plan asked for an easy run is **not** a miss. Something was
+    /// recorded, and D4's "a workout that happened outranks the plan's ask" is unchanged
+    /// by this ticket — whether an unmet *running* obligation should recolour such a day
+    /// is §7.2's roll-up, which is MAX-116/MAX-117's and needs the lifting plan model to
+    /// exist first. The prescription is still carried on the cell either way.
+    func testALiftOnAPrescribedRunDayIsNeitherMissedNorScored() throws {
+        let days = try resolve(
+            from: "2026-01-06", through: "2026-01-06", // Tuesday: easy 8 km
+            workouts: [
+                try workout(on: "2026-01-06", activityType: .traditionalStrengthTraining)
+            ],
+            scoreLedgers: [:],
+            planCalendar: try calendar()
+        )
+        let resolved = try cell(days, on: "2026-01-06")
+        XCTAssertEqual(resolved.state, .noVerdict(activityType: .traditionalStrengthTraining))
+        XCTAssertEqual(resolved.prescription?.scheduledSession.kind, .easy)
+        // No stored classification exists for a lift, so there is nothing to compare
+        // against the ask (D2) — and unlike an awaiting run, there never will be.
+        XCTAssertNil(resolved.agreement)
+        XCTAssertNil(resolved.state.scoredBand)
+    }
+
+    // MARK: - MAX-126: a day holding both a run and a lift
+
+    /// The ordinary day once MAX-109 lands. A pending answer outranks a settled absence:
+    /// this cell is about to become a band when the run is scored, so calling the day
+    /// "no verdict" would be false within minutes. Asserted with the lift *first* so the
+    /// earliest-start tiebreak cannot be what produces the answer.
+    func testADayHoldingALiftAndAnUnscoredRunAwaitsTheRunsScore() throws {
+        let workouts = [
+            try workout(
+                on: "2026-01-06", activityType: .traditionalStrengthTraining,
+                startOffsetSeconds: 3_600
+            ),
+            try workout(on: "2026-01-06", activityType: .running, startOffsetSeconds: 3_600 * 10),
+        ]
+        let days = try resolve(
+            from: "2026-01-06", through: "2026-01-06",
+            workouts: workouts, scoreLedgers: [:], planCalendar: try calendar()
+        )
+        XCTAssertEqual(try state(days, on: "2026-01-06"), .awaitingScore(activityType: .running))
+    }
+
+    /// And once that run is scored, the band wins outright — the lift alongside it takes
+    /// nothing away from a day that was judged.
+    func testADayHoldingALiftAndAScoredRunShowsTheRunsBand() throws {
+        let runID = UUID()
+        let workouts = [
+            try workout(
+                on: "2026-01-06", activityType: .traditionalStrengthTraining,
+                startOffsetSeconds: 3_600
+            ),
+            try workout(
+                id: runID, on: "2026-01-06",
+                activityType: .running, startOffsetSeconds: 3_600 * 10
+            ),
+        ]
+        let days = try resolve(
+            from: "2026-01-06", through: "2026-01-06",
+            workouts: workouts,
+            scoreLedgers: [runID: try ledger(points: 88, workoutID: runID)],
+            planCalendar: try calendar()
+        )
+        XCTAssertEqual(
+            try state(days, on: "2026-01-06"),
+            .scored(band: .effective, activityType: .running)
+        )
+    }
+
+    /// D8. A lift ingested before MAX-111 carries an immutable auto-score produced by
+    /// the running rubric, and this ticket does not reach back and hide it: the day still
+    /// shows the band that was stored. Whether those historical scores should be
+    /// relabelled is A21/MAX-125, the owner's decision, and it has not been made.
+    func testAnAlreadyScoredNonRunKeepsItsStoredBand() throws {
+        let liftID = UUID()
+        let days = try resolve(
+            from: "2026-01-06", through: "2026-01-06",
+            workouts: [
+                try workout(
+                    id: liftID, on: "2026-01-06",
+                    activityType: .traditionalStrengthTraining
+                )
+            ],
+            scoreLedgers: [liftID: try ledger(points: 30, workoutID: liftID)],
+            planCalendar: try calendar()
+        )
+        XCTAssertEqual(
+            try state(days, on: "2026-01-06"),
+            .scored(band: .ineffective, activityType: .traditionalStrengthTraining)
+        )
+    }
+
+    /// The invariant the calendar's drawing is paid for by: the two scoreless states
+    /// partition on `ActivityType.isRun`, so the activity glyph a cell already carries
+    /// separates them without a new colour or a new mark. If this ever fails, a lifting
+    /// day and a run awaiting its score have become the same cell.
+    func testTheTwoScorelessStatesNeverCarryTheSameActivityType() throws {
+        let workouts = [
+            try workout(on: "2026-01-05", activityType: .running),
+            try workout(on: "2026-01-06", activityType: .treadmillRunning),
+            try workout(on: "2026-01-07", activityType: .traditionalStrengthTraining),
+            try workout(on: "2026-01-08", activityType: .cycling),
+            try workout(on: "2026-01-09", activityType: .hiking),
+            try workout(on: "2026-01-10", activityType: .walking),
+        ]
+        let days = try resolve(
+            from: "2026-01-05", through: "2026-01-11",
+            workouts: workouts, scoreLedgers: [:], planCalendar: try calendar()
+        )
+        for resolved in days {
+            switch resolved.state {
+            case .awaitingScore(let activityType):
+                XCTAssertTrue(activityType.isRun, "\(resolved.date): \(activityType)")
+            case .noVerdict(let activityType):
+                XCTAssertFalse(activityType.isRun, "\(resolved.date): \(activityType)")
+            case .scored, .missed, .convertedRest, .scheduledRest, .forthcoming, .unplanned:
+                continue
+            }
+        }
     }
 
     // MARK: - .missed / .convertedRest / .scheduledRest / .unplanned

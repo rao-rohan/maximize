@@ -5,14 +5,20 @@ import MaximizeCore
 /// effectiveness score, whether it was effective, and the one-line rationale — or the
 /// honest absence of a score.
 ///
-/// ## The unscored state is first-class
+/// ## Both scoreless states are first-class, and they are not the same state
 ///
-/// MAX-015/MAX-023 are still in flight, so in practice **every workout this renders
-/// today is unscored** — either scoring hasn't run yet (seconds to minutes after a run
-/// finishes) or never will (no API key, no network). `unscoredSection` is not a dimmed
-/// or empty copy of the scored layout: it has its own copy, its own neutral surface,
-/// and it carries **none** of the three saturated score-band colors. Coloring an
-/// undecided state would say a verdict exists when it does not.
+/// A workout with no score is ordinary here, and there are two ways to be one.
+/// `awaitingScoreSection` is a run whose score has not landed yet — seconds after a
+/// run finishes, or indefinitely with no API key and no network — and it says so with a
+/// spinner, because the screen really will change. `noVerdictSection` (MAX-126) is a
+/// lift, a ride or a hike: MAX-111 stopped the running rubric being applied to those, so
+/// no score is coming, ever, and a spinner there is the app promising something it
+/// cannot deliver. It carries no spinner and no future tense.
+///
+/// Neither is a dimmed or empty copy of the scored layout: each has its own copy on its
+/// own neutral surface, and each carries **none** of the three saturated score-band
+/// colors. Coloring an undecided state would say a verdict exists when it does not;
+/// coloring a state that will never have one would be worse.
 ///
 /// ## Manual annotations sit alongside the auto-score, never over it
 ///
@@ -76,8 +82,10 @@ struct VerdictHeaderView: View {
     @ViewBuilder
     private var scoringSection: some View {
         switch verdict.scoring {
-        case .unscored:
-            unscoredSection
+        case .awaitingScore:
+            awaitingScoreSection
+        case .noVerdict:
+            noVerdictSection
         case let .scored(automatic, annotation):
             scoredSection(automatic: automatic, annotation: annotation)
         }
@@ -87,20 +95,54 @@ struct VerdictHeaderView: View {
     /// comment above). `contentSurface(.inset)` keeps it visually a *part of* the
     /// header rather than a sibling card, since it is standing in for the score area,
     /// not narrating something separate.
-    private var unscoredSection: some View {
+    private var awaitingScoreSection: some View {
         HStack(spacing: Spacing.compact) {
             ProgressView()
-            VStack(alignment: .leading, spacing: Spacing.tight) {
-                Text("Not yet scored")
-                    .font(.metricSecondary)
-                    .foregroundStyle(Color.textPrimary)
-                Text("Scoring runs automatically once the run is captured.")
-                    .font(.metricLabel)
-                    .foregroundStyle(Color.textSecondary)
-            }
+            scorelessCopy(
+                headline: "Not yet scored",
+                detail: "Scoring runs automatically once the run is captured."
+            )
             Spacer(minLength: 0)
         }
         .contentSurface(.inset)
+    }
+
+    /// The same neutral surface as `awaitingScoreSection`, with the spinner removed and
+    /// the sentence in the present tense.
+    ///
+    /// **The spinner is the part that was lying**, so it is the part that goes: it is an
+    /// indeterminate progress indicator over a process that is not running, and
+    /// VoiceOver announces it as "in progress". What replaces it is not an error icon
+    /// and not an empty slot — the workout was captured in full, and the only thing
+    /// absent is a number the plan has no way to produce. Stating that plainly, once, is
+    /// the whole design (CLAUDE.md: absence is a designed state).
+    ///
+    /// The two lines are combined into one accessibility element so VoiceOver reads the
+    /// fact and its reason as a single sentence rather than as two unrelated labels.
+    private var noVerdictSection: some View {
+        HStack(spacing: Spacing.compact) {
+            scorelessCopy(
+                headline: "Recorded, not scored",
+                detail: "The plan scores runs, so there's no score for this workout."
+            )
+            Spacer(minLength: 0)
+        }
+        .contentSurface(.inset)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// Shared so the two scoreless states cannot drift apart in weight or colour — one
+    /// voice, one weight, one surface. Only the words differ, which is the only thing
+    /// that should.
+    private func scorelessCopy(headline: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.tight) {
+            Text(headline)
+                .font(.metricSecondary)
+                .foregroundStyle(Color.textPrimary)
+            Text(detail)
+                .font(.metricLabel)
+                .foregroundStyle(Color.textSecondary)
+        }
     }
 
     private func scoredSection(automatic: Score, annotation: ScoreAnnotation?) -> some View {
