@@ -86,6 +86,185 @@ final class WorkoutSampleExtractorTests: XCTestCase {
         XCTAssertNotNil(input.heartRateSeries)
     }
 
+    // MARK: - Treadmill distance samples are the mirror image (MAX-066)
+
+    func testAnIndoorWorkoutFetchesDistanceSamplesButNotARoute() async throws {
+        let workout = try Fixture.workout(activityType: .treadmillRunning, hasRoute: false)
+        let fetcher = FakeWorkoutSampleFetcher()
+        fetcher.enqueueDistanceSamplePage(DistanceSampleFetchPage(samples: [
+            RawDistanceSample(date: Fixture.epoch.addingTimeInterval(10), meters: 0),
+            RawDistanceSample(date: Fixture.epoch.addingTimeInterval(20), meters: 25),
+        ]))
+
+        let input = try await WorkoutSampleExtractor.extract(for: workout, using: fetcher)
+
+        let series = try XCTUnwrap(input.distanceSamples)
+        XCTAssertEqual(series.samples.map(\.offsetSeconds), [10, 20])
+        XCTAssertEqual(series.samples.map(\.meters), [0, 25])
+        XCTAssertNil(input.route)
+        XCTAssertTrue(fetcher.receivedRouteRequests.isEmpty)
+    }
+
+    /// The exact mirror of `testAnIndoorWorkoutNeverQueriesForARoute`: an outdoor run
+    /// already has an authoritative track, so the distance-sample query is never run.
+    func testAnOutdoorWorkoutNeverQueriesForDistanceSamples() async throws {
+        let workout = try Fixture.workout(hasRoute: true)
+        let fetcher = FakeWorkoutSampleFetcher()
+        fetcher.setRoute(RouteFetchResult(points: [
+            RawRoutePoint(date: Fixture.epoch.addingTimeInterval(10), latitudeDegrees: 40, longitudeDegrees: -73),
+        ]))
+
+        let input = try await WorkoutSampleExtractor.extract(for: workout, using: fetcher)
+
+        XCTAssertNil(input.distanceSamples)
+        XCTAssertTrue(fetcher.receivedDistanceSampleRequests.isEmpty)
+        XCTAssertNotNil(input.route)
+    }
+
+    func testSortsDistanceSamplesRegardlessOfHealthStoreOrder() async throws {
+        let workout = try Fixture.workout(hasRoute: false)
+        let fetcher = FakeWorkoutSampleFetcher()
+        fetcher.enqueueDistanceSamplePage(DistanceSampleFetchPage(samples: [
+            RawDistanceSample(date: Fixture.epoch.addingTimeInterval(20), meters: 25),
+            RawDistanceSample(date: Fixture.epoch.addingTimeInterval(5), meters: 0),
+        ]))
+
+        let input = try await WorkoutSampleExtractor.extract(for: workout, using: fetcher)
+
+        let series = try XCTUnwrap(input.distanceSamples)
+        XCTAssertEqual(series.samples.map(\.offsetSeconds), [5, 20])
+    }
+
+    func testNoDistanceSamplesAtAllIsAbsentNotEmpty() async throws {
+        let workout = try Fixture.workout(hasRoute: false)
+        let fetcher = FakeWorkoutSampleFetcher()
+        // No pages enqueued: the fake returns an empty page.
+
+        let input = try await WorkoutSampleExtractor.extract(for: workout, using: fetcher)
+
+        XCTAssertNil(input.distanceSamples)
+    }
+
+    func testADistanceSampleFetchFailureLeavesTheWorkoutUsableWithHeartRateIntact() async throws {
+        let workout = try Fixture.workout(hasRoute: false)
+        let fetcher = FakeWorkoutSampleFetcher()
+        fetcher.enqueueHeartRatePage(HeartRateSampleFetchPage(samples: [
+            RawHeartRateSample(date: Fixture.epoch.addingTimeInterval(10), beatsPerMinute: 140),
+        ]))
+        fetcher.failNextDistanceSampleFetch(with: TestFetchError.boom)
+        let diagnostics = SampleExtractionDiagnosticRecorder()
+
+        let input = try await WorkoutSampleExtractor.extract(
+            for: workout,
+            using: fetcher,
+            report: diagnostics.handler()
+        )
+
+        XCTAssertNotNil(input.heartRateSeries)
+        XCTAssertNil(input.distanceSamples)
+        XCTAssertEqual(diagnostics.reported, [.distanceSampleFetchFailed])
+    }
+
+    func testDistanceSamplePagingResumesAfterTheLastSampleOfThePreviousPage() async throws {
+        let workout = try Fixture.workout(hasRoute: false)
+        let fetcher = FakeWorkoutSampleFetcher()
+        let policy = try SampleExtractionPolicy(
+            heartRateBatchLimit: 100,
+            heartRateMaxPages: 5,
+            maxRoutePoints: 100,
+            distanceSampleBatchLimit: 2,
+            distanceSampleMaxPages: 5
+        )
+        let firstPageLastDate = Fixture.epoch.addingTimeInterval(20)
+        fetcher.enqueueDistanceSamplePage(DistanceSampleFetchPage(samples: [
+            RawDistanceSample(date: Fixture.epoch.addingTimeInterval(10), meters: 0),
+            RawDistanceSample(date: firstPageLastDate, meters: 25),
+        ]))
+        fetcher.enqueueDistanceSamplePage(DistanceSampleFetchPage(samples: [
+            RawDistanceSample(date: Fixture.epoch.addingTimeInterval(30), meters: 26),
+        ]))
+
+        let input = try await WorkoutSampleExtractor.extract(for: workout, using: fetcher, policy: policy)
+
+        XCTAssertEqual(fetcher.receivedDistanceSampleRequests.count, 2)
+        XCTAssertNil(fetcher.receivedDistanceSampleRequests[0].after)
+        let secondRequestAfter = try XCTUnwrap(fetcher.receivedDistanceSampleRequests[1].after)
+        XCTAssertGreaterThan(secondRequestAfter, firstPageLastDate)
+
+        let series = try XCTUnwrap(input.distanceSamples)
+        XCTAssertEqual(series.samples.map(\.offsetSeconds), [10, 20, 30])
+    }
+
+    func testDistanceSamplePagingTruncatesAndReportsWhenThePolicyLimitIsReached() async throws {
+        let workout = try Fixture.workout(hasRoute: false)
+        let fetcher = FakeWorkoutSampleFetcher()
+        let policy = try SampleExtractionPolicy(
+            heartRateBatchLimit: 100,
+            heartRateMaxPages: 5,
+            maxRoutePoints: 100,
+            distanceSampleBatchLimit: 1,
+            distanceSampleMaxPages: 2
+        )
+        fetcher.enqueueDistanceSamplePage(DistanceSampleFetchPage(samples: [
+            RawDistanceSample(date: Fixture.epoch.addingTimeInterval(10), meters: 0),
+        ]))
+        fetcher.enqueueDistanceSamplePage(DistanceSampleFetchPage(samples: [
+            RawDistanceSample(date: Fixture.epoch.addingTimeInterval(20), meters: 25),
+        ]))
+        let diagnostics = SampleExtractionDiagnosticRecorder()
+
+        let input = try await WorkoutSampleExtractor.extract(
+            for: workout,
+            using: fetcher,
+            policy: policy,
+            report: diagnostics.handler()
+        )
+
+        XCTAssertEqual(fetcher.receivedDistanceSampleRequests.count, 2)
+        XCTAssertEqual(input.distanceSamples?.count, 2)
+        XCTAssertEqual(diagnostics.reported, [.distanceSamplePagingTruncated(samplesCollected: 2)])
+    }
+
+    func testAnImplausibleDistanceSampleIsDroppedAndReported() async throws {
+        let workout = try Fixture.workout(hasRoute: false)
+        let fetcher = FakeWorkoutSampleFetcher()
+        fetcher.enqueueDistanceSamplePage(DistanceSampleFetchPage(samples: [
+            RawDistanceSample(date: Fixture.epoch.addingTimeInterval(10), meters: 25),
+            // A negative distance is not a real reading — Validate.nonNegative rejects it.
+            RawDistanceSample(date: Fixture.epoch.addingTimeInterval(20), meters: -5),
+        ]))
+        let diagnostics = SampleExtractionDiagnosticRecorder()
+
+        let input = try await WorkoutSampleExtractor.extract(
+            for: workout,
+            using: fetcher,
+            report: diagnostics.handler()
+        )
+
+        XCTAssertEqual(input.distanceSamples?.samples.map(\.offsetSeconds), [10])
+        XCTAssertEqual(diagnostics.reported, [.distanceSamplesDropped(count: 1)])
+    }
+
+    func testADuplicateDistanceSampleTimestampAcrossPagesIsDroppedAndReported() async throws {
+        let workout = try Fixture.workout(hasRoute: false)
+        let fetcher = FakeWorkoutSampleFetcher()
+        let duplicateDate = Fixture.epoch.addingTimeInterval(10)
+        fetcher.enqueueDistanceSamplePage(DistanceSampleFetchPage(samples: [
+            RawDistanceSample(date: duplicateDate, meters: 25),
+            RawDistanceSample(date: duplicateDate, meters: 26),
+        ]))
+        let diagnostics = SampleExtractionDiagnosticRecorder()
+
+        let input = try await WorkoutSampleExtractor.extract(
+            for: workout,
+            using: fetcher,
+            report: diagnostics.handler()
+        )
+
+        XCTAssertEqual(input.distanceSamples?.count, 1)
+        XCTAssertEqual(diagnostics.reported, [.distanceSamplesDropped(count: 1)])
+    }
+
     func testNoHeartRateAtAllIsAbsentNotEmpty() async throws {
         let workout = try Fixture.workout(hasRoute: false)
         let fetcher = FakeWorkoutSampleFetcher()

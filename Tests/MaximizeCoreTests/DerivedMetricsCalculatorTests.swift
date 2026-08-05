@@ -301,6 +301,26 @@ final class DerivedMetricsCalculatorTests: XCTestCase {
         XCTAssertNil(metrics.distanceSplits)
     }
 
+    /// MAX-066: a treadmill run with a distance-sample series gets a real breakdown,
+    /// computed on the metrics record exactly like the GPS path above — the arithmetic
+    /// is pinned in `DistanceSplitsTests`, this only checks the ingestion-time wiring.
+    func testTreadmillDistanceSplitsAreComputedOnTheMetricsRecordFromDistanceSamples() throws {
+        let workout = try Fixture.workout(activityType: .treadmillRunning, hasRoute: false)
+        var samples: [DistanceSample] = [try DistanceSample(offsetSeconds: 0, meters: 0)]
+        for index in 1...9 {
+            samples.append(try DistanceSample(offsetSeconds: Double(index) * 100, meters: 10_000.0 / 9))
+        }
+        let input = try DerivedMetricsInput(
+            workout: workout,
+            distanceSamples: try DistanceSampleSeries(workoutID: workout.id, samples: samples)
+        )
+        let metrics = try DerivedMetricsCalculator.compute(input, plan: try Fixture.plan())
+
+        let splits = try XCTUnwrap(metrics.distanceSplits)
+        XCTAssertEqual(try XCTUnwrap(splits.series(in: .kilometers)).splits.count, 10)
+        XCTAssertNotNil(splits.series(in: .miles))
+    }
+
     /// The reference route is 3 336 m of track against a 10 km run — a truncated or
     /// dropped-out track, which cannot be stretched into a breakdown (see
     /// `DistanceSplitCalculator`). Every other metric on the run is unaffected.
@@ -335,6 +355,20 @@ final class DerivedMetricsCalculatorTests: XCTestCase {
                 workout: workout,
                 route: try MetricsFixture.meridianRoute(
                     altitudes: [10, 20], workoutID: Fixture.otherWorkoutID
+                )
+            )
+        )
+    }
+
+    func testDistanceSamplesFromAnotherWorkoutIsRejected() throws {
+        let workout = try Fixture.workout()
+        assertThrows(
+            .inconsistent,
+            try DerivedMetricsInput(
+                workout: workout,
+                distanceSamples: try DistanceSampleSeries(
+                    workoutID: Fixture.otherWorkoutID,
+                    samples: [try DistanceSample(offsetSeconds: 0, meters: 0)]
                 )
             )
         )
