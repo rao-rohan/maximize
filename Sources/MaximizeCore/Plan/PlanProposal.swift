@@ -538,7 +538,7 @@ public struct PlanProposal: Hashable, Sendable, Codable {
     private static func renderedSchema() -> String {
         let heartRate = HeartRateSample.plausibleBPM
         let scores = ScoreValue.permittedRange
-        let kindLines = ScheduledSessionKind.allCases
+        let kindLines = ScheduledSessionKind.prescribable
             .map { "    - \"\($0.rawValue)\" — \(gloss(for: $0))" }
             .joined(separator: "\n")
 
@@ -602,7 +602,14 @@ public struct PlanProposal: Hashable, Sendable, Codable {
 
     /// One line per session kind, exhaustive by the compiler rather than by a dictionary
     /// somebody has to remember to extend. Adding a case stops this switch compiling,
-    /// which is a stronger guarantee than the test that also checks it.
+    /// which is a stronger guarantee than the test that also checks it — and it did
+    /// exactly that when MAX-128 added `.lift`.
+    ///
+    /// `.lift` is glossed but **not offered**: the vocabulary the model is given comes
+    /// from `ScheduledSessionKind.prescribable`, which excludes it, for the same reason
+    /// MAX-128 kept it out of the authoring picker. There is one prescription slot today,
+    /// and a lift proposed into the run slot would be a plan the athlete cannot mean.
+    /// MAX-141 opens it, once MAX-129 has given the week a second slot to put it in.
     private static func gloss(for kind: ScheduledSessionKind) -> String {
         switch kind {
         case .easy:
@@ -616,6 +623,8 @@ public struct PlanProposal: Hashable, Sendable, Codable {
         case .other:
             return "scheduled, but not one of the three run types the scoring rubric "
                 + "reasons about — cross-training, strength, mobility"
+        case .lift:
+            return "a strength session. Not proposable yet — see `prescribable`"
         }
     }
 
@@ -625,7 +634,7 @@ public struct PlanProposal: Hashable, Sendable, Codable {
         .joined(separator: ", ")
 
     /// "easy, long, …", derived from the enum for the same reason.
-    static let sessionKindVocabulary = ScheduledSessionKind.allCases
+    static let sessionKindVocabulary = ScheduledSessionKind.prescribable
         .map(\.rawValue)
         .joined(separator: ", ")
 

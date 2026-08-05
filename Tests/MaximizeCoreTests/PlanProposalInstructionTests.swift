@@ -119,7 +119,10 @@ final class PlanProposalInstructionTests: XCTestCase {
     /// without anyone editing it.
     func testAVocabularyRejectionListsTheWholeVocabulary() {
         let kinds = PlanProposalError.unknownSessionKind(name: "tempo").description
-        for kind in ScheduledSessionKind.allCases {
+        // `prescribable`: the rejection lists what the model may actually propose, so a
+        // retry is pointed at a legal vocabulary rather than at one including `.lift`,
+        // which has nowhere to go until MAX-129 gives the week a second slot.
+        for kind in ScheduledSessionKind.prescribable {
             XCTAssertTrue(kinds.contains(kind.rawValue), "the message omits \(kind.rawValue)")
         }
         let weekdays = PlanProposalError.unknownWeekday(name: "moonday").description

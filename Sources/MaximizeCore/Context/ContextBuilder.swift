@@ -243,7 +243,7 @@ public enum ContextBuilder {
             // is a stored decision the scorer made (`Score.actualClassification`, D2);
             // re-deriving it here would be a second classifier, free to disagree with the
             // one the score was computed under. So an unscored workout has no context yet —
-            // ordinary, not a failure, and `WorkoutChatModel` already treats it as a state.
+            // ordinary, not a failure, and `ChatModel` already treats it as a state.
             throw DomainError.inconsistent(
                 reason: "ContextBuilder: workout \(workoutID) has not been scored, so nothing has "
                     + "classified it and there is no verdict to open a conversation about."

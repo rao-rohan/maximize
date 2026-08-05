@@ -384,8 +384,13 @@ final class PlanProposalTests: XCTestCase {
     /// The test §4.8 names explicitly. Adding a `ScheduledSessionKind` and forgetting the
     /// prompt fails here rather than silently producing a model that cannot propose the
     /// new kind.
-    func testTheSchemaNamesEverySessionKind() {
-        for kind in ScheduledSessionKind.allCases {
+    /// **`prescribable`, not `allCases`** (MAX-128/MAX-129). There is one prescription
+    /// slot today, so `.lift` is deliberately not offered to the model — a lift proposed
+    /// into the run slot would be a plan the athlete cannot mean. Asserting over
+    /// `prescribable` keeps the forcing function intact for every kind that *is*
+    /// proposable, and MAX-141 widens it when the week has a second slot.
+    func testTheSchemaNamesEveryProposableSessionKind() {
+        for kind in ScheduledSessionKind.prescribable {
             XCTAssertTrue(
                 PlanProposal.schemaDescription.contains("\"\(kind.rawValue)\""),
                 "the plan schema never mentions the \(kind.rawValue) session kind"

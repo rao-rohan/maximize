@@ -14,7 +14,7 @@ struct WorkoutDetailView: View {
 
     /// Kept alongside `model` (rather than read back out of it) purely so `content`
     /// below can hand it to `WorkoutChatSectionView`, whose sheet owns its own
-    /// `WorkoutChatModel` (MAX-051) and is loaded independently of
+    /// `ChatModel` (MAX-051) and is loaded independently of
     /// `WorkoutDetailModel`'s read-only snapshot — chat is live and bidirectional, not
     /// another `WorkoutDetailData` field.
     private let workoutID: UUID
