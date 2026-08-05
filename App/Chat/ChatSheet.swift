@@ -58,6 +58,15 @@ import MaximizeCore
 struct ChatSheet: View {
     private enum Route: Hashable {
         case threadList
+        /// §4.6's handoff: `PlanAuthoringView`, prefilled from the accepted proposal
+        /// (MAX-101).
+        ///
+        /// The **proposal** is the payload, not a draft and not a plan. `PlanProposal` is
+        /// `Hashable` and carries no repository, so a navigation value is a legitimate
+        /// place for it — and the screen it opens builds its own authoring session
+        /// against storage, exactly as it does when opened by hand. Nothing about this
+        /// route writes anything (A13).
+        case planAuthoring(PlanProposal)
     }
 
     /// See this type's "Two ways to open something." Hashable so `.id(opening)` can key
@@ -100,6 +109,12 @@ struct ChatSheet: View {
                             // on screen underneath it.
                             path = NavigationPath()
                         }
+                    case let .planAuthoring(proposal):
+                        // Pushed rather than presented as a second sheet: the athlete is
+                        // still inside one task — reviewing a plan they asked for — and a
+                        // Back button that returns to the card is the right way out of a
+                        // form they have not saved.
+                        PlanAuthoringView(proposal: proposal)
                     }
                 }
         }
@@ -114,6 +129,7 @@ struct ChatSheet: View {
                 currentInterval: currentInterval,
                 onOpenThreadList: { path.append(Route.threadList) },
                 onStartNewChatForCurrentWindow: startNewTrainingChat,
+                onAcceptProposal: openAuthoring(with:),
                 onDone: { dismiss() }
             )
         case let .threadID(threadID):
@@ -122,9 +138,23 @@ struct ChatSheet: View {
                 currentInterval: currentInterval,
                 onOpenThreadList: { path.append(Route.threadList) },
                 onStartNewChatForCurrentWindow: startNewTrainingChat,
+                onAcceptProposal: openAuthoring(with:),
                 onDone: { dismiss() }
             )
         }
+    }
+
+    // MARK: - Accepting a proposal (MAX-101, §4.6)
+
+    /// Pushes the authoring screen, prefilled.
+    ///
+    /// A push, not a reassignment of `opening`: the conversation stays underneath, so
+    /// Back returns to the card the athlete just read rather than to a transcript with
+    /// nothing on it. Note what this does **not** do — it does not store, does not
+    /// dismiss the sheet, and does not clear the proposal. The plan in force is unchanged
+    /// until the athlete taps Save on the screen this opens (A13).
+    private func openAuthoring(with proposal: PlanProposal) {
+        path.append(Route.planAuthoring(proposal))
     }
 
     // MARK: - New chat

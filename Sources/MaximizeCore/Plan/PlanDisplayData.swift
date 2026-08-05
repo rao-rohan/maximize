@@ -208,11 +208,11 @@ public enum PlanDisplayData: Hashable, Sendable {
     ) throws -> PlanDisplayData {
         guard let calendar else { return .notAuthored }
 
-        // `PlanCalendar.versions` is non-empty and ascending by `effectiveFrom`, and
-        // version number ascends with it (`PlanCalendar.init`'s own invariant), so the
-        // last element is also the highest version. Asked for explicitly rather than
-        // relying on that coupling, matching `PlanAuthoring.currentVersion(of:)`.
-        guard let current = calendar.versions.max(by: { $0.version < $1.version }) else {
+        // The same answer the authoring screen uses, from the same function rather than
+        // from a second copy of its `max(by:)` — MAX-101 made it public precisely so the
+        // proposal card, this screen and `PlanAuthoringSession` cannot end up with three
+        // notions of which version is in force.
+        guard let current = PlanAuthoring.currentVersion(of: calendar) else {
             return .notAuthored
         }
 

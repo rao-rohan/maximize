@@ -94,6 +94,15 @@ struct ChatConversationView: View {
     /// on screen.
     let onStartNewChatForCurrentWindow: () -> Void
 
+    /// Forwarded from `ChatSheet`: what accepting a plan proposal does (MAX-101, §4.6).
+    /// Pushing `PlanAuthoringView` is something only the stack's owner can do, so this
+    /// view hands the proposal up and `ChatSheet` opens the screen prefilled.
+    ///
+    /// The proposal travels rather than a draft or a plan: the authoring screen builds
+    /// its own session against storage, as it always has. See `ChatModel`'s own note on
+    /// `proposalAwaitingReview`.
+    let onAcceptProposal: (PlanProposal) -> Void
+
     /// Forwarded from `ChatSheet`, whose `\.dismiss` this view does not have — it was
     /// not presented, `ChatSheet` was.
     let onDone: () -> Void
@@ -115,6 +124,7 @@ struct ChatConversationView: View {
         currentInterval: TrendInterval?,
         onOpenThreadList: @escaping () -> Void,
         onStartNewChatForCurrentWindow: @escaping () -> Void,
+        onAcceptProposal: @escaping (PlanProposal) -> Void,
         onDone: @escaping () -> Void
     ) {
         self.init(
@@ -125,11 +135,13 @@ struct ChatConversationView: View {
                 planRepository: PersistenceComposition.store,
                 settingsRepository: PersistenceComposition.store,
                 chatThreadRepository: PersistenceComposition.store,
-                chatClient: AnthropicStreamingChatClient(keyStore: KeychainAnthropicAPIKeyStore())
+                chatClient: AnthropicStreamingChatClient(keyStore: KeychainAnthropicAPIKeyStore()),
+                planProposalClient: AnthropicPlanProposalClient(keyStore: KeychainAnthropicAPIKeyStore())
             ),
             currentInterval: currentInterval,
             onOpenThreadList: onOpenThreadList,
             onStartNewChatForCurrentWindow: onStartNewChatForCurrentWindow,
+            onAcceptProposal: onAcceptProposal,
             onDone: onDone
         )
     }
@@ -141,6 +153,7 @@ struct ChatConversationView: View {
         currentInterval: TrendInterval?,
         onOpenThreadList: @escaping () -> Void,
         onStartNewChatForCurrentWindow: @escaping () -> Void,
+        onAcceptProposal: @escaping (PlanProposal) -> Void,
         onDone: @escaping () -> Void
     ) {
         self.init(
@@ -151,11 +164,13 @@ struct ChatConversationView: View {
                 planRepository: PersistenceComposition.store,
                 settingsRepository: PersistenceComposition.store,
                 chatThreadRepository: PersistenceComposition.store,
-                chatClient: AnthropicStreamingChatClient(keyStore: KeychainAnthropicAPIKeyStore())
+                chatClient: AnthropicStreamingChatClient(keyStore: KeychainAnthropicAPIKeyStore()),
+                planProposalClient: AnthropicPlanProposalClient(keyStore: KeychainAnthropicAPIKeyStore())
             ),
             currentInterval: currentInterval,
             onOpenThreadList: onOpenThreadList,
             onStartNewChatForCurrentWindow: onStartNewChatForCurrentWindow,
+            onAcceptProposal: onAcceptProposal,
             onDone: onDone
         )
     }
@@ -165,12 +180,14 @@ struct ChatConversationView: View {
         currentInterval: TrendInterval?,
         onOpenThreadList: @escaping () -> Void,
         onStartNewChatForCurrentWindow: @escaping () -> Void,
+        onAcceptProposal: @escaping (PlanProposal) -> Void,
         onDone: @escaping () -> Void
     ) {
         _model = State(initialValue: model)
         self.currentInterval = currentInterval
         self.onOpenThreadList = onOpenThreadList
         self.onStartNewChatForCurrentWindow = onStartNewChatForCurrentWindow
+        self.onAcceptProposal = onAcceptProposal
         self.onDone = onDone
     }
 
@@ -319,6 +336,12 @@ struct ChatConversationView: View {
                         WorkoutChatStreamingBubble(text: model.streamingText)
                     }
 
+                    // §4.6: the proposal appears *in the transcript*, as a card, at the
+                    // end — it is the most recent thing that happened. It is not a
+                    // bubble, because it is not something either party said, and
+                    // `ChatModel` never writes it to the thread.
+                    planDraftingContent
+
                     Color.clear
                         .frame(height: LayoutMetrics.hairline)
                         .id(Self.transcriptBottomAnchor)
@@ -334,6 +357,7 @@ struct ChatConversationView: View {
             .scrollDismissesKeyboard(.interactively)
             .onChange(of: model.messages.count) { scrollToBottom(proxy) }
             .onChange(of: model.isStreaming) { scrollToBottom(proxy) }
+            .onChange(of: model.planDrafting) { scrollToBottom(proxy) }
             .onChange(of: isComposerFocused) {
                 guard isComposerFocused else { return }
                 scrollToBottom(proxy)
@@ -341,7 +365,93 @@ struct ChatConversationView: View {
         }
     }
 
+    // MARK: - Drafting a plan from the conversation (MAX-101, §4)
+
+    /// What the transcript shows for the plan-drafting action: nothing, a progress line,
+    /// or the card.
+    ///
+    /// Every branch reads `model.planDrafting` — this view never infers a state from the
+    /// presence of a value, and never calls `draftPlan()` from `onAppear` or a timer. A14
+    /// is an invariant, not a default.
+    @ViewBuilder
+    private var planDraftingContent: some View {
+        switch model.planDrafting {
+        case .idle:
+            EmptyView()
+        case .drafting:
+            HStack(spacing: Spacing.snug) {
+                ProgressView()
+                Text("Drafting a plan from this conversation…")
+                    .font(.metricLabel)
+                    .foregroundStyle(Color.textSecondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .combine)
+        case let .proposed(review):
+            PlanProposalCardView(
+                review: review,
+                onAccept: { onAcceptProposal(review.proposal) },
+                onDiscard: { model.discardProposal() }
+            )
+        }
+    }
+
+    /// §4.7's "Draft a plan from this conversation", as a separate action rather than
+    /// something the model emits mid-stream.
+    ///
+    /// Pinned above the composer rather than buried in the toolbar: it is the one action
+    /// this screen exists to make possible, it costs exactly one call per tap (A14), and
+    /// a training thread's toolbar already carries **New chat**. Absent entirely on a
+    /// workout thread — `canDraftPlan` is false there and there is nothing for a disabled
+    /// button to teach.
+    @ViewBuilder
+    private var draftPlanButton: some View {
+        if model.subject?.kind == .training {
+            Button(action: draftPlan) {
+                Label("Draft a plan from this conversation", systemImage: "list.clipboard")
+                    .font(.metricLabel)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .tint(Color.accent)
+            .disabled(!model.canDraftPlan)
+            .accessibilityHint(
+                "Asks Claude for a plan built from this conversation. You review it before anything is saved."
+            )
+        }
+    }
+
+    private func draftPlan() {
+        guard model.canDraftPlan else { return }
+        Task { await model.draftPlan() }
+    }
+
+    /// The bottom bar: §4.7's drafting action above the input row, in one glass
+    /// container.
+    ///
+    /// One container rather than two stacked bars, because two floating glass surfaces
+    /// over the same transcript is chrome competing with itself — and because the two
+    /// belong together: both are things you do *to* this conversation.
     private var composer: some View {
+        VStack(spacing: Spacing.snug) {
+            draftPlanButton
+            inputRow
+        }
+        // A bar pinned over scrolling content is chrome, not a data surface, so glass
+        // is the correct treatment (FR-4.2). `.contentSurface(.inset)` below marks only
+        // the text field's own subtree, which sits under this modifier — the misuse
+        // assertion reads the environment where `glassChrome` is applied, and that is
+        // outside it.
+        //
+        // Floating rather than edge-to-edge, so the bar ends above the home indicator
+        // instead of leaving a strip of transcript below a full-width bar's bottom edge.
+        .padding(Spacing.snug)
+        .glassChrome(.toolbar)
+        .padding(.horizontal, LayoutMetrics.screenMargin)
+        .padding(.top, Spacing.snug)
+    }
+
+    private var inputRow: some View {
         HStack(alignment: .bottom, spacing: Spacing.snug) {
             // No `onSubmit` and no `submitLabel`. With `axis: .vertical` the return key
             // inserts a newline and `onSubmit` is never called, so the previous
@@ -368,18 +478,6 @@ struct ChatConversationView: View {
             .disabled(!model.canSend)
             .accessibilityLabel("Send")
         }
-        // A bar pinned over scrolling content is chrome, not a data surface, so glass
-        // is the correct treatment (FR-4.2). `.contentSurface(.inset)` above marks only
-        // the text field's own subtree, which sits below this modifier — the misuse
-        // assertion reads the environment where `glassChrome` is applied, and that is
-        // outside it.
-        //
-        // Floating rather than edge-to-edge, so the bar ends above the home indicator
-        // instead of leaving a strip of transcript below a full-width bar's bottom edge.
-        .padding(Spacing.snug)
-        .glassChrome(.toolbar)
-        .padding(.horizontal, LayoutMetrics.screenMargin)
-        .padding(.top, Spacing.snug)
     }
 
     /// Note what is deliberately **not** here: the field is no longer disabled while a

@@ -75,6 +75,15 @@ import Observation
 /// §9 makes that an invariant rather than a scoping choice, because chat proposes and
 /// the athlete taps.
 ///
+/// **`draftPlan()` does not weaken that** (MAX-101, A13). It reads `planRepository` to
+/// find out which version a proposal would supersede, and stops there: the outcome is a
+/// `PlanProposalReview` held in memory. There is no call to `PlanRepository.store(_:)`
+/// anywhere in this file, no `Plan` is constructed here, and the only way the proposal
+/// becomes a stored version is the athlete tapping through to `PlanAuthoringView` and
+/// saving it — `PlanAuthoringSession.plan(from:effectiveFrom:)` is still the single
+/// door. `ChatPlanDraftingTests` asserts the negative directly rather than trusting this
+/// paragraph.
+///
 /// ## Why a workout thread requires an existing score
 ///
 /// FR-2.1 seeds the thread with "the score already assigned," and `WorkoutContext`
@@ -121,9 +130,11 @@ import Observation
 ///
 /// ## A14 — nothing here calls the model unattended
 ///
-/// `send()` is the only path to `StreamingChatModelInvoking`, and it is reached only from
-/// a view forwarding a tap. `load()` reads storage and returns; it never streams. There
-/// is no timer, no on-appear call, and no background wake anywhere in this file.
+/// `send()` is the only path to `StreamingChatModelInvoking`, and `draftPlan()` the only
+/// path to `PlanProposalModelInvoking`; both are reached only from a view forwarding a
+/// tap. `load()` reads storage and returns; it never streams and never drafts. There is
+/// no timer, no on-appear call, and no background wake anywhere in this file, and
+/// nothing pre-drafts a proposal in case one is wanted.
 @MainActor
 @Observable
 public final class ChatModel {
@@ -189,6 +200,22 @@ public final class ChatModel {
         }
     }
 
+    /// Where the "draft a plan from this conversation" action stands (§4, MAX-101).
+    ///
+    /// A separate axis from `messages` on purpose: a proposal is **not a turn**. It is
+    /// not something either party said, it is never written to the thread, and it does
+    /// not survive the sheet closing. Modelling it as a `DisplayMessage` would have put a
+    /// value the athlete has not accepted into the same list as the ones already on disk.
+    public enum PlanDraftingState: Hashable, Sendable {
+        /// No proposal is being asked for and none is waiting to be reviewed.
+        case idle
+        /// One call is in flight, possibly the one retry §4.5 permits.
+        case drafting
+        /// A proposal came back and is on screen awaiting the athlete's decision.
+        /// **Nothing has been stored** — see this type's note on §2.5.
+        case proposed(PlanProposalReview)
+    }
+
     public private(set) var loadState: LoadState = .loading
 
     /// Every row the view draws, oldest first — persisted turns and app-generated
@@ -211,6 +238,30 @@ public final class ChatModel {
     public var canSend: Bool {
         loadState == .ready && !isStreaming
             && !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// §4, MAX-101. Nothing here ever sets this to anything but `.idle` on its own.
+    public private(set) var planDrafting: PlanDraftingState = .idle
+
+    /// Whether "draft a plan from this conversation" is offered at all.
+    ///
+    /// **Training threads only.** §4.2 puts plan authoring in "an ordinary streaming
+    /// training thread", and a workout thread has nothing a plan can be drafted from: its
+    /// context is one run, and a plan written from one run would be a plan written from
+    /// almost nothing. Keeping the action off that surface is also what makes MAX-096's
+    /// regression promise hold — a workout thread behaves exactly as it did.
+    ///
+    /// It also requires something to have been said, and specifically something the
+    /// *thread* holds rather than something merely on screen: a question whose reply
+    /// never arrived is kept in `messages` but was deliberately not persisted (see "only
+    /// completed turns are persisted"), and it is `thread.visibleMessages` that
+    /// `draftPlan()` actually replays. Reading the same list the call will send is what
+    /// keeps an enabled button from producing "there is nothing to draft from".
+    public var canDraftPlan: Bool {
+        guard planProposalClient != nil, subject?.kind == .training else { return false }
+        guard loadState == .ready, !isStreaming else { return false }
+        if case .drafting = planDrafting { return false }
+        return thread?.visibleMessages.contains(where: { $0.role == .user }) ?? false
     }
 
     /// How this model was asked to open (MAX-097, §2.2 vs §2.3).
@@ -268,6 +319,11 @@ public final class ChatModel {
     private let settingsRepository: (any SettingsRepository)?
     private let chatThreadRepository: (any ChatThreadRepository)?
     private let chatClient: any StreamingChatModelInvoking
+    /// MAX-100's transport, for §4.7's separate one-shot call. Optional in the way the
+    /// repositories are and `chatClient` is not: a caller with no plan-drafting transport
+    /// (a workout-only preview, a test about streaming) is a real situation, and the
+    /// honest response is to not offer the action rather than to offer one that fails.
+    private let planProposalClient: (any PlanProposalModelInvoking)?
     private let timeZone: TimeZone
     private let now: @Sendable () -> Date
 
@@ -304,6 +360,13 @@ public final class ChatModel {
     ///     or `FakeStreamingChatModelInvoking` in tests). Not optional: unlike the
     ///     repositories, there is no legitimate "unavailable" state for it — failure to
     ///     reach the model arrives as a `ChatStreamEvent.failed` value instead.
+    ///   - planProposalClient: MAX-100's transport for §4.7's one-shot plan-drafting
+    ///     call, or nil where the caller has none. Nil is a real state — a workout-only
+    ///     surface, a test about streaming — and it turns `canDraftPlan` off rather than
+    ///     offering an action that cannot work. Defaulted to nil, unlike the
+    ///     repositories, because the mistake MAX-049 warns about is the opposite one
+    ///     here: a defaulted *repository* silently looked empty, whereas a defaulted nil
+    ///     transport visibly removes a button.
     ///   - timeZone: the zone the athlete's calendar days are resolved in, matching
     ///     `WorkoutDetailModel`'s and `TrendTilesModel`'s own default and reasoning.
     ///   - now: injected rather than read from the clock so a sent turn's timestamps —
@@ -317,6 +380,7 @@ public final class ChatModel {
         settingsRepository: (any SettingsRepository)?,
         chatThreadRepository: (any ChatThreadRepository)?,
         chatClient: any StreamingChatModelInvoking,
+        planProposalClient: (any PlanProposalModelInvoking)? = nil,
         timeZone: TimeZone = .current,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
@@ -328,6 +392,7 @@ public final class ChatModel {
         self.settingsRepository = settingsRepository
         self.chatThreadRepository = chatThreadRepository
         self.chatClient = chatClient
+        self.planProposalClient = planProposalClient
         self.timeZone = timeZone
         self.now = now
     }
@@ -351,6 +416,7 @@ public final class ChatModel {
         settingsRepository: (any SettingsRepository)?,
         chatThreadRepository: (any ChatThreadRepository)?,
         chatClient: any StreamingChatModelInvoking,
+        planProposalClient: (any PlanProposalModelInvoking)? = nil,
         timeZone: TimeZone = .current,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
@@ -362,6 +428,7 @@ public final class ChatModel {
         self.settingsRepository = settingsRepository
         self.chatThreadRepository = chatThreadRepository
         self.chatClient = chatClient
+        self.planProposalClient = planProposalClient
         self.timeZone = timeZone
         self.now = now
     }
@@ -374,6 +441,10 @@ public final class ChatModel {
         context = nil
         thread = nil
         workoutFacts = nil
+        // A proposal describes the conversation it was drafted from. A reload starts
+        // that conversation over, so a card left on screen would be a diff against a
+        // transcript that is no longer there.
+        planDrafting = .idle
         if case .threadID = opening {
             // A subject-opened model's `subject` never changes (set once, at init).
             // A thread-id-opened one clears it here so a second `load()` — after the
@@ -739,6 +810,143 @@ public final class ChatModel {
             // it on this side of the seam.
             messages.append(DisplayMessage(kind: .notice, text: "The reply stream ended unexpectedly."))
         }
+    }
+
+    // MARK: - Drafting a plan from this conversation (MAX-101, §4)
+
+    /// Asks the model for a `PlanProposal` built from this conversation, and prepares
+    /// the review card for it.
+    ///
+    /// A no-op when `canDraftPlan` is false, so a view may call this unconditionally
+    /// from a disabled button's action without a second guard — the same shape `send()`
+    /// has.
+    ///
+    /// ## What this does and does not touch
+    ///
+    /// It reads: the context `load()` already built (never a second assembly — D3), the
+    /// thread's visible turns, the stored plan calendar, and the athlete's distance unit.
+    /// It writes: `planDrafting`, and a `.notice` in the transcript when it fails.
+    ///
+    /// **It stores nothing.** The plan calendar is read to work out which version a
+    /// proposal would supersede — that is what makes the card a diff rather than a
+    /// restatement (§4.6) — and no write of any kind follows. See A13, and this type's
+    /// note on §2.5.
+    ///
+    /// ## The proposal is not appended to the thread
+    ///
+    /// §2.5 and this type's "only completed turns are persisted" both apply: a proposal
+    /// is neither a question the athlete asked nor a reply Claude gave, so it is not one
+    /// of the thread's turns and is never written. It lives on `planDrafting` until the
+    /// athlete accepts it, discards it, or closes the sheet.
+    public func draftPlan() async {
+        guard canDraftPlan,
+              let planProposalClient,
+              let planRepository,
+              let context,
+              let thread
+        else { return }
+
+        let turns: [ChatTurn]
+        do {
+            turns = try thread.visibleMessages.map(Self.turn(for:))
+        } catch {
+            // Unreachable — every stored `ChatMessage` already satisfies `ChatTurn`'s
+            // non-empty rule. Said plainly rather than force-unwrapped.
+            noteDraftingFailure(.nothingToDraftFrom)
+            return
+        }
+
+        planDrafting = .drafting
+        // One call per tap, with at most §4.5's one correction inside it. The policy is
+        // `PlanProposalDrafting`'s and is tested there; this only reports the outcome.
+        let outcome = await PlanProposalDrafting.proposal(
+            from: planProposalClient,
+            factSheet: context.factSheet(),
+            turns: turns
+        )
+
+        switch outcome {
+        case let .failed(failure):
+            noteDraftingFailure(failure)
+        case let .proposed(proposal):
+            await presentReview(of: proposal, planRepository: planRepository)
+        }
+    }
+
+    /// Builds the card against the athlete's stored plans, and shows it.
+    ///
+    /// The session built here is the same one `PlanAuthoringView` will build when the
+    /// handoff opens it — same function, same inputs — which is what keeps the card's
+    /// "changed from" from describing a comparison the form will not make.
+    private func presentReview(
+        of proposal: PlanProposal,
+        planRepository: any PlanRepository
+    ) async {
+        do {
+            let session = try PlanAuthoring.session(
+                revising: try await planRepository.planCalendar(),
+                today: try today()
+            )
+            planDrafting = .proposed(
+                try PlanProposalReview.build(
+                    applying: proposal,
+                    to: session,
+                    distanceUnit: await draftingDistanceUnit()
+                )
+            )
+        } catch {
+            // The proposal parsed but the card could not be prepared — a plan store that
+            // could not be read, essentially. Reported as the failure it is rather than
+            // shown as a card with half its rows missing, and the plan in force is
+            // untouched either way.
+            noteDraftingFailure(.transport(.requestFailed))
+        }
+    }
+
+    /// A settings read that fails is not a reason to refuse to show a proposal — the
+    /// unit is a display preference, and `AppSettings.standard`'s is a defensible
+    /// answer. The same call `PlanAuthoringModel` makes, for the same reason.
+    private func draftingDistanceUnit() async -> DistanceUnit {
+        guard let settingsRepository,
+              let settings = try? await settingsRepository.settings()
+        else { return AppSettings.standard.distanceUnit }
+        return settings.distanceUnit
+    }
+
+    /// §4.5 step 2, and the ticket's "failure is a state": every way this can fail gets
+    /// one honest sentence in the transcript, as a notice — never written to the thread,
+    /// exactly like a dropped stream's.
+    private func noteDraftingFailure(_ failure: PlanDraftingFailure) {
+        planDrafting = .idle
+        messages.append(DisplayMessage(kind: .notice, text: failure.description))
+    }
+
+    /// Rejecting a proposal. Leaves the plan in force **completely** untouched, which
+    /// costs nothing to guarantee because nothing was ever written: this drops a value
+    /// held in memory.
+    ///
+    /// A notice is appended rather than the card vanishing silently, because a card that
+    /// disappears on tap leaves an athlete unsure whether they just changed something.
+    public func discardProposal() {
+        guard case .proposed = planDrafting else { return }
+        planDrafting = .idle
+        messages.append(DisplayMessage(
+            kind: .notice,
+            text: "Proposal discarded. Your plan is unchanged."
+        ))
+    }
+
+    /// The proposal awaiting review, if there is one — what the accept action hands to
+    /// `PlanAuthoringView`.
+    ///
+    /// Note what this returns: a `PlanProposal`, not a `Plan` and not a `PlanDraft`. The
+    /// handoff carries the model's proposal to the authoring screen, which builds its own
+    /// session against storage as it always has and applies the proposal to *that* draft.
+    /// Handing over a finished draft would let a stale session — one built before a plan
+    /// was saved on another screen — reach the form.
+    public var proposalAwaitingReview: PlanProposal? {
+        guard case let .proposed(review) = planDrafting else { return nil }
+        return review.proposal
     }
 
     // MARK: - Mapping
