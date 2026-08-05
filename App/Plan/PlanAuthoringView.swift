@@ -103,15 +103,14 @@ struct PlanAuthoringView: View {
     /// typed is not prefilled from anything and does not need telling so. That makes this
     /// the rare section whose absence is correct rather than a designed empty state.
     ///
-    /// Every string comes from the core (`PlanProposalReview`), so the sentence about
-    /// lifts here is the same sentence the card said a tap ago.
+    /// Every string comes from the core (`PlanProposalReview`), so the headline here is
+    /// the same one the card said a tap ago.
     @ViewBuilder
     private func prefillSection(_ editing: PlanAuthoringModel.Editing) -> some View {
         if let prefill = editing.prefill {
             Section("From your conversation") {
                 Text(prefill.headline)
                 quietText(prefill.explanation)
-                quietText(prefill.liftNote)
             }
         }
     }

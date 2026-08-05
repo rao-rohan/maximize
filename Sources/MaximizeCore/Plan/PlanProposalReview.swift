@@ -122,17 +122,6 @@ public struct PlanProposalReview: Hashable, Sendable {
 
     public let sections: [Section]
 
-    /// The sentence about lifts, always present.
-    ///
-    /// **Never optional, and never omitted when there is "nothing to say".** A proposal
-    /// cannot prescribe a lift — `PlanProposal`'s vocabulary comes from
-    /// `ScheduledSessionKind.prescribable`, which excludes `.lift` until MAX-141 — so an
-    /// athlete who wrote "and lift on Tuesdays" into the conversation would otherwise be
-    /// told yes by omission: they would see a card full of the changes they asked for and
-    /// nothing at all indicating that one of them was not made. Saying so on every card
-    /// costs one line and is the only honest option.
-    public let liftNote: String
-
     public var isRevision: Bool {
         if case .revision = standing { return true }
         return false
@@ -241,10 +230,10 @@ public struct PlanProposalReview: Hashable, Sendable {
             sections: [
                 targetsSection(before: before, after: after),
                 weekSection(before: before, after: after, distanceUnit: distanceUnit),
+                liftSection(before: before, after: after),
                 arcSection(before: before, after: after, distanceUnit: distanceUnit),
                 goalsSection(before: before, after: after),
-            ],
-            liftNote: liftNote(for: after)
+            ]
         )
     }
 
@@ -296,10 +285,8 @@ public struct PlanProposalReview: Hashable, Sendable {
         )
     }
 
-    /// Seven rows, Monday-first, one per weekday — the **run** slot only.
-    ///
-    /// The lift slot is not diffed because a proposal cannot move it; `liftNote` says so
-    /// in words rather than drawing seven rows that can never differ.
+    /// Seven rows, Monday-first, one per weekday — the **run** slot only. The lift slot
+    /// has its own section, `liftSection`, immediately below this one on the card.
     private static func weekSection(
         before: PlanDraft?,
         after: PlanDraft,
@@ -316,6 +303,30 @@ public struct PlanProposalReview: Hashable, Sendable {
             )
         }
         return Section(id: "week", title: "The week", rows: rows)
+    }
+
+    /// Seven rows, Monday-first, one per weekday — the **lift** slot (MAX-141).
+    ///
+    /// A proposal can now move this slot (LIFTING-SPEC §2.2, §5), so it is diffed the
+    /// same way the run slot is rather than described in a fixed sentence: a lift day
+    /// the athlete had and the model's reply silently dropped is a `.changed` row here,
+    /// not a note the athlete has to trust separately from what the card shows. This is
+    /// the fix `PlanDraft.applying(_:)`'s own doc points at — carrying the lift slot
+    /// forward untouched used to be the only honest option because a proposal could not
+    /// speak it at all; now that it can, the athlete's proof that "nothing changed" is
+    /// the same diff every other field gets, not a sentence asserting it.
+    private static func liftSection(before: PlanDraft?, after: PlanDraft) -> Section {
+        let isRevision = before != nil
+        let rows = Weekday.allCases.sorted().map { weekday in
+            row(
+                id: "lift.\(weekday)",
+                label: PlanCopy.weekday(weekday),
+                before: before.map { liftSlotText($0[weekday]) },
+                after: liftSlotText(after[weekday]),
+                isRevision: isRevision
+            )
+        }
+        return Section(id: "lift", title: "Lifts", rows: rows)
     }
 
     /// One row per arc week present on either side, ascending, under a row stating the
@@ -429,6 +440,17 @@ public struct PlanProposalReview: Hashable, Sendable {
         return PlanCopy.session(session, unit: distanceUnit)
     }
 
+    /// The lift slot's own rendering, read through `PlanCopy.liftSession(_:)` so this
+    /// card and `PlanAuthoringView`'s own lift rows never say the same Tuesday two
+    /// different things (A17).
+    private static func liftSlotText(_ day: PlanDraft.DayDraft) -> String {
+        // Unreachable for the same reason `runSlotText`'s guard is: `DayDraft.setLiftKind`
+        // already keeps the pair convertible, so `liftSession()` does not throw on a
+        // draft reached through this type's own setters.
+        guard let session = try? day.liftSession() else { return "Not stated" }
+        return PlanCopy.liftSession(session)
+    }
+
     private static func weekCount(_ count: Int) -> String {
         count == 1 ? "1 week" : "\(count) weeks"
     }
@@ -445,22 +467,5 @@ public struct PlanProposalReview: Hashable, Sendable {
     private static func targetDayText(_ day: CalendarDay?) -> String {
         guard let day else { return "None stated" }
         return CalendarDayLabel.full(day)
-    }
-
-    // MARK: - Lifts
-
-    /// See `liftNote`. Worded from what the applied draft actually carries, so the
-    /// sentence names the athlete's real lift days rather than describing the feature.
-    private static func liftNote(for after: PlanDraft) -> String {
-        let liftDays = after.week
-            .filter { $0.liftKind != .rest }
-            .map { PlanCopy.weekday($0.weekday) }
-
-        guard !liftDays.isEmpty else {
-            return "Lifts are not part of a drafted plan. This proposal covers the run slot only, "
-                + "and prescribes no lift days — set those in the plan editor."
-        }
-        return "Lifts are not part of a drafted plan, so your lift days carry through unchanged: "
-            + liftDays.joined(separator: ", ") + ". Change those in the plan editor."
     }
 }

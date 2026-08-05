@@ -4,8 +4,8 @@ import MaximizeCore
 /// The proposal card in the transcript (CHAT-FIRST-SPEC.md §4.6, MAX-101).
 ///
 /// **This view decides nothing.** What the card says — the headline, the summary, every
-/// row's label and value, which rows changed and what they changed from, the sentence
-/// about lifts, and what accepting and discarding each promise — is all
+/// row's label and value (lift rows included, MAX-141), which rows changed and what they
+/// changed from, and what accepting and discarding each promise — is all
 /// `PlanProposalReview`, computed in `MaximizeCore` and covered by
 /// `PlanProposalReviewTests`. This file lays those strings out and forwards two taps,
 /// which is the "observe, render, forward intent" shape every other view here follows.
@@ -62,9 +62,6 @@ struct PlanProposalCardView: View {
             if review.isRevision {
                 disclosureToggle
             }
-            Text(review.liftNote)
-                .font(.microLabel)
-                .foregroundStyle(Color.textSecondary)
             actions
         }
         .frame(maxWidth: .infinity, alignment: .leading)

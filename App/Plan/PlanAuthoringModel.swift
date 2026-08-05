@@ -77,12 +77,13 @@ final class PlanAuthoringModel {
     /// handoff).
     ///
     /// Every string here is the core's, taken from a `PlanProposalReview` rebuilt against
-    /// *this* screen's session — so the sentence about lifts on the form is the same
-    /// sentence the card said a tap ago, and stays true of the draft actually loaded.
+    /// *this* screen's session — so the headline on the form is the same headline the
+    /// card said a tap ago. The lift slot no longer needs a sentence of its own here
+    /// (MAX-141): it prefills the same way the run slot does, and the form's own week
+    /// section shows what was carried over.
     struct PlanPrefillNotice: Equatable {
         let headline: String
         let explanation: String
-        let liftNote: String
     }
 
     private(set) var state: LoadState = .loading
@@ -182,8 +183,8 @@ final class PlanAuthoringModel {
     ///
     /// The review is rebuilt here rather than carried across the handoff, and that is
     /// deliberate: a review built in chat describes the session chat saw, and this screen
-    /// has just read the store again. Rebuilding is what keeps the banner's lift sentence
-    /// true of the draft actually on screen.
+    /// has just read the store again. Rebuilding is what keeps the banner's headline true
+    /// of the draft actually on screen.
     ///
     /// - Throws: from `PlanDraft.applying(_:)`, which for a parsed proposal throws
     ///   nothing — a failure here reaches `.failed` rather than silently opening an
@@ -203,8 +204,7 @@ final class PlanAuthoringModel {
             draft: try session.draft.applying(proposal),
             notice: PlanPrefillNotice(
                 headline: review.headline,
-                explanation: PlanProposalReview.acceptExplanation,
-                liftNote: review.liftNote
+                explanation: PlanProposalReview.acceptExplanation
             )
         )
     }
