@@ -260,16 +260,22 @@ extension TrainingContext {
     /// measures anything but a run. Those two absences are worded apart for the same
     /// reason `WorkoutFactSheet` words its three split absences apart.
     ///
+    /// This ticket originally drew that distinction here, by asking the session whether
+    /// its activity type was a run. MAX-126 landed the same distinction as two first-class
+    /// cases on `WorkoutVerdict.Scoring`, so the switch below reads them instead of
+    /// re-deriving one — the model must never be told a verdict is coming when the app
+    /// knows it is not, and there should be exactly one place that decides which is true.
+    ///
     /// The rationale the scorer wrote is deliberately not here — see `TrainingContext`.
     /// The correction is, because it is what the tallies count (§8), and a line quoting
     /// only the automatic score beside an average built from corrections would be the
     /// disagreement §3.6 exists to prevent.
     private static func verdict(_ session: TrainingContext.Session) -> String {
         switch session.verdict.scoring {
-        case .unscored:
-            return session.activityType.isRun
-                ? "Score: no verdict — this run has not been scored"
-                : "Score: no verdict — the plan's rubric scores runs, so this session is not scored"
+        case .awaitingScore:
+            return "Score: no verdict yet — this run has not been scored"
+        case .noVerdict:
+            return "Score: none — the plan's rubric scores runs, so this session is not scored"
         case let .scored(automatic, annotation):
             let assigned = "Score: \(automatic.value)/100 (\(automatic.band.rawValue))"
             guard let annotation else { return assigned }

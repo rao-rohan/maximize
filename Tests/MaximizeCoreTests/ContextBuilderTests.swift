@@ -311,9 +311,9 @@ final class ContextBuilderTests: XCTestCase {
 
         let sheet = try trainingContext(records: records, planCalendar: try calendar()).factSheet()
 
-        XCTAssertTrue(sheet.contains("Score: no verdict — this run has not been scored"), sheet)
+        XCTAssertTrue(sheet.contains("Score: no verdict yet — this run has not been scored"), sheet)
         XCTAssertTrue(
-            sheet.contains("Score: no verdict — the plan's rubric scores runs, so this session is not scored"),
+            sheet.contains("Score: none — the plan's rubric scores runs, so this session is not scored"),
             sheet
         )
         // Never a bare gap, and never a zero.
