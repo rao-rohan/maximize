@@ -26,10 +26,11 @@ struct DashboardView: View {
 
                 TrendIntervalSelectorView(model: intervalModel)
 
-                // Drift overlay (MAX-062) and summary tiles (MAX-063) land here too,
-                // each scoped to `intervalModel.state.interval`.
+                // The drift overlay (MAX-062) lands here too, scoped the same way.
+                // Order follows FR-3: the calendar (3.2) then the tiles (3.4).
                 if let interval = intervalModel.state.interval {
                     ScoreCalendarView(interval: interval)
+                    TrendTilesView(interval: interval)
                 }
             }
             .screenMargins()
