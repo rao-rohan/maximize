@@ -204,7 +204,10 @@ public enum PlanDisplayData: Hashable, Sendable {
         today: CalendarDay
     ) throws -> VersionDetail {
         let week = Weekday.allCases.sorted().map { weekday -> WeekdayRow in
-            let session = plan.weeklyTemplate.session(on: weekday)
+            // The run slot only. Showing the lift slot beside it is MAX-138's ticket —
+            // this file builds rows a screen renders, and a row nothing draws is a row
+            // nobody checks.
+            let session = plan.weeklyTemplate.session(on: weekday, for: .run)
             return WeekdayRow(
                 weekday: weekday,
                 kind: session.kind,

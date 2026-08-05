@@ -59,16 +59,22 @@ enum Fixture {
         try pairs.map { try HeartRateSample(offsetSeconds: $0.0, beatsPerMinute: $0.1) }
     }
 
-    static func weeklyTemplate() throws -> WeeklyTemplate {
-        try WeeklyTemplate([
-            .monday: .rest,
-            .tuesday: ScheduledSession(kind: .easy, distanceMeters: 8_000),
-            .wednesday: ScheduledSession(kind: .hard, note: "6 × 800m"),
-            .thursday: ScheduledSession(kind: .easy, distanceMeters: 8_000),
-            .friday: .rest,
-            .saturday: ScheduledSession(kind: .easy, distanceMeters: 6_000),
-            .sunday: ScheduledSession(kind: .long, distanceMeters: 18_000),
-        ])
+    /// - Parameter lift: the lift slot. Defaults to empty — i.e. rest on every weekday,
+    ///   which is what every plan authored before MAX-129 prescribes, so every existing
+    ///   test keeps measuring exactly what it measured before.
+    static func weeklyTemplate(lift: [Weekday: ScheduledSession] = [:]) throws -> WeeklyTemplate {
+        try WeeklyTemplate(
+            [
+                .monday: .rest,
+                .tuesday: ScheduledSession(kind: .easy, distanceMeters: 8_000),
+                .wednesday: ScheduledSession(kind: .hard, note: "6 × 800m"),
+                .thursday: ScheduledSession(kind: .easy, distanceMeters: 8_000),
+                .friday: .rest,
+                .saturday: ScheduledSession(kind: .easy, distanceMeters: 6_000),
+                .sunday: ScheduledSession(kind: .long, distanceMeters: 18_000),
+            ],
+            lift: lift
+        )
     }
 
     /// A rubric shaped like PRD §10.3's worked example, written entirely as data.

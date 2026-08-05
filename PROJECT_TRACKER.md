@@ -1298,6 +1298,84 @@ activity type a real workout is stored under, which is behaviour, and this ticke
 forbade any. It is a one-line fetcher change plus one row in `ActivityType.discipline`,
 and it wants the ticket that is already opening `App/HealthKitWorkoutFetcher.swift`.
 
+**MAX-129 — the prescription is indexed by discipline.** `WeeklyTemplate.Entry` carries a
+run ask and a lift ask; `PlanDay` carries both and answers `scheduledSession(for:)`, which
+is total in the discipline because `Discipline` is closed at two cases and rest is an
+answer on each. One plan record, one version, one `effectiveFrom` — D1 untouched.
+
+- **No behaviour changes for a run.** Every existing reader of `PlanDay.scheduledSession`
+  and `WeeklyTemplate.Entry.session` means the *run* ask, so after this change each is
+  still correct rather than merely still compiling. `canBeMissed` is likewise still the run
+  obligation's predicate; widening it to count obligations is A19, and MAX-134's ticket.
+- **No migration, proven twice.** `liftSession` and `muscleGroups` decode with
+  `decodeIfPresent` and are *omitted on encode* when they carry nothing, because rest and
+  absent are the same statement (A17). So a lift-free plan encodes to the bytes it encoded
+  to before the ticket, and a `Score`'s stored `ScheduledSession` (immutable under D8) does
+  not move either. Pinned by a hand-written pre-MAX-129 payload that decodes to a template
+  with every lift slot at rest and re-encodes to the same bytes, and by a same-band
+  assertion through `RubricEvaluator` — LIFTING-SPEC §2.3's two acceptance criteria.
+- **Authoring carries the lift slot forward verbatim.** `PlanDraft.DayDraft.liftSession` is
+  carried but not editable: `PlanDraft.init(_:)` is documented as lossless, and this was
+  the first field that could have made it untrue — a revision that dropped it would delete
+  a lifting prescription the next time the athlete changed their HR cap. A17 leans on that
+  carry-forward when it argues one plan record rather than two. **MAX-137 gives the screen
+  its editor**, and with it the loose-input validation `PlanAuthoringError` will need.
+
+**Downstream types that now need updating, in dependency order.** None of these are broken
+today — the run half of each is unchanged, and every plan on disk prescribes rest on every
+lift slot — but each currently answers about the day's *run* while calling it the day:
+
+| Reader | What it reads | Ticket |
+|---|---|---|
+| `RubricEvaluator.evaluate` | `planDay.scheduledSession.kind` picks the bands | MAX-133 |
+| `RestDayBudgeting` / `TalliesCalculator` | `PlanDay.canBeMissed`, `costTier` | MAX-134 |
+| `ScoreCalendar.dayState` / `agreement` | the day's single prescribed kind | MAX-135 |
+| `TrainingFactSheet` / `WorkoutFactSheet` | `entry.session`, `planDay.scheduledSession` | MAX-136 |
+| `PlanDraft` setters, `PlanAuthoringError` | the run slot only | MAX-137 |
+| `PlanDisplayData.WeekdayRow` | one kind/distance/note per weekday | MAX-138 |
+| `TrendTileData` planned mileage | sums `planDay.scheduledSession.distanceMeters` | MAX-140 |
+| `PlanProposal` (MAX-099) | validates the same shape `PlanAuthoringSession` does | MAX-141 |
+
+**MAX-141 does need updating, and its brief should say so.** `PlanProposal` validates
+against `PlanAuthoringSession`'s rules; those rules did not change for the run slot, so it
+still compiles and still produces valid plans — but a proposal it accepts can only ever
+prescribe rest on every lift slot, which is now a silently incomplete plan rather than the
+only expressible one. Since the owner has reaffirmed that **the plan is configured through
+chat**, that ticket is the real authoring path, not MAX-137's form.
+
+**Scope taken mid-ticket: the lift slot names its muscle groups.** Owner's ask. `MuscleGroup`
+is a closed six-case core vocabulary — chest, back, shoulders, arms, legs, core — chosen so
+that push/pull/legs, upper/lower and a five-day split are all expressible without a residual
+case; "full body" is the whole set rather than a seventh case, because an overlapping case
+gives one Tuesday two spellings. `ScheduledSession.muscleGroups` is a `Set`, encoded in
+`CaseIterable` order so a set's arbitrary iteration order never reaches the bytes, and only
+a `.lift` may carry one — the same shape of rule, for the same reason, as a rest day being
+unable to carry a distance. **Rest and "a lift with no groups named" stay distinct**, which
+is what keeps the lift slot's totality meaningful.
+
+> **⚠️ Open, needs an amendment and the owner's call: nothing can verify a muscle-group
+> prescription.** HealthKit reports `traditionalStrengthTraining` and says nothing about what
+> was worked — the same wall A20 hit on sets, reps and load when it chose adherence over
+> volume. So the plan can say "Tuesday is chest and shoulders" and the app cannot check that
+> it happened. **This ticket made no scoring, tallies or adherence decision about it**, and
+> nothing on those paths reads `muscleGroups`. The options, with what each costs:
+>
+> 1. **The athlete confirms after the fact.** The only option that actually verifies. Spends
+>    PRD §3's manual-entry non-goal, which A16 was deliberately written narrowly to avoid
+>    spending, and adds a per-session prompt to a product whose whole claim is that capture
+>    is automatic.
+> 2. **The plan states intent; scoring never checks it.** Costs nothing and changes nothing:
+>    muscle groups become prescription copy that reaches the athlete, the plan screen and
+>    Claude's context, and adherence stays "did a lift happen on a lift day" (A20). The gap
+>    is that a week of chest-only lifting scores identically to a balanced one.
+> 3. **Chat asks.** Claude already has the prescription in context (D3/A12) and can ask "did
+>    you get to legs?" in the daily conversation. Cheap, conversational, and *not* a record —
+>    an answer in a chat bubble is not a stored fact anything can count, so it informs the
+>    athlete without becoming telemetry.
+>
+> Recommended lean: **2 now, 3 as it costs nothing extra, and 1 only if the owner decides the
+> signal is worth the non-goal.** Recorded, not taken — flagged for the overseer to dispatch.
+
 **MAX-130 — a lift's metrics are decided, not merely withheld.** MAX-111 put `if isRun` in
 front of three expressions in `DerivedMetricsCalculator`. That fixed the three metrics that
 existed and did nothing about the fourth, so the decision moved into `DerivedMetricKind` —
