@@ -28,36 +28,43 @@ import MaximizeCore
 /// See `ScoreCalendarRepresentation` for the full argument, including why the rows are
 /// weekdays rather than months and what the density costs.
 ///
-/// ## Channels other than hue, and one this view does not have
+/// ## Channels other than hue
 ///
-/// Two channels carry states independently of hue in the day grid:
+/// Three channels carry state independently of hue in the day grid, so a colour-blind
+/// athlete reads the same calendar a sighted one does:
 ///
 /// 1. **A `.missed` day and a `.scored(.ineffective, _)` day share the same red
 ///    fill** (D9 says a miss "shows red"; the rubric's own "skipped → 0–15" band
 ///    lands in the same score range .ineffective already covers), **but never the
 ///    same glyph** — an activity icon for a bad run, a dedicated "×" for a day
 ///    nothing happened. Shape alone tells the two apart in grayscale.
-/// 2. **Every cell carries a full-sentence VoiceOver label**
+/// 2. **A scored day carries `ScoreBand.mark` in its corner** — a dot for effective,
+///    a ring for marginal, nothing for ineffective (`ScoreBandMarkView`). This
+///    channel exists because the state glyph does *not* cover the bands: it encodes
+///    the activity, so an effective run and a marginal run of the same type get the
+///    same glyph, and their two fills measure **1.02:1** against each other in dark
+///    (1.04:1 in light). Until MAX-084 this view's doc comment claimed a guarantee it
+///    did not have, and green-versus-orange is the exact pair colour-blindness
+///    collapses. See `ScoreBandMark` for the full measurement.
+/// 3. **Every cell carries a full-sentence VoiceOver label**
 ///    (`ScoreCalendarFormatting.accessibilityLabel`), not just a glyph name — the
 ///    channel that does not depend on shape recognition at all.
 ///
-/// **They do not cover `.effective` versus `.marginal`, and this file used to claim they
-/// did.** `docs/DESIGN-REVIEW.md` §8.1 measured it: the two fills contrast with each
-/// other at 1.02:1, so they are the same square in greyscale, and the glyph encodes what
-/// activity was done rather than how it scored — so a good run day and a not-quite day
-/// differ only along the exact hue axis deuteranopia collapses. Fixing that is the
-/// review's **T6** (a third non-hue channel, most likely a corner mark per band), which
-/// is a change to how a *cell* is drawn at every span and is out of MAX-083's scope. The
-/// claim is corrected here rather than repeated, since asserting a property the code does
-/// not have is how the gap survived review the first time.
+/// Channel 2 is MAX-084 closing what MAX-083 recorded here as still open. Before it, the
+/// first and third channels covered `.missed` versus `.ineffective` and left `.effective`
+/// versus `.marginal` on hue alone, at 1.02:1 — the same square in greyscale, on the exact
+/// hue axis deuteranopia collapses.
 ///
-/// The year heatmap inherits that gap and adds no new one it can help. A cell there is
-/// too small for a glyph, so the shape channel narrows to the distinction that matters
-/// most — a missed day is drawn hollow, a badly-scored day filled
-/// (`ScoreCalendarDayState.isDrawnHollowAtHeatmapDensity`) — while the VoiceOver
-/// sentence, dated with its month since nothing on screen says which day it is, carries
-/// everything. Whatever T6 adds should be checked at this density too; a corner mark on a
-/// six-point square is the case that will test it.
+/// **The year heatmap still has that gap, and it is not fixable with a mark.** A heatmap
+/// cell is about six points square; there is no corner to put a pip in, which is the case
+/// MAX-083 predicted would test T6 and it fails it. The shape channel there stays narrowed
+/// to the distinction that survives at that size — a missed day is drawn hollow, a
+/// badly-scored day filled (`ScoreCalendarDayState.isDrawnHollowAtHeatmapDensity`) — and
+/// the VoiceOver sentence, dated with its month since nothing on screen says which day it
+/// is, carries the rest. **So at year density, good and not-quite remain a hue
+/// distinction.** Closing it would take a channel that works at six points: separating the
+/// two fills on the luminance axis, or drawing marginal inset. Both are judgements about
+/// something nobody here can look at, and neither is this ticket's.
 ///
 /// `.scheduledRest` and `.convertedRest` sit on the same neutral fill as
 /// `.awaitingScore` and `.unplanned` (`ScoreBandColors.swift`'s own doc comment: a
@@ -193,6 +200,11 @@ private struct ScoreCalendarDayCell: View {
     /// text style the glyph is rendered in, so the two grow together.
     @ScaledMetric(relativeTo: .caption2) private var glyphSize = LayoutMetrics.calendarGlyphSize
 
+    /// Scaled alongside the glyph for the same reason: a mark that stayed 6pt while the
+    /// cell's content grew would shrink out of the design at accessibility sizes,
+    /// exactly when the reader needs it most.
+    @ScaledMetric(relativeTo: .caption2) private var markSize = LayoutMetrics.scoreBandMarkSize
+
     var body: some View {
         // The square is driven by the column's width alone, never by what is drawn
         // inside it. `Color.clear` has no intrinsic size, so `aspectRatio(1, .fit)`
@@ -219,6 +231,15 @@ private struct ScoreCalendarDayCell: View {
                         // the glyph optically centred rather than nudging the number
                         // off-axis on wider marks.
                         .frame(width: glyphSize, height: glyphSize)
+                }
+            }
+            // The band's non-colour channel (MAX-084). Only a `.scored` day has a band
+            // to mark — `.missed` draws in the same red but was never scored, and
+            // `scoredBand` is the core accessor that says so.
+            .overlay(alignment: .topTrailing) {
+                if let band = day.state.scoredBand {
+                    ScoreBandMarkView(band: band, diameter: markSize)
+                        .padding(Spacing.tight)
                 }
             }
         // Not `.contentSurface(.tile)`: that fixes the fill to `.surfaceElevated`,

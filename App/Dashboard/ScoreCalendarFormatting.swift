@@ -10,8 +10,8 @@ import MaximizeCore
 /// ## The accessibility channel this exists to carry
 ///
 /// Color alone cannot carry the calendar's meaning (constraint #4 — a colour-blind
-/// athlete cannot read hue). Two independent, redundant channels stand in for it,
-/// and both are decided here rather than left to the view to reinvent per call site:
+/// athlete cannot read hue). Two of the three redundant channels are decided here
+/// rather than left to the view to reinvent per call site:
 ///
 /// - **Glyph shape.** `.scored`/`.awaitingScore` show what activity was done;
 ///   `.missed` shows a dedicated "not done" mark rather than an activity icon, so a
@@ -19,9 +19,18 @@ import MaximizeCore
 ///   red) never look alike even in grayscale. `.scheduledRest` and `.convertedRest`
 ///   use two visually distinct rest glyphs for the same reason, even though both sit
 ///   on the same neutral fill.
+///
+///   **What the glyph does not do, and used to claim it did.** It separates *day
+///   states*. It does not separate *bands*, because `.scored` resolves to the
+///   activity glyph regardless of how the run went — so an effective run and a
+///   marginal run of the same type are the same mark on two fills that measure
+///   1.02:1 against each other. That is what `ScoreBand.mark` is for (MAX-084); it
+///   is decided in `MaximizeCore` and drawn by `ScoreBandMarkView`, deliberately not
+///   folded into `systemImageName(for:)` — one glyph cannot encode two orthogonal
+///   facts, and activity is the one this function is named for.
 /// - **VoiceOver label.** Every state gets a full sentence, not just a glyph name —
 ///   the strongest channel of all, since it does not depend on shape recognition
-///   either.
+///   either. This one *does* already name the band.
 enum ScoreCalendarFormatting {
 
     // MARK: - Glyph

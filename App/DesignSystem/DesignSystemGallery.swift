@@ -143,21 +143,37 @@ struct DesignSystemGallery: View {
             // with the core, and so the band -> color path is the one being shown.
             HStack(spacing: Spacing.snug) {
                 ForEach(ScoreBand.allCases, id: \.self) { band in
-                    Text(band.rawValue)
-                        .font(.microLabel)
-                        .foregroundStyle(Color.textOnSaturatedFill)
-                        .padding(.vertical, Spacing.snug)
-                        .frame(maxWidth: .infinity)
-                        .background(
-                            Color.scoreBand(band),
-                            in: RoundedRectangle(cornerRadius: CornerRadius.tile, style: .continuous)
+                    VStack(spacing: Spacing.tight) {
+                        // The non-colour channel (MAX-084), shown here because a
+                        // specimen sheet that only shows the fills shows the half of
+                        // the band system that a colour-blind reader cannot use.
+                        ScoreBandMarkView(
+                            band: band,
+                            diameter: LayoutMetrics.prominentScoreBandMarkSize
                         )
+                        Text(band.rawValue)
+                            .font(.microLabel)
+                            .foregroundStyle(Color.textOnSaturatedFill)
+                    }
+                    .padding(.vertical, Spacing.snug)
+                    .frame(maxWidth: .infinity)
+                    .background(
+                        Color.scoreBand(band),
+                        in: RoundedRectangle(cornerRadius: CornerRadius.tile, style: .continuous)
+                    )
                 }
             }
 
             Text("Only the calendar and the verdict header may use these.")
                 .font(.microLabel)
                 .foregroundStyle(Color.textTertiary)
+
+            Text(
+                "effective and marginal are 1.02:1 against each other — "
+                    + "the mark, not the fill, is what separates them."
+            )
+            .font(.microLabel)
+            .foregroundStyle(Color.textTertiary)
         }
     }
 

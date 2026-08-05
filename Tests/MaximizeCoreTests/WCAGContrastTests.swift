@@ -161,7 +161,115 @@ final class DesignPaletteContrastTests: XCTestCase {
         }
     }
 
+    // MARK: Score bands against *each other* — the gap MAX-084 found
+
+    /// The check this suite was missing, and the reason a 1.02:1 pair shipped.
+    ///
+    /// Every pairing above measures a token against a *surface*. Nothing measured the
+    /// three bands against one another, so nothing noticed that `scoreEffective` and
+    /// `scoreMarginal` are the same square in greyscale — or that in light appearance
+    /// all three bands land within 1.04:1 of each other.
+    ///
+    /// The rule asserted here is the one FR-3.2's calendar actually needs: **no two
+    /// bands may be left distinguishable by hue alone.** A pair passes if either its
+    /// fills separate by WCAG 1.4.11's 3:1 non-text minimum — enough that luminance
+    /// alone tells them apart — or the two carry different `ScoreBandMark`s. Today
+    /// every pair passes on the mark, in all four appearances; that is precisely the
+    /// point of the mark. A future edit that collapses two bands onto one mark, or that
+    /// adds a fourth band without one, fails here rather than waiting for a reviewer
+    /// with a colour-blindness filter.
+    func testNoTwoScoreBandsAreDistinguishedByHueAlone() {
+        let bands = ScoreBand.allCases
+        for (indexA, bandA) in bands.enumerated() {
+            for bandB in bands[(indexA + 1)...] {
+                let inkA = ink(for: bandA)
+                let inkB = ink(for: bandB)
+                for appearance in Appearance.allCases {
+                    let ratio = WCAGContrast.contrastRatio(
+                        appearance.token(inkA),
+                        appearance.token(inkB)
+                    )
+                    let separatedByLuminance = WCAGContrast.meetsAA(ratio, .largeTextOrNonText)
+                    let separatedByShape = bandA.mark != bandB.mark
+                    XCTAssertTrue(
+                        separatedByLuminance || separatedByShape,
+                        """
+                        \(bandA.rawValue) and \(bandB.rawValue) measure \
+                        \(String(format: "%.2f", ratio)):1 against each other \
+                        [\(appearance.rawValue)] and share the mark \
+                        \(bandA.mark.rawValue) — nothing but hue tells them apart.
+                        """
+                    )
+                }
+            }
+        }
+    }
+
+    /// The mark is only a channel if the three values are actually different. Stated
+    /// separately from the rule above so a regression reads as "two bands share a mark"
+    /// rather than as a contrast failure.
+    func testEveryScoreBandCarriesItsOwnMark() {
+        let marks = ScoreBand.allCases.map(\.mark)
+        XCTAssertEqual(
+            Set(marks).count,
+            ScoreBand.allCases.count,
+            "Two bands share a mark: \(marks.map(\.rawValue))"
+        )
+    }
+
+    /// The mark is drawn in `textOnSaturatedFill` on the band fill, at pip scale — a
+    /// small graphical object, so WCAG 1.4.11's 3:1 applies to it rather than 4.5:1.
+    /// It clears the text bar anyway in every appearance; asserted at the bar it
+    /// actually has to meet, with the real one recorded in the message.
+    func testScoreBandMarkIsLegibleOnItsOwnFill() {
+        for band in scoreBands {
+            assertAA(
+                DesignPalette.textOnSaturatedFill.dark, band.ink.dark, .largeTextOrNonText,
+                "band mark on \(band.name) [dark]"
+            )
+            assertAA(
+                DesignPalette.textOnSaturatedFill.light, band.ink.light, .largeTextOrNonText,
+                "band mark on \(band.name) [light]"
+            )
+            assertAA(
+                DesignPalette.textOnSaturatedFill.dark, band.ink.darkHighContrast, .largeTextOrNonText,
+                "band mark on \(band.name) [dark, Increase Contrast]"
+            )
+            assertAA(
+                DesignPalette.textOnSaturatedFill.light, band.ink.lightHighContrast, .largeTextOrNonText,
+                "band mark on \(band.name) [light, Increase Contrast]"
+            )
+        }
+    }
+
+    private func ink(for band: ScoreBand) -> DesignPalette.Ink {
+        switch band {
+        case .effective: return DesignPalette.scoreEffective
+        case .marginal: return DesignPalette.scoreMarginal
+        case .ineffective: return DesignPalette.scoreIneffective
+        }
+    }
+
     // MARK: Helper
+
+    /// The four resolutions of every `Ink`, so a check can be written once and run
+    /// against all of them — CLAUDE.md's rule that a fix which works in dark and breaks
+    /// light is not a fix.
+    enum Appearance: String, CaseIterable {
+        case dark
+        case light
+        case darkHighContrast
+        case lightHighContrast
+
+        func token(_ ink: DesignPalette.Ink) -> ColorToken {
+            switch self {
+            case .dark: return ink.dark
+            case .light: return ink.light
+            case .darkHighContrast: return ink.darkHighContrast
+            case .lightHighContrast: return ink.lightHighContrast
+            }
+        }
+    }
 
     private func assertAA(
         _ foreground: ColorToken,
