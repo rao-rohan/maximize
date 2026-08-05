@@ -45,18 +45,54 @@ public enum DesignPalette {
         lightHighContrast: 0xFFFFFF
     )
 
+    /// MAX-127: was `dark: 0x16161C, light: 0xF5F5F7` (1.09:1 on `surface` in both
+    /// appearances — the design review's headline finding). See `surfaceInset` below
+    /// for why this token, not that one, absorbs most of each appearance's widen, and
+    /// for the accent/`textTertiary` ceiling that bounds both.
     public static let surfaceElevated = Ink(
-        dark: 0x16161C,
-        light: 0xF5F5F7,
-        darkHighContrast: 0x1C1C25,
-        lightHighContrast: 0xEDEDF2
+        dark: 0x1C1C22,
+        light: 0xEEEEF0,
+        darkHighContrast: 0x26262C,
+        lightHighContrast: 0xDEDEE0
     )
 
+    /// MAX-127: widens the ramp MAX-085 deliberately left alone (see `surfaceBorder`
+    /// below for why it was left alone, and why this ticket is the one allowed to
+    /// touch it). Was `dark: 0x1F1F27, light: 0xEBEBEF` (1.10:1 / 1.09:1 on
+    /// `surfaceElevated`).
+    ///
+    /// ## Why the widen is smaller than it looks like it should be
+    ///
+    /// This token is two things at once: the well inside a card, *and* the surface
+    /// every chart in the app plots on. Both `Color.accent` and `Color.textTertiary`
+    /// are drawn directly on it — the plan ring's neighbouring copy, every
+    /// axis-adjacent label — and `DesignPaletteContrastTests` holds both to 4.5:1
+    /// against it. Neither moved in this ticket: the accent is settled (A7, MAX-084)
+    /// and retuning `textTertiary` belongs to a different ticket. That sets a hard
+    /// ceiling on how light this surface can get in dark mode, and how dark it can get
+    /// in light mode, before one of those two tokens drops below AA against it.
+    ///
+    /// The ceiling turned out to be much tighter in dark than the design review
+    /// guessed. §2.1(a) expected "most of the movement" to be available in dark
+    /// because `surface` is already white in light; what it did not account for is
+    /// that MAX-070 had already tuned `textTertiary` against *this exact surface* to
+    /// clear AA with only a small margin, in dark specifically. The room this ticket
+    /// actually had, holding both `accent` and `textTertiary` at ≥4.5:1 with a real
+    /// (not hundredths) buffer: **dark `0x1F`→`0x25`, light `0xEB`→`0xE1`** — dark's
+    /// window is under half the size light's is, the opposite of the review's guess.
+    /// This ticket used most of dark's window (`0x1F`→`0x22`) and about a third of
+    /// light's (`0xEB`→`0xE4`), leaving margin (≥0.08:1) on both rather than
+    /// re-creating the "hundredths" problem one token over.
+    ///
+    /// `surfaceElevated` above has no downstream plot surface pinning it — only the
+    /// same accent/`textTertiary` floor, cleared more easily from a starting point
+    /// already closer to `surface` — so it absorbs the rest of each appearance's
+    /// widen.
     public static let surfaceInset = Ink(
-        dark: 0x1F1F27,
-        light: 0xEBEBEF,
-        darkHighContrast: 0x26262F,
-        lightHighContrast: 0xE0E0E6
+        dark: 0x22222A,
+        light: 0xE4E4E8,
+        darkHighContrast: 0x303038,
+        lightHighContrast: 0xD6D6DA
     )
 
     public static let separator = Ink(
@@ -69,47 +105,55 @@ public enum DesignPalette {
     /// The edge of a card (MAX-085). Drawn as a hairline around `ContentSurface.card`
     /// and nothing else.
     ///
-    /// ## Why an edge and not a wider fill ramp
+    /// ## Why this token still exists after MAX-127 widened the ramp
     ///
     /// The design review (MAX-082 §2.1) measured `surfaceElevated` on `surface` at
-    /// **1.09:1** — roughly half Apple's own dark step of 1.23:1 — and offered two
-    /// fixes: widen the fills, or give cards a border. It leaned toward widening. The
-    /// fills turn out to be boxed in on both sides, which is why this token exists
-    /// instead:
+    /// **1.09:1** and offered two fixes: widen the fills, or give cards a border.
+    /// MAX-085 shipped the border alone, because `surfaceInset` — the surface every
+    /// chart plots on — was tuned to within hundredths of its own floor and widening
+    /// it would have re-opened the whole chart palette (see that ticket's history for
+    /// the numbers). MAX-127 is the ticket that reopened it on purpose: `surfaceInset`
+    /// and `surfaceElevated` are both wider now, and `chartGridline`/`chartExcursion`/
+    /// `chartSeriesMuted`/`chartThreshold` are re-tuned to hold real headroom against
+    /// the new value rather than hundredths (see `surfaceInset` and the chart tokens
+    /// below).
     ///
-    /// - **`surfaceInset` cannot move.** It is the surface every chart in the app plots
-    ///   on, and MAX-084 tuned each chart mark against it to within hundredths of its
-    ///   floor — `chartGridline` measures 1.43:1 in light against a 1.4 floor,
-    ///   `chartExcursion` 2.01:1 against 2.0. Lifting the plot surface pushes both under
-    ///   water and re-opens the entire chart palette.
-    /// - **`surfaceElevated` therefore cannot move either**, because the room above it
-    ///   is `surfaceInset`'s. Raising the card to the ~1.16:1 the review proposed leaves
-    ///   the well inside the card at 1.05:1 — a bigger loss than the gain.
-    /// - **`surface` has nowhere to go.** In light it is already white; in dark, taking
-    ///   it to pure black buys the card step only 1.09 → 1.17 and spends the palette's
-    ///   blue-black identity on its largest area to get there.
-    ///
-    /// So the boundary is carried by an edge, which is also the more literally iOS 26
-    /// answer of the two. Widening the ramp properly means re-tuning the chart tokens
-    /// against a lighter plot surface — a real ticket, and a chart ticket, not this one.
+    /// That widen turned out to be real but modest — `surfaceInset` is boxed in by
+    /// `accent` and `textTertiary`'s existing AA margins against it, neither of which
+    /// this ticket was free to move (see `surfaceInset`'s comment for the exact
+    /// numbers). The fill step alone (`surfaceElevated` on `surface`) reaches
+    /// **1.16:1** in both appearances — better than the 1.09:1 the review measured,
+    /// still short of Apple's own ~1.23:1 dark step. **The edge is therefore still
+    /// doing real work, not redundant load-bearing decoration**: `surfaceElevated` on
+    /// `surface` alone would leave a card readable but quiet; the edge is what pushes
+    /// the invariant below well past its floor in both appearances rather than resting
+    /// on it.
     ///
     /// ## The values
     ///
-    /// **1.61:1** against the card fill in dark, 1.51:1 in light — deliberately stronger
-    /// than `separator` (1.31:1 / 1.34:1), because a card's outer boundary should outrank
-    /// the rules drawn *inside* it, and weaker than any chart mark, because it is
-    /// structure rather than data. It is drawn at `LayoutMetrics.hairline`, so a 1.3:1
-    /// edge of the kind the review sketched would have been half a point of almost
-    /// nothing.
+    /// Dark is unchanged (MAX-085's `0x3A3A45` already cleared the new, lighter
+    /// `surfaceElevated` with margin). Light is retuned darker — was `0xC9C9D3` — because
+    /// the wider `surfaceElevated` (now closer to white) had pulled the old value's
+    /// margin down to 1.43:1, the same "hundredths above the floor" problem this ticket
+    /// exists to fix everywhere else. The new light value restores a comparable margin
+    /// to dark's.
     ///
-    /// Increase Contrast **raises** it rather than flattening it — 2.49:1 and 2.78:1 on
+    /// **1.51:1 against the card fill in dark, 1.59:1 in light** — both comfortably past
+    /// the 1.4:1 the invariant below asks of them, both still stronger than `separator`
+    /// (1.23:1 / 1.26:1, so the card's outer boundary still outranks the rules drawn
+    /// *inside* it) and weaker than any chart mark or `textTertiary` (4.97:1 / 5.13:1 on
+    /// the card), because it is structure rather than data. Against the screen behind
+    /// the card it measures 1.75:1 / 1.84:1 — real separation on both sides of the edge,
+    /// not just the one the invariant tests.
+    ///
+    /// Increase Contrast **raises** it rather than flattening it — 2.22:1 and 2.41:1 on
     /// the card, and 3.10:1 / 3.24:1 against the screen behind it, which clears WCAG
     /// 1.4.11's 3:1 for a graphical object. That is the setting's whole point here: the
     /// one surface cue this palette has room for gets stronger, not weaker, for the
     /// people who asked for stronger cues.
     public static let surfaceBorder = Ink(
         dark: 0x3A3A45,
-        light: 0xC9C9D3,
+        light: 0xBEBEC8,
         darkHighContrast: 0x5A5A68,
         lightHighContrast: 0x8E8E9A
     )
@@ -199,25 +243,36 @@ public enum DesignPalette {
 
     // MARK: Charts
 
-    /// MAX-084: was `dark: 0x2A2A33, light: 0xE2E2E8, darkHighContrast: 0x45454F,
-    /// lightHighContrast: 0xC2C2CC`, measuring 1.15 / 1.09 / 1.58 / 1.86 against
-    /// `surfaceInset` — the surface every chart in the app plots on. `ColorTokens`
-    /// says a gridline "should be visible and never compete with the series"; at
-    /// 1.09:1 in light the light value achieved only the second half. The four values
-    /// below clear 1.4:1 in the standard appearances and 1.8:1 under Increase
-    /// Contrast, which is present without being loud: the series they sit behind
-    /// measures 13.42:1 and the threshold rule 9.96:1, so there is no danger of a
+    /// MAX-127: was `dark: 0x3C3C46, light: 0xC6C6D0, darkHighContrast: 0x4F4F59,
+    /// lightHighContrast: 0xA5A5AF` — MAX-084's fix, which cleared its own 1.4:1 floor
+    /// by **1.43:1 in light**, hundredths rather than headroom. `surfaceInset` moving
+    /// under MAX-127 would have sent that value back under water on its own, so this
+    /// re-tune is required, not optional, and it goes further than "still passes":
+    /// the four values below clear the 1.4:1 floor by **at least 0.19:1 in every
+    /// appearance** (1.59:1 dark, 1.60:1 light, 1.89:1 / 1.90:1 under Increase
+    /// Contrast) — real margin against a plot surface that can move again in a future
+    /// ticket, not a value re-pinned to the line. `ColorTokens` says a gridline
+    /// "should be visible and never compete with the series"; the series behind it
+    /// still measures 12.9–14.5:1 and the threshold rule 10.9–14.5:1 (`surfaceInset`
+    /// varies slightly by appearance now, see that token), so there is no danger of a
     /// gridline competing with either.
     public static let chartGridline = Ink(
-        dark: 0x3C3C46,
-        light: 0xC6C6D0,
-        darkHighContrast: 0x4F4F59,
-        lightHighContrast: 0xA5A5AF
+        dark: 0x42424C,
+        light: 0xB5B5BF,
+        darkHighContrast: 0x595963,
+        lightHighContrast: 0x9B9BA5
     )
 
+    /// MAX-127: was `dark: 0xC9C9D4, light: 0x3A3A44` (darkHighContrast/
+    /// lightHighContrast unchanged — already the appearance's pure white/black, with
+    /// nowhere further to go). Retuned outward (lighter in dark, darker in light) so
+    /// `chartExcursion`'s cap-label legibility test still clears 4.5:1 with real margin
+    /// against the wider `surfaceInset` — see `chartExcursion`'s comment for why the
+    /// two tokens had to move together. Still clears the hierarchy ladder under
+    /// `chartSeriesPrimary` in every appearance (`DesignPaletteContrastTests`).
     public static let chartThreshold = Ink(
-        dark: 0xC9C9D4,
-        light: 0x3A3A44,
+        dark: 0xD6D6E1,
+        light: 0x2A2A34,
         darkHighContrast: 0xFFFFFF,
         lightHighContrast: 0x000000
     )
@@ -229,52 +284,60 @@ public enum DesignPalette {
         lightHighContrast: 0x000000
     )
 
-    /// MAX-084: was `dark: 0x5A5A66, light: 0xA8A8B4, darkHighContrast: 0x81818D,
-    /// lightHighContrast: 0x74747F` — 2.41 / 1.98 / 3.90 / 3.51 on `surfaceInset` at
-    /// *full* strength, before the recency ramp fades it. The drift overlay then draws
-    /// its oldest curve at `HeartRateDriftOverlayData.oldestContextOpacity`, which took
-    /// the dark value to 1.25:1 on a 1pt stroke. FR-3.3 is about watching drift flatten
-    /// across an interval, and the far end of the interval is the end that was
-    /// disappearing. Raised so the base clears WCAG 1.4.11's 3:1 for a graphical object
-    /// in the standard appearances (4.5:1 under Increase Contrast) and the whole ramp
-    /// sits higher; the ramp's floor moved in the same change.
+    /// MAX-127: was `dark: 0x696975, light: 0x848490, darkHighContrast: 0x8C8C98,
+    /// lightHighContrast: 0x63636F` — 2.41:1 at full strength in dark against the old,
+    /// narrower `surfaceInset`. Against MAX-127's wider one that fell under the 3:1
+    /// graphical-object floor (2.45:1), so this needed to move regardless of headroom;
+    /// the four values below clear 3.0:1 by at least 0.28:1 in every appearance (3.28
+    /// dark / 3.44 light / 4.47 dark-HC / 4.03 light-HC), and the faded end of the
+    /// recency ramp — `chartSeriesMuted` at
+    /// `HeartRateDriftOverlayData.oldestContextOpacity` — clears its own 1.5:1 floor by
+    /// at least 0.14:1 in every appearance rather than sitting on it.
     public static let chartSeriesMuted = Ink(
-        dark: 0x696975,
-        light: 0x848490,
-        darkHighContrast: 0x8C8C98,
-        lightHighContrast: 0x63636F
+        dark: 0x71717D,
+        light: 0x787884,
+        darkHighContrast: 0x9696A2,
+        lightHighContrast: 0x646470
     )
 
     /// The region of a chart where the athlete was outside the plan — currently the
     /// time above the HR cap (FR-1.2), which PRD §9 calls the primary easy-run
     /// discipline metric.
     ///
-    /// New in MAX-084. It was `chartThreshold.opacity(0.2)` written at the call site,
-    /// which composites to 1.62:1 on `surfaceInset` in dark and 1.40:1 in light — the
-    /// faintest deliberate mark on a chart that exists to show it, fainter than the
-    /// axis labels beside it at 4.80:1. A hierarchy inversion, and an opacity literal
-    /// in a view, where no other colour value in this app is allowed to live.
+    /// MAX-127: was `dark: 0x51515B, light: 0xA7A7B1, darkHighContrast: 0x65656F,
+    /// lightHighContrast: 0x8A8A94` — MAX-084's fix, which cleared its own 2.0:1 floor
+    /// by **2.09:1 in dark, 2.01:1 in light**: the same "hundredths, not headroom"
+    /// problem `chartGridline` had. Re-tuned against the wider `surfaceInset` to clear
+    /// 2.0:1 by at least 0.24:1 in every appearance (2.25 dark / 2.31 light / 2.52
+    /// dark-HC / 2.42 light-HC).
     ///
-    /// Two decisions worth recording:
+    /// **This token and `chartThreshold` had to move together, not independently.**
+    /// The cap label ("Cap N bpm") is drawn in `chartThreshold` directly over this
+    /// fill, and needs 4.5:1 against it (`testTheCapLabelStaysLegibleOverTheShading`).
+    /// With `surfaceInset` wider, pushing `chartExcursion` far enough from it to clear
+    /// 2.0:1 with margin pulls it close enough to the old `chartThreshold` that the
+    /// label's contrast collapses — at the values that gave `chartExcursion` real
+    /// floor headroom, the label fell to ~3.5:1 in both appearances. There is no value
+    /// of `chartExcursion` alone that clears both constraints against a stationary
+    /// `chartThreshold`; the fill and the rule share the space between `surfaceInset`
+    /// and `chartSeriesPrimary`, and widening the plot surface narrows it for both.
+    /// `chartThreshold` moved outward instead (see its own comment) to reopen room for
+    /// both floors to clear with margin at once — 4.88:1 dark / 4.85:1 light for the
+    /// label, still inside `chartSeriesPrimary`'s hierarchy slot in every appearance.
+    ///
+    /// Two decisions from MAX-084 still hold and were not revisited here:
     ///
     /// - **Opaque, not a tint.** A named opaque value is a value `WCAGContrastTests`
-    ///   can measure. A call-site opacity is not, which is how 1.62:1 went unnoticed.
-    /// - **Neutral, not warm.** The design review preferred a desaturated warm hue so
-    ///   the shading would stop sharing its hue with the cap rule. At this lightness a
-    ///   warm tilt reads as brown against a blue-black palette, and no one on this
-    ///   project can look at it; FR-4.3's saturated budget is also already spent on the
-    ///   accent and the three bands. The shading and the rule are separated instead by
-    ///   strength and form — a solid region at ~2.1:1 under a dashed 1pt rule at
-    ///   9.96:1. If a device check says the hue is worth having, this is one value.
-    ///
-    /// Bounded above as well as below: the cap line's "Cap N bpm" annotation is drawn
-    /// in `chartThreshold` directly over this region, so the fill must stay light
-    /// enough to keep that label at AA. It measures 4.78:1 in dark at these values.
+    ///   can measure. A call-site opacity is not — see `CadenceBandView`'s band
+    ///   shading, which still writes `Color.chartThreshold.opacity(0.2)` at the call
+    ///   site and was out of this ticket's scope to fix; reported separately.
+    /// - **Neutral, not warm.** FR-4.3's saturated budget is already spent on the
+    ///   accent and the three bands; see MAX-084's history for the full argument.
     public static let chartExcursion = Ink(
-        dark: 0x51515B,
-        light: 0xA7A7B1,
-        darkHighContrast: 0x65656F,
-        lightHighContrast: 0x8A8A94
+        dark: 0x585862,
+        light: 0x9696A0,
+        darkHighContrast: 0x6C6C76,
+        lightHighContrast: 0x888892
     )
 
     // MARK: Chrome
