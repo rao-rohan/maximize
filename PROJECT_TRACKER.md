@@ -398,9 +398,18 @@ compiles it but does not run it; see the PR's **Needs device verification** sect
 
 ### Deliberately not built
 
-Live coaching · manual entry/editing · strength analysis · HealthKit writes · multi-user ·
-nutrition · ~~Claude on the dashboard tab~~ · **any server component** (A1). PRD §3, §12.
-Listed so nobody helpfully adds one.
+Live coaching · **manual entry/editing** · ~~strength analysis~~ · HealthKit writes ·
+multi-user · nutrition · ~~Claude on the dashboard tab~~ · **any server component** (A1).
+PRD §3, §12. Listed so nobody helpfully adds one.
+
+**Strength analysis is struck, on purpose (A16).** The owner asked that plans account for
+lifting goals as well as running goals, and MAX-109 spends the non-goal deliberately rather
+than letting it arrive as a side effect of somebody adding a `.lift` case. The spend is
+narrow: PRD §3 protects strength *analysis* and manual entry in the same breath, and
+**only the first is spent**. Manual entry is now bolded above because A20 reaffirms it
+against exactly the pressure A16 creates — HealthKit carries no sets, reps or load, so
+"lifting needs volume tracking" is the obvious next request and it is refused on A20's
+authority, not admitted on A16's.
 
 **Claude on the dashboard tab is struck, on purpose (A10).** The chat-first pivot puts a
 persistent Ask button on every screen, and on the dashboard it opens a thread about an
@@ -439,7 +448,7 @@ change rather than four.
 |---|---|---|---|
 | P1 | `Plan` cannot express the *shape* of classification rules, so four dimensionless ratios live in `WorkoutClassificationPolicy` | MAX-013 | Real D1 leak, but bounded: they are ratios, never a bpm, metre or minute, so changing the cap or arc still moves the thresholds. A `classification` block on a future plan version fixes it |
 | P2 | Same, for the cap-anchored zone multipliers in `HeartRateZoneModel` | MAX-012 | As P1 |
-| P3 | `Plan` records **no durations at all**, so the "too short to classify" floor can only be distance-based | MAX-013 | A mis-started treadmill run with HR but no distance is not caught and reaches the scorer. Wants `minimumSessionDuration` |
+| P3 | `Plan` records **no durations at all**, so the "too short to classify" floor can only be distance-based | MAX-013 | A mis-started treadmill run with HR but no distance is not caught and reaches the scorer. Wants `minimumSessionDuration`. **MAX-113 closes this** — a lifting session is prescribed in minutes, so the plan has to learn durations either way |
 | P4 | `ScheduledSession` cannot express interval structure (e.g. 6×800m) | MAX-013 | The scorer sees "hard" but not the prescribed shape, so it cannot judge whether the session was executed as written |
 
 Separately, `CalendarDay` lacks day/week arithmetic — MAX-013 carried a private day
@@ -533,6 +542,8 @@ feature was governed by a plan that could not exist).
 | MAX-090 | Chat-first product spec: plan generation and Q&A through chat | Owner | **Opus** 🔒 ✅ |
 | MAX-091 | Run both Claude clients on the Sonnet tier at `medium` effort | Owner, cost | Sonnet 🔒 ✅ |
 | MAX-092 … MAX-104 | The chat-first build, decomposed from MAX-090 | MAX-090 | see below |
+| MAX-109 | Lifting product spec: plans account for lifting and running | Owner | **Opus** ✅ |
+| MAX-110 … MAX-125 | The lifting build, decomposed from MAX-109 | MAX-109 | see below |
 
 **MAX-066.** Splits currently need a GPS track, so a treadmill run has none — correctly
 rendered as an absence rather than fabricated. `distanceWalkingRunning` is already
@@ -662,6 +673,13 @@ Two consequences that make this more than decoration:
 D1 and D2 are untouched: the plan layer reads the versioned record in effect on each day
 through `PlanCalendar`, never a literal and never a recomputation.
 
+**MAX-105 must not be dispatched until its brief carries MAX-109's §2.** A17 makes a day's
+prescription **two** sessions — one per discipline — and a substrate designed around one
+prescription is the wrong design for the hardest visual in the app. This is the single most
+expensive collision on the board: either MAX-105 waits for MAX-111 and is designed once, or
+MAX-117 redesigns a ~42pt cell whose contrast budget MAX-084 and MAX-087 already spent.
+Sequence: **111 → 105 → 117**.
+
 **MAX-091.** Both Claude clients moved from the Opus tier to the Sonnet tier at `medium`
 effort, on the owner's cost instruction. Three things came with the model that are not
 optional and are easy to get wrong later, so they are recorded here rather than only in
@@ -763,6 +781,104 @@ a `ChatSubject` — `.workout(UUID)` or `.training(TrainingScope)` — plus a
   future decomposition: a ticket that grows a protocol owns every conformer of it, and
   the brief should say so.**
 
+### Phase 9 — Lifting (MAX-109)
+
+**MAX-109 is the lifting product spec, and it is delivered:**
+[`docs/LIFTING-SPEC.md`](./docs/LIFTING-SPEC.md) plus amendments **A16–A21**. Nothing in it
+is built. It came from one sentence from the owner — *"Plans should account for both
+lifting goals and running goals"* — and the first thing it found is that the ticket is not
+what it looks like.
+
+**Strength workouts are already captured, already enriched, and already scored.** Nothing
+in the pipeline filters by activity type: `HealthKitWorkoutObserver` watches
+`HKWorkoutType`, the fetcher maps `.traditionalStrengthTraining` to a first-class
+`ActivityType`, `WorkoutIngestionPipeline` has no activity branch, and MAX-034 made sample
+extraction unconditional. So every lift since MAX-033 has been stored with its heart-rate
+curve, given derived metrics measured against the *running* cap, classified `.other`, and
+scored — at 40–69 by `StandardPlanSeed`'s unconditional `fallback.recorded` band against a
+threshold of 70, or at **20–45 by `easy.wellOverCap`**, which carries no
+`.actualClassification` condition and therefore fires on any workout whose average heart
+rate clears cap + 8, with the rationale *"Well above the easy cap for the whole run."*
+Those scores are immutable (D8). This phase is a correction of behaviour already in
+production, not the addition of a feature.
+
+Two more findings worth carrying without reading all of it:
+
+- **`DerivedMetricsCalculator` fabricates a cadence for lifts.** Average cadence is derived
+  from step count over duration with no discipline gate, so a lifting session yields ~20
+  steps/min — walking between racks — drawn against a 165–170 band and printed to Claude as
+  "Average cadence". A18 draws the line the code is missing: a number that *can* be computed
+  and describes nothing is not the same as an honest absence, and this codebase's
+  absence-is-first-class stance is an argument for **not computing it**, not for rendering
+  it as a dash.
+- **The classifier is the least damaged part**, contrary to the dispatch brief's reading.
+  It does not read pace at all (its own doc comment refuses cadence, pace and energy), and
+  it short-circuits on `activityType.isRun` before touching a heart rate. A lift already
+  classifies `.other` and there is a test pinning it.
+
+The three decisions worth knowing without reading all of it:
+
+- **The prescription is indexed by discipline (A17).** `Discipline` is closed at `.run` and
+  `.lift`; the weekly template prescribes one session per **(weekday, discipline)** pair,
+  rest explicit on both, so resolution stays a total function; and a workout is only ever
+  evaluated against its own discipline's ask. One plan record, one version, one
+  `effectiveFrom` — two plan records would make `Score.planVersion` ambiguous and split
+  every D1 guard in the codebase. **No migration:** the plan is a JSON blob and the lift
+  slot decodes with `decodeIfPresent` defaulting to rest, so a plan authored before lifting
+  decodes to "prescribed no lifting", which is what it meant.
+- **Effective days count obligations, not days (A19).** A Tuesday asking for a run and a
+  lift is two obligations; meeting one is not meeting the day. Two *attempts at one*
+  obligation still resolve generously (the warm-up-jog reasoning is untouched). The
+  landable property is that on a day prescribing at most one session the two countings are
+  identical — so **no historical figure moves**, and that is an acceptance criterion with
+  fixtures behind it.
+- **Lifting is scored on adherence, not volume (A20).** HealthKit has no sets, reps or
+  load, so the alternative is manual entry — PRD §3's *"the thing being killed"*. The
+  non-goal is **not** spent. The honest cost is stated: adherence cannot tell a hard
+  session from a token one.
+
+**One escalation, and it is not a ticket's to make.** §11.4 / A21: the lift scores already
+written are wrong, D8 forbids overwriting them, and they are not scorer misjudgements —
+counting them as such corrupts the correction-rate signal D8 exists to protect. The
+recorded lean is to label them; the decision is the owner's, tracked as MAX-125.
+
+| ID | Ticket | Depends on | Tier |
+|---|---|---|---|
+| MAX-110 | `Discipline`, and `.lift` on both classification enums | — | **Opus** |
+| MAX-111 | The per-discipline prescription; the no-op decode test | 110 | **Opus** |
+| MAX-112 | Discipline-gated derived metrics; stop fabricating cadence | 110 | **Opus** |
+| MAX-113 | Rubric vocabulary for lifts — **closes gap P3** | 110 | **Opus** |
+| MAX-114 | Seed bands for lift days; the `easy.wellOverCap` shadow | 113 | Sonnet |
+| MAX-115 | Match a workout to its own discipline's ask | 111, 113 | **Opus** |
+| MAX-116 | Obligations, not days: tallies, streak, rest-day budget | 111, 115 | **Opus** |
+| MAX-117 | The calendar's mixed day | 116, **105** | **Opus** |
+| MAX-118 | Context and fact sheet learn discipline | 111, 112 | **Opus** 🔒 |
+| MAX-119 | Plan authoring for two slots | 111 | Sonnet |
+| MAX-120 | The plan screen shows both | 111 | Sonnet |
+| MAX-121 | Workout detail for a lift | 112, 115 | Sonnet |
+| MAX-122 | Trend tiles, honestly ("days run", the effective denominator) | 116 | Sonnet |
+| MAX-123 | `PlanProposal` covers lift days | 111, **099** | Sonnet 🔒 |
+| MAX-124 | `TrainingContext` is per-session, not per-run | 111, **095** | **Opus** 🔒 |
+| MAX-125 | **Decide what to do with lifts already scored as runs** | 110 | Owner / overseer |
+
+**Four collisions the overseer must respect.**
+
+1. **MAX-105 before MAX-117, and MAX-105's brief must carry A17** — see the MAX-105 note
+   above. Sequence 111 → 105 → 117.
+2. **MAX-095's brief must carry LIFTING-SPEC §10.2 before it is written.** Its specified
+   roll-up is "one line per run" and it must be "one line per session", discipline-tagged,
+   with the plan block carrying the lift week. Briefing it now costs a paragraph; MAX-124
+   exists only if 095 lands unbriefed, and it would be a rewrite of an Opus 🔒 ticket.
+3. **MAX-110 adds `.lift` to `RestDayBudgeting.costTier` without reordering the existing
+   cases.** The tiers are ordinal and conversion outcomes depend on relative order — a
+   reorder silently rewrites the calendar's past. `Domain/ScheduledSession.swift` is touched
+   by 110, 111 and 113 and they are already in dependency order.
+4. **MAX-104 runs after 117–122.** It already absorbs MAX-086's absence-voice half; it
+   should absorb the lifting surfaces in the same pass rather than spawning a follow-up.
+
+Suggested order: **105 (briefed) → 110 → 111 → (112 ‖ 113) → 114 → 115 → 116 → 117**, with
+118 parallel after 112, 120 then 119 parallel after 111, and 121/122 last.
+
 ---
 
 ## Risks
@@ -808,4 +924,7 @@ a `ChatSubject` — `.workout(UUID)` or `.training(TrainingScope)` — plus a
 | 2026-08-04 | The color-literal guard now admits **no** exceptions in `App/` | Consequence of the above: `App/` is entirely literal-free, so any color value there is one escaping the contrast suite that guards it. Verified the tightened guard catches a literal planted in `ColorTokens.swift` itself |
 | 2026-08-04 | `Score` stores its band and validates it against the stored threshold, but does not compute it | Storing follows D2 (compute once). Refusing to compute follows D1 (the threshold is versioned). Rejecting a band that contradicts its threshold costs nothing and makes an incoherent score unrepresentable; the marginal/ineffective split stays the scorer's judgement |
 | 2026-08-04 | Rubric carries `marginalThreshold` alongside `effectiveThreshold` | Three bands need two cut points. Since `ScoreBand` cannot compute itself, something must supply them, and D1 says that is versioned plan data rather than a constant in the scorer |
+| 2026-08-05 | **MAX-109**: a day's prescription is indexed by discipline — one plan record, one version, two slots per weekday (A17) | Two plan records would make `Score.planVersion` ambiguous and split `PlanCalendar`, the context builder's coherence guard and MAX-011's no-back-dating rule in half, to buy the ability to revise lifting without restating running — a cost every other plan field already pays for free via `PlanAuthoringSession`. Two slots keep `WeeklyTemplate`'s totality (rest explicit on both sides), and because the plan is a JSON blob the lift slot decodes with `decodeIfPresent` to rest, so no stored prescription changes and no historical score becomes irreproducible |
+| 2026-08-05 | **MAX-109**: effective days count obligations, not days (A19) | Extending `contains(where: \.isEffective)` to two disciplines says "a day with two obligations is satisfied by meeting either one", which makes lifting decorative — the opposite of what "the plan should account for both" asks. Two *attempts at one* obligation still resolve best-of; the warm-up-jog reasoning is untouched. Landable because on a one-session day the two countings are identical, so no historical figure moves |
+| 2026-08-05 | **MAX-109**: lifting is scored on adherence, not volume; manual entry stays a non-goal (A20) | HealthKit carries no sets, reps or load, so the only alternative is the athlete typing them — PRD §3's "the thing being killed" and the direct negation of §2's north star. Adherence delivers what the ask actually needs (skipping the lift costs something) with zero taps; a volume rubric obliges the app to become a lifting logger, which §13 names as the top execution risk. The cost is stated rather than hidden: adherence cannot tell a hard session from a token one |
 | 2026-08-04 | **MAX-034**: `WorkoutIngestionPipeline.enrich` extracts and stores samples (HR series, route) before resolving the plan, not after | Fixed a permanent-data-loss bug: `enrich` previously returned before `WorkoutSampleExtractor.extract` ran whenever no plan governed the workout's day, so every run predating the athlete's first plan version kept no HR curve — and MAX-031's advancing anchor never revisited it. The curve is a fact about the run, not the plan; only derived metrics (§9, measured against the plan's cap) stay gated on plan coverage. `IngestionPipelineDiagnostic.storedWithoutPlan` now documents that samples are stored either way. Found in the same pass: `.workoutPredatesEveryPlan` can never be completed later — MAX-011's version/`effectiveFrom` ordering forbids a plan from ever back-dating earlier than one that already exists — unlike `.noPlanAuthored`, which the lazy path does complete once a first plan is authored |
