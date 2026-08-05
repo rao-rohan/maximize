@@ -96,6 +96,14 @@ public struct DerivedMetricsInput: Hashable, Sendable {
 /// reserved for the cases where zero is the true answer, of which "no seconds above the
 /// cap" is the important one: a perfectly disciplined easy run.
 ///
+/// ## And meaningless is not absent-by-accident
+///
+/// A metric can be *computable* for a workout and still describe nothing about it — a
+/// lift's steps per minute is arithmetic that lands on a real number and means nothing.
+/// Which figures those are is not decided here: `DerivedMetricKind` owns it, in one
+/// exhaustive switch, so that a metric added later cannot reach a discipline it says
+/// nothing about without someone having chosen to send it there (A17, MAX-130).
+///
 /// ## Purity, and the ordering question it settles
 ///
 /// This is a pure function: same inputs, same outputs, always. That matters because
@@ -122,6 +130,24 @@ public enum DerivedMetricsCalculator {
             zones = try HeartRateZoneModel.capAnchored(heartRateCapBPM: plan.heartRateCapBPM)
         }
 
+        // MAX-130. Every figure below passes through one decision point — the exhaustive
+        // switch in `DerivedMetricKind.requirement` — rather than each carrying its own
+        // predicate here. That is what stops the next metric being computed for a
+        // discipline it says nothing about: a new case does not compile until someone
+        // has answered the question. See `DerivedMetricKind` for the reasoning, and for
+        // why each figure got the answer it did.
+        //
+        // *Every* figure, including the three that currently apply everywhere. The
+        // uniformity is the point: "the calculator records nothing that does not apply"
+        // is then a property of this function rather than of which lines someone
+        // remembered to wrap, and it is asserted as one over `allCases` in the tests.
+        //
+        // Absent, never zero, throughout. A nil is left out of a trend and omitted from
+        // the fact sheet; a zero is averaged in and shown as measured.
+        func applies(_ kind: DerivedMetricKind) -> Bool {
+            kind.applies(to: input.workout.activityType)
+        }
+
         var averageHeartRateBPM: Double?
         var maximumHeartRateBPM: Double?
         var timeAboveCapSeconds: Double?
@@ -130,66 +156,42 @@ public enum DerivedMetricsCalculator {
 
         if let series = input.heartRateSeries {
             let curve = HeartRateCurve(series)
-            averageHeartRateBPM = curve.averageBPM
-            maximumHeartRateBPM = curve.maximumBPM
+            if applies(.averageHeartRateBPM) {
+                averageHeartRateBPM = curve.averageBPM
+            }
+            if applies(.maximumHeartRateBPM) {
+                maximumHeartRateBPM = curve.maximumBPM
+            }
+
             // A single-sample series covers no span, so it truthfully spent zero seconds
             // above the cap and has no zone splits. Zero rather than nil here because the
             // run does have heart-rate data — nil would be indistinguishable from a
             // workout the sensor never covered at all.
-            timeAboveCapSeconds = curve.secondsAbove(plan.heartRateCapBPM)
-            zoneSplits = try curve.zoneSplits(model: zones)
+            if applies(.timeAboveCapSeconds) {
+                timeAboveCapSeconds = curve.secondsAbove(plan.heartRateCapBPM)
+            }
+            if applies(.zoneSplits) {
+                zoneSplits = try curve.zoneSplits(model: zones)
+            }
 
             // §9: drift is "most meaningful on easy and long runs; near-meaningless on
             // interval/hard runs, so surfaced conditionally". An unclassified workout is
             // not yet known to be one of the meaningful kinds, so it gets no drift
             // either — the alternative is emitting a number and hoping the view
             // remembers to hide it.
-            if input.classification?.driftIsMeaningful == true {
+            if applies(.heartRateDriftFraction), input.classification?.driftIsMeaningful == true {
                 heartRateDriftFraction = curve.driftFraction
             }
         }
 
-        // MAX-111. Three of the metrics below are models *of running*, not measurements
-        // that happen to be taken on a run, and handing them a workout that is not a run
-        // produces a number rather than an answer:
-        //
-        // - **Cadence** is steps per minute against `Plan.cadenceTarget`, a running band.
-        //   A strength session's step count is incidental movement between sets, and
-        //   dividing it by the session's duration invents a running form metric for a
-        //   session with no running form in it. Confirmed on the device: a lift was
-        //   storing a "cadence" and sending it to Claude as fact.
-        // - **Grade-adjusted pace** applies Minetti's cost-of-*running* polynomial to a
-        //   route. A hike or a ride carrying a route would get a running pace it never
-        //   ran.
-        // - **Distance splits** are FR-1.5's per-kilometre *pace* breakdown, read
-        //   everywhere in the app as a run's splits.
-        //
-        // So they are absent for a non-run — absent, never zero, for the reason stated
-        // above: a nil is left out of a trend and out of the fact sheet, whereas a zero is
-        // averaged in and shown as measured. `distanceSplitsComputed` stays true, so
-        // MAX-067's backfill does not re-fetch a lift's samples on every launch forever
-        // looking for splits it will never find.
-        //
-        // Deliberately *not* gated: average and maximum heart rate, time above cap and
-        // the zone splits. Those are true readings of a heart-rate series the athlete
-        // genuinely produced, and the cap they were read against is recorded on the result
-        // (`planVersion`) so a later version cannot silently reinterpret them. Whether a
-        // lift should be measured against a cap of its own is a plan-model question, and
-        // MAX-109 owns it.
-        //
-        // Drift needs no gate here: it is already conditional on
-        // `WorkoutClassification.driftIsMeaningful`, and `WorkoutClassifier` answers
-        // `.other` for everything that is not a run.
-        let isRun = input.workout.activityType.isRun
-
-        let averageCadenceStepsPerMinute: Double? = isRun
+        let averageCadenceStepsPerMinute: Double? = applies(.averageCadenceStepsPerMinute)
             ? averageCadence(
                 totalStepCount: input.totalStepCount,
                 durationSeconds: input.workout.durationSeconds
             )
             : nil
 
-        let gradeAdjustedPaceSecondsPerKilometer: Double? = isRun
+        let gradeAdjustedPaceSecondsPerKilometer: Double? = applies(.gradeAdjustedPaceSecondsPerKilometer)
             ? GradeAdjustedPace.secondsPerKilometer(
                 workout: input.workout,
                 route: input.route,
@@ -203,7 +205,11 @@ public enum DerivedMetricsCalculator {
         // chat. `DistanceSplitCalculator` documents what it measures against, which
         // source wins when both are present, and every case in which it truthfully
         // returns nil.
-        let distanceSplits: DistanceSplits? = isRun
+        //
+        // `distanceSplitsComputed` below stays true even where this is gated off, so
+        // MAX-067's backfill does not re-fetch a lift's samples on every launch forever
+        // looking for splits it will never be allowed to find.
+        let distanceSplits: DistanceSplits? = applies(.distanceSplits)
             ? DistanceSplitCalculator.splits(
                 workout: input.workout,
                 route: input.route,
@@ -240,8 +246,9 @@ public enum DerivedMetricsCalculator {
     ///
     /// **This is arithmetic, and it does not know what a run is** — steps divided by
     /// minutes is a number for any workout that reports both. Whether asking the question
-    /// makes sense is `compute`'s call, and MAX-111 is where it is made; see the note
-    /// there. Callers reaching this directly are responsible for the same check.
+    /// makes sense is answered once, by `DerivedMetricKind.averageCadenceStepsPerMinute`,
+    /// and `compute` reads that answer. Callers reaching this directly are responsible
+    /// for the same check.
     static func averageCadence(totalStepCount: Double?, durationSeconds: Double) -> Double? {
         guard let totalStepCount, durationSeconds > 0 else { return nil }
         return totalStepCount / (durationSeconds / 60)
