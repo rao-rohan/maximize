@@ -241,7 +241,7 @@ thin, and the brief carries that instruction explicitly.
 
 | ID | Ticket | Spec | Tier | Status | Depends on |
 |---|---|---|---|---|---|
-| MAX-048 | Deterministic duplicate resolution for `ChatThreadRecord` | D6, A1 | Sonnet | 🔲 | MAX-020 |
+| MAX-048 | Deterministic duplicate resolution for `ChatThreadRecord` | D6, A1 | Sonnet | ✅ | MAX-020 |
 | MAX-050 | Per-workout thread persistence | D6, FR-2.3 | Sonnet | ✅ | MAX-020 |
 | MAX-051 | Chat UI with token-streaming reveal | FR-2.1–2.4, D10 | Sonnet | 🔲 | MAX-024, MAX-041, MAX-050 |
 
