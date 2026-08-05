@@ -27,6 +27,9 @@ import MaximizeCore
 /// `Color.scoreBand(_:)` refuses to allow at its call site, just moved one file over.
 struct VerdictHeaderView: View {
     let verdict: WorkoutVerdict
+    /// MAX-047 — the athlete's chosen `DistanceUnit`, needed here for the scheduled
+    /// session's distance (`WorkoutDisplayFormatting.describeScheduledSession`).
+    let distanceUnit: DistanceUnit
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.regular) {
@@ -41,7 +44,7 @@ struct VerdictHeaderView: View {
     }
 
     private var scheduledSessionLabel: String {
-        WorkoutDisplayFormatting.describeScheduledSession(verdict.scheduledSession)
+        WorkoutDisplayFormatting.describeScheduledSession(verdict.scheduledSession, unit: distanceUnit)
     }
 
     // MARK: Scheduled / actual

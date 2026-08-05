@@ -11,6 +11,7 @@ import MaximizeCore
 /// per-row summary are FR-1.5 / MAX-045's job, not this one.
 struct WorkoutRow: View {
     let workout: Workout
+    let distanceUnit: DistanceUnit
 
     var body: some View {
         HStack(spacing: Spacing.compact) {
@@ -24,7 +25,7 @@ struct WorkoutRow: View {
             }
             Spacer(minLength: Spacing.compact)
             if let distanceMeters = workout.distanceMeters {
-                Text(WorkoutDisplayFormatting.distance(meters: distanceMeters))
+                Text(WorkoutDisplayFormatting.distance(meters: distanceMeters, unit: distanceUnit))
                     .font(.metricLabel)
                     .foregroundStyle(Color.textSecondary)
             }

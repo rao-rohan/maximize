@@ -57,7 +57,7 @@ struct WorkoutDetailView: View {
                 .padding(.top, Spacing.hero)
         case let .loaded(data):
             VStack(alignment: .leading, spacing: LayoutMetrics.sectionSpacing) {
-                VerdictHeaderView(verdict: data.verdict)
+                VerdictHeaderView(verdict: data.verdict, distanceUnit: data.distanceUnit)
                 HRCurveView(chartData: data.heartRateChart)
                 CadenceBandView(data: data.cadence)
                 RouteMapView(data: data.routeMap)
