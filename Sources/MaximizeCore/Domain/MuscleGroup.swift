@@ -48,6 +48,28 @@ public enum MuscleGroup: String, Hashable, Sendable, Codable, CaseIterable {
 
     /// Every group. See the type note on why this is a constant rather than a case.
     public static let fullBody: Set<MuscleGroup> = Set(MuscleGroup.allCases)
+
+    /// The athlete-facing name — "Core", not `core`.
+    ///
+    /// In the core for `ActivityType.displayName`'s reason: as of A22 these words are
+    /// read back to the athlete on the workout detail screen, where what they say is a
+    /// product decision rather than a rendering detail, and a decision belongs where CI
+    /// runs it.
+    ///
+    /// `App/Plan/PlanAuthoringFormatting.describe(_:)` predates this and produces the
+    /// same strings. Collapsing it onto this property belongs to whichever ticket next
+    /// opens that file — MAX-138 is live in it — and the wording is pinned by a test
+    /// here so the two cannot drift silently in the meantime.
+    public var displayName: String {
+        switch self {
+        case .chest: return "Chest"
+        case .back: return "Back"
+        case .shoulders: return "Shoulders"
+        case .arms: return "Arms"
+        case .legs: return "Legs"
+        case .core: return "Core"
+        }
+    }
 }
 
 extension Set where Element == MuscleGroup {

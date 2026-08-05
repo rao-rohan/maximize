@@ -7,6 +7,11 @@ enum Fixture {
     static let workoutID = UUID(uuidString: "11111111-1111-1111-1111-111111111111") ?? UUID()
     static let otherWorkoutID = UUID(uuidString: "22222222-2222-2222-2222-222222222222") ?? UUID()
 
+    /// A22's muscle-group entry has its own identity, not the workout's — a workout
+    /// accumulates entries, so a fixture that reused `workoutID` would hide the
+    /// difference.
+    static let muscleGroupEntryID = UUID(uuidString: "44444444-4444-4444-4444-444444444444") ?? UUID()
+
     static let epoch = Date(timeIntervalSince1970: 1_767_225_600) // 2026-01-01T00:00:00Z
 
     static func day(_ year: Int, _ month: Int, _ dayOfMonth: Int) throws -> CalendarDay {

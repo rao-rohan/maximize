@@ -40,6 +40,10 @@ public enum WorkoutAttachedRecord: String, Hashable, Sendable, CaseIterable {
     case automaticScore
     case scoreAnnotations
     case chatThread
+    /// A22's athlete-supplied muscle groups. Attached to the workout for the same
+    /// reason a score annotation is: it is a statement *about* a session, and it means
+    /// nothing once the session is gone.
+    case muscleGroupEntries
 }
 
 /// Reading and writing workouts and everything captured with them (PRD §8).
@@ -127,6 +131,30 @@ public protocol ScoreRepository: Sendable {
 
     /// Adds a correction. Additive: it cannot touch the auto-score.
     func annotate(_ annotation: ScoreAnnotation) async throws
+}
+
+/// What the athlete said a strength session worked (A22, PRD §8's shape for an
+/// annotation applied to an input).
+///
+/// Separate from `WorkoutRepository` rather than two more methods on it, because that
+/// protocol's contract is "everything captured with a workout" — records that mirror
+/// the health store. Nothing here comes from the health store, and A22 is explicit that
+/// keeping the athlete's answers out of the captured record is what stops the
+/// manual-entry permission it spends from widening.
+public protocol MuscleGroupEntryRepository: Sendable {
+
+    /// Everything the athlete has said about this workout, oldest first — the whole
+    /// log, not the answer in force, so that `MuscleGroupLog` (not the store) decides
+    /// which one that is.
+    ///
+    /// Total rather than optional: an empty log is the ordinary state of a lift nobody
+    /// has answered for yet, and it is a different thing from a read that failed.
+    func muscleGroupLog(forWorkout id: UUID) async throws -> MuscleGroupLog
+
+    /// Adds an entry. Additive, like `ScoreRepository.annotate`: there is deliberately
+    /// no update or delete path, so changing an answer appends a new record and the
+    /// earlier one stays on file.
+    func record(_ entry: MuscleGroupEntry) async throws
 }
 
 /// Every plan version, as the resolvable calendar (D1).
