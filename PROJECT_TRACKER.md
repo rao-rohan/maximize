@@ -1045,7 +1045,7 @@ twelve and is dispatchable immediately.
 | MAX-093 | The stored record: additive fields, no migration | 092 | Sonnet ✅ |
 | MAX-094 | Shared fact-sheet formatting — pure extraction | — | Sonnet ✅ |
 | MAX-095 | `TrainingContext` + one context entry point | 092, 094 | **Opus** 🔒 ✅ |
-| MAX-096 | `ChatModel` generalised; transcript cap; training task text | 095 | **Opus** 🔒 |
+| MAX-096 | `ChatModel` generalised; transcript cap; training task text | 095 | **Opus** 🔒 ✅ |
 | MAX-097 | Thread list, derived titles, new chat, scope subtitle | 093, 096 | Sonnet |
 | MAX-098 | The persistent glass button | 097 | Sonnet |
 | MAX-099 | `PlanProposal` — type, parse, schema derived from core enums | 095 | **Opus** 🔒 |
@@ -1136,6 +1136,33 @@ the whole stored `WeeklyTemplate`, so LIFTING-SPEC §10.2's requirement that it 
 **lift slot** arrives for free the moment the template grows one (MAX-113/114) — there is
 nothing to carry today. And the training thread's `ChatInstruction.task` text (§3.5) is
 **MAX-096's**, not this ticket's; nothing here touches `Chat/`.
+
+**MAX-096 made the chat model subject-driven, and capped the transcript.**
+`WorkoutChatModel` is now `ChatModel`, taking a `ChatSubject` instead of a workout id and
+asking `ContextBuilder` for whichever `PromptContext` that subject calls for. Four things
+worth carrying forward:
+
+- **The workout path is a regression suite, not a rewrite.** Its guards run in the same
+  order and produce the same states (`.notYetScored`, `.noVerdict`, `.failed`) as before,
+  and `MAX-051`'s whole test file survives with the type renamed. The one deliberate
+  wording change is the "no API key" notice, which now says *"about your training"* on a
+  training thread rather than lying about "this workout".
+- **The transcript cap lives in `ChatInstruction`, not in the caller.** At most
+  `maximumReplayedTurns` (**40**) turns are replayed, and the initializer applies it — a
+  bound a caller has to remember is one that is eventually forgotten, and the failure is
+  silent. When turns are dropped the instruction prepends a bracketed notice turn saying
+  so, because A14's reason is that a model answering as though it had seen the start of a
+  conversation it did not is worse than one that says it lost the thread. It is a turn
+  rather than a field so the App-layer transport cannot forget to render it, and so a core
+  test can assert the model actually receives it.
+- **The training `task` (§3.5) is asserted clause by clause.** Naming the window beside
+  every aggregate (§3.6(b)) and refusing to re-score (D8) each have their own test, so
+  neither can be reworded away by a later edit that only reads well.
+- **A training turn now needs the settings store.** `TalliesCalculator` reads the rest-day
+  budget, so `ChatModel` gained a `settingsRepository` — read **only** on the training
+  path, deliberately, so a workout thread has no failure mode it did not have before. The
+  training path also widens its workout fetch to whole Monday-first weeks (C1) and skips
+  the heart-rate-series read entirely, since §3.3 sends no curve for any session.
 
 ### Phase 9 — Lifting (MAX-109)
 
