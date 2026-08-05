@@ -1,9 +1,7 @@
 import Foundation
 
-/// The interval a trends surface is scoped to (FR-3.1): this week, this month, or a
-/// custom range. This is the whole of MAX-060's scope — three tickets consume it
-/// (MAX-061 the score-colored calendar, MAX-062 the cross-run HR-drift overlay,
-/// MAX-063 the summary tiles) but build nothing here.
+/// The interval a trends surface is scoped to (FR-3.1): this week, this month, or this
+/// year.
 ///
 /// ## The seam
 ///
@@ -26,29 +24,47 @@ import Foundation
 /// `DateInterval` (an instant range) rather than a `CalendarDay` pair — turning
 /// `from`/`through` into one needs a time zone, which is a decision this type
 /// deliberately does not make (see `CalendarDay.init(_:in:)`'s own doc comment for
-/// why). That conversion is the consuming ticket's job, the same way `TalliesInput`
-/// and `WorkoutDetailModel` already take a time zone from their caller rather than
-/// assuming `.current` themselves.
+/// why). `TrendIntervalDateConversion.swift` is the single supported door for that.
 ///
-/// ## Why week and month reuse MAX-011's boundary rather than inventing one
+/// ## Why every case reuses MAX-011's boundary rather than inventing one
 ///
 /// `WeekInterval` is Monday-first because the training week already is (`Weekday` is
 /// ISO-8601 for exactly that reason) — it is built directly on
 /// `CalendarDay.startOfTrainingWeek()`, the same boundary `TalliesCalculator` and
 /// `PlanCalendar.arcWeek(for:under:)` already anchor to. A dashboard interval that
 /// disagreed with the calendar underneath it would be the same shape of drift D2
-/// exists to prevent, just wearing a different case name.
+/// exists to prevent, just wearing a different case name. `MonthInterval` and
+/// `YearInterval` likewise resolve their bounds through `CalendarDay` itself rather
+/// than through a second copy of "how long is February".
+///
+/// ## Why there is no custom range (MAX-083)
+///
+/// MAX-060 shipped a fourth case, `.custom(CustomDateRange)`, with a pair of date
+/// pickers. It is gone, at the owner's direction, and its removal is deliberately
+/// total: there is no dead case, no vestigial payload type, and no picker. The reasons
+/// it is not missed are worth recording, because "add a custom range back" is an easy
+/// thing to propose:
+///
+/// - **It had no predecessor.** `previous()`/`next()` returned nil for it — a 19-day
+///   range has no natural adjacent one — so the chevrons silently did nothing on a
+///   quarter of the selector's states. With `.custom` gone, `previous()`/`next()` are
+///   total, and no longer return an `Optional` that every call site had to defend
+///   against.
+/// - **It made every downstream surface's span unbounded.** Week, month and year are
+///   three spans that can each be given a representation that suits them (see
+///   `DashboardSpanPresentation.swift`); "17 days" is a span nothing can be designed
+///   for, so every surface had to be designed for the worst case instead.
 public enum TrendInterval: Hashable, Sendable {
     case week(WeekInterval)
     case month(MonthInterval)
-    case custom(CustomDateRange)
+    case year(YearInterval)
 
     /// Inclusive lower bound.
     public var from: CalendarDay {
         switch self {
         case .week(let week): return week.start
         case .month(let month): return month.start
-        case .custom(let range): return range.start
+        case .year(let year): return year.start
         }
     }
 
@@ -57,18 +73,19 @@ public enum TrendInterval: Hashable, Sendable {
         switch self {
         case .week(let week): return week.end
         case .month(let month): return month.end
-        case .custom(let range): return range.end
+        case .year(let year): return year.end
         }
     }
 
     /// Which of the three shapes this is, for a selection UI that needs to know which
     /// segment is active without switching over the payload (e.g. to drive a
-    /// segmented control's binding).
+    /// segmented control's binding), and for the per-span presentation table in
+    /// `DashboardSpanPresentation.swift`.
     public var kind: TrendIntervalKind {
         switch self {
         case .week: return .week
         case .month: return .month
-        case .custom: return .custom
+        case .year: return .year
         }
     }
 
@@ -83,37 +100,44 @@ public enum TrendInterval: Hashable, Sendable {
         .month(try MonthInterval(containing: today))
     }
 
-    /// The adjacent earlier interval of the same shape — the whole previous week or
-    /// month, never a slice of one.
+    /// The calendar year containing `today`.
+    public static func thisYear(today: CalendarDay) throws -> TrendInterval {
+        .year(try YearInterval(containing: today))
+    }
+
+    /// The adjacent earlier interval of the same shape — the whole previous week,
+    /// month or year, never a slice of one.
     ///
-    /// Nil for `.custom`: "the previous custom range" is not a well-defined operation
-    /// (a 3-day range and a 19-day range have no natural predecessor), so the
-    /// selection UI asks the athlete for a new range instead of guessing at an
-    /// adjacent one.
-    public func previous() throws -> TrendInterval? {
+    /// Total, not optional: every shape has exactly one predecessor now that
+    /// `.custom` is gone. It still throws, because the predecessor of the first
+    /// representable year does not exist — `CalendarDay`'s domain starts at 1 AD, and
+    /// walking off the end of it is a caller error rather than a silent clamp.
+    public func previous() throws -> TrendInterval {
         switch self {
         case .week(let week): return .week(try week.previous())
         case .month(let month): return .month(try month.previous())
-        case .custom: return nil
+        case .year(let year): return .year(try year.previous())
         }
     }
 
-    /// The adjacent later interval of the same shape. See `previous()` for why
-    /// `.custom` has none.
-    public func next() throws -> TrendInterval? {
+    /// The adjacent later interval of the same shape. See `previous()`.
+    public func next() throws -> TrendInterval {
         switch self {
         case .week(let week): return .week(try week.next())
         case .month(let month): return .month(try month.next())
-        case .custom: return nil
+        case .year(let year): return .year(try year.next())
         }
     }
 }
 
 /// Which shape a `TrendInterval` is, independent of its payload.
+///
+/// `CaseIterable` in declaration order — week, month, year — which is also the order a
+/// segmented control should present them in: ascending span, most detail first.
 public enum TrendIntervalKind: Hashable, Sendable, CaseIterable {
     case week
     case month
-    case custom
+    case year
 }
 
 /// A Monday-first training week (FR-3.1's "this week").
@@ -194,30 +218,69 @@ public struct MonthInterval: Hashable, Sendable {
     }
 }
 
-/// A custom date range (FR-3.1).
+/// A calendar year — January 1st through December 31st (MAX-083).
 ///
-/// Constructing one with `end` before `start` throws rather than clamping or
-/// silently swapping the bounds — CLAUDE.md's "model illegal states as
-/// unrepresentable," applied the same way `Tallies.init`, `TalliesInput.init`, and
-/// `TrainingWeek.init` already guard `from ≤ through`.
+/// ## Why a calendar year and not a rolling twelve months
 ///
-/// There is no separate "empty range" case to reject: `CalendarDay` is whole-day
-/// granularity and both bounds are always present and inclusive, so the shortest
-/// representable range is one day (`start == end`). There is no way to construct a
-/// zero-day range through this initializer at all, so nothing downstream has to
-/// defend against one.
-public struct CustomDateRange: Hashable, Sendable {
+/// A rolling window ("the last 365 days") is the tempting alternative, and it is wrong
+/// for this selector for three reasons:
+///
+/// 1. **It has no clean predecessor.** `previous()` on a rolling window would mean
+///    "the twelve months ending a year ago", which overlaps nothing and lines up with
+///    nothing; step back twice and the two windows share no boundary with each other
+///    or with any month or week the rest of the app reasons in.
+/// 2. **It is not reproducible.** The same selection resolves to a different range
+///    tomorrow, so the number on screen changes without the data changing. That is the
+///    shape of non-determinism D1 forbids of anything feeding a score, and while a
+///    dashboard is not the scorer, a range that quietly moves under the athlete is a
+///    bad property in either place.
+/// 3. **It cannot be labelled.** "2026" is unambiguous; "Aug 5 2025 – Aug 4 2026" is a
+///    header nobody reads.
+///
+/// The cost is real and accepted: on January 2nd, "year" shows two days. That is
+/// exactly the property `MonthInterval` already has on the 1st of a month, and the
+/// remedy is the same one — the chevron steps back to the whole previous year.
+///
+/// ## What it is anchored to
+///
+/// The calendar year, not the training week. A year therefore begins mid-week: 2026
+/// opens on a Thursday. That is deliberate and it composes: `TrendInterval`'s
+/// consumers already widen to whole Monday-first weeks when the C1 obligation demands
+/// it (`trainingWeekAlignedDateInterval(in:)`), exactly as they must for a month,
+/// which has the same property. Anchoring the year to a Monday instead would have made
+/// "2026" mean a range not equal to 2026, which is a worse trade in a label the
+/// athlete reads.
+///
+/// Leap years need no special handling and get none: `end` is December 31st, which
+/// exists in every year, and the 366th day arrives on its own because `CalendarDay`
+/// already knows February's length. `TrendIntervalTests` pins 2024 anyway — a leap
+/// year is precisely the case where an off-by-one hides.
+public struct YearInterval: Hashable, Sendable {
+    /// January 1st.
     public let start: CalendarDay
+    /// December 31st.
     public let end: CalendarDay
 
-    /// - Throws: `DomainError.inconsistent` if `end` precedes `start`.
-    public init(start: CalendarDay, end: CalendarDay) throws {
-        guard start <= end else {
-            throw DomainError.inconsistent(
-                reason: "CustomDateRange: end (\(end)) must not be before start (\(start))"
-            )
-        }
-        self.start = start
-        self.end = end
+    public var year: Int { start.year }
+
+    /// The year containing `day`.
+    public init(containing day: CalendarDay) throws {
+        try self.init(year: day.year)
+    }
+
+    /// - Parameter year: 1...9999, `CalendarDay`'s own domain. Outside it this throws
+    ///   rather than clamping, which is what makes `previous()`/`next()` safe to be
+    ///   total at every other year.
+    public init(year: Int) throws {
+        self.start = try CalendarDay(year: year, month: 1, day: 1)
+        self.end = try CalendarDay(year: year, month: 12, day: 31)
+    }
+
+    public func previous() throws -> YearInterval {
+        try YearInterval(year: year - 1)
+    }
+
+    public func next() throws -> YearInterval {
+        try YearInterval(year: year + 1)
     }
 }

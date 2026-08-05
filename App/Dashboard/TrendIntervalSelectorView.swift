@@ -1,17 +1,22 @@
 import SwiftUI
 import MaximizeCore
 
-/// FR-3.1: the week / month / custom selector for the dashboard.
+/// FR-3.1: the week / month / year selector for the dashboard.
 ///
 /// Every decision about what interval results from a tap lives in
 /// `TrendIntervalSelectionModel` (state, App layer) and `MaximizeCore.TrendInterval`
-/// (the type, MAX-060) — this view only renders the current selection and forwards
-/// taps. See CLAUDE.md's "a view should read as: observe state, render it, forward
-/// user intent."
+/// (the type) — this view only renders the current selection and forwards taps. See
+/// CLAUDE.md's "a view should read as: observe state, render it, forward user intent."
 ///
-/// `.contentSurface(.card)`, never glass (FR-4.2) — this is a data control, not
-/// chrome, and it sits in the dashboard's content column alongside the calendar and
-/// tiles it scopes.
+/// MAX-083 removed the fourth segment and the date pickers under it. The visible
+/// consequence is that the header is now the same shape in every state: a label with a
+/// step-back and step-forward chevron either side, because all three shapes have a
+/// previous and a next. Nothing on this control can be in an invalid state, so the error
+/// line that used to sit under it is gone too.
+///
+/// `.contentSurface(.card)`, never glass (FR-4.2) — this is a data control, not chrome,
+/// and it sits in the dashboard's content column alongside the calendar and tiles it
+/// scopes.
 struct TrendIntervalSelectorView: View {
     var model: TrendIntervalSelectionModel
 
@@ -22,21 +27,8 @@ struct TrendIntervalSelectorView: View {
             switch model.state {
             case .ready(let interval):
                 header(for: interval)
-                if interval.kind == .custom {
-                    customRangeControls
-                }
             case .failed:
                 Text("Couldn't resolve today's date.")
-                    .font(.metricLabel)
-                    .foregroundStyle(Color.textSecondary)
-            }
-
-            if let error = model.customRangeError {
-                // The three score-band colors are reserved for the calendar and the
-                // verdict header (FR-4.3, see `ScoreBandColors.swift`) — this app's
-                // palette has no general-purpose "error" token, so a status message
-                // here reads the same quiet way `SettingsView`'s does.
-                Text(error)
                     .font(.metricLabel)
                     .foregroundStyle(Color.textSecondary)
             }
@@ -46,11 +38,15 @@ struct TrendIntervalSelectorView: View {
 
     // MARK: - Shape picker
 
+    /// Driven by `TrendIntervalKind.allCases`, in the core's own declaration order —
+    /// ascending span, most detail first. A hand-written list here would be a second
+    /// place the set of spans is stated, free to fall out of step with the presentation
+    /// table that decides what each one renders.
     private var kindPicker: some View {
         Picker("Interval", selection: kindBinding) {
-            Text("Week").tag(TrendIntervalKind.week)
-            Text("Month").tag(TrendIntervalKind.month)
-            Text("Custom").tag(TrendIntervalKind.custom)
+            ForEach(TrendIntervalKind.allCases, id: \.self) { kind in
+                Text(TrendIntervalFormatting.name(for: kind)).tag(kind)
+            }
         }
         .pickerStyle(.segmented)
     }
@@ -58,29 +54,21 @@ struct TrendIntervalSelectorView: View {
     private var kindBinding: Binding<TrendIntervalKind> {
         Binding(
             get: { model.state.interval?.kind ?? .week },
-            set: { newKind in
-                switch newKind {
-                case .week: model.selectWeek()
-                case .month: model.selectMonth()
-                case .custom: model.selectCustom()
-                }
-            }
+            set: { model.select($0) }
         )
     }
 
-    // MARK: - Header: label, with navigation for week/month
+    // MARK: - Header
 
-    @ViewBuilder
     private func header(for interval: TrendInterval) -> some View {
-        HStack {
-            if interval.kind != .custom {
-                Button {
-                    model.selectPrevious()
-                } label: {
-                    Image(systemName: "chevron.left")
-                }
-                .accessibilityLabel("Previous \(interval.kind == .week ? "week" : "month")")
+        let noun = TrendIntervalFormatting.name(for: interval.kind).lowercased()
+        return HStack {
+            Button {
+                model.selectPrevious()
+            } label: {
+                Image(systemName: "chevron.left")
             }
+            .accessibilityLabel("Previous \(noun)")
 
             Spacer()
 
@@ -90,39 +78,12 @@ struct TrendIntervalSelectorView: View {
 
             Spacer()
 
-            if interval.kind != .custom {
-                Button {
-                    model.selectNext()
-                } label: {
-                    Image(systemName: "chevron.right")
-                }
-                .accessibilityLabel("Next \(interval.kind == .week ? "week" : "month")")
+            Button {
+                model.selectNext()
+            } label: {
+                Image(systemName: "chevron.right")
             }
+            .accessibilityLabel("Next \(noun)")
         }
-    }
-
-    // MARK: - Custom range controls
-
-    private var customRangeControls: some View {
-        VStack(alignment: .leading, spacing: Spacing.snug) {
-            DatePicker(
-                "Start",
-                selection: Binding(
-                    get: { model.customStartDate },
-                    set: { model.updateCustomStart($0) }
-                ),
-                displayedComponents: .date
-            )
-            DatePicker(
-                "End",
-                selection: Binding(
-                    get: { model.customEndDate },
-                    set: { model.updateCustomEnd($0) }
-                ),
-                displayedComponents: .date
-            )
-        }
-        .font(.bodyCopy)
-        .foregroundStyle(Color.textPrimary)
     }
 }
