@@ -94,6 +94,17 @@ enum PlanAuthoringFormatting {
         PlanCopy.distance(meters, unit: unit)
     }
 
+    static func duration(_ seconds: Double) -> String {
+        PlanCopy.duration(seconds)
+    }
+
+    /// The collapsed summary for the lift's duration-and-note control (MAX-148) —
+    /// "Not set" is this screen's designed-absence text for the pair, matching the
+    /// "None" a distance stepper already shows for an unset run distance.
+    static func liftDetail(durationSeconds: Double?, note: String?) -> String {
+        PlanCopy.liftDetail(durationSeconds: durationSeconds, note: note) ?? "Not set"
+    }
+
     static func describeSession(_ session: ScheduledSession, unit: DistanceUnit) -> String {
         PlanCopy.session(session, unit: unit)
     }

@@ -25,14 +25,25 @@ public enum PlanAuthoringError: Error, Hashable, Sendable, CustomStringConvertib
     case scheduledDistanceNotPositive(weekday: Weekday)
     case longRunDistanceNotPositive(week: Int)
 
+    /// The run slot's kind is not one `ScheduledSessionKind.prescribable` permits — in
+    /// practice, `.lift` (MAX-148).
+    ///
+    /// Unreachable through the screen: `PlanDraft.DayDraft.setKind` refuses `.lift`
+    /// outright, so nothing authored here can produce this. Kept as a real, readable
+    /// case rather than a `try!` for the same reason `wouldRewriteHistory` is — a
+    /// `PlanDraft` built from a stored `Plan` whose run slot already held a lift
+    /// (`WeeklyTemplate` itself does not forbid one) reaches this check on save rather
+    /// than saving a plan judged against the wrong slot.
+    case scheduledKindNotPrescribable(weekday: Weekday)
+
     /// The lift slot the athlete assembled is not a legal session.
     ///
-    /// Unreachable in practice, for the same reason `wouldRewriteHistory` is: every
-    /// setter `PlanDraft.DayDraft` exposes for the lift slot already keeps it
-    /// convertible (`setLiftKind` clears the groups the moment the kind leaves
-    /// `.lift`), so `DayDraft.liftSession()` has no path left to a rejected
-    /// combination. Kept as a real, readable case anyway rather than a `try!`, which
-    /// non-test code may not write.
+    /// Reachable as of MAX-148: `setLiftDurationSeconds` accepts any value a stepper
+    /// hands it, so a non-positive or non-finite duration reaches `liftSession()`
+    /// unvalidated and this is where it is caught. The muscle-group combination
+    /// `ScheduledSession` also rejects stays unreachable, for the reason
+    /// `wouldRewriteHistory` documents: `setLiftKind` clears the groups the moment the
+    /// kind leaves `.lift`, so `DayDraft.liftSession()` has no path left to it.
     case liftSessionInvalid(weekday: Weekday)
 
     /// The version set this plan would produce is not one `PlanCalendar` accepts.
@@ -66,6 +77,9 @@ public enum PlanAuthoringError: Error, Hashable, Sendable, CustomStringConvertib
                 + "the distance off entirely."
         case let .longRunDistanceNotPositive(week):
             return "Week \(week) of the long-run arc prescribes a distance of zero."
+        case let .scheduledKindNotPrescribable(weekday):
+            let name = String(describing: weekday).capitalized
+            return "\(name)'s run slot cannot prescribe a lift. Use the lift slot below it."
         case let .liftSessionInvalid(weekday):
             let name = String(describing: weekday).capitalized
             return "\(name)'s lift prescription is not valid. Reopen the screen and try again."
@@ -291,10 +305,18 @@ public struct PlanAuthoringSession: Hashable, Sendable {
 
     /// Both slots are assembled from the draft's own loose fields now (MAX-137) and can
     /// therefore both fail validation, each with its own readable error.
+    ///
+    /// The `prescribable` check runs first and independently of `day.session()`'s own
+    /// throw (MAX-148): `WeeklyTemplate` itself does not refuse a `.lift` run slot — see
+    /// `PlanAuthoringError.scheduledKindNotPrescribable`'s note on why this is
+    /// belt-and-braces rather than dead code.
     private func weeklyTemplate(from draft: PlanDraft) throws -> WeeklyTemplate {
         var sessions: [Weekday: ScheduledSession] = [:]
         var liftSessions: [Weekday: ScheduledSession] = [:]
         for day in draft.week {
+            guard ScheduledSessionKind.prescribable.contains(day.kind) else {
+                throw PlanAuthoringError.scheduledKindNotPrescribable(weekday: day.weekday)
+            }
             guard let session = try? day.session() else {
                 throw PlanAuthoringError.scheduledDistanceNotPositive(weekday: day.weekday)
             }

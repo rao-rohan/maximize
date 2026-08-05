@@ -30,7 +30,11 @@ public struct WorkoutClassificationPolicy: Hashable, Sendable, Codable {
     /// Fraction of the shortest run the plan prescribes below which a recorded run is a
     /// fragment — a mis-started or accidentally-split session — rather than a workout.
     ///
-    /// Zero disables the test.
+    /// Zero disables the test. Only reachable when the workout has a distance at all —
+    /// `Plan.minimumSessionDurationSeconds` (MAX-149) is the equivalent test for a
+    /// workout that has none, and lives on `Plan` rather than here; see that field's doc
+    /// comment for why an absolute plan-level duration and not a third fraction in this
+    /// struct.
     public let fragmentDistanceFraction: Double
 
     /// The lowest zone counted as high-intensity work. With cap-anchored zones, zone 4
@@ -265,23 +269,32 @@ public enum WorkoutClassifier {
 
     /// Whether the record is too short to be the session it would otherwise be read as.
     ///
-    /// The yardstick is the shortest run the plan ever prescribes: a quarter of that is
-    /// not a bad workout, it is a workout that did not happen — a mis-started session,
-    /// or one HealthKit split in two. Scoring it against a scheduled 8 km would produce
-    /// a confident, immutable, wrong number (D8).
+    /// **Distance first, when there is one.** The yardstick is the shortest run the plan
+    /// ever prescribes: a quarter of that is not a bad workout, it is a workout that did
+    /// not happen — a mis-started session, or one HealthKit split in two. Scoring it
+    /// against a scheduled 8 km would produce a confident, immutable, wrong number (D8).
     ///
-    /// The test needs a distance on both sides. A workout with none, or a plan whose
-    /// template prescribes none, gets no fragment test rather than a guessed one.
+    /// **Duration when there is no distance to test.** A run with heart-rate data but no
+    /// distance sample — a treadmill started before the belt moved, an indoor run with no
+    /// GPS lock — used to get no fragment test at all, and reached the scorer as a real
+    /// session (MAX-149, closing the classifier half of tracker gap P3; LIFTING-SPEC
+    /// §9.2). `Plan.minimumSessionDurationSeconds` is the floor for exactly that case. A
+    /// workout that *has* a distance is judged on distance only, unchanged from before
+    /// this ticket — a duration floor calibrated for "did this session happen at all" has
+    /// no business overruling a run whose distance already answered that question.
     private static func isFragment(
         _ workout: Workout,
         plan: Plan,
         policy: WorkoutClassificationPolicy
     ) -> Bool {
-        guard policy.fragmentDistanceFraction > 0,
-              let distanceMeters = workout.distanceMeters,
-              let shortest = shortestPrescribedRunMeters(in: plan)
-        else { return false }
-        return distanceMeters < shortest * policy.fragmentDistanceFraction
+        if let distanceMeters = workout.distanceMeters {
+            guard policy.fragmentDistanceFraction > 0,
+                  let shortest = shortestPrescribedRunMeters(in: plan)
+            else { return false }
+            return distanceMeters < shortest * policy.fragmentDistanceFraction
+        }
+        guard let minimumSeconds = plan.minimumSessionDurationSeconds else { return false }
+        return workout.durationSeconds < minimumSeconds
     }
 
     /// The shortest distance the weekly template asks a run to be.

@@ -448,7 +448,7 @@ change rather than four.
 |---|---|---|---|
 | P1 | `Plan` cannot express the *shape* of classification rules, so four dimensionless ratios live in `WorkoutClassificationPolicy` | MAX-013 | Real D1 leak, but bounded: they are ratios, never a bpm, metre or minute, so changing the cap or arc still moves the thresholds. A `classification` block on a future plan version fixes it |
 | P2 | Same, for the cap-anchored zone multipliers in `HeartRateZoneModel` | MAX-012 | As P1 |
-| P3 | ~~`Plan` records **no durations at all**~~ **Closed by MAX-131**: `ScheduledSession.durationSeconds` is the plan's first duration, and `RubricReference.scheduledDuration(fraction:)` is how a band names it | MAX-013 | The rubric half is closed. **The classifier half is not**: `WorkoutClassifier.isFragment` still tests distance only, so a mis-started treadmill run with HR but no distance still reaches the scorer. The plan can now express the floor it wants — a `minimumSessionDuration`, or the ask's own duration — and the ticket that changes the classifier is a behaviour change nobody has picked up |
+| P3 | ~~`Plan` records **no durations at all**~~ **Expressible in both halves; not yet effective.** MAX-131 gave the plan `ScheduledSession.durationSeconds` and `RubricReference.scheduledDuration(fraction:)` (the rubric half); **MAX-149 gives `Plan.minimumSessionDurationSeconds`** and teaches `WorkoutClassifier.isFragment` to read it (the classifier half) | MAX-013 | **Do not tick this closed yet.** The plan can now *express* a duration floor, and `isFragment` reads it — but **nothing authors one**: neither `StandardPlanSeed` nor the authoring screen sets `minimumSessionDurationSeconds`, so every plan on disk has `nil` and the floor never fires. A mis-started treadmill run still reaches the scorer today. **MAX-151 wires it**; until that merges, this gap is closed in vocabulary only, which is the same shape MAX-131 and MAX-132 had between them |
 | P4 | `ScheduledSession` cannot express interval structure (e.g. 6×800m) | MAX-013 | The scorer sees "hard" but not the prescribed shape, so it cannot judge whether the session was executed as written |
 
 Separately, `CalendarDay` lacks day/week arithmetic — MAX-013 carried a private day
@@ -1512,7 +1512,10 @@ is the overseer's, not a ticket's — flagged here rather than done.
 | MAX-143 | ~~Decide what to do with lifts already scored as runs~~ — **owner chose: label them**, and it is built | 128 | **Opus** ✅ |
 | MAX-144 | ~~How adherence to a muscle-group prescription is judged~~ — **decided (A22)** | 129 | Owner ✅ |
 | MAX-145 | **Enter muscle groups on a strength workout's detail screen** (A22) | 129, 144 | **Opus** ✅ |
-| MAX-147 | The scorer's task text learns discipline (source: MAX-133) | 133, 136 | **Opus** |
+| MAX-147 | The scorer's task text learns discipline (source: MAX-133) | 133, 136 | Sonnet ✅ |
+| MAX-148 | A lift's duration and note become editable, proposable, and type-safe | 137, 141 | Sonnet ✅ |
+| MAX-149 | Duration floor for fragments — **the classifier half of gap P3**; not yet wired to any author | 013, 131 | Sonnet ✅ |
+| MAX-151 | **Author the duration floor** — `StandardPlanSeed` states one, the authoring screen edits it, `PlanProposal` can propose it. Without this MAX-149 never fires | 149, 146, 148 | Sonnet |
 
 **Four collisions the overseer must respect.**
 
@@ -1667,7 +1670,9 @@ was not widened to accept either. Decisions, and what each cost:
   hands the athlete a form that would silently ignore the field the model just set. This
   is real remaining scope (the duration half of LIFTING-SPEC §4.3's example), not
   finished here — it wants the ticket that gives `PlanDraft.DayDraft` those two setters
-  first, so chat and the screen gain the ability together.
+  first, so chat and the screen gain the ability together. **Superseded by MAX-148**,
+  which gives `PlanDraft.DayDraft` both setters and `PlanProposal` both wire fields
+  together, exactly as this note asked for.
 - **`unknownMuscleGroup` and `liftRestDayIsNotEmpty` are new error cases**, not reuses of
   `unknownSessionKind`/`restDayIsNotEmpty` — each names a different field with a
   different vocabulary, and reusing the run-slot case would have pointed a retry at the
@@ -1676,6 +1681,59 @@ was not widened to accept either. Decisions, and what each cost:
   distinct from rest (A17), so the brief's suggested example of an invalid case was
   wrong — the actual invalid case pinned under test is a **rest** lift slot naming
   muscle groups (`liftRestDayIsNotEmpty`).
+
+**MAX-148 closes the gap the paragraph above left open, plus a second one MAX-141 found
+but did not fix: `setKind`/`PlanAuthoringSession` refusing `.lift` in the run slot at
+the type level, not only in the picker.** Source: MAX-131 (which carried the fields with
+no setter) and MAX-141 (which named both gaps explicitly and left them for "the ticket
+that gives `PlanDraft.DayDraft` those two setters first").
+
+- **`PlanDraft.DayDraft` gains `setLiftDurationSeconds` and `setLiftNote`.** Same shape
+  as the existing lift setters: ignored while the slot is not `.lift` (nowhere legal for
+  the value to go), and `setLiftKind` now clears both — alongside the groups it already
+  cleared — the moment the kind leaves `.lift`, so a draft reached through this type's own
+  setters can never make `liftSession()` throw.
+- **`PlanProposal.Day` gains `liftDurationSeconds` and `liftNote` as real wire fields**,
+  exactly the pattern MAX-141 set for `liftKind`/`liftMuscleGroups`: their own keys in
+  `CodingKeys`, their own line in the rendered schema, `liftRestDayIsNotEmpty` widened to
+  refuse a rest lift carrying either (not only muscle groups), and a non-positive duration
+  refused through `liftSessionInvalid` — the same "reachable now" note the case's own doc
+  carries.
+- **The consequence worth stating plainly, mirroring MAX-141's own callout**: because both
+  fields are now wire fields, `PlanDraft.applying(_:)` takes them directly from the
+  proposal rather than carrying the athlete's existing value forward when the kind is
+  unchanged. `carriedLiftDurationSeconds`/`carriedLiftNote` — the two carry-forward helpers
+  MAX-141 wrote because there was nothing else to do — are deleted; the run slot's own
+  `durationSeconds` keeps its carry-forward helper, because that field still has no wire
+  representation (nothing prescribes a run's length yet). A model that wants to keep a
+  lift's duration or note now has to restate it, the same as it already had to restate the
+  muscle groups — `PlanProposalTests`' `testARestatedLiftIsAppliedFaithfully` was updated
+  to send `liftNote` explicitly rather than relying on a carry.
+- **The picker-only `prescribable` hole is closed at both layers named in the ticket.**
+  `PlanDraft.DayDraft.setKind` now ignores `.lift` outright (a no-op, matching how a rest
+  day already ignores a distance set on it), and `PlanAuthoringSession.weeklyTemplate(from:)`
+  independently refuses a `.lift` run slot with a new `PlanAuthoringError.scheduledKindNotPrescribable`
+  case — belt-and-braces, because `WeeklyTemplate` itself still does not forbid one, so a
+  `PlanDraft` built from a stored `Plan` whose run slot already held a lift (however that
+  happened) is refused at the door rather than saved as a plan judged against the wrong
+  slot.
+- **Authoring-screen density decision: a collapsed `DisclosureGroup`, not two more
+  permanent controls.** Seven weekdays × two slots was already the screen's own stated
+  concern (MAX-137); adding a duration Stepper and a note TextField as always-visible rows
+  under every lift day would have added fourteen more controls to a screen that already has
+  that many. Instead the two fields sit behind a `DisclosureGroup` beside the existing
+  "Groups" menu, labelled with the pair rendered together (`PlanCopy.liftDetail`, "45 min ·
+  lower body focus", or "Not set") so the row is scannable closed and only expands when an
+  athlete actually wants to set a duration or note. **Rejected**: a sheet or separate
+  per-day detail screen (too much navigation for two fields already inline for muscle
+  groups) and a permanently visible Stepper + TextField pair (the density this ticket
+  exists to avoid).
+- **`PlanCopy.duration(_:)` and `PlanCopy.liftSession(_:)` learn to render the duration**,
+  which is also what makes the diff work for free: `PlanProposalReview`'s existing
+  per-weekday lift row already diffs the *rendered* string, so once that string includes
+  the duration and note, a changed one is a `.changed` row with no new section or row-id
+  needed — the ticket's "diff row for a changed duration/note" requirement is met by the
+  rendering change alone, not by new diff logic.
 
 **Scope taken mid-ticket: the lift slot names its muscle groups.** Owner's ask. `MuscleGroup`
 is a closed six-case core vocabulary — chest, back, shoulders, arms, legs, core — chosen so
@@ -1878,10 +1936,61 @@ The two that were not are now `RubricCondition.actualDiscipline(oneOf:)` and
   Neither is editable: **MAX-137 gives the screen its editor**, and **MAX-141** is what
   lets a chat-authored proposal state one. Until then nothing authors a duration, which is
   why this ticket adds none to `StandardPlanSeed`.
-- **Reported, not done: the classifier half of P3.** `WorkoutClassifier.isFragment` still
+- ~~**Reported, not done: the classifier half of P3.** `WorkoutClassifier.isFragment` still
   tests distance only, so an HR-only treadmill fragment still reaches the scorer.
   LIFTING-SPEC §9.2 wants a duration floor there; the plan can now express one, and
-  changing the classifier is a behaviour change this ticket's brief forbade.
+  changing the classifier is a behaviour change this ticket's brief forbade.~~ **Closed by
+  MAX-149.**
+
+**MAX-149 — the classifier half of P3, and the argument for where the floor lives.** A
+mis-started or accidentally split treadmill run — heart-rate data, no distance sample —
+passed `WorkoutClassifier.isFragment`'s distance test (there was no distance to fail it
+on) and reached the scorer as a real session, an immutable wrong score under D8.
+LIFTING-SPEC §9.2 names this exactly and asks for a duration floor; MAX-131 reported it
+rather than building it, because its brief forbade a behaviour change.
+
+- **`Plan.minimumSessionDurationSeconds`, not a `WorkoutClassificationPolicy` fraction.**
+  The two candidates were an absolute figure the plan version states — `heartRateCapBPM`'s
+  own shape — or a third fraction alongside `fragmentDistanceFraction` in
+  `WorkoutClassificationPolicy`. Rejected the second: that type's own doc already names its
+  fractions a known, temporary gap against D1, held open only because they are *ratios* of
+  a plan-stated quantity (the shortest prescribed run, the cap) rather than absolutes,
+  pending "a `classification` block on a future plan version". Filing a brand-new
+  free-standing threshold into a struct whose own comment says "this shouldn't really be
+  here" would grow that gap rather than close it. A plan-relative fraction of the shortest
+  prescribed run's *duration* was considered too, and rejected for a sharper reason:
+  `ScheduledSession.durationSeconds` on the run slot is still carried-but-uneditable —
+  MAX-137 and MAX-141 landed, but neither put a control on it, so nothing authors one — so
+  a plan-relative floor would silently never fire for any plan on disk, which is the
+  opposite of what the ticket is for. `minimumSessionDurationSeconds` sits directly on `Plan`, optional
+  (defaulting nil, matching every field MAX-129/MAX-131 added), resolved once per plan
+  version exactly like the cap.
+- **Distance-tested runs are unaffected; the floor only ever answers the question the
+  distance test could not ask.** `isFragment` now branches on whether the workout has a
+  distance at all: if it does, the existing distance-fraction test runs exactly as before
+  — a duration floor calibrated for "did this happen" has no business overruling a run
+  whose distance already answered that, and a fixture pins a case where the two would
+  disagree. Only a distance-less workout falls through to the duration floor, and only
+  when the plan states one; a plan with no opinion asks no duration question, the same "no
+  guessed threshold" rule the distance test already followed.
+- **A lift cannot be caught by this floor, and it is not by luck.** `classify()` answers
+  `.other` for any non-run before `isFragment` runs at all — `isFragment` is unreachable
+  for a lift regardless of how aggressive the floor is. Pinned with a fixture using a
+  floor long enough to catch a 45-minute lift, to make the claim more than "nothing tests
+  it".
+- **Nothing stored moves.** A hand-written pre-MAX-149 `Plan` payload — every key `Plan`
+  already carried, no `minimumSessionDurationSeconds` key — decodes to a plan equal to the
+  one this build authors with no floor stated, and the same fragment call matches under
+  both. A plan that states no floor re-encodes without the key.
+- **Reported, not done: authoring cannot carry the floor forward.**
+  `PlanAuthoringSession.plan(from:effectiveFrom:)` builds every `Plan` field from
+  `PlanDraft`, and `PlanDraft`/`PlanAuthoring.swift` are owned by MAX-148, in flight in
+  parallel — out of this ticket's scope to touch. So a plan revision saved through the
+  authoring screen today always produces `minimumSessionDurationSeconds == nil`, same as
+  `StandardPlanSeed` (MAX-146, also out of scope here) never setting one. The domain type
+  and the classifier are ready; nothing in this build can author a floor yet. That is
+  follow-on ticket work, the same shape MAX-131 left `durationSeconds` in before MAX-137
+  gave it an editor.
 
 **MAX-132 — `StandardPlanSeed` learns to speak the vocabulary MAX-131 gave it, and closes
 the shadow §11.4 escalates.** Two changes to `Sources/MaximizeCore/Plan/StandardPlanSeed.swift`,
