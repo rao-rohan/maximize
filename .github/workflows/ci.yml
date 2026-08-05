@@ -13,9 +13,39 @@ concurrency:
 jobs:
   test:
     name: Build & test MaximizeCore
-    runs-on: macos-15
+    # Linux, not macOS, and the architecture guard below is what makes that legal.
+    # `MaximizeCore` is forbidden from importing SwiftUI, UIKit, HealthKit, SwiftData,
+    # CloudKit, MapKit, Charts or Security, so it is pure Swift and Foundation and has
+    # no reason to need a Mac. On a private repo the difference is 10x: macOS minutes
+    # bill at a 10x multiplier against the included allowance, Linux at 1x, and this is
+    # the job that runs on every commit. Only the app-shell job below genuinely needs
+    # macOS, because only it runs `xcodebuild`.
+    #
+    # `platforms:` in Package.swift sets minimum *Apple* versions; it does not exclude
+    # Linux, and nothing in the core is Apple-only. If that ever stops being true, this
+    # job fails loudly — which is the correct outcome, because it would mean the core
+    # had grown a platform dependency the guard was supposed to prevent.
+    runs-on: ubuntu-latest
+    container: swift:6.0
+    # Inside a container GitHub defaults `shell:` to `sh`, not `bash`, and the build
+    # steps below use `set -o pipefail` — a bashism that `sh` rejects outright with
+    # "Illegal option -o pipefail" before the compiler is ever invoked. Setting it once
+    # here beats remembering it per step.
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
+
+      # swift-corelibs-foundation reads real time-zone data for anything involving a
+      # named zone. Several tests turn a civil day into an instant in America/New_York
+      # or Asia/Kathmandu, so a missing tzdata would fail them on the zone rather than
+      # on anything real.
+      #
+      # `swift:6.0` turns out to already carry it — this is insurance against an image
+      # that stops doing so, and it costs one apt index fetch.
+      - name: Install time zone data
+        run: apt-get update && apt-get install -y --no-install-recommends tzdata
 
       - name: Show toolchain
         run: swift --version
