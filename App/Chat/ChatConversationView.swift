@@ -103,6 +103,12 @@ struct ChatConversationView: View {
     /// `proposalAwaitingReview`.
     let onAcceptProposal: (PlanProposal) -> Void
 
+    /// Forwarded from `ChatSheet`: §6.2's chip tap, on the runs strip below the
+    /// transcript (MAX-103). Pushing that run's detail screen is something only the
+    /// stack's owner can do, exactly like `onOpenThreadList` and `onAcceptProposal`
+    /// above — this view only ever names which run was tapped.
+    let onSelectRun: (UUID) -> Void
+
     /// Forwarded from `ChatSheet`, whose `\.dismiss` this view does not have — it was
     /// not presented, `ChatSheet` was.
     let onDone: () -> Void
@@ -125,6 +131,7 @@ struct ChatConversationView: View {
         onOpenThreadList: @escaping () -> Void,
         onStartNewChatForCurrentWindow: @escaping () -> Void,
         onAcceptProposal: @escaping (PlanProposal) -> Void,
+        onSelectRun: @escaping (UUID) -> Void,
         onDone: @escaping () -> Void
     ) {
         self.init(
@@ -142,6 +149,7 @@ struct ChatConversationView: View {
             onOpenThreadList: onOpenThreadList,
             onStartNewChatForCurrentWindow: onStartNewChatForCurrentWindow,
             onAcceptProposal: onAcceptProposal,
+            onSelectRun: onSelectRun,
             onDone: onDone
         )
     }
@@ -154,6 +162,7 @@ struct ChatConversationView: View {
         onOpenThreadList: @escaping () -> Void,
         onStartNewChatForCurrentWindow: @escaping () -> Void,
         onAcceptProposal: @escaping (PlanProposal) -> Void,
+        onSelectRun: @escaping (UUID) -> Void,
         onDone: @escaping () -> Void
     ) {
         self.init(
@@ -171,6 +180,7 @@ struct ChatConversationView: View {
             onOpenThreadList: onOpenThreadList,
             onStartNewChatForCurrentWindow: onStartNewChatForCurrentWindow,
             onAcceptProposal: onAcceptProposal,
+            onSelectRun: onSelectRun,
             onDone: onDone
         )
     }
@@ -181,6 +191,7 @@ struct ChatConversationView: View {
         onOpenThreadList: @escaping () -> Void,
         onStartNewChatForCurrentWindow: @escaping () -> Void,
         onAcceptProposal: @escaping (PlanProposal) -> Void,
+        onSelectRun: @escaping (UUID) -> Void,
         onDone: @escaping () -> Void
     ) {
         _model = State(initialValue: model)
@@ -188,6 +199,7 @@ struct ChatConversationView: View {
         self.onOpenThreadList = onOpenThreadList
         self.onStartNewChatForCurrentWindow = onStartNewChatForCurrentWindow
         self.onAcceptProposal = onAcceptProposal
+        self.onSelectRun = onSelectRun
         self.onDone = onDone
     }
 
@@ -292,6 +304,9 @@ struct ChatConversationView: View {
                     scopeMismatchBanner(notice)
                 }
                 transcript
+                // §2.2's "Runs strip" row, below the transcript and above the composer.
+                // `nil` for a workout subject — `RunsStripView` renders nothing then.
+                RunsStripView(data: model.runsStripData, onSelectRun: onSelectRun)
             }
             .safeAreaInset(edge: .bottom, spacing: 0) { composer }
         }

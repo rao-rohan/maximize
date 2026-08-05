@@ -343,6 +343,19 @@ public final class ChatModel {
     /// for both by falling back until `thread` itself is set.
     public private(set) var workoutFacts: WorkoutThreadFacts?
 
+    /// §2.2, §6.2, MAX-103: the "Runs in this conversation" strip's data.
+    ///
+    /// Read straight off `context` — never a second fetch of stored records — so the
+    /// strip can never show a session the prompt did not (`RunsStripData`'s own "built
+    /// from the thread's own context"). `nil` for a workout subject (there is nothing to
+    /// strip: the sheet already sits on top of that run's own screen, §6.1) and `nil`
+    /// before `load()` has built a context, exactly as `title`/`subtitle` degrade before
+    /// their own inputs exist.
+    public var runsStripData: RunsStripData? {
+        guard case let .training(trainingContext) = context else { return nil }
+        return RunsStripData.build(from: trainingContext)
+    }
+
     /// - Parameters:
     ///   - subject: what this thread is about (A11). The set is closed, which is what
     ///     lets `load()` stay exhaustive: a third subject cannot be added without the
