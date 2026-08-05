@@ -138,12 +138,22 @@ enum Fixture {
     /// The band is derived here only because this is test scaffolding standing in for
     /// a scorer. Production code must not turn a number into a `ScoreBand`; that
     /// decision belongs to MAX-015, reading the plan version's thresholds.
+    /// - Parameters:
+    ///   - scheduledKind/actualClassification: the plan-versus-execution pair the
+    ///     scorer recorded. They agree by default, which is the ordinary case; pass
+    ///     differing values to build a run that diverged from what was prescribed
+    ///     (`ScoreCalendarTests`).
     static func score(
         points: Int,
         threshold: Int = 70,
         marginal: Int = 45,
-        workoutID: UUID = Fixture.workoutID
+        workoutID: UUID = Fixture.workoutID,
+        scheduledKind: ScheduledSessionKind = .easy,
+        actualClassification: WorkoutClassification = .easy
     ) throws -> Score {
+        // `ScheduledSession` rejects a rest day carrying a distance; no caller passes
+        // `.rest` today, and this keeps the fixture from becoming a trap if one does.
+        let scheduledDistance: Double? = scheduledKind == .rest ? nil : 8_000
         let band: ScoreBand
         if points >= threshold {
             band = .effective
@@ -155,8 +165,8 @@ enum Fixture {
         return try Score(
             workoutID: workoutID,
             planVersion: PlanVersion(1),
-            scheduledSession: ScheduledSession(kind: .easy, distanceMeters: 8_000),
-            actualClassification: .easy,
+            scheduledSession: ScheduledSession(kind: scheduledKind, distanceMeters: scheduledDistance),
+            actualClassification: actualClassification,
             value: ScoreValue(points),
             effectiveThreshold: ScoreValue(threshold),
             band: band,

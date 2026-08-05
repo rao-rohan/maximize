@@ -2,7 +2,7 @@ import Foundation
 
 /// What one day on the score-colored calendar (D4, FR-3.2) actually is.
 ///
-/// ## Why six cases, not "good / bad / empty"
+/// ## Why seven cases, not "good / bad / empty"
 ///
 /// The PRD treats these as different facts, and collapsing them would throw away
 /// information the athlete can act on:
@@ -14,6 +14,12 @@ import Foundation
 ///   showing it as effective would be a promise nobody made.
 /// - `.missed` — the plan asked for something and nothing happened, and the weekly
 ///   rest-day budget did not stretch to cover it (D9). A real failure to execute.
+/// - `.forthcoming` — the plan asks for something on a day that **has not happened
+///   yet**. Same absence of a score as `.missed`, opposite meaning, and until MAX-105
+///   this type could not tell them apart: `resolve` had no notion of "today", so every
+///   scheduled day between now and the end of the selected month resolved to `.missed`
+///   and the forward half of the grid read as a wall of failure. A day the athlete has
+///   not reached is not a day the athlete has skipped.
 /// - `.convertedRest` — the same missed ask, but MAX-016's automatic weekly-budget
 ///   conversion (A6) folded it into rest. Distinct from a scheduled rest day: this
 ///   one is a forgiven miss, and A6's own trade-off note ("the calendar may read as
@@ -56,20 +62,105 @@ public enum ScoreCalendarDayState: Hashable, Sendable {
     /// The plan's own ask for the day was rest.
     case scheduledRest
 
+    /// The plan asks for `scheduledKind` on a day that has not happened yet.
+    ///
+    /// **Never `.rest`**, for the same reason `.missed` never is: a scheduled rest day
+    /// is `.scheduledRest` whether it is behind or ahead of today. Rest was prescribed,
+    /// rest is what the day is, and there is no outcome still pending on it.
+    case forthcoming(scheduledKind: ScheduledSessionKind)
+
     /// No plan version governs this day.
     case unplanned
 }
 
-/// One resolved calendar cell: a day, and the state it is in.
+/// How what the athlete did on a day compares with what the plan asked of it
+/// (MAX-105).
+///
+/// ## Why this reads the stored score rather than re-deciding anything
+///
+/// Both halves of the comparison are already recorded on the immutable auto-score
+/// (D2/D8): `Score.scheduledSession` is the prescription the scorer judged against, and
+/// `Score.actualClassification` is MAX-013's answer for what the run actually was.
+/// Nothing here re-classifies a workout or re-resolves a threshold — it compares two
+/// values that were decided once, at ingestion, and stored.
+///
+/// The *prescribed* side is taken from the day's resolved `PlanDay` rather than from
+/// `Score.scheduledSession`, so that every day in the range — scored or not — describes
+/// its prescription from one source. `PlanCalendar`'s ordering invariants make the two
+/// identical by construction: a later plan version may never take effect before an
+/// earlier one, so the plan in force on a day cannot change after that day has been
+/// scored (D1).
+public enum PlanExecutionAgreement: Hashable, Sendable {
+    /// A session was prescribed and what was performed is that kind.
+    case asPrescribed(kind: ScheduledSessionKind)
+
+    /// A session was prescribed and something else was performed — an easy run on a
+    /// long-run day. Not a failure and deliberately not coloured as one: the athlete
+    /// trained, and the score already judges *how* they trained. It is a divergence
+    /// between plan and execution, which is the thing this calendar exists to show.
+    case divergent(prescribed: ScheduledSessionKind, performed: WorkoutClassification)
+
+    /// Something was performed on a day the plan asked nothing of — a run on a
+    /// scheduled rest day, or on a day no plan version governs.
+    case unprescribed(performed: WorkoutClassification)
+}
+
+/// One resolved calendar cell: a day, the state it is in, and the plan underneath it.
+///
+/// ## Two layers, deliberately not merged (MAX-105)
+///
+/// `state` is what *happened*. `prescription` is what was *asked*. They are separate
+/// properties rather than one fatter enum because they are separate facts with
+/// different lifetimes: the ask is fixed the moment a plan version takes effect, and
+/// the outcome arrives days later, or never. Folding the ask into `state` would mean
+/// `.scored` carried a plan payload that most of its readers do not want, and would put
+/// the same `ScheduledSessionKind` in two places for `.missed` to disagree with itself
+/// about.
+///
+/// It is also what makes the rendering rule expressible in one sentence: the
+/// prescription is the ground, the state is the figure drawn on it.
 public struct ScoreCalendarDay: Hashable, Sendable, Identifiable {
     public var id: CalendarDay { date }
 
     public let date: CalendarDay
     public let state: ScoreCalendarDayState
 
-    public init(date: CalendarDay, state: ScoreCalendarDayState) {
+    /// The plan's entry for this day, resolved through `PlanCalendar` (D1) — the plan
+    /// version in effect *on this day*, never today's. Nil where no version governs it.
+    ///
+    /// Carried even where `state` already names the ask (`.missed`, `.scheduledRest`,
+    /// `.forthcoming`) so that "what does the plan say about this day" has exactly one
+    /// answer regardless of how the day turned out, and so a reader never has to
+    /// reconstruct it from a state's associated value.
+    public let prescription: PlanDay?
+
+    /// How the day's execution compares with `prescription` — nil when nothing was
+    /// performed, and nil while a performed workout is still awaiting its score, since
+    /// the classification this compares against is stored on the score (D2).
+    public let agreement: PlanExecutionAgreement?
+
+    public init(
+        date: CalendarDay,
+        state: ScoreCalendarDayState,
+        prescription: PlanDay? = nil,
+        agreement: PlanExecutionAgreement? = nil
+    ) {
         self.date = date
         self.state = state
+        self.prescription = prescription
+        self.agreement = agreement
+    }
+
+    /// Whether the plan asks for a *session* on this day, as opposed to rest or
+    /// nothing at all.
+    ///
+    /// This is the whole condition the plan layer is drawn on — one bit, so a cell
+    /// that carries it needs no legend beyond "the plan asked for something here".
+    /// `PlanDay.canBeMissed` is the same predicate seen from the other end (D9), and
+    /// reusing it is deliberate: a day the plan can hold you to is exactly a day the
+    /// plan asked something of.
+    public var prescribesASession: Bool {
+        prescription?.canBeMissed == true
     }
 }
 
@@ -85,6 +176,19 @@ public struct ScoreCalendarDay: Hashable, Sendable, Identifiable {
 /// whole-week range, and both types are pure functions of the same records. A caller
 /// already assembling a `TalliesInput` for the same interval already has everything
 /// `resolve` below needs.
+///
+/// **The one place the two now differ, stated plainly (MAX-105).** This type is told
+/// what day it is and `TalliesCalculator` is not, so this type withholds days on or
+/// after `today` from the budget's candidate pool (`RestDayBudgeting`'s
+/// `outcomesUnknownFrom`) while `TalliesCalculator` still offers them. The rule for
+/// *which* miss is forgiven is unchanged and still lives in exactly one place; what
+/// differs is which days are eligible to be forgiven at all. Forgiving a day that has
+/// not happened is not a judgement call — it spends a finite weekly budget on a
+/// non-event, and leaves a genuine miss earlier in the same week showing red because
+/// the allowance was already gone. Fixing the tallies side needs a `today` on
+/// `TalliesInput` and moves `Tallies.currentStreak` (which today breaks on the first
+/// future scheduled day it walks back from), so it is reported as follow-up work
+/// rather than folded into this ticket.
 ///
 /// ## The C1 obligation this carries forward
 ///
@@ -112,6 +216,16 @@ public enum ScoreCalendar {
     ///     here — the caller supplies it, the same way `TrendInterval
     ///     .dateInterval(in:)` and `TalliesInput` both demand it rather than assume
     ///     one.
+    ///   - today: the athlete's current day, in `timeZone`. **An input, never a clock
+    ///     read.** Two answers depend on it and both are wrong if it is guessed: a
+    ///     scheduled day with nothing recorded is `.forthcoming` on or after this day
+    ///     and `.missed` before it, and only days before it are candidates for D9's
+    ///     rest-day conversion. Threading it in is what keeps `resolve` a pure function
+    ///     — the same discipline `timeZone` above is held to, and the reason both the
+    ///     future/missed split and the budget boundary are testable at all.
+    ///
+    ///     Note the boundary is *strict*: today itself is `.forthcoming`, not
+    ///     `.missed`. A scheduled run at six in the morning has not been skipped.
     ///   - workouts: see the type's documentation for the range this must cover —
     ///     wider than `from...through` whenever the interval does not already align
     ///     to Monday-first week boundaries.
@@ -125,6 +239,7 @@ public enum ScoreCalendar {
         from: CalendarDay,
         through: CalendarDay,
         timeZone: TimeZone,
+        today: CalendarDay,
         workouts: [Workout],
         scoreLedgers: [UUID: ScoreLedger] = [:],
         planCalendar: PlanCalendar?,
@@ -145,19 +260,33 @@ public enum ScoreCalendar {
         let (planDaysInRange, convertedDates) = try resolveRestDayConversions(
             from: from,
             through: through,
+            today: today,
             workoutsByDay: workoutsByDay,
             planCalendar: planCalendar,
             restDayBudget: restDayBudget
         )
 
         return try CalendarDay.days(from: from, through: through).map { day in
-            let state = dayState(
-                dayWorkouts: workoutsByDay[day] ?? [],
-                planDay: planDaysInRange[day],
-                isConverted: convertedDates.contains(day),
-                scoreLedgers: scoreLedgers
+            let planDay = planDaysInRange[day]
+            let dayWorkouts = workoutsByDay[day] ?? []
+            let best = bestScoredPair(
+                dayWorkouts.compactMap { workout in
+                    scoreLedgers[workout.id].map { (workout, $0) }
+                }
             )
-            return ScoreCalendarDay(date: day, state: state)
+            let state = dayState(
+                dayWorkouts: dayWorkouts,
+                bestScored: best,
+                planDay: planDay,
+                isConverted: convertedDates.contains(day),
+                outcomeIsKnown: day < today
+            )
+            return ScoreCalendarDay(
+                date: day,
+                state: state,
+                prescription: planDay,
+                agreement: agreement(planDay: planDay, score: best?.1.automatic)
+            )
         }
     }
 
@@ -166,6 +295,7 @@ public enum ScoreCalendar {
     private static func resolveRestDayConversions(
         from: CalendarDay,
         through: CalendarDay,
+        today: CalendarDay,
         workoutsByDay: [CalendarDay: [Workout]],
         planCalendar: PlanCalendar?,
         restDayBudget: RestDayBudget
@@ -185,7 +315,12 @@ public enum ScoreCalendar {
             planDays: expandedPlanDays,
             workoutDays: Set(workoutsByDay.keys),
             budget: restDayBudget,
-            createdAt: restDayBudgetingStamp
+            createdAt: restDayBudgetingStamp,
+            // The whole week is still handed over (C1), so the week's *shape* — which
+            // days it rests on, and therefore which misses are adjacent to rest — is
+            // unchanged. Only candidacy is bounded: a day whose outcome is not in
+            // cannot be a miss, so it cannot be forgiven.
+            outcomesUnknownFrom: today
         )
         return (planDaysInRange, Set(overrides.map(\.date)))
     }
@@ -194,20 +329,17 @@ public enum ScoreCalendar {
 
     private static func dayState(
         dayWorkouts: [Workout],
+        bestScored: (Workout, ScoreLedger)?,
         planDay: PlanDay?,
         isConverted: Bool,
-        scoreLedgers: [UUID: ScoreLedger]
+        outcomeIsKnown: Bool
     ) -> ScoreCalendarDayState {
-        let scoredPairs = dayWorkouts.compactMap { workout in
-            scoreLedgers[workout.id].map { (workout, $0) }
-        }
-
         // A workout that actually happened always outranks the plan's ask for the
         // day — D4 colors by what was done, not by what was scheduled. This applies
         // even on a day the plan scheduled as rest: an extra session still gets
         // judged on its own merits, and a rest day the athlete ran through is a fact
         // worth surfacing honestly rather than hiding behind "scheduled rest".
-        if let best = bestScoredPair(scoredPairs) {
+        if let best = bestScored {
             return .scored(band: best.1.automatic.band, activityType: best.0.activityType)
         }
         if let earliestUnscored = dayWorkouts.min(by: { $0.start < $1.start }) {
@@ -216,9 +348,33 @@ public enum ScoreCalendar {
 
         guard let planDay else { return .unplanned }
         guard planDay.canBeMissed else { return .scheduledRest }
+        // Ahead of `missed`/`convertedRest`, and deliberately ahead of `isConverted`
+        // too: a day whose outcome is not in has nothing to forgive, so a stray
+        // conversion could never present itself as one.
+        guard outcomeIsKnown else {
+            return .forthcoming(scheduledKind: planDay.scheduledSession.kind)
+        }
         return isConverted
             ? .convertedRest(scheduledKind: planDay.scheduledSession.kind)
             : .missed(scheduledKind: planDay.scheduledSession.kind)
+    }
+
+    // MARK: - Plan vs. execution
+
+    /// Nil unless something was performed *and* scored — the classification this
+    /// compares against lives on the auto-score (`Score.actualClassification`, D2), so
+    /// a recorded-but-unscored day has an ask and an outcome but no comparison yet.
+    /// That is a real state, not a gap to paper over: the calendar still shows the ask.
+    private static func agreement(planDay: PlanDay?, score: Score?) -> PlanExecutionAgreement? {
+        guard let score else { return nil }
+        let performed = score.actualClassification
+        guard let planDay, planDay.canBeMissed else {
+            return .unprescribed(performed: performed)
+        }
+        let prescribed = planDay.scheduledSession.kind
+        return prescribed == ScheduledSessionKind(performed)
+            ? .asPrescribed(kind: prescribed)
+            : .divergent(prescribed: prescribed, performed: performed)
     }
 
     /// The best-banded workout of the day, deterministically. "Best" mirrors
