@@ -110,22 +110,30 @@ public struct StoredRestDayOverride: Hashable, Sendable {
 /// D6 is why this record syncs like the rest: the conversation about a run is part of
 /// the longitudinal record and must survive a reinstall.
 ///
-/// ## `createdAt` is storage metadata, not domain data (MAX-048)
+/// ## `createdAt` is storage metadata (MAX-048), and now seeds one domain field
 ///
-/// `ChatThread` carries no timestamp of its own — a thread is an ordered list of
-/// messages, and each message already carries when it happened. `createdAt` exists so
-/// the store can break a tie deterministically when CloudKit mirroring produces two
-/// `ChatThreadRecord`s for one workout: the schema cannot carry a unique constraint
-/// (see `MaximizeSchemaV1`'s CloudKit notes), so `MaximizeStore.threadRecords(for:)`
-/// needs the same kind of explicit ordering `workoutRecords(for:)` already has via
-/// `StoredWorkout.ingestedAt`.
+/// `createdAt` exists so the store can break a tie deterministically when CloudKit
+/// mirroring produces two `ChatThreadRecord`s for one workout: the schema cannot carry a
+/// unique constraint (see `MaximizeSchemaV1`'s CloudKit notes), so
+/// `MaximizeStore.threadRecords(for:)` needs the same kind of explicit ordering
+/// `workoutRecords(for:)` already has via `StoredWorkout.ingestedAt`. That job is
+/// unchanged.
 ///
-/// The difference from `ingestedAt` is that `ingestedAt` is real domain data — it is a
-/// field on `Workout` and round-trips through `toDomain()`. `createdAt` has nowhere to
-/// round-trip into, because `ChatThread` has no such field, so it stays a plain
-/// property on this stored struct and the domain type is untouched. It is set once, at
-/// a record's first insert, and `MaximizeStore` preserves it across every later
-/// `store(_:)` for the same workout — see that file for why.
+/// What changed at MAX-092: `ChatThread` gained `lastActivityAt`, which the thread list
+/// sorts on, and this record has no column for it yet — MAX-093 adds one. Until then
+/// `toDomain()` derives it as *the last message's timestamp, or `createdAt` for a thread
+/// with no messages*, which is precisely the value MAX-093 will backfill existing rows
+/// with. It is a derivation, not a guess: every turn carries its own timestamp, so the
+/// only thread whose activity is not already recorded is one nobody has spoken in.
+///
+/// ## This record can carry only a workout subject, until MAX-093
+///
+/// A11 gives a thread a `ChatSubject`, and the columns for the training case
+/// (`subjectKind` and two day strings) are MAX-093's, not this ticket's. So
+/// `init(_:createdAt:)` refuses a training thread rather than silently storing it as
+/// some workout's. Nothing constructs a training thread before MAX-095, so the refusal
+/// is unreachable today and is here to make sure it stays that way if the tickets land
+/// out of order.
 public struct StoredChatThread: Hashable, Sendable {
     public var threadUUID: UUID
     public var workoutUUID: UUID
@@ -143,31 +151,43 @@ public struct StoredChatThread: Hashable, Sendable {
         self.createdAt = createdAt
     }
 
-    /// - Parameter createdAt: Not derived from `thread` — `ChatThread` has no
-    ///   timestamp of its own. The caller (`MaximizeStore`) decides this: the existing
-    ///   record's `createdAt` on an update, or the current time on first insert.
+    /// - Parameter createdAt: Not derived from `thread`. The caller (`MaximizeStore`)
+    ///   decides this: the existing record's `createdAt` on an update, or the current
+    ///   time on first insert.
+    /// - Throws: `DomainError.inconsistent` for anything but a workout subject. See this
+    ///   type's note on MAX-093. The reason names the subject *kind* only — an
+    ///   identifier in an error is an identifier in a log, which CLAUDE.md rules out.
     public init(_ thread: ChatThread, createdAt: Date) throws {
+        guard let workoutUUID = thread.subject.workoutID else {
+            throw DomainError.inconsistent(
+                reason: "StoredChatThread cannot carry a \(thread.subject.kind.rawValue) subject "
+                    + "until MAX-093 adds the columns for it"
+            )
+        }
         let messagesJSON = try PersistencePayload.encode(
             thread.messages,
             field: "StoredChatThread.messagesJSON"
         )
         self.init(
             threadUUID: thread.id,
-            workoutUUID: thread.workoutID,
+            workoutUUID: workoutUUID,
             messagesJSON: messagesJSON,
             createdAt: createdAt
         )
     }
 
     public func toDomain() throws -> ChatThread {
-        try ChatThread(
+        let messages = try PersistencePayload.decode(
+            [ChatMessage].self,
+            from: messagesJSON,
+            field: "StoredChatThread.messagesJSON"
+        )
+        return try ChatThread(
             id: threadUUID,
-            workoutID: workoutUUID,
-            messages: try PersistencePayload.decode(
-                [ChatMessage].self,
-                from: messagesJSON,
-                field: "StoredChatThread.messagesJSON"
-            )
+            subject: .workout(workoutUUID),
+            messages: messages,
+            // See this type's note: the column arrives with MAX-093.
+            lastActivityAt: messages.last?.timestamp ?? createdAt
         )
     }
 }

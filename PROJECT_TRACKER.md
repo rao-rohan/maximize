@@ -715,7 +715,7 @@ twelve and is dispatchable immediately.
 
 | ID | Ticket | Depends on | Tier |
 |---|---|---|---|
-| MAX-092 | `ChatSubject` and thread identity | — | **Opus** |
+| MAX-092 | `ChatSubject` and thread identity | — | **Opus** ✅ |
 | MAX-093 | The stored record: additive fields, no migration | 092 | Sonnet |
 | MAX-094 | Shared fact-sheet formatting — pure extraction | — | Sonnet ✅ |
 | MAX-095 | `TrainingContext` + one context entry point | 092, 094 | **Opus** 🔒 |
@@ -737,6 +737,31 @@ before MAX-105**, both being in the calendar's contrast budget; and — the orig
 lands before 098** (both touch `RootTabView.swift`, and the button should be built against
 the migrated tab bar rather than merged into it afterwards); and **102 before 101** (both
 touch `App/Plan/`, and 102 is the smaller, independent one).
+
+**MAX-092 landed the identity change.** `ChatThread` is keyed on its own `id` and carries
+a `ChatSubject` — `.workout(UUID)` or `.training(TrainingScope)` — plus a
+`lastActivityAt`. Four things are worth carrying forward:
+
+- **Freezing is enforced by the type, not by a convention.** `TrainingScope` holds two
+  `CalendarDay`s and its only door in from a `TrendInterval` is `init(resolving:)`. There
+  is deliberately **no way back out**: nothing can hand you the interval a scope came
+  from, because a caller holding one could re-resolve it (§3.4, A11).
+- **MAX-048's determinism is preserved and promoted.** Its `(createdAt, threadUUID)` sort
+  in `MaximizeStore` is untouched and still picks the same row. What changed is that
+  "which thread does a subject resolve to" is now an explicit protocol contract —
+  `mostRecentThread(for:)`, newest activity with the identifier breaking a tie — and
+  `FakeChatThreadRepository` makes CI check it on every commit, which MAX-048's own
+  version of the rule never was.
+- **One thread per workout is now a repository policy, not a shape.** §12's question 3 is
+  therefore reversible in one method, as the spec says it should be. Training subjects are
+  deliberately not deduplicated: "New chat" over a newer window is the product.
+- **It had to touch one App file, and that is a decomposition miss worth recording.**
+  `MaximizeStore` conforms to `ChatThreadRepository`, so growing the protocol broke the
+  `ios-app` job. The ticket said core-only; the alternative was a knowingly red merge
+  gate. The change is the minimum that compiles — no column, no schema version, no
+  migration — and MAX-093 replaces the two derivations it leans on. **The lesson for
+  future decomposition: a ticket that grows a protocol owns every conformer of it, and
+  the brief should say so.**
 
 ---
 

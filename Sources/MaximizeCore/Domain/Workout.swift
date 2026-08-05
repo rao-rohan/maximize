@@ -37,6 +37,31 @@ public struct ActivityType: RawRepresentable, Hashable, Sendable, Codable, Custo
 
     public var description: String { rawValue }
 
+    /// The athlete-facing name — "Treadmill running", not `treadmillRunning`.
+    ///
+    /// In the core because a chat thread's title is derived here (§2.4, MAX-092) and a
+    /// title is stored data's shadow: it must read the same on every launch and be
+    /// assertable in a unit test. An unrecognised type degrades to its capitalised raw
+    /// value for the same reason this is a string wrapper and not an `enum` — HealthKit
+    /// gains activity types every release, and one we have never heard of must still
+    /// print something a person can read.
+    ///
+    /// `App/Workouts/WorkoutDisplayFormatting.describe(_:)` predates this and produces
+    /// the same strings. Collapsing it onto this property belongs to whichever ticket
+    /// next opens that file; it is not this one's, and the wording is pinned by a test
+    /// here so the two cannot drift silently in the meantime.
+    public var displayName: String {
+        switch self {
+        case .running: return "Running"
+        case .treadmillRunning: return "Treadmill running"
+        case .walking: return "Walking"
+        case .hiking: return "Hiking"
+        case .cycling: return "Cycling"
+        case .traditionalStrengthTraining: return "Strength training"
+        default: return rawValue.capitalized
+        }
+    }
+
     // Written out rather than left to the RawRepresentable/Codable default so the
     // encoded form is unambiguously a bare string.
     public init(from decoder: any Decoder) throws {

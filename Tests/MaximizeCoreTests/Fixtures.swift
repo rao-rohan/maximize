@@ -13,6 +13,48 @@ enum Fixture {
         try CalendarDay(year: year, month: month, day: dayOfMonth)
     }
 
+    /// `epoch` plus an offset, so a test can say when a turn happened in seconds.
+    static func at(_ offsetSeconds: Double) -> Date {
+        epoch.addingTimeInterval(offsetSeconds)
+    }
+
+    static func scope(
+        from start: (Int, Int, Int),
+        through end: (Int, Int, Int)
+    ) throws -> TrainingScope {
+        try TrainingScope(
+            from: day(start.0, start.1, start.2),
+            through: day(end.0, end.1, end.2)
+        )
+    }
+
+    /// A thread, with `lastActivityAt` defaulted to the last turn (MAX-092).
+    ///
+    /// The default exists so tests that are about ordering, subjects or titles do not
+    /// have to restate an invariant `ChatThread` already enforces. A test that is
+    /// *about* `lastActivityAt` passes it.
+    static func thread(
+        id: UUID = UUID(),
+        subject: ChatSubject = .workout(Fixture.workoutID),
+        messages: [ChatMessage] = [],
+        lastActivityAt: Date? = nil
+    ) throws -> ChatThread {
+        try ChatThread(
+            id: id,
+            subject: subject,
+            messages: messages,
+            lastActivityAt: lastActivityAt ?? messages.last?.timestamp ?? epoch
+        )
+    }
+
+    static func message(
+        _ role: ChatRole,
+        _ content: String,
+        at offsetSeconds: Double
+    ) throws -> ChatMessage {
+        try ChatMessage(id: UUID(), role: role, content: content, timestamp: at(offsetSeconds))
+    }
+
     static func samples(_ pairs: [(Double, Double)]) throws -> [HeartRateSample] {
         try pairs.map { try HeartRateSample(offsetSeconds: $0.0, beatsPerMinute: $0.1) }
     }
