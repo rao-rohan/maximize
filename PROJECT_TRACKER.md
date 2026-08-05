@@ -1166,6 +1166,43 @@ worth carrying forward:
 
 ### Phase 9 — Lifting (MAX-109)
 
+**MAX-144 — muscle groups, and the verification wall behind them.** From the owner, mid
+MAX-129: *"Let's have all muscle groups listed (chest back shoulders arms legs etc) this
+should be part of a potential plan."* So a lift prescription is not "there is a lift on
+Tuesday" but "Tuesday is chest and shoulders".
+
+**The vocabulary is unambiguous and is being built now** — relayed into MAX-129, which is
+defining the lift slot and would otherwise have had this retrofitted into it. A closed
+`MuscleGroup` enum, a *set* per lift slot (a real session is rarely one group), and rest
+still expressible so MAX-129's totality property survives.
+
+**What is not decidable without the owner is whether anything can check it.** HealthKit
+reports `traditionalStrengthTraining` and says nothing about what was worked — the same
+wall A20 hit when it chose adherence over volume because there are no sets, reps or load.
+So the plan can prescribe chest-and-shoulders and **nothing in the app can verify it
+happened.** Three resolutions, each with a real cost:
+
+- **The athlete confirms afterwards.** Honest and checkable, but it spends PRD §3's
+  manual-entry non-goal — and A16 was written narrowly on purpose *to avoid spending it*.
+  Spending it is legitimate; spending it by accident is not, which is what A10's precedent
+  is for.
+- **The plan states intent that scoring cannot check.** Cheapest, and it means a lift's
+  score can never reflect whether the right work was done — only that *a* lift happened.
+  That makes the prescription documentation rather than a standard.
+- **Chat asks.** Fits the pivot and costs no new UI, but it makes a scoring input depend on
+  a model call, and A14 says no chat call is ever unattended. A score that waits on a
+  conversation is a different product from one that arrives on its own.
+
+MAX-129 is explicitly barred from picking. It builds what a plan can *say*; this ticket
+decides what the app can *check*, and it needs an amendment.
+
+**The owner also reaffirmed that the plan is configured through chat**, which constrains the
+shape rather than only the surface: whatever a lift slot carries has to be something a model
+can propose and a person can review in a bubble. A structure that only makes sense in a form
+is the wrong structure. That reaches MAX-141 (`PlanProposal` covers lift days) and MAX-101.
+
+
+
 **MAX-109 is the lifting product spec, and it is delivered:**
 [`docs/LIFTING-SPEC.md`](./docs/LIFTING-SPEC.md) plus amendments **A16–A21**. Nothing in it
 is built. It came from one sentence from the owner — *"Plans should account for both
@@ -1250,6 +1287,7 @@ is the overseer's, not a ticket's — flagged here rather than done.
 | MAX-141 | `PlanProposal` covers lift days | 129, **099** | Sonnet 🔒 |
 | MAX-142 | `TrainingContext` is per-session, not per-run | 129, **095** | **Opus** 🔒 |
 | MAX-143 | **Decide what to do with lifts already scored as runs** | 128 | Owner / overseer |
+| MAX-144 | **Muscle groups in a lift prescription — and how adherence to them is judged** | 129 | **Opus** |
 
 **Four collisions the overseer must respect.**
 
