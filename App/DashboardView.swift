@@ -20,8 +20,15 @@ import SwiftUI
 /// to `navigationTitle` rather than being duplicated — the workouts tab already titles
 /// itself that way, and two titles on one screen is what a stacked bar plus an inline
 /// heading would have been. The stack pushes nothing today; it exists for the bar.
+///
+/// **MAX-098 moved ownership of the interval model up to `RootTabView`.** This screen
+/// still renders and mutates it and is still the only place it can be changed from —
+/// what changed is that the persistent Ask button also reads it, on every tab, to know
+/// which window a training thread would be about (§3.4). One control, one notion of
+/// "what period are we talking about"; a second one is the class of mistake D2 and D3
+/// exist to prevent. This view is otherwise unchanged.
 struct DashboardView: View {
-    @State private var intervalModel = TrendIntervalSelectionModel()
+    let intervalModel: TrendIntervalSelectionModel
 
     var body: some View {
         NavigationStack {
