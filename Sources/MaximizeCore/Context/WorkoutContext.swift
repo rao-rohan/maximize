@@ -124,15 +124,47 @@ public struct WorkoutContext: Hashable, Sendable {
     public let existingScore: Score?
 
     /// The run cut into `paceBreakdownUnit` splits — **present for chat, absent for
-    /// scoring** (MAX-068).
+    /// scoring** (MAX-068), and **absent for a lift whatever the audience** (MAX-136).
     ///
     /// Read from `DerivedMetrics.distanceSplits`, which `DistanceSplitCalculator` cut
     /// once at ingestion (D2); nothing here derives a pace. Nil for three different
     /// reasons and the fact sheet distinguishes them, because "the scorer is not shown
     /// this", "there was never a track to cut" and "we have no breakdown on file for a
     /// run that certainly had splits" are three different facts and only the last is a
-    /// gap in our records.
+    /// gap in our records. A lift is a fourth, and it is not one the fact sheet words at
+    /// all: the section does not appear (LIFTING-SPEC §10.1).
     public let paceBreakdown: DistanceSplitSeries?
+
+    // MARK: - Which prescription this workout answers to (A17, LIFTING-SPEC §10.1)
+
+    /// Which of the plan's two slots this workout is judged against.
+    ///
+    /// Read from `ActivityType.discipline`, which is the one place that mapping lives,
+    /// rather than restated here. Derived rather than stored for the same reason: a
+    /// second copy could disagree with the workout it describes, and nothing on screen
+    /// would say so.
+    public var discipline: Discipline {
+        workout.activityType.discipline
+    }
+
+    /// The plan's ask **for this workout's own discipline** on `day` — nil only when no
+    /// plan governs the day.
+    ///
+    /// **This is the accessor that describes the workout.** `planDay.scheduledSession`
+    /// is the *run* slot whatever the workout was, and reading it for a lift is how a
+    /// strength session came to be presented under "The plan" against an ask nobody made
+    /// of it (LIFTING-SPEC §10.1). `PlanDay.scheduledSession(for:)` is total in the
+    /// discipline — rest is an answer on each slot — so the optionality here carries
+    /// exactly one meaning, the same one `planDay`'s does.
+    ///
+    /// Computed rather than selected into storage by the builder, deliberately. It is a
+    /// total lookup over two values this context already carries, not a metric, so D2 is
+    /// not in play; and a stored copy would be a second answer to "which ask governs
+    /// this workout", free to drift from `planDay` and `workout`. One derivation, in the
+    /// one context module, is what D3 is asking for.
+    public var scheduledSession: ScheduledSession? {
+        planDay?.scheduledSession(for: discipline)
+    }
 
     /// The unit the pace breakdown is always rendered in.
     ///
