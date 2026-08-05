@@ -79,8 +79,9 @@ import Foundation
 /// Saturday before they have arrived leaves Tuesday's genuine miss with no allowance
 /// left and showing red, and the same week silently rearranges which day it forgave as
 /// the week goes on. Callers that know what day it is should say so; the parameter
-/// defaults to nil only because `TalliesCalculator` genuinely does not know — see
-/// `ScoreCalendar`'s own documentation for that seam and the follow-up it names.
+/// defaults to nil only for a caller reasoning purely about the past, which genuinely
+/// has no "today" to supply. `ScoreCalendar` and `TalliesCalculator` (MAX-105,
+/// MAX-110) both pass it now — the seam this note used to describe as open is closed.
 public enum RestDayBudgeting {
     /// Converts up to `budget.daysPerWeek` missed days per training week in `planDays`
     /// into `RestDayOverride`s, least-costly first (see the type's documentation for

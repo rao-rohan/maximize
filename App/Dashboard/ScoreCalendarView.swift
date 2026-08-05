@@ -1,6 +1,15 @@
 import SwiftUI
 import MaximizeCore
 
+/// Where a day-grid door leads (MAX-108) — the view-layer mirror of
+/// `ScoreCalendarDay.destination`'s non-empty case, and nothing more than that: the
+/// core already decided *whether* a day has anything behind it, so this type only
+/// carries *what SwiftUI screen* answers "one" versus "more than one."
+enum ScoreCalendarDoorRoute: Hashable {
+    case workout(UUID)
+    case day([UUID])
+}
+
 /// FR-3.2 / D4 / D9 / A6: the score-colored calendar for the dashboard's selected
 /// interval, in whichever arrangement that span calls for.
 ///
@@ -121,6 +130,42 @@ import MaximizeCore
 /// `ScoreCalendarRepresentation.drawsThePlanLayer` carries that decision and its
 /// argument. `.forthcoming` still applies there — it is drawn as an ordinary neutral
 /// mark, never as the hollow outline `.missed` uses.
+///
+/// ## Calendar days are doors (MAX-108)
+///
+/// A day-grid cell is now a real door, not a picture of one — *which* days open, and
+/// onto what, is decided entirely by `ScoreCalendarDay.destination`, resolved in
+/// `MaximizeCore` and unit tested there. This view only turns that decision into a
+/// transition:
+///
+/// - **One workout** pushes `WorkoutDetailView` directly, on the same
+///   `NavigationStack` `WorkoutsView` already pushes it onto — a calendar door and a
+///   list row reach the same kind of screen.
+/// - **Two or more** pushes `DayWorkoutsView`, which pages between them — the
+///   interesting half of this ticket. A day with two runs is exactly the day worth
+///   comparing, and backing out to the sorted workout list and back in is the
+///   interaction that makes comparing not worth doing.
+/// - **Nothing to open** — `.notYetDue` or `.nothingRecorded` — does not navigate at
+///   all. It surfaces an alert carrying the exact sentence VoiceOver already speaks
+///   for that cell (`ScoreCalendarFormatting.accessibilityLabel(for:)`), so a sighted
+///   tap and a VoiceOver swipe learn the same fact rather than the tap reading as
+///   broken or, worse, doing nothing a sighted athlete can notice.
+///
+/// **Every day-grid cell is a `Button` to VoiceOver**, regardless of which of the three
+/// above it resolves to — the visible fill and ring are unchanged either way (MAX-105
+/// and MAX-084's contrast budget are not spent again here), but the *trait* changes
+/// from a static element to an actionable one, and its accessibility action is exactly
+/// what a sighted double-tap does.
+///
+/// **The year heatmap stays inert.** Its marks are ~6pt against Apple's own 44pt
+/// minimum — treating one as a tap target would be worse than the read-only surface it
+/// is today, so `ScoreCalendarHeatmapCell` is untouched by this ticket.
+///
+/// **Tap targets clear 44pt even where the drawn cell does not** — `LayoutMetrics
+/// .minimumTapTarget`, applied as a `.frame(minWidth:minHeight:)` + `.contentShape`
+/// pair on the cell's hit area rather than as a size change to what is drawn, so the
+/// calendar's own visual density (CLAUDE.md: "do not restyle the calendar") is
+/// unaffected either way.
 struct ScoreCalendarView: View {
     let interval: TrendInterval
 
@@ -153,6 +198,22 @@ struct ScoreCalendarView: View {
         .contentSurface(.card)
         .task(id: interval) {
             await model.load(for: interval)
+        }
+        // Registered here rather than on `DashboardView`'s own `NavigationStack` so
+        // the door and its destinations stay declared beside the cells that open
+        // them — SwiftUI resolves `navigationDestination` against the nearest
+        // enclosing `NavigationStack` regardless of which of its descendants the
+        // modifier is attached to, so this does not require touching
+        // `DashboardView.swift` (MAX-085 owns tab-level navigation right now; this
+        // view only needs a stack to exist above it, which `DashboardView` already
+        // provides).
+        .navigationDestination(for: ScoreCalendarDoorRoute.self) { route in
+            switch route {
+            case .workout(let workoutID):
+                WorkoutDetailView(workoutID: workoutID)
+            case .day(let workoutIDs):
+                DayWorkoutsView(workoutIDs: workoutIDs)
+            }
         }
     }
 
@@ -273,7 +334,66 @@ private struct ScoreCalendarDayCell: View {
             : LayoutMetrics.planRingWidth
     }
 
+    /// Shown when `day.destination` is `.notYetDue` or `.nothingRecorded` — a tap has
+    /// nowhere to navigate to, so it surfaces the same sentence VoiceOver already
+    /// speaks for the cell instead (MAX-108). Local to this cell, not lifted to
+    /// `ScoreCalendarView`: at most one alert is ever showing, and this keeps that
+    /// invariant true by construction rather than by convention.
+    @State private var isShowingEmptyDayAlert = false
+
     var body: some View {
+        door
+            // `.plain` because the default button/link styles bring their own
+            // press-highlight and tint — chrome this cell's fill and ring were never
+            // designed against. `cellVisual` is the only thing allowed to draw here.
+            .buttonStyle(.plain)
+            // The visible fill and ring are unaffected — this only floors the
+            // *hit-testable* region. `.frame(minWidth:minHeight:)` proposes a lower
+            // bound to this cell's reported size without changing what the grid's
+            // fixed-width column proposes downward to `cellVisual`, so the drawn
+            // square stays exactly the size MAX-105's layout gave it; only a future
+            // cell smaller than 44pt would ever see this frame do anything at all.
+            .frame(minWidth: LayoutMetrics.minimumTapTarget, minHeight: LayoutMetrics.minimumTapTarget)
+            .contentShape(Rectangle())
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(ScoreCalendarFormatting.accessibilityLabel(for: day))
+            // Title-only, reusing the exact VoiceOver sentence rather than writing a
+            // second copy of it — see the type's own doc comment. The default OK
+            // button is enough; there is nothing here to confirm or branch on.
+            .alert(
+                ScoreCalendarFormatting.accessibilityLabel(for: day),
+                isPresented: $isShowingEmptyDayAlert
+            ) {}
+    }
+
+    /// Chooses the transition `day.destination` calls for. Every branch renders
+    /// `cellVisual` unchanged — MAX-108 does not spend any of MAX-084/MAX-087's
+    /// contrast budget or redraw anything MAX-105 already decided; only the
+    /// interactive wrapper around it differs.
+    @ViewBuilder
+    private var door: some View {
+        switch day.destination {
+        case .workouts(let workoutIDs) where workoutIDs.count == 1:
+            NavigationLink(value: ScoreCalendarDoorRoute.workout(workoutIDs[0])) { cellVisual }
+        case .workouts(let workoutIDs) where !workoutIDs.isEmpty:
+            NavigationLink(value: ScoreCalendarDoorRoute.day(workoutIDs)) { cellVisual }
+        case .workouts, .notYetDue, .nothingRecorded:
+            // Reached for `.notYetDue`/`.nothingRecorded`, and for an empty
+            // `.workouts([])` — unreachable in practice (`ScoreCalendar.resolve`
+            // never constructs one), but handled the same defensible way rather than
+            // assumed away, per CLAUDE.md's no-force-unwrap discipline.
+            Button {
+                isShowingEmptyDayAlert = true
+            } label: {
+                cellVisual
+            }
+        }
+    }
+
+    /// The date, glyph, band pip and plan ring — everything MAX-061 through MAX-105
+    /// already drew, unmodified by this ticket. Factored out so `door` above can wrap
+    /// the identical visual in whichever control the destination calls for.
+    private var cellVisual: some View {
         // The square is driven by the column's width alone, never by what is drawn
         // inside it. `Color.clear` has no intrinsic size, so `aspectRatio(1, .fit)`
         // resolves against the proposed width and every cell in the grid comes out
@@ -340,8 +460,10 @@ private struct ScoreCalendarDayCell: View {
                     .strokeBorder(Color.accent, lineWidth: ringWidth)
             }
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(ScoreCalendarFormatting.accessibilityLabel(for: day))
+        // No accessibility modifiers here — `body` above owns the label and the
+        // single-element collapse for whichever control (`NavigationLink`/`Button`)
+        // wraps this visual, so nesting a second `.accessibilityElement` here would
+        // fight it rather than reinforce it.
     }
 
     /// The fill's corner radius, concentric with the ring's `CornerRadius.tile`.

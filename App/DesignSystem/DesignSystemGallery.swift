@@ -58,6 +58,15 @@ struct DesignSystemGallery: View {
                 tile(value: "142", unit: "avg bpm")
                 tile(value: "3.1", unit: "% drift")
             }
+
+            // The specimen for MAX-085's one open question. The card above carries a
+            // hairline `surfaceBorder`; the tiles beside it deliberately do not, on the
+            // grounds that outlining a grid makes a wire mesh. That is arithmetic's
+            // limit — whether the card reads as a card, and whether the tiles look
+            // unfinished next to it, is a device judgement.
+            Text("The card is edged; the tiles are not. Needs device verification.")
+                .font(.microLabel)
+                .foregroundStyle(Color.textTertiary)
         }
     }
 
@@ -215,6 +224,7 @@ struct DesignSystemGallery: View {
                 swatch("surface", .surface)
                 swatch("surfaceElevated", .surfaceElevated)
                 swatch("surfaceInset", .surfaceInset)
+                swatch("surfaceBorder", .surfaceBorder)
                 swatch("separator", .separator)
                 swatch("textPrimary", .textPrimary)
                 swatch("textSecondary", .textSecondary)
