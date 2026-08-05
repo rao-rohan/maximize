@@ -6,7 +6,7 @@ import SwiftUI
 /// tickets, each reading `intervalModel.state.interval` to know what to render:
 ///
 /// - MAX-061 — the score-colored calendar (FR-3.2)
-/// - MAX-062 — the cross-run HR-drift overlay (FR-3.3)
+/// - MAX-062 — the cross-run HR-drift overlay (FR-3.3), landed
 /// - MAX-063 — the summary tiles (FR-3.4)
 ///
 /// None of them owns `intervalModel`; this view does, and passes the selection down.
@@ -26,10 +26,11 @@ struct DashboardView: View {
 
                 TrendIntervalSelectorView(model: intervalModel)
 
-                // The drift overlay (MAX-062) lands here too, scoped the same way.
-                // Order follows FR-3: the calendar (3.2) then the tiles (3.4).
+                // Order follows FR-3: the calendar (3.2), the overlay (3.3), then the
+                // tiles (3.4).
                 if let interval = intervalModel.state.interval {
                     ScoreCalendarView(interval: interval)
+                    DriftOverlayView(interval: interval)
                     TrendTilesView(interval: interval)
                 }
             }
