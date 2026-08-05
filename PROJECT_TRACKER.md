@@ -477,6 +477,7 @@ and none of them is required for the PRD to be complete.
 | MAX-067 | Backfill splits for runs ingested before MAX-046 | MAX-046 | Sonnet |
 | MAX-068 | Decide whether splits enter the Claude prompt | MAX-046 | **Opus** 🔒 |
 | MAX-069 | Extend file protection over Core Data's external-storage directory | MAX-072 R1 | Sonnet 🔒 |
+| MAX-081 | Move Settings out of the tab bar; fix keyboard handling | Device report | Sonnet ✅ |
 
 **MAX-066.** Splits currently need a GPS track, so a treadmill run has none — correctly
 rendered as an absence rather than fabricated. `distanceWalkingRunning` is already
@@ -504,6 +505,19 @@ the GPS track and the chat transcript — are protected by the *directory* attri
 today; the gap is that a future edit removing the directory attribute as redundant would
 silently uncover them. Belt-and-braces parity means walking Core Data's support
 directory, which depends on an implementation detail and should be verified on a device.
+
+**MAX-081.** From the owner, off the device, and the first ticket sourced that way rather
+than from another agent. Two chrome changes. Settings gave up its tab for a toolbar
+button present on both remaining tabs — `settingsToolbarItem()` — and `DashboardView`
+grew the `NavigationStack` it needed to have a bar at all. The keyboard half found four
+distinct defects behind "the keyboard is very buggy": no dismiss affordance anywhere in
+the app; a chat composer nested inside the detail screen's outer `ScrollView`, where
+keyboard avoidance, a growing field and streaming text all fought over one scroll offset;
+`.onSubmit` on an `axis: .vertical` field, which never fires; and a composer disabled
+while streaming, which silently resigned focus and dropped the keyboard on every send.
+Chat moved to its own sheet with the composer as a bottom `safeAreaInset`. **None of it
+is verified** — CI has no simulator and cannot observe an interaction; see the PR's device
+list.
 
 ---
 
