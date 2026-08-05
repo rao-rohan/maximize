@@ -1,4 +1,5 @@
 import SwiftUI
+import MaximizeCore
 
 /// The foreground affordance for granting Health access (MAX-030).
 ///
@@ -16,8 +17,16 @@ import SwiftUI
 /// "no data recorded" and infer something about the person from the difference. The
 /// strongest true statement available is that the sheet was answered, so that is the
 /// only thing said here.
+///
+/// **MAX-154 moved the wording itself into `MaximizeCore`.** The care above was real
+/// but unenforced: it lived in four string literals in this file, which CI compiles and
+/// never runs, so nothing but a reader could tell whether the next edit kept it.
+/// `HealthAccessState` has no `granted` case and no `denied` case for exactly that
+/// reason, and `FailureCopyTests` asserts that no sentence derived from it claims
+/// either. This view now holds a state and renders it — see CLAUDE.md's "observe state,
+/// render it, forward user intent."
 struct HealthAccessSettingsSection: View {
-    @State private var statusMessage = "Health access has not been requested yet on this launch."
+    @State private var accessState: HealthAccessState = .notRequestedYet
     @State private var isRequesting = false
 
     var body: some View {
@@ -27,7 +36,7 @@ struct HealthAccessSettingsSection: View {
             Button("Request Health access", action: request)
                 .disabled(isRequesting)
 
-            Text(statusMessage)
+            Text(FailureCopy.healthAccess(accessState))
         }
     }
 
@@ -54,13 +63,16 @@ struct HealthAccessSettingsSection: View {
             // could not be enabled.
             IngestionComposition.workoutObserver.startObservingWorkouts()
 
-            statusMessage = "Health access was requested. iOS does not report whether read access was granted; workouts will appear if it was."
+            accessState = .requestAnswered
         } catch HealthKitObserverError.healthDataUnavailable {
-            statusMessage = "HealthKit is not available on this device."
+            accessState = .healthDataUnavailable
         } catch {
-            // Generic on purpose: this string is the only thing that reaches the
-            // screen, and health data must not leak into UI text or logs (CLAUDE.md).
-            statusMessage = "Could not complete the Health access request."
+            // The caught error is deliberately not read, not logged, and not carried
+            // into the state: an arbitrary `Error` from HealthKit may carry sample
+            // values in its `userInfo`, and health data does not go into strings a
+            // person or a log can read (CLAUDE.md). What reaches the screen is a fixed
+            // sentence chosen in `MaximizeCore` from a case with no payload.
+            accessState = .requestFailed
         }
     }
 }
