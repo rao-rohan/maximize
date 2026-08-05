@@ -197,9 +197,56 @@ final class StoredRecordRoundTripTests: XCTestCase {
                 ZoneSplits.Split(zone: .two, seconds: 1_200),
                 ZoneSplits.Split(zone: .three, seconds: 900.5),
             ]),
+            distanceSplits: DistanceSplits(series: [
+                DistanceSplitSeries(
+                    unit: .kilometers,
+                    splits: [
+                        DistanceSplit(ordinal: 1, distanceMeters: 1_000, elapsedSeconds: 312.4, isComplete: true),
+                        DistanceSplit(ordinal: 2, distanceMeters: 420, elapsedSeconds: 131.2, isComplete: false),
+                    ]
+                ),
+            ]),
             planVersion: PlanVersion(3)
         )
         XCTAssertEqual(try StoredDerivedMetrics(metrics).toDomain(), metrics)
+    }
+
+    /// MAX-046. Absent, not empty: a run with no pace breakdown stores a **nil** blob, not
+    /// an empty one. `DistanceSplits` cannot hold zero series, so an empty blob would not
+    /// decode — which is exactly why the column is optional rather than defaulted.
+    ///
+    /// This is also what every workout ingested before MAX-046 reads back as: the column
+    /// did not exist when they were written, so it is NULL for them, and the detail screen
+    /// says "no splits recorded for this run" rather than inventing a breakdown.
+    func testDerivedMetricsWithNoDistanceSplitsStoreANilBlob() throws {
+        let metrics = try DerivedMetrics(workoutID: Fixture.workoutID, planVersion: PlanVersion(1))
+        let stored = try StoredDerivedMetrics(metrics)
+
+        XCTAssertNil(stored.distanceSplitsJSON)
+        XCTAssertNil(try stored.toDomain().distanceSplits)
+    }
+
+    /// The trailing partial split survives storage as a partial split. Losing the flag
+    /// would turn a 420 m remainder into a kilometre the athlete never ran.
+    func testDistanceSplitCompletenessSurvivesStorage() throws {
+        let metrics = try DerivedMetrics(
+            workoutID: Fixture.workoutID,
+            distanceSplits: DistanceSplits(series: [
+                DistanceSplitSeries(
+                    unit: .miles,
+                    splits: [
+                        DistanceSplit(ordinal: 1, distanceMeters: 1_609.344, elapsedSeconds: 500, isComplete: true),
+                        DistanceSplit(ordinal: 2, distanceMeters: 300, elapsedSeconds: 93, isComplete: false),
+                    ]
+                ),
+            ]),
+            planVersion: PlanVersion(1)
+        )
+
+        let restored = try XCTUnwrap(try StoredDerivedMetrics(metrics).toDomain().distanceSplits)
+        let miles = try XCTUnwrap(restored.series(in: .miles))
+        XCTAssertEqual(miles.splits.map(\.isComplete), [true, false])
+        XCTAssertEqual(miles.splits.last?.distanceMeters, 300)
     }
 
     /// Optionality is meaningful throughout `DerivedMetrics`: an indoor run has no
@@ -217,6 +264,7 @@ final class StoredRecordRoundTripTests: XCTestCase {
         XCTAssertNil(restored.timeAboveCapSeconds)
         XCTAssertNil(restored.heartRateDriftFraction)
         XCTAssertNil(restored.gradeAdjustedPaceSecondsPerKilometer)
+        XCTAssertNil(restored.distanceSplits)
         XCTAssertFalse(restored.hasHeartRateData)
     }
 
