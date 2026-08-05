@@ -192,7 +192,7 @@ public enum DesignPalette {
     /// sits higher; the ramp's floor moved in the same change.
     public static let chartSeriesMuted = Ink(
         dark: 0x696975,
-        light: 0x878793,
+        light: 0x848490,
         darkHighContrast: 0x8C8C98,
         lightHighContrast: 0x63636F
     )
