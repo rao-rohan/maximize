@@ -265,4 +265,85 @@ final class ChatStreamDecoderTests: XCTestCase {
         XCTAssertEqual(decoder.consume(""), [])
         XCTAssertEqual(decoder.consume(""), [])
     }
+
+    // MARK: - MAX-107: a stream whose blank lines did not survive the transport
+
+    /// **The regression test for the defect that broke chat on device.**
+    ///
+    /// Every other test in this file builds its frames with `frame(_:)`, which appends
+    /// the blank line itself. That made the whole suite an idealised stream: the
+    /// decoder was only ever asked to parse input that already had the boundaries it
+    /// depended on. `URLSession.AsyncBytes.lines` is a line sequence, not an SSE
+    /// parser, and it makes no such promise — so this feeds the decoder the same events
+    /// with **no blank lines at all** and asserts the reply still arrives.
+    ///
+    /// Before MAX-107 this failed with `.failed(.unreadableResponse)`: with nothing to
+    /// close a frame, all seven payloads accumulated into one buffer, and
+    /// `{...}\n{...}\n{...}` is not a JSON object. Every turn died, on every model,
+    /// which is what "chat isn't working at all" turned out to mean.
+    func testDeliversAReplyWhenNoBlankLinesSeparateFrames() {
+        let events = decode([
+            "event: message_start",
+            #"data: {"type":"message_start","message":{"model":"claude-sonnet-5","content":[],"stop_reason":null}}"#,
+            "event: content_block_start",
+            #"data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#,
+            "event: ping",
+            #"data: {"type": "ping"}"#,
+            "event: content_block_delta",
+            #"data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello there"}}"#,
+            "event: content_block_delta",
+            #"data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":", how are you?"}}"#,
+            "event: content_block_stop",
+            #"data: {"type":"content_block_stop","index":0}"#,
+            "event: message_delta",
+            #"data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":11}}"#,
+            "event: message_stop",
+            #"data: {"type":"message_stop"}"#,
+        ])
+
+        XCTAssertEqual(events, [.text("Hello there"), .text(", how are you?"), .completed(.endTurn)])
+    }
+
+    /// The same stream *with* its blank lines, so the fix is pinned as working either
+    /// way rather than as having traded one assumption for the opposite one.
+    func testDeliversTheSameReplyWhenBlankLinesArePresent() {
+        let events = decode(
+            frame(#"{"type":"message_start","message":{"content":[]}}"#)
+                + frame(#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#)
+                + frame(#"{"type": "ping"}"#)
+                + textDelta("Hello there")
+                + textDelta(", how are you?")
+                + frame(#"{"type":"content_block_stop","index":0}"#)
+                + messageDelta(stopReason: "end_turn")
+                + messageStop
+        )
+
+        XCTAssertEqual(events, [.text("Hello there"), .text(", how are you?"), .completed(.endTurn)])
+    }
+
+    /// The API pads its payloads with trailing whitespace inside the closing brace —
+    /// `{"type":"message_stop"       }` is real, from the transcript MAX-107 was
+    /// diagnosed against. Valid JSON, and worth pinning so nobody "tidies" the decoder
+    /// into trimming or rejecting it.
+    func testToleratesWhitespacePaddedPayloads() {
+        let events = decode([
+            #"data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Padded"}      }"#,
+            #"data: {"type":"message_stop"       }"#,
+        ])
+
+        XCTAssertEqual(events, [.text("Padded"), .completed(.endTurn)])
+    }
+
+    /// A terminal frame closed by the *next* `data:` line rather than by a blank line
+    /// still ends the turn exactly once — the "exactly one terminal event" contract has
+    /// to survive the new completion path, not just the old one.
+    func testATerminalFrameClosedByTheNextDataLineStillEndsTheTurnOnce() {
+        let events = decode([
+            #"data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Done."}}"#,
+            #"data: {"type":"message_stop"}"#,
+            #"data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ignored"}}"#,
+        ])
+
+        XCTAssertEqual(events, [.text("Done."), .completed(.endTurn)])
+    }
 }
