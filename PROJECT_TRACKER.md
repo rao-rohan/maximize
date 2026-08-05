@@ -458,7 +458,7 @@ ticket that could not close it, and each fails quietly rather than loudly.
 
 | # | Question | Blocks | Status |
 |---|---|---|---|
-| Q1 | Accent color for the on-plan/effective state (PRD §14.2) | — | **Owner's call, open.** A placeholder violet `#8E7CFF` is in place — chosen to sit far from green/amber/red and from iOS system blue, ~5.9:1 on dark. Change the single `Color.accent` declaration in `ColorTokens.swift` to re-theme |
+| Q1 | Accent color for the on-plan/effective state (PRD §14.2) | — | **Resolved at MAX-084 — A7 ratifies the violet `#8E7CFF` / `#5B3FE8` already in place.** 6.06:1 and 6.32:1 on `surface`, AA everywhere including `surfaceInset`, and AAA under Increase Contrast. Five alternatives were measured and rejected: cyan and teal collide with `scoreEffective` at 1.14:1 and 1.09:1, which is the constraint that actually decides this — the accent must not be mistakable for a score band. No palette value changed; see `docs/PRD-AMENDMENTS.md` A7 |
 
 Resolved: backend architecture (→ A1, on-device) · existing-code question (greenfield) ·
 rest-day conversion (→ A6, automatic) · **Q2 Xcode 26 availability** — yes, verified
@@ -467,16 +467,56 @@ and CI selects a 26.x toolchain explicitly rather than trusting the runner defau
 
 ## Post-PRD backlog
 
+**The original four (MAX-066 to MAX-069) are all merged.** What follows are the tickets
+raised after them — from device use, from the design review, and from the fixes
+themselves.
+
+| ID | Ticket | Source | Tier | Status |
+|---|---|---|---|---|
+| MAX-080 | Plan authoring — seed a plan, revise as a new version | device use | **Opus** | ✅ |
+| MAX-081 | Settings to a toolbar button; keyboard handling | device use | **Opus** | ✅ |
+| MAX-082 | Design review of the whole app | owner request | **Opus** | ✅ |
+| MAX-083 | Week / month / year intervals, per-span representations | owner request | **Opus** | ✅ |
+| MAX-084 | Score-band and chart contrast; resolve A7 | MAX-082 | **Opus** | ✅ |
+| MAX-085 | Surface elevation, `.tint()` adoption, Liquid Glass chrome | MAX-082 | **Opus** | 🔲 |
+| MAX-086 | One voice for the 22 absence strings; wire `AppearancePreference` | MAX-082 | Sonnet | 🔲 |
+| MAX-087 | A non-hue channel for score bands in the year heatmap | MAX-084 | Sonnet | 🔲 |
+
+**MAX-080 was the blocker, and it was my miss.** Nothing in the app called
+`PlanRepository.store(_:)` — so `planCalendar()` returned nil forever, every workout
+ingested as `.noPlanAuthored` and stored no derived metrics, nothing could be scored,
+chat was permanently unavailable, and the calendar showed every day as ungoverned. The
+PRD never specifies how a plan is created; I decomposed 40 tickets without noticing
+nothing filled that hole. It also surfaced a real gap in **§10.3's rubric**: with only
+its stated rows, a long day that fell short, a prescribed hard day, a run on a rest day
+or a walked easy day all hit `noBandMatched` — a thrown error, so no score at all. The
+seeded week has two rest days, so that was not hypothetical.
+
+**MAX-084 left one case open, and named it: the year heatmap (MAX-087).** Its 6pt cells
+have no corner to carry the pip that separates the bands elsewhere, so effective versus
+marginal is still hue-only there — at 1.02:1, which is no separation for a colour-blind
+athlete. MAX-083's own doc comment predicted this would be the case that tests the fix.
+It needs a channel that works at 6pt: luminance separation, or an inset mark.
+
+**The contrast suite now has teeth.** `testNoTwoScoreBandsAreDistinguishedByHueAlone`
+requires every band pair, in every appearance variant, to separate by 3:1 **or** carry
+different marks — and it caught a real defect on its first run, in MAX-084's own new
+token. The prior suite checked tokens against *surfaces* only, which is how a 1.02:1
+pair shipped past a WCAG suite in the first place.
+
+---
+
+
 Every ticket tracing to the PRD is merged. These came out of the work itself — reported
 by the agents that found them rather than fixed in place, per the standing instruction —
 and none of them is required for the PRD to be complete.
 
 | ID | Ticket | Source | Tier |
 |---|---|---|---|
-| MAX-066 | Treadmill splits from a distance-sample series | MAX-046 | Sonnet |
-| MAX-067 | Backfill splits for runs ingested before MAX-046 | MAX-046 | Sonnet |
-| MAX-068 | Decide whether splits enter the Claude prompt | MAX-046 | **Opus** 🔒 |
-| MAX-069 | Extend file protection over Core Data's external-storage directory | MAX-072 R1 | Sonnet 🔒 |
+| MAX-066 | Treadmill splits from a distance-sample series | MAX-046 | Sonnet  ✅ |
+| MAX-067 | Backfill splits for runs ingested before MAX-046 | MAX-046 | Sonnet  ✅ |
+| MAX-068 | Decide whether splits enter the Claude prompt | MAX-046 | **Opus** 🔒  ✅ |
+| MAX-069 | Extend file protection over Core Data's external-storage directory | MAX-072 R1 | Sonnet 🔒  ✅ |
 | MAX-081 | Move Settings out of the tab bar; fix keyboard handling | Device report | Sonnet ✅ |
 
 **MAX-066.** Splits currently need a GPS track, so a treadmill run has none — correctly
