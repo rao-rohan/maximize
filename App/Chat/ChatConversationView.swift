@@ -18,9 +18,15 @@ import MaximizeCore
 /// point: every decision — when a turn is complete, what streams versus what is shown
 /// versus what is persisted, what "no key stored" or a dropped connection should say —
 /// lives in `ChatModel` (`MaximizeCore`) and is unit tested there. This file only
-/// renders `model.loadState`/`model.messages`/`model.streamingText` and forwards
-/// `send()`, the same "observe, render, forward intent" shape every other view in this
-/// app follows.
+/// renders `model.loadState`/`model.messages`/`model.replyPhase`/`model.streamingText`
+/// and forwards `send()` and `retry()`, the same "observe, render, forward intent" shape
+/// every other view in this app follows.
+///
+/// **`model.replyPhase` is the newest instance of that (MAX-152).** Waiting, streaming
+/// and stalled are three states of one request and used to be one boolean here, which is
+/// why all three drew the same ellipsis. Which one is showing is now decided by
+/// `ChatReplyProgress` in the core, from stream events, under test; this view branches on
+/// the answer and inspects nothing about the stream itself.
 ///
 /// ## Subject-dependent copy, never re-decided here
 ///
