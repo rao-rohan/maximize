@@ -448,7 +448,7 @@ change rather than four.
 |---|---|---|---|
 | P1 | `Plan` cannot express the *shape* of classification rules, so four dimensionless ratios live in `WorkoutClassificationPolicy` | MAX-013 | Real D1 leak, but bounded: they are ratios, never a bpm, metre or minute, so changing the cap or arc still moves the thresholds. A `classification` block on a future plan version fixes it |
 | P2 | Same, for the cap-anchored zone multipliers in `HeartRateZoneModel` | MAX-012 | As P1 |
-| P3 | ~~`Plan` records **no durations at all**~~ **Closed by MAX-131**: `ScheduledSession.durationSeconds` is the plan's first duration, and `RubricReference.scheduledDuration(fraction:)` is how a band names it | MAX-013 | The rubric half is closed. **The classifier half is not**: `WorkoutClassifier.isFragment` still tests distance only, so a mis-started treadmill run with HR but no distance still reaches the scorer. The plan can now express the floor it wants — a `minimumSessionDuration`, or the ask's own duration — and the ticket that changes the classifier is a behaviour change nobody has picked up |
+| P3 | ~~`Plan` records **no durations at all**~~ **Fully closed.** MAX-131 gave the plan `ScheduledSession.durationSeconds` and `RubricReference.scheduledDuration(fraction:)` (the rubric half); **MAX-149 gives `Plan.minimumSessionDurationSeconds`** and teaches `WorkoutClassifier.isFragment` to read it (the classifier half) | MAX-013 | Both halves closed. A recorded run with no distance — a mis-started or accidentally split treadmill session — is now tested against the plan's duration floor when one is stated, instead of reaching the scorer untested. Nothing authors the floor yet (no plan-authoring screen or seed sets it); that is separate ticket work, tracked below |
 | P4 | `ScheduledSession` cannot express interval structure (e.g. 6×800m) | MAX-013 | The scorer sees "hard" but not the prescribed shape, so it cannot judge whether the session was executed as written |
 
 Separately, `CalendarDay` lacks day/week arithmetic — MAX-013 carried a private day
@@ -1508,6 +1508,7 @@ is the overseer's, not a ticket's — flagged here rather than done.
 | MAX-143 | **Decide what to do with lifts already scored as runs** | 128 | Owner / overseer |
 | MAX-144 | ~~How adherence to a muscle-group prescription is judged~~ — **decided (A22)** | 129 | Owner ✅ |
 | MAX-145 | **Enter muscle groups on a strength workout's detail screen** (A22) | 129, 144 | **Opus** ✅ |
+| MAX-149 | Duration floor for fragments — **closes the classifier half of gap P3** | 013, 131 | **Opus** ✅ |
 
 **Four collisions the overseer must respect.**
 
@@ -1873,10 +1874,61 @@ The two that were not are now `RubricCondition.actualDiscipline(oneOf:)` and
   Neither is editable: **MAX-137 gives the screen its editor**, and **MAX-141** is what
   lets a chat-authored proposal state one. Until then nothing authors a duration, which is
   why this ticket adds none to `StandardPlanSeed`.
-- **Reported, not done: the classifier half of P3.** `WorkoutClassifier.isFragment` still
+- ~~**Reported, not done: the classifier half of P3.** `WorkoutClassifier.isFragment` still
   tests distance only, so an HR-only treadmill fragment still reaches the scorer.
   LIFTING-SPEC §9.2 wants a duration floor there; the plan can now express one, and
-  changing the classifier is a behaviour change this ticket's brief forbade.
+  changing the classifier is a behaviour change this ticket's brief forbade.~~ **Closed by
+  MAX-149.**
+
+**MAX-149 — the classifier half of P3, and the argument for where the floor lives.** A
+mis-started or accidentally split treadmill run — heart-rate data, no distance sample —
+passed `WorkoutClassifier.isFragment`'s distance test (there was no distance to fail it
+on) and reached the scorer as a real session, an immutable wrong score under D8.
+LIFTING-SPEC §9.2 names this exactly and asks for a duration floor; MAX-131 reported it
+rather than building it, because its brief forbade a behaviour change.
+
+- **`Plan.minimumSessionDurationSeconds`, not a `WorkoutClassificationPolicy` fraction.**
+  The two candidates were an absolute figure the plan version states — `heartRateCapBPM`'s
+  own shape — or a third fraction alongside `fragmentDistanceFraction` in
+  `WorkoutClassificationPolicy`. Rejected the second: that type's own doc already names its
+  fractions a known, temporary gap against D1, held open only because they are *ratios* of
+  a plan-stated quantity (the shortest prescribed run, the cap) rather than absolutes,
+  pending "a `classification` block on a future plan version". Filing a brand-new
+  free-standing threshold into a struct whose own comment says "this shouldn't really be
+  here" would grow that gap rather than close it. A plan-relative fraction of the shortest
+  prescribed run's *duration* was considered too, and rejected for a sharper reason:
+  `ScheduledSession.durationSeconds` on the run slot is still carried-but-uneditable —
+  MAX-137 and MAX-141 landed, but neither put a control on it, so nothing authors one — so
+  a plan-relative floor would silently never fire for any plan on disk, which is the
+  opposite of what the ticket is for. `minimumSessionDurationSeconds` sits directly on `Plan`, optional
+  (defaulting nil, matching every field MAX-129/MAX-131 added), resolved once per plan
+  version exactly like the cap.
+- **Distance-tested runs are unaffected; the floor only ever answers the question the
+  distance test could not ask.** `isFragment` now branches on whether the workout has a
+  distance at all: if it does, the existing distance-fraction test runs exactly as before
+  — a duration floor calibrated for "did this happen" has no business overruling a run
+  whose distance already answered that, and a fixture pins a case where the two would
+  disagree. Only a distance-less workout falls through to the duration floor, and only
+  when the plan states one; a plan with no opinion asks no duration question, the same "no
+  guessed threshold" rule the distance test already followed.
+- **A lift cannot be caught by this floor, and it is not by luck.** `classify()` answers
+  `.other` for any non-run before `isFragment` runs at all — `isFragment` is unreachable
+  for a lift regardless of how aggressive the floor is. Pinned with a fixture using a
+  floor long enough to catch a 45-minute lift, to make the claim more than "nothing tests
+  it".
+- **Nothing stored moves.** A hand-written pre-MAX-149 `Plan` payload — every key `Plan`
+  already carried, no `minimumSessionDurationSeconds` key — decodes to a plan equal to the
+  one this build authors with no floor stated, and the same fragment call matches under
+  both. A plan that states no floor re-encodes without the key.
+- **Reported, not done: authoring cannot carry the floor forward.**
+  `PlanAuthoringSession.plan(from:effectiveFrom:)` builds every `Plan` field from
+  `PlanDraft`, and `PlanDraft`/`PlanAuthoring.swift` are owned by MAX-148, in flight in
+  parallel — out of this ticket's scope to touch. So a plan revision saved through the
+  authoring screen today always produces `minimumSessionDurationSeconds == nil`, same as
+  `StandardPlanSeed` (MAX-146, also out of scope here) never setting one. The domain type
+  and the classifier are ready; nothing in this build can author a floor yet. That is
+  follow-on ticket work, the same shape MAX-131 left `durationSeconds` in before MAX-137
+  gave it an editor.
 
 **MAX-132 — `StandardPlanSeed` learns to speak the vocabulary MAX-131 gave it, and closes
 the shadow §11.4 escalates.** Two changes to `Sources/MaximizeCore/Plan/StandardPlanSeed.swift`,
