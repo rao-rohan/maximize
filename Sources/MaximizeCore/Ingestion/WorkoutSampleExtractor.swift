@@ -25,13 +25,35 @@ public struct SampleExtractionPolicy: Hashable, Sendable {
     /// wake.
     public let maxRoutePoints: Int
 
-    private init(uncheckedHeartRateBatchLimit: Int, heartRateMaxPages: Int, maxRoutePoints: Int) {
+    /// Maximum distance samples one page may contain (MAX-066). Paged the same way
+    /// heart rate is — see `heartRateBatchLimit`.
+    public let distanceSampleBatchLimit: Int
+
+    /// Maximum pages one distance-sample fetch may request. Mirrors
+    /// `heartRateMaxPages`.
+    public let distanceSampleMaxPages: Int
+
+    private init(
+        uncheckedHeartRateBatchLimit: Int,
+        heartRateMaxPages: Int,
+        maxRoutePoints: Int,
+        distanceSampleBatchLimit: Int,
+        distanceSampleMaxPages: Int
+    ) {
         self.heartRateBatchLimit = uncheckedHeartRateBatchLimit
         self.heartRateMaxPages = heartRateMaxPages
         self.maxRoutePoints = maxRoutePoints
+        self.distanceSampleBatchLimit = distanceSampleBatchLimit
+        self.distanceSampleMaxPages = distanceSampleMaxPages
     }
 
-    public init(heartRateBatchLimit: Int, heartRateMaxPages: Int, maxRoutePoints: Int) throws {
+    public init(
+        heartRateBatchLimit: Int,
+        heartRateMaxPages: Int,
+        maxRoutePoints: Int,
+        distanceSampleBatchLimit: Int = 1_000,
+        distanceSampleMaxPages: Int = 20
+    ) throws {
         guard heartRateBatchLimit >= 1 else {
             throw DomainError.outOfRange(
                 field: "SampleExtractionPolicy.heartRateBatchLimit",
@@ -56,22 +78,45 @@ public struct SampleExtractionPolicy: Hashable, Sendable {
                 upperBound: nil
             )
         }
+        guard distanceSampleBatchLimit >= 1 else {
+            throw DomainError.outOfRange(
+                field: "SampleExtractionPolicy.distanceSampleBatchLimit",
+                value: Double(distanceSampleBatchLimit),
+                lowerBound: 1,
+                upperBound: nil
+            )
+        }
+        guard distanceSampleMaxPages >= 1 else {
+            throw DomainError.outOfRange(
+                field: "SampleExtractionPolicy.distanceSampleMaxPages",
+                value: Double(distanceSampleMaxPages),
+                lowerBound: 1,
+                upperBound: nil
+            )
+        }
         self.init(
             uncheckedHeartRateBatchLimit: heartRateBatchLimit,
             heartRateMaxPages: heartRateMaxPages,
-            maxRoutePoints: maxRoutePoints
+            maxRoutePoints: maxRoutePoints,
+            distanceSampleBatchLimit: distanceSampleBatchLimit,
+            distanceSampleMaxPages: distanceSampleMaxPages
         )
     }
 
-    /// 1,000 samples per page, at most 20 pages (20,000 samples), 20,000 route points.
+    /// 1,000 samples per page, at most 20 pages (20,000 samples), 20,000 route points,
+    /// and the same 1,000×20 paging for distance samples.
     ///
     /// A watch sensor recording roughly once per second puts even a 90-minute run
     /// (tracker's own example) at ~5,400 samples and ~5,400 GPS fixes — comfortably
     /// under both caps, which exist for the pathological case, not normal operation.
+    /// `distanceWalkingRunning` samples arrive at a similar cadence, so the same
+    /// bound applies.
     public static let standard = SampleExtractionPolicy(
         uncheckedHeartRateBatchLimit: 1_000,
         heartRateMaxPages: 20,
-        maxRoutePoints: 20_000
+        maxRoutePoints: 20_000,
+        distanceSampleBatchLimit: 1_000,
+        distanceSampleMaxPages: 20
     )
 }
 
@@ -105,6 +150,17 @@ public enum SampleExtractionDiagnostic: Hashable, Sendable {
     /// `SampleExtractionPolicy.maxRoutePoints` was reached before the route finished
     /// streaming.
     case routeTruncated(pointsCollected: Int)
+
+    /// The distance-sample fetch failed (MAX-066). Mirrors `heartRateFetchFailed`:
+    /// whatever was collected before the failure is kept.
+    case distanceSampleFetchFailed
+
+    /// Raw distance readings that could not become a valid `DistanceSample`.
+    case distanceSamplesDropped(count: Int)
+
+    /// `SampleExtractionPolicy.distanceSampleMaxPages` was reached while the health
+    /// store still had more to give.
+    case distanceSamplePagingTruncated(samplesCollected: Int)
 
     /// The step-count fetch failed. Average cadence comes back absent, not zero.
     case stepCountFetchFailed
@@ -145,6 +201,17 @@ public enum SampleExtractionDiagnostic: Hashable, Sendable {
 /// for a treadmill run, and skipping the query costs it nothing (mirrors
 /// `HealthKitWorkoutFetcher.hasStoredRoute`, which already skips its own probe for
 /// activities that cannot have a route).
+///
+/// ## Distance samples are the mirror image (MAX-066)
+///
+/// Fetched only when `workout.hasRoute` is `false`. An outdoor run already has an
+/// authoritative time-versus-distance relation in its GPS track — `hasRoute` says a
+/// `Route` object exists to carry it, even on the rare pass where the route fetch
+/// itself later fails — so asking for distance samples too would be a second source
+/// of the same relation for no reason ever exercised: `DistanceSplitCalculator`
+/// prefers the route whenever one was supplied, and `hasRoute` is exactly the signal
+/// that decides whether one will be. The one query this function could not avoid is
+/// therefore never run on a run that does not need it.
 public enum WorkoutSampleExtractor {
     /// A resumed heart-rate page is requested fractionally after the previous page's
     /// last sample, not at the same instant. An inclusive re-query exactly at the
@@ -178,12 +245,19 @@ public enum WorkoutSampleExtractor {
             ? try await extractRoute(workout: workout, fetcher: fetcher, policy: policy, report: report)
             : nil
 
+        // The mirror image of the route skip above (MAX-066): asked for only when
+        // there is no route to prefer instead. See the type documentation.
+        let distanceSamples = workout.hasRoute
+            ? nil
+            : try await extractDistanceSampleSeries(workout: workout, fetcher: fetcher, policy: policy, report: report)
+
         let totalStepCount = await extractTotalStepCount(workout: workout, fetcher: fetcher, report: report)
 
         return try DerivedMetricsInput(
             workout: workout,
             heartRateSeries: heartRateSeries,
             route: route,
+            distanceSamples: distanceSamples,
             totalStepCount: totalStepCount
         )
     }
@@ -287,6 +361,94 @@ public enum WorkoutSampleExtractor {
         // cannot reject this — no silent `try?` standing in for an invariant this
         // function has already enforced.
         return try HeartRateSeries(workoutID: workoutID, samples: samples)
+    }
+
+    // MARK: - Distance samples (MAX-066)
+
+    /// Same paging shape as `extractHeartRateSeries`, requested only for a workout with
+    /// no route — see the type documentation.
+    private static func extractDistanceSampleSeries(
+        workout: Workout,
+        fetcher: WorkoutSampleFetching,
+        policy: SampleExtractionPolicy,
+        report: @Sendable (SampleExtractionDiagnostic) -> Void
+    ) async throws -> DistanceSampleSeries? {
+        var raw: [RawDistanceSample] = []
+        var after: Date?
+        var pages = 0
+
+        while pages < policy.distanceSampleMaxPages {
+            let request = try DistanceSampleFetchRequest(
+                workoutID: workout.id,
+                windowStart: workout.start,
+                windowEnd: workout.end,
+                after: after,
+                limit: policy.distanceSampleBatchLimit
+            )
+
+            let page: DistanceSampleFetchPage
+            do {
+                page = try await fetcher.fetchDistanceSamples(request)
+            } catch {
+                report(.distanceSampleFetchFailed)
+                return try buildDistanceSampleSeries(workoutID: workout.id, workoutStart: workout.start, raw: raw, report: report)
+            }
+
+            raw.append(contentsOf: page.samples)
+            pages += 1
+
+            guard page.samples.count >= policy.distanceSampleBatchLimit else {
+                return try buildDistanceSampleSeries(workoutID: workout.id, workoutStart: workout.start, raw: raw, report: report)
+            }
+
+            guard let latest = page.samples.map(\.date).max() else {
+                return try buildDistanceSampleSeries(workoutID: workout.id, workoutStart: workout.start, raw: raw, report: report)
+            }
+            after = latest.addingTimeInterval(Self.pagingEpsilonSeconds)
+        }
+
+        report(.distanceSamplePagingTruncated(samplesCollected: raw.count))
+        return try buildDistanceSampleSeries(workoutID: workout.id, workoutStart: workout.start, raw: raw, report: report)
+    }
+
+    /// Converts, sorts, and validates raw readings into a `DistanceSampleSeries`.
+    /// Mirrors `buildHeartRateSeries` exactly, including the ordering distrust.
+    private static func buildDistanceSampleSeries(
+        workoutID: UUID,
+        workoutStart: Date,
+        raw: [RawDistanceSample],
+        report: (SampleExtractionDiagnostic) -> Void
+    ) throws -> DistanceSampleSeries? {
+        let sorted = raw.sorted { $0.date < $1.date }
+
+        var samples: [DistanceSample] = []
+        samples.reserveCapacity(sorted.count)
+        var lastOffset: Double?
+        var dropped = 0
+
+        for reading in sorted {
+            let offset = reading.date.timeIntervalSince(workoutStart)
+            if let lastOffset, offset <= lastOffset {
+                dropped += 1
+                continue
+            }
+            guard let sample = try? DistanceSample(offsetSeconds: offset, meters: reading.meters) else {
+                dropped += 1
+                continue
+            }
+            samples.append(sample)
+            lastOffset = offset
+        }
+
+        if dropped > 0 {
+            report(.distanceSamplesDropped(count: dropped))
+        }
+
+        // Absent, not empty: a workout the source recorded no distance samples for,
+        // and one every reading of which was unusable, look the same downstream.
+        guard !samples.isEmpty else { return nil }
+
+        return try DistanceSampleSeries(workoutID: workoutID, samples: samples)
     }
 
     // MARK: - Route

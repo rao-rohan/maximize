@@ -46,6 +46,23 @@ final class WorkoutIngestionPipelineTests: XCTestCase {
         XCTAssertEqual(harness.store.allRoutes.first?.points.count, 3)
     }
 
+    // MARK: - MAX-066: treadmill splits from a distance-sample series
+
+    func testATreadmillWorkoutGetsDistanceSplitsFromItsDistanceSampleSeries() async throws {
+        // 6 samples 60 s apart, summing (after the first, excluded, same as GPS
+        // acquisition lag) to the fixture workout's recorded 10 000 m.
+        let harness = try Harness(treadmillDistanceSamples: 6)
+
+        try await harness.pipeline.ingest(harness.workout)
+
+        let metrics = try XCTUnwrap(harness.store.storedMetrics(forWorkout: harness.workout.id))
+        let splits = try XCTUnwrap(metrics.distanceSplits)
+        XCTAssertNotNil(splits.series(in: .kilometers))
+        // No route was ever asked for — the extractor skips it for an indoor run — and
+        // none is stored.
+        XCTAssertTrue(harness.store.allRoutes.isEmpty)
+    }
+
     func testMetricsAreRecomputedOnceTheClassificationIsKnown() async throws {
         // MAX-012 gates drift on classification and MAX-013 reads the metrics, so the
         // pipeline computes, classifies, and computes again. Skipping the second pass
@@ -641,9 +658,15 @@ final class WorkoutIngestionPipelineTests: XCTestCase {
         init(
             policy: IngestionPipelinePolicy = .standard,
             beatsPerMinute: Double = 140,
-            routePoints: Int = 0
+            routePoints: Int = 0,
+            // MAX-066: a treadmill run has no route, so this and `routePoints` are
+            // mutually exclusive in practice — set at most one per test.
+            treadmillDistanceSamples: Int = 0
         ) throws {
-            let capturedWorkout = try Fixture.workout()
+            let capturedWorkout = try Fixture.workout(
+                activityType: treadmillDistanceSamples > 0 ? .treadmillRunning : .running,
+                hasRoute: treadmillDistanceSamples == 0
+            )
             let workoutStore = InMemoryWorkoutStore(planCalendar: try PlanCalendar([ScoringFixture.plan()]))
             let sampleFetcher = FakeWorkoutSampleFetcher()
             let scoringModel = FakeScoringModel()
@@ -672,6 +695,26 @@ final class WorkoutIngestionPipelineTests: XCTestCase {
                         altitudeMeters: 10
                     )
                 }))
+            }
+            if treadmillDistanceSamples > 0 {
+                // Segments sized so their sum matches `Fixture.workout`'s default
+                // 10 000 m recorded distance — otherwise the plausibility check in
+                // `DistanceSplitCalculator.Track` would (correctly) refuse the track.
+                let segmentMeters = 10_000.0 / Double(treadmillDistanceSamples - 1)
+                let distancePage = DistanceSampleFetchPage(
+                    samples: (0..<treadmillDistanceSamples).map { index in
+                        RawDistanceSample(
+                            date: Fixture.epoch.addingTimeInterval(Double(index) * 60),
+                            meters: index == 0 ? 0 : segmentMeters
+                        )
+                    }
+                )
+                // Queued repeatedly for the same reason as the heart-rate page above:
+                // re-extraction (the lazy `completeIngestion` path) is a genuine case,
+                // and the fake has to answer it faithfully rather than only once.
+                for _ in 0..<4 {
+                    sampleFetcher.enqueueDistanceSamplePage(distancePage)
+                }
             }
 
             workout = capturedWorkout

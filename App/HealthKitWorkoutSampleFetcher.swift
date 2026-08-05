@@ -11,18 +11,19 @@ import MaximizeCore
 /// found. `WorkoutSampleExtractor` decides how many heart-rate pages to request, what a
 /// fetch failure means, and how raw readings become domain values.
 ///
-/// ## Heart rate and step count are date-range queries; the route is not
+/// ## Heart rate, distance samples and step count are date-range queries; the route is not
 ///
 /// FR-0.3 specifies heart rate as a "time-range predicate" fetch, and that is exactly
-/// what `fetchHeartRateSamples` and `fetchTotalStepCount` run — no workout lookup
-/// needed, just the window `WorkoutSampleExtractor` already knows. A route is
-/// different: HealthKit associates a route with a workout by *object*, not by a
-/// date-range predicate (`HKQuery.predicateForObjects(from: HKWorkout)`), so
-/// `fetchRoute` first re-resolves the `HKWorkout` from the UUID `WorkoutSampleFetching`
-/// carries, then hands it to `HealthKitRouteLookup`. This is the one extra query this
-/// file could not avoid: `WorkoutSampleFetching`'s methods intentionally know nothing
-/// beyond a workout's identifier and window (per `WorkoutFetching`'s own model), so
-/// only the adapter, which does have the HealthKit vocabulary, can bridge back.
+/// what `fetchHeartRateSamples`, `fetchDistanceSamples` (MAX-066) and
+/// `fetchTotalStepCount` run — no workout lookup needed, just the window
+/// `WorkoutSampleExtractor` already knows. A route is different: HealthKit associates a
+/// route with a workout by *object*, not by a date-range predicate
+/// (`HKQuery.predicateForObjects(from: HKWorkout)`), so `fetchRoute` first re-resolves
+/// the `HKWorkout` from the UUID `WorkoutSampleFetching` carries, then hands it to
+/// `HealthKitRouteLookup`. This is the one extra query this file could not avoid:
+/// `WorkoutSampleFetching`'s methods intentionally know nothing beyond a workout's
+/// identifier and window (per `WorkoutFetching`'s own model), so only the adapter,
+/// which does have the HealthKit vocabulary, can bridge back.
 final class HealthKitWorkoutSampleFetcher: WorkoutSampleFetching, @unchecked Sendable {
     private let healthStore: HKHealthStore
 
@@ -59,6 +60,48 @@ final class HealthKitWorkoutSampleFetcher: WorkoutSampleFetching, @unchecked Sen
         return HeartRateSampleFetchPage(
             samples: raw.map { sample in
                 RawHeartRateSample(date: sample.startDate, beatsPerMinute: sample.quantity.doubleValue(for: beatsPerMinute))
+            }
+        )
+    }
+
+    // MARK: - Distance samples (MAX-066)
+
+    /// `distanceWalkingRunning` is already authorised by this app — MAX-032 already
+    /// reads it as a cumulative total for `Workout.distanceMeters` — this asks for it
+    /// as a series instead, giving an indoor run (which has no `HKWorkoutRoute`) a
+    /// genuine time-versus-distance relation `DistanceSplitCalculator` can cut into
+    /// splits.
+    func fetchDistanceSamples(_ request: DistanceSampleFetchRequest) async throws -> DistanceSampleFetchPage {
+        let predicate = HKQuery.predicateForSamples(
+            withStart: request.after ?? request.windowStart,
+            end: request.windowEnd,
+            options: .strictStartDate
+        )
+
+        let raw: [HKQuantitySample] = try await withCheckedThrowingContinuation { continuation in
+            let query = HKSampleQuery(
+                sampleType: HKQuantityType(.distanceWalkingRunning),
+                predicate: predicate,
+                limit: request.limit,
+                sortDescriptors: [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)]
+            ) { _, samples, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                continuation.resume(returning: (samples as? [HKQuantitySample]) ?? [])
+            }
+            healthStore.execute(query)
+        }
+
+        return DistanceSampleFetchPage(
+            samples: raw.map { sample in
+                // `endDate`, not `startDate`: unlike a heart-rate reading (near-
+                // instantaneous, so the two barely differ), a distance sample reports
+                // ground covered *over* an interval — the value belongs to the moment
+                // that interval closes, which is the timestamp `DistanceSample.meters`
+                // should be read against.
+                RawDistanceSample(date: sample.endDate, meters: sample.quantity.doubleValue(for: .meter()))
             }
         )
     }

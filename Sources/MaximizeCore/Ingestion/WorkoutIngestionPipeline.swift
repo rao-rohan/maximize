@@ -643,6 +643,7 @@ private extension DerivedMetricsInput {
             workout: workout,
             heartRateSeries: heartRateSeries,
             route: route,
+            distanceSamples: distanceSamples,
             totalStepCount: totalStepCount,
             classification: classification
         )

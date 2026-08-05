@@ -16,6 +16,15 @@ public struct DerivedMetricsInput: Hashable, Sendable {
     /// Absent for indoor runs (FR-0.6).
     public let route: Route?
 
+    /// The workout's distance-sample series (MAX-066), or nil.
+    ///
+    /// Only ever populated for a workout with no route — `WorkoutSampleExtractor`
+    /// fetches this exclusively when `route` is nil, and `DistanceSplitCalculator`
+    /// prefers `route` over this whenever both happen to be present, so an outdoor
+    /// run's splits are never at the mercy of a second, lower-fidelity source. See
+    /// `DistanceSplitCalculator` for what it does with this.
+    public let distanceSamples: DistanceSampleSeries?
+
     /// Steps recorded over the workout, from which average cadence is derived.
     ///
     /// It arrives as a parameter because `Workout` (MAX-010) carries no step count —
@@ -31,6 +40,7 @@ public struct DerivedMetricsInput: Hashable, Sendable {
         workout: Workout,
         heartRateSeries: HeartRateSeries? = nil,
         route: Route? = nil,
+        distanceSamples: DistanceSampleSeries? = nil,
         totalStepCount: Double? = nil,
         classification: WorkoutClassification? = nil
     ) throws {
@@ -51,11 +61,17 @@ public struct DerivedMetricsInput: Hashable, Sendable {
                 )
             }
         }
+        if let distanceSamples, distanceSamples.workoutID != workout.id {
+            throw DomainError.inconsistent(
+                reason: "DerivedMetricsInput.distanceSamples belongs to a different workout"
+            )
+        }
         try Validate.optionalNonNegative(totalStepCount, "DerivedMetricsInput.totalStepCount")
 
         self.workout = workout
         self.heartRateSeries = heartRateSeries
         self.route = route
+        self.distanceSamples = distanceSamples
         self.totalStepCount = totalStepCount
         self.classification = classification
     }
@@ -150,12 +166,15 @@ public enum DerivedMetricsCalculator {
             ),
             zoneSplits: zoneSplits,
             // FR-1.5, and D2's whole point: the pace breakdown is cut here, once, from
-            // the route and the recorded distance — not in a view, and not a second time
-            // for the chat. `DistanceSplitCalculator` documents what it measures against
-            // and every case in which it truthfully returns nil.
+            // the route (or, for an indoor run, the distance-sample series — MAX-066)
+            // and the recorded distance — not in a view, and not a second time for the
+            // chat. `DistanceSplitCalculator` documents what it measures against, which
+            // source wins when both are present, and every case in which it truthfully
+            // returns nil.
             distanceSplits: DistanceSplitCalculator.splits(
                 workout: input.workout,
-                route: input.route
+                route: input.route,
+                distanceSamples: input.distanceSamples
             ),
             planVersion: plan.version
         )

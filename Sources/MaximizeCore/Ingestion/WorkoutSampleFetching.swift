@@ -74,6 +74,69 @@ public struct HeartRateSampleFetchPage: Hashable, Sendable {
     }
 }
 
+/// One raw `distanceWalkingRunning` reading as the health store reports it: an
+/// absolute timestamp and the metres covered since the previous reading, not yet
+/// converted to `DistanceSample`'s workout-relative offset.
+///
+/// Mirrors `RawHeartRateSample` exactly, for the same reason: the offset conversion
+/// needs the workout's `start`, which only `WorkoutSampleExtractor` holds.
+public struct RawDistanceSample: Hashable, Sendable {
+    public let date: Date
+    public let meters: Double
+
+    public init(date: Date, meters: Double) {
+        self.date = date
+        self.meters = meters
+    }
+}
+
+/// One page of a distance-sample fetch. Same paging shape as
+/// `HeartRateSampleFetchRequest` — see its documentation for why this is bounded and
+/// re-requestable rather than "give me everything".
+public struct DistanceSampleFetchRequest: Hashable, Sendable {
+    public let workoutID: UUID
+    public let windowStart: Date
+    public let windowEnd: Date
+
+    /// Resume point, mirroring `HeartRateSampleFetchRequest.after`.
+    public let after: Date?
+
+    /// Maximum samples this page may contain.
+    public let limit: Int
+
+    public init(workoutID: UUID, windowStart: Date, windowEnd: Date, after: Date?, limit: Int) throws {
+        guard windowEnd >= windowStart else {
+            throw DomainError.inconsistent(
+                reason: "DistanceSampleFetchRequest.windowEnd must not precede windowStart"
+            )
+        }
+        guard limit >= 1 else {
+            throw DomainError.outOfRange(
+                field: "DistanceSampleFetchRequest.limit",
+                value: Double(limit),
+                lowerBound: 1,
+                upperBound: nil
+            )
+        }
+        self.workoutID = workoutID
+        self.windowStart = windowStart
+        self.windowEnd = windowEnd
+        self.after = after
+        self.limit = limit
+    }
+}
+
+/// What one distance-sample page fetch returned.
+public struct DistanceSampleFetchPage: Hashable, Sendable {
+    /// Samples for this page, in whatever order the health store returned them.
+    /// `WorkoutSampleExtractor` sorts and validates, exactly as for heart rate.
+    public let samples: [RawDistanceSample]
+
+    public init(samples: [RawDistanceSample]) {
+        self.samples = samples
+    }
+}
+
 /// One raw GPS fix, before it becomes a `RoutePoint` with a workout-relative offset.
 public struct RawRoutePoint: Hashable, Sendable {
     public let date: Date
@@ -162,6 +225,14 @@ public protocol WorkoutSampleFetching: Sendable {
 
     /// The workout's full route, or the absence of one.
     func fetchRoute(_ request: RouteFetchRequest) async throws -> RouteFetchResult
+
+    /// One page of `distanceWalkingRunning` samples for the workout's window (MAX-066).
+    ///
+    /// `WorkoutSampleExtractor` only asks for these when the workout has no route
+    /// (FR-0.6): an outdoor run already has an authoritative time-versus-distance
+    /// relation in its GPS track, and this exists to give an indoor run the same kind
+    /// of relation, not to second-guess one that already has it.
+    func fetchDistanceSamples(_ request: DistanceSampleFetchRequest) async throws -> DistanceSampleFetchPage
 
     /// Total steps recorded over the workout window, or `nil` if the source reported
     /// none. Cadence (§9) is derived from this total, not fetched as a sample series —

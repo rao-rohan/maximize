@@ -18,6 +18,10 @@ public final class FakeWorkoutSampleFetcher: WorkoutSampleFetching, @unchecked S
     private var routeRequests: [RouteFetchRequest] = []
     private var routeError: Error?
 
+    private var queuedDistanceSamplePages: [DistanceSampleFetchPage] = []
+    private var distanceSampleRequests: [DistanceSampleFetchRequest] = []
+    private var distanceSampleErrorForNextFetch: Error?
+
     private var stepCount: Double?
     private var stepCountError: Error?
     private var stepCountRequests = 0
@@ -32,6 +36,12 @@ public final class FakeWorkoutSampleFetcher: WorkoutSampleFetching, @unchecked S
 
     public var receivedRouteRequests: [RouteFetchRequest] {
         lock.locked { routeRequests }
+    }
+
+    /// Every distance-sample request received, in order — mirrors
+    /// `receivedHeartRateRequests`.
+    public var receivedDistanceSampleRequests: [DistanceSampleFetchRequest] {
+        lock.locked { distanceSampleRequests }
     }
 
     public var stepCountRequestCount: Int {
@@ -56,6 +66,17 @@ public final class FakeWorkoutSampleFetcher: WorkoutSampleFetching, @unchecked S
     /// Every route fetch throws this.
     public func failRouteFetch(with error: Error) {
         lock.locked { routeError = error }
+    }
+
+    /// Queues pages to be returned by subsequent distance-sample fetches, in order.
+    /// Mirrors `enqueueHeartRatePage`.
+    public func enqueueDistanceSamplePage(_ page: DistanceSampleFetchPage) {
+        lock.locked { queuedDistanceSamplePages.append(page) }
+    }
+
+    /// The next distance-sample fetch throws this, then behaves normally again.
+    public func failNextDistanceSampleFetch(with error: Error) {
+        lock.locked { distanceSampleErrorForNextFetch = error }
     }
 
     /// Every step-count fetch returns this until changed again.
@@ -87,6 +108,18 @@ public final class FakeWorkoutSampleFetcher: WorkoutSampleFetching, @unchecked S
         }
         if let error { throw error }
         return result
+    }
+
+    public func fetchDistanceSamples(_ request: DistanceSampleFetchRequest) async throws -> DistanceSampleFetchPage {
+        let (error, next) = lock.locked { () -> (Error?, DistanceSampleFetchPage?) in
+            distanceSampleRequests.append(request)
+            let error = distanceSampleErrorForNextFetch
+            distanceSampleErrorForNextFetch = nil
+            let next = queuedDistanceSamplePages.isEmpty ? nil : queuedDistanceSamplePages.removeFirst()
+            return (error, next)
+        }
+        if let error { throw error }
+        return next ?? DistanceSampleFetchPage(samples: [])
     }
 
     public func fetchTotalStepCount(workoutID: UUID, windowStart: Date, windowEnd: Date) async throws -> Double? {

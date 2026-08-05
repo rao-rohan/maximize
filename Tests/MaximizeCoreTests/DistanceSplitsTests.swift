@@ -60,6 +60,44 @@ final class DistanceSplitsTests: XCTestCase {
         try XCTUnwrap(splits?.series(in: .kilometers))
     }
 
+    /// A distance-sample series of `offsets.count` readings, evenly spaced, covering
+    /// `totalMeters` end to end (MAX-066).
+    ///
+    /// Mirrors `evenRoute`'s construction exactly: `Track(distanceSamples:)` sums
+    /// `samples[1...].meters` into its raw cumulative curve (the first sample's own
+    /// delta is excluded, the same "acquisition lag" exclusion the GPS track applies
+    /// to the ground before its first fix), so `totalMeters` is split into
+    /// `offsets.count - 1` equal segments here, same as `evenRoute` splits it into
+    /// `offsets.count - 1` equal haversine segments.
+    private func evenDistanceSamples(offsets: [Double], totalMeters: Double) throws -> DistanceSampleSeries {
+        let segmentMeters = totalMeters / Double(offsets.count - 1)
+        var samples: [DistanceSample] = []
+        for (index, offset) in offsets.enumerated() {
+            samples.append(try DistanceSample(offsetSeconds: offset, meters: index == 0 ? 0 : segmentMeters))
+        }
+        return try DistanceSampleSeries(workoutID: Fixture.workoutID, samples: samples)
+    }
+
+    /// - Parameter samplesTotalMeters: how long the *sample series* is. Defaults to the
+    ///   recorded distance, mirroring `splits(...)`'s `gpsTotalMeters` default.
+    private func splitsFromDistanceSamples(
+        distanceMeters: Double?,
+        durationSeconds: Double,
+        offsets: [Double],
+        samplesTotalMeters: Double? = nil
+    ) throws -> DistanceSplits? {
+        let workout = try Fixture.workout(
+            durationSeconds: durationSeconds,
+            distanceMeters: distanceMeters,
+            hasRoute: false
+        )
+        let samples = try evenDistanceSamples(
+            offsets: offsets,
+            totalMeters: samplesTotalMeters ?? distanceMeters ?? 1_000
+        )
+        return DistanceSplitCalculator.splits(workout: workout, route: nil, distanceSamples: samples)
+    }
+
     private func assertElapsed(
         _ series: DistanceSplitSeries,
         equals expected: [Double],
@@ -386,6 +424,159 @@ final class DistanceSplitsTests: XCTestCase {
             splits(distanceMeters: 5_000, durationSeconds: 1_000, offsets: (0...10).map { Double($0) * 100 })
         )
         XCTAssertEqual(try roundTripped(breakdown), breakdown)
+    }
+
+    // MARK: - Treadmill splits from a distance-sample series (MAX-066)
+
+    /// The distance-sample path produces the same shape of answer as the GPS path for
+    /// an equivalent evenly-paced run — same arithmetic, different source.
+    func testEvenTreadmillRunCutsIntoWholeKilometresOfEqualPace() throws {
+        let series = try kilometers(
+            splitsFromDistanceSamples(
+                distanceMeters: 5_000,
+                durationSeconds: 1_000,
+                offsets: (0...10).map { Double($0) * 100 }
+            )
+        )
+
+        assertElapsed(series, equals: [200, 200, 200, 200, 200])
+        for split in series.splits {
+            XCTAssertTrue(split.isComplete)
+            XCTAssertEqual(split.distanceMeters, 1_000, accuracy: Self.tolerance)
+            XCTAssertEqual(split.paceSeconds(per: .kilometers), 200, accuracy: Self.tolerance)
+        }
+    }
+
+    /// Same anchoring rule as the GPS path: splits sum to `Workout.distanceMeters`, not
+    /// to the sensor's own running total.
+    func testTreadmillSplitsTotalTheRecordedDistanceRatherThanTheSampleSum() throws {
+        let series = try kilometers(
+            splitsFromDistanceSamples(
+                distanceMeters: 10_000,
+                durationSeconds: 1_000,
+                offsets: (0...10).map { Double($0) * 100 },
+                samplesTotalMeters: 10_200
+            )
+        )
+
+        XCTAssertEqual(series.splits.count, 10)
+        XCTAssertEqual(series.totalDistanceMeters, 10_000, accuracy: Self.tolerance)
+    }
+
+    /// A single distance sample carries no distance-versus-time relation, same as a
+    /// single-fix route.
+    func testSingleDistanceSampleHasNoSplits() throws {
+        let series = try DistanceSampleSeries(
+            workoutID: Fixture.workoutID,
+            samples: [try DistanceSample(offsetSeconds: 0, meters: 0)]
+        )
+        XCTAssertNil(
+            DistanceSplitCalculator.splits(
+                workout: try Fixture.workout(distanceMeters: 5_000, hasRoute: false),
+                route: nil,
+                distanceSamples: series
+            )
+        )
+    }
+
+    /// The same plausibility band the GPS path is guarded by: a sample series that
+    /// describes far less ground than the workout recorded cannot be trusted to cut it
+    /// up, whichever sensor produced it.
+    func testDistanceSampleTrackTooShortForTheRecordedDistanceIsRefused() throws {
+        XCTAssertNil(
+            try splitsFromDistanceSamples(
+                distanceMeters: 10_000,
+                durationSeconds: 1_000,
+                offsets: [0, 100, 200],
+                samplesTotalMeters: 5_000
+            )
+        )
+    }
+
+    func testDistanceSampleTrackTooLongForTheRecordedDistanceIsRefused() throws {
+        XCTAssertNil(
+            try splitsFromDistanceSamples(
+                distanceMeters: 5_000,
+                durationSeconds: 1_000,
+                offsets: [0, 100, 200],
+                samplesTotalMeters: 10_000
+            )
+        )
+    }
+
+    /// A workout with no route and no distance-sample series has no splits — the
+    /// absence, not a fabrication built from total distance and duration.
+    func testNoRouteAndNoDistanceSamplesHasNoSplits() throws {
+        let workout = try Fixture.workout(
+            activityType: .treadmillRunning,
+            durationSeconds: 1_800,
+            distanceMeters: 5_000,
+            hasRoute: false
+        )
+        XCTAssertNil(DistanceSplitCalculator.splits(workout: workout, route: nil, distanceSamples: nil))
+    }
+
+    /// FR-1.5's "every unit, cut once" applies to the treadmill path too — nothing
+    /// about which source supplied the track changes what gets stored.
+    func testEveryDisplayUnitIsCutFromDistanceSamplesToo() throws {
+        let breakdown = try XCTUnwrap(
+            splitsFromDistanceSamples(
+                distanceMeters: 5_000,
+                durationSeconds: 1_000,
+                offsets: (0...10).map { Double($0) * 100 }
+            )
+        )
+
+        XCTAssertEqual(breakdown.series.count, DistanceUnit.allCases.count)
+        let miles = try XCTUnwrap(breakdown.series(in: .miles))
+        XCTAssertEqual(miles.splits.count, 4)
+        XCTAssertEqual(miles.splits.last?.isComplete, false)
+        XCTAssertEqual(miles.totalDistanceMeters, 5_000, accuracy: Self.tolerance)
+    }
+
+    /// The load-bearing decision (constraint #3): a GPS route is authoritative
+    /// whenever it exists, even when a distance-sample series is also supplied and
+    /// would, on its own, produce a *different* breakdown. An outdoor run's splits
+    /// must not depend on whether a distance series happened to be attached.
+    func testRouteWinsOverDistanceSamplesWhenBothArePresent() throws {
+        let workout = try Fixture.workout(durationSeconds: 1_000, distanceMeters: 5_000)
+        let route = try evenRoute(offsets: (0...10).map { Double($0) * 100 }, gpsTotalMeters: 5_000)
+        // Same total distance, deliberately different pacing shape: two fast then
+        // eight slow segments, so if this source were consulted the splits would not
+        // match the route's even pacing.
+        var lopsidedSamples: [DistanceSample] = [try DistanceSample(offsetSeconds: 0, meters: 0)]
+        for index in 1...10 {
+            lopsidedSamples.append(
+                try DistanceSample(offsetSeconds: Double(index) * 100, meters: index <= 2 ? 2_000 : 100)
+            )
+        }
+        let distanceSamples = try DistanceSampleSeries(workoutID: Fixture.workoutID, samples: lopsidedSamples)
+
+        let series = try kilometers(
+            DistanceSplitCalculator.splits(workout: workout, route: route, distanceSamples: distanceSamples)
+        )
+
+        // The route's even pacing, not the lopsided sample series.
+        assertElapsed(series, equals: [200, 200, 200, 200, 200])
+    }
+
+    /// The mirror of the above: when the route itself cannot become a track (too few
+    /// points here), the answer is still *no breakdown* — never a silent fall-through
+    /// to the distance-sample series.
+    func testRoutePresentButUnusableStillRefusesRatherThanFallingBackToDistanceSamples() throws {
+        let workout = try Fixture.workout(durationSeconds: 1_000, distanceMeters: 5_000)
+        let sparseRoute = try Route(
+            workoutID: Fixture.workoutID,
+            points: [try RoutePoint(offsetSeconds: 0, latitudeDegrees: 0, longitudeDegrees: 0)]
+        )
+        let distanceSamples = try evenDistanceSamples(
+            offsets: (0...10).map { Double($0) * 100 },
+            totalMeters: 5_000
+        )
+
+        XCTAssertNil(
+            DistanceSplitCalculator.splits(workout: workout, route: sparseRoute, distanceSamples: distanceSamples)
+        )
     }
 
     /// Decoding goes through the validating initializer, so a blob mangled on disk or by a
