@@ -185,9 +185,11 @@ extension ScoreCalendarDayState {
     /// to confuse — "I ran badly" and "I did not run" are different problems with
     /// different fixes.
     ///
-    /// It does not restore the whole channel, and the gap is stated rather than papered
-    /// over: `.effective` versus `.marginal` is carried by hue alone at this density. See
-    /// `ScoreCalendarRepresentation.weekColumnHeatmap`.
+    /// It does not restore the whole channel by itself: `.effective` versus `.marginal`
+    /// needed a separate fix, since neither carries a state of its own for this property
+    /// to distinguish (both are `.scored`, just with different bands). See
+    /// `ScoreBandHeatmapMark` (MAX-087) for that channel, and
+    /// `ScoreCalendarRepresentation.weekColumnHeatmap` for how the two combine.
     public var isDrawnHollowAtHeatmapDensity: Bool {
         if case .missed = self { return true }
         return false

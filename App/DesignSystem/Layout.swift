@@ -104,4 +104,17 @@ enum LayoutMetrics {
 
     /// The same mark on the verdict header's band chip, which has room for it.
     static let prominentScoreBandMarkSize: CGFloat = 10
+
+    /// Visible-edge fraction of a year-heatmap mark's full footprint, for
+    /// `ScoreBandHeatmapMark.majorInset` and `.minorInset` (MAX-087). `.fullBleed`
+    /// needs no constant of its own — by definition it draws at the full footprint,
+    /// fraction 1.
+    ///
+    /// Chosen so the smallest tier — `.minorInset`, `.ineffective`'s mark — still
+    /// clears roughly a point across at the heatmap's own ~6pt mark size
+    /// (`LayoutMetrics.heatmapCellSpacing`'s doc comment). Below that this channel
+    /// stops reading as "a smaller mark" and starts reading as a rendering artifact.
+    /// Needs device verification: see `ScoreBandHeatmapMark`.
+    static let heatmapMarkMajorInsetFraction: CGFloat = 0.64
+    static let heatmapMarkMinorInsetFraction: CGFloat = 0.4
 }

@@ -52,3 +52,36 @@ struct ScoreBandMarkView: View {
         .accessibilityHidden(true)
     }
 }
+
+/// Draws a scored day's fill at `ScoreBand.heatmapMark`'s size (MAX-087) — the year
+/// heatmap's non-colour channel, for the density at which `ScoreBandMarkView`'s corner
+/// pip has nowhere to sit. Everything about *which* size a band gets is decided in
+/// `MaximizeCore`; this only knows the fraction each case draws at, the same division
+/// of labour `ScoreBandMarkView` uses above.
+///
+/// Fills at less than the full available size rather than drawing a fixed inset, so the
+/// mark scales with whatever frame it is given — the calendar's true ~6pt heatmap cell,
+/// or a magnified specimen in `DesignSystemGallery`.
+struct ScoreBandHeatmapMarkView: View {
+    let band: ScoreBand
+    let cornerRadius: CGFloat
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .fill(Color.scoreBand(band))
+            // Scales about the shape's own centre, so the margin this leaves is even
+            // on every side rather than pulling the mark toward one corner.
+            .scaleEffect(scale)
+    }
+
+    private var scale: CGFloat {
+        switch band.heatmapMark {
+        case .fullBleed:
+            return 1.0
+        case .majorInset:
+            return LayoutMetrics.heatmapMarkMajorInsetFraction
+        case .minorInset:
+            return LayoutMetrics.heatmapMarkMinorInsetFraction
+        }
+    }
+}
