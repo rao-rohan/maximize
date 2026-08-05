@@ -52,11 +52,26 @@ public struct PlanDraft: Hashable, Sendable {
         public private(set) var distanceMeters: Double?
         public private(set) var note: String?
 
-        public init(weekday: Weekday, session: ScheduledSession) {
+        /// The **lift** slot's ask, carried verbatim (A17).
+        ///
+        /// Not decomposed into kind/distance/note the way the run slot is, and not
+        /// editable here, because nothing on the authoring screen can edit it yet —
+        /// MAX-137 is the ticket that gives the screen its second row set, and a
+        /// decomposition with no editor is a shape chosen before its use is known.
+        ///
+        /// It is carried because `PlanDraft.init(_:)` is documented as lossless and
+        /// this is the first field that could have made that untrue: a revision that
+        /// dropped it would silently delete a lifting prescription the next time the
+        /// athlete changed their HR cap. A17 leans on exactly that carry-forward when
+        /// it argues one plan record rather than two.
+        public private(set) var liftSession: ScheduledSession
+
+        public init(weekday: Weekday, session: ScheduledSession, liftSession: ScheduledSession = .rest) {
             self.weekday = weekday
             self.kind = session.kind
             self.distanceMeters = session.distanceMeters
             self.note = session.note
+            self.liftSession = liftSession
         }
 
         public mutating func setKind(_ kind: ScheduledSessionKind) {
@@ -129,6 +144,9 @@ public struct PlanDraft: Hashable, Sendable {
     ///   - weeklySessions: any weekday left out defaults to rest, so a caller cannot
     ///     accidentally produce a partial week — `WeeklyTemplate` rejects one, and the
     ///     rejection would surface at save time rather than here.
+    ///   - liftSessions: the lift slot, carried but not edited — see `DayDraft
+    ///     .liftSession`. A weekday left out is rest, matching `WeeklyTemplate`'s own
+    ///     default.
     ///   - longRunArcWeeks: must be non-empty and strictly ascending by index, the same
     ///     rule `LongRunArc` enforces. Checked here so a draft is always convertible.
     public init(
@@ -139,6 +157,7 @@ public struct PlanDraft: Hashable, Sendable {
         marginalThresholdPoints: Int,
         weeklySessions: [Weekday: ScheduledSession],
         longRunArcWeeks: [ArcWeekDraft],
+        liftSessions: [Weekday: ScheduledSession] = [:],
         goalStatements: String = "",
         goalTargetDay: CalendarDay? = nil
     ) throws {
@@ -158,7 +177,11 @@ public struct PlanDraft: Hashable, Sendable {
         self.goalStatements = goalStatements
         self.goalTargetDay = goalTargetDay
         self.week = Weekday.allCases.sorted().map {
-            DayDraft(weekday: $0, session: weeklySessions[$0] ?? .rest)
+            DayDraft(
+                weekday: $0,
+                session: weeklySessions[$0] ?? .rest,
+                liftSession: liftSessions[$0] ?? .rest
+            )
         }
         self.longRunArc = longRunArcWeeks
     }
@@ -170,8 +193,10 @@ public struct PlanDraft: Hashable, Sendable {
     /// silently reset to a default the next time the athlete changed the HR cap.
     public init(_ plan: Plan) throws {
         var sessions: [Weekday: ScheduledSession] = [:]
+        var liftSessions: [Weekday: ScheduledSession] = [:]
         for entry in plan.weeklyTemplate.entries {
             sessions[entry.weekday] = entry.session
+            liftSessions[entry.weekday] = entry.liftSession
         }
         try self.init(
             heartRateCapBPM: plan.heartRateCapBPM,
@@ -183,6 +208,7 @@ public struct PlanDraft: Hashable, Sendable {
             longRunArcWeeks: plan.longRunArc.weeks.map {
                 ArcWeekDraft(index: $0.index, distanceMeters: $0.distanceMeters)
             },
+            liftSessions: liftSessions,
             goalStatements: plan.goals.statements.joined(separator: "\n"),
             goalTargetDay: plan.goals.targetDay
         )

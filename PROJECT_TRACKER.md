@@ -1048,7 +1048,7 @@ twelve and is dispatchable immediately.
 | MAX-096 | `ChatModel` generalised; transcript cap; training task text | 095 | **Opus** 🔒 ✅ |
 | MAX-097 | Thread list, derived titles, new chat, scope subtitle | 093, 096 | Sonnet ✅ |
 | MAX-098 | The persistent glass button | 097 | Sonnet |
-| MAX-099 | `PlanProposal` — type, parse, schema derived from core enums | 095 | **Opus** 🔒 |
+| MAX-099 | `PlanProposal` — type, parse, schema derived from core enums | 095 | **Opus** 🔒 ✅ |
 | MAX-100 | The Anthropic client for plan proposals | 099 | Sonnet 🔒 |
 | MAX-101 | Conversational plan authoring; proposal card; handoff | 098, 100 | **Opus** |
 | MAX-102 | **The read-only plan screen with version history** | — | Sonnet ✅ |
@@ -1137,32 +1137,41 @@ the whole stored `WeeklyTemplate`, so LIFTING-SPEC §10.2's requirement that it 
 nothing to carry today. And the training thread's `ChatInstruction.task` text (§3.5) is
 **MAX-096's**, not this ticket's; nothing here touches `Chat/`.
 
-**MAX-096 made the chat model subject-driven, and capped the transcript.**
-`WorkoutChatModel` is now `ChatModel`, taking a `ChatSubject` instead of a workout id and
-asking `ContextBuilder` for whichever `PromptContext` that subject calls for. Four things
-worth carrying forward:
+**MAX-099 landed the proposal boundary, and D1 is where it was.** `PlanProposal` is a
+validated value describing a proposed plan — goals, weekly template, distance arc, HR cap,
+cadence band — with `parse`, a derived `schemaDescription`, `PlanProposalInstruction` and
+`PlanProposalModelInvoking`. Core-only, three new files under `Plan/`, nothing under `App/`.
+Five things are worth carrying forward:
 
-- **The workout path is a regression suite, not a rewrite.** Its guards run in the same
-  order and produce the same states (`.notYetScored`, `.noVerdict`, `.failed`) as before,
-  and `MAX-051`'s whole test file survives with the type renamed. The one deliberate
-  wording change is the "no API key" notice, which now says *"about your training"* on a
-  training thread rather than lying about "this workout".
-- **The transcript cap lives in `ChatInstruction`, not in the caller.** At most
-  `maximumReplayedTurns` (**40**) turns are replayed, and the initializer applies it — a
-  bound a caller has to remember is one that is eventually forgotten, and the failure is
-  silent. When turns are dropped the instruction prepends a bracketed notice turn saying
-  so, because A14's reason is that a model answering as though it had seen the start of a
-  conversation it did not is worse than one that says it lost the thread. It is a turn
-  rather than a field so the App-layer transport cannot forget to render it, and so a core
-  test can assert the model actually receives it.
-- **The training `task` (§3.5) is asserted clause by clause.** Naming the window beside
-  every aggregate (§3.6(b)) and refusing to re-score (D8) each have their own test, so
-  neither can be reworded away by a later edit that only reads well.
-- **A training turn now needs the settings store.** `TalliesCalculator` reads the rest-day
-  budget, so `ChatModel` gained a `settingsRepository` — read **only** on the training
-  path, deliberately, so a workout thread has no failure mode it did not have before. The
-  training path also widens its workout fetch to whole Monday-first weeks (C1) and skips
-  the heart-rate-series read entirely, since §3.3 sends no curve for any session.
+- **The proposal has no path to storage, and the near-miss A13 names has no half in this
+  PR to be built from.** Nothing in the three files returns a `Plan`, builds a `PlanDraft`,
+  or mentions a repository. `PlanDraft.applying(_:)` is deliberately **not** here; it is
+  MAX-101's, and `PlanProposalTests` builds that mapping in *test* code precisely so this
+  ticket can assert the door accepts its output without shipping the door a second key.
+- **A proposal that parses is one `PlanAuthoringSession` accepts** — a constraint, not a
+  convenience, because a proposal that parsed and then failed at the door would be a card
+  the athlete can tap and get nowhere with. Field-value rules are reported in the door's own
+  vocabulary (`PlanProposalError.rejectedByAuthoring(PlanAuthoringError)`) rather than
+  restated, and a test runs a parsed proposal through a real session.
+- **Three rules exist here that the door has no case for** — a complete week, an empty rest
+  day, a non-empty ascending arc. Each is something `PlanDraft` makes *unrepresentable*
+  (its initializer fills all seven weekdays; `setKind` clears a rest day's distance), so
+  enforcing them at the model boundary is agreement with the door, not divergence from it.
+  A proposal arrives whole and can break all three.
+- **§4.4's exclusions are refused, not ignored.** A reply carrying `version`,
+  `effectiveFrom`, or rubric bands is rejected by name. Dropping `effectiveFrom` silently
+  would keep an arc indexed from a date the app will not use — a plan wrong in a way nothing
+  on screen shows.
+- **The schema is generated from `ScheduledSessionKind.allCases`, `Weekday.allCases`,
+  `HeartRateSample.plausibleBPM` and `ScoreValue.permittedRange`**, with two guards: a
+  compiler-exhaustive `switch` for the per-kind gloss, and tests asserting every enum case
+  appears in the rendered text. Adding a session kind and forgetting the prompt now fails
+  CI instead of silently producing a model that cannot propose it.
+
+**One thing MAX-099 deliberately did not do.** `PlanProposal.parse` and `ScoreProposal.parse`
+now hold two copies of the same code-fence handling. Extracting a shared envelope helper
+means editing `Scoring/`, which this ticket does not own; a test pins that the two tolerate
+the same formatting, so the duplication cannot drift unnoticed. **Worth a small follow-up.**
 
 **MAX-097 gave the sheet a past.** `ChatSheet` now owns one `NavigationStack` holding the
 open conversation and, pushed on top of it, the thread list — `WorkoutChatSectionView`'s
@@ -1291,7 +1300,7 @@ is the overseer's, not a ticket's — flagged here rather than done.
 |---|---|---|---|
 | MAX-128 | `Discipline`, and `.lift` on both classification enums (spec's MAX-110) | — | **Opus** ✅ |
 | MAX-129 | The per-discipline prescription; the no-op decode test | 128 | **Opus** |
-| MAX-130 | Discipline-gated derived metrics; stop fabricating cadence | 128 | **Opus** |
+| MAX-130 | Discipline-gated derived metrics; stop fabricating cadence | 128 | **Opus** ✅ |
 | MAX-131 | Rubric vocabulary for lifts — **closes gap P3** | 128 | **Opus** |
 | MAX-132 | Seed bands for lift days; the `easy.wellOverCap` shadow | 131 | Sonnet |
 | MAX-133 | Match a workout to its own discipline's ask | 129, 131 | **Opus** |
@@ -1352,6 +1361,126 @@ first-class `ActivityType` (LIFTING-SPEC §14 puts it in this ticket). It change
 activity type a real workout is stored under, which is behaviour, and this ticket's brief
 forbade any. It is a one-line fetcher change plus one row in `ActivityType.discipline`,
 and it wants the ticket that is already opening `App/HealthKitWorkoutFetcher.swift`.
+
+**MAX-129 — the prescription is indexed by discipline.** `WeeklyTemplate.Entry` carries a
+run ask and a lift ask; `PlanDay` carries both and answers `scheduledSession(for:)`, which
+is total in the discipline because `Discipline` is closed at two cases and rest is an
+answer on each. One plan record, one version, one `effectiveFrom` — D1 untouched.
+
+- **No behaviour changes for a run.** Every existing reader of `PlanDay.scheduledSession`
+  and `WeeklyTemplate.Entry.session` means the *run* ask, so after this change each is
+  still correct rather than merely still compiling. `canBeMissed` is likewise still the run
+  obligation's predicate; widening it to count obligations is A19, and MAX-134's ticket.
+- **No migration, proven twice.** `liftSession` and `muscleGroups` decode with
+  `decodeIfPresent` and are *omitted on encode* when they carry nothing, because rest and
+  absent are the same statement (A17). So a lift-free plan encodes to the bytes it encoded
+  to before the ticket, and a `Score`'s stored `ScheduledSession` (immutable under D8) does
+  not move either. Pinned by a hand-written pre-MAX-129 payload that decodes to a template
+  with every lift slot at rest and re-encodes to the same bytes, and by a same-band
+  assertion through `RubricEvaluator` — LIFTING-SPEC §2.3's two acceptance criteria.
+- **Authoring carries the lift slot forward verbatim.** `PlanDraft.DayDraft.liftSession` is
+  carried but not editable: `PlanDraft.init(_:)` is documented as lossless, and this was
+  the first field that could have made it untrue — a revision that dropped it would delete
+  a lifting prescription the next time the athlete changed their HR cap. A17 leans on that
+  carry-forward when it argues one plan record rather than two. **MAX-137 gives the screen
+  its editor**, and with it the loose-input validation `PlanAuthoringError` will need.
+
+**Downstream types that now need updating, in dependency order.** None of these are broken
+today — the run half of each is unchanged, and every plan on disk prescribes rest on every
+lift slot — but each currently answers about the day's *run* while calling it the day:
+
+| Reader | What it reads | Ticket |
+|---|---|---|
+| `RubricEvaluator.evaluate` | `planDay.scheduledSession.kind` picks the bands | MAX-133 |
+| `RestDayBudgeting` / `TalliesCalculator` | `PlanDay.canBeMissed`, `costTier` | MAX-134 |
+| `ScoreCalendar.dayState` / `agreement` | the day's single prescribed kind | MAX-135 |
+| `TrainingFactSheet` / `WorkoutFactSheet` | `entry.session`, `planDay.scheduledSession` | MAX-136 |
+| `PlanDraft` setters, `PlanAuthoringError` | the run slot only | MAX-137 |
+| `PlanDisplayData.WeekdayRow` | one kind/distance/note per weekday | MAX-138 |
+| `TrendTileData` planned mileage | sums `planDay.scheduledSession.distanceMeters` | MAX-140 |
+| `PlanProposal` (MAX-099) | validates the same shape `PlanAuthoringSession` does | MAX-141 |
+
+**MAX-141 does need updating, and its brief should say so.** `PlanProposal` validates
+against `PlanAuthoringSession`'s rules; those rules did not change for the run slot, so it
+still compiles and still produces valid plans — but a proposal it accepts can only ever
+prescribe rest on every lift slot, which is now a silently incomplete plan rather than the
+only expressible one. Since the owner has reaffirmed that **the plan is configured through
+chat**, that ticket is the real authoring path, not MAX-137's form.
+
+**Scope taken mid-ticket: the lift slot names its muscle groups.** Owner's ask. `MuscleGroup`
+is a closed six-case core vocabulary — chest, back, shoulders, arms, legs, core — chosen so
+that push/pull/legs, upper/lower and a five-day split are all expressible without a residual
+case; "full body" is the whole set rather than a seventh case, because an overlapping case
+gives one Tuesday two spellings. `ScheduledSession.muscleGroups` is a `Set`, encoded in
+`CaseIterable` order so a set's arbitrary iteration order never reaches the bytes, and only
+a `.lift` may carry one — the same shape of rule, for the same reason, as a rest day being
+unable to carry a distance. **Rest and "a lift with no groups named" stay distinct**, which
+is what keeps the lift slot's totality meaningful.
+
+> **⚠️ Open, needs an amendment and the owner's call: nothing can verify a muscle-group
+> prescription.** HealthKit reports `traditionalStrengthTraining` and says nothing about what
+> was worked — the same wall A20 hit on sets, reps and load when it chose adherence over
+> volume. So the plan can say "Tuesday is chest and shoulders" and the app cannot check that
+> it happened. **This ticket made no scoring, tallies or adherence decision about it**, and
+> nothing on those paths reads `muscleGroups`. The options, with what each costs:
+>
+> 1. **The athlete confirms after the fact.** The only option that actually verifies. Spends
+>    PRD §3's manual-entry non-goal, which A16 was deliberately written narrowly to avoid
+>    spending, and adds a per-session prompt to a product whose whole claim is that capture
+>    is automatic.
+> 2. **The plan states intent; scoring never checks it.** Costs nothing and changes nothing:
+>    muscle groups become prescription copy that reaches the athlete, the plan screen and
+>    Claude's context, and adherence stays "did a lift happen on a lift day" (A20). The gap
+>    is that a week of chest-only lifting scores identically to a balanced one.
+> 3. **Chat asks.** Claude already has the prescription in context (D3/A12) and can ask "did
+>    you get to legs?" in the daily conversation. Cheap, conversational, and *not* a record —
+>    an answer in a chat bubble is not a stored fact anything can count, so it informs the
+>    athlete without becoming telemetry.
+>
+> Recommended lean: **2 now, 3 as it costs nothing extra, and 1 only if the owner decides the
+> signal is worth the non-goal.** Recorded, not taken — flagged for the overseer to dispatch.
+
+**MAX-130 — a lift's metrics are decided, not merely withheld.** MAX-111 put `if isRun` in
+front of three expressions in `DerivedMetricsCalculator`. That fixed the three metrics that
+existed and did nothing about the fourth, so the decision moved into `DerivedMetricKind` —
+one case per figure `DerivedMetrics` carries, one exhaustive `switch` answering what a
+workout must be before that figure describes anything, and `DerivedMetricKindTests` walking
+the record's stored properties by reflection so a *field* added without a case fails CI too.
+A new metric cannot now reach a discipline it says nothing about by default.
+
+- **A lift's stored record is: average and maximum heart rate, and zone splits.** Nothing
+  else. Cadence, grade-adjusted pace and distance splits stay absent (MAX-111, unchanged);
+  drift stays absent; and **`timeAboveCapSeconds` is now absent too** — LIFTING-SPEC §3.3(a),
+  the one behaviour change. `Plan.heartRateCapBPM` is the easy-run ceiling, so on a lift the
+  figure keeps its name and heading while changing meaning from "did you hold the plan's
+  discipline" to "how hard did you work". §15 q2 records this as the owner's to overrule;
+  the lean it implements is the spec's own.
+- **No new stored figure, and no schema change.** §8's honest list of what HealthKit gives
+  for a strength session is duration, active energy and the heart-rate series — and
+  `Workout` already stores the first two. Adding a derived copy of either would be a second
+  source of truth for a number the record already holds, which is exactly what D2 forbids.
+  So `StoredWorkoutRecords` and `MaximizeSchema` were not touched, against the spec's ticket
+  table, which anticipated new columns.
+- **The gate reads `Discipline`, and `isRun` survives where it is the narrower question.**
+  Three requirement cases, not two: `.anyDiscipline`, `.runDiscipline` (the figure is
+  anchored to a *run field of the plan*), and `.runningActivity` (the figure models running
+  gait or the metabolic cost of running a grade). A ride and a hike are `.run` by slot and
+  have no running form, so a gate written as `discipline == .run` would hand cadence and
+  Minetti pace straight back to them — the second half of what MAX-111 actually fixed. The
+  containment `isRun ⇒ .run` is already pinned by `DisciplineTests`.
+- **No backfill, and no stored score touched** (D2, D8). Metrics are still computed once, at
+  ingestion, at the same moment as before; already-ingested lifts keep the metrics they
+  have, including the cap figure. Re-deriving them is a separate ticket with MAX-067's
+  question attached, and the scores those figures fed are A21/MAX-143's.
+- **Reported, not done: `HKQuantityTypeIdentifier.workoutEffortScore`.** §15 q1 asks the
+  implementer to check whether a strength-relevant quantity type has appeared. As far as can
+  be established without an SDK in this container: **no sets, reps or external load** — the
+  finding §8.1 rests on holds. The one lift-relevant quantity HealthKit does have and this
+  app does not request is the iOS 18-era `workoutEffortScore` / `estimatedWorkoutEffortScore`
+  pair, a 1–10 session-effort rating. It is a fetcher change plus an authorisation change in
+  the App layer, and it is the closest thing to an intensity signal a lift can carry — see
+  §8.3's stated cost ("adherence scoring cannot tell a hard session from a token one").
+  Worth its own ticket; deliberately not taken here.
 
 **MAX-093 landed the stored record.** `StoredChatThread` is columnar —
 `subjectKindRawValue`, `workoutUUID` (a fixed sentinel for a training row),

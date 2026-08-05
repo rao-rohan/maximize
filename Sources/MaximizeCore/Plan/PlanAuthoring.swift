@@ -276,15 +276,23 @@ public struct PlanAuthoringSession: Hashable, Sendable {
         )
     }
 
+    /// The run slot is assembled from the draft's loose (kind, distance, note) triples
+    /// and can therefore fail validation; the lift slot is carried through as an
+    /// already-constructed `ScheduledSession` and cannot, which is why only the run half
+    /// has an error case here. That stays true only while the screen cannot edit the
+    /// lift slot — MAX-137 gives it an editor, and an editor means a lift ask can be
+    /// half-typed, which means this function grows the matching translation.
     private func weeklyTemplate(from draft: PlanDraft) throws -> WeeklyTemplate {
         var sessions: [Weekday: ScheduledSession] = [:]
+        var liftSessions: [Weekday: ScheduledSession] = [:]
         for day in draft.week {
             guard let session = try? day.session() else {
                 throw PlanAuthoringError.scheduledDistanceNotPositive(weekday: day.weekday)
             }
             sessions[day.weekday] = session
+            liftSessions[day.weekday] = day.liftSession
         }
-        return try WeeklyTemplate(sessions)
+        return try WeeklyTemplate(sessions, lift: liftSessions)
     }
 
     private func longRunArc(from draft: PlanDraft) throws -> LongRunArc {

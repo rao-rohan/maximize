@@ -277,13 +277,13 @@ final class FactSheetFormattingAgreementTests: XCTestCase {
         XCTAssertTrue(
             workoutSheet.contains(
                 "Scheduled for this day: "
-                    + FactSheetFormatting.scheduledSession(template.session(on: .tuesday))
+                    + FactSheetFormatting.scheduledSession(template.session(on: .tuesday, for: .run))
             ),
             workoutSheet
         )
         XCTAssertTrue(
             trainingSheet.contains(
-                "Planned: " + FactSheetFormatting.scheduledSession(template.session(on: .thursday))
+                "Planned: " + FactSheetFormatting.scheduledSession(template.session(on: .thursday, for: .run))
             ),
             trainingSheet
         )

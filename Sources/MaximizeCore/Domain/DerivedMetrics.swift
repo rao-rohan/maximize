@@ -91,6 +91,12 @@ public struct ZoneSplits: Hashable, Sendable, Codable {
 /// workout with no heart-rate series has no average HR; drift on an interval session
 /// is "near-meaningless" (§9) and is therefore left nil rather than computed and
 /// quietly ignored.
+///
+/// **Adding a figure here means adding a `DerivedMetricKind` case**, which is where the
+/// question "which disciplines does this describe?" is asked and answered (A17,
+/// MAX-130). `DerivedMetricKindTests` walks these stored properties by reflection and
+/// fails on one that has no case, so the pairing is not a convention anyone has to
+/// remember.
 public struct DerivedMetrics: Hashable, Sendable, Codable, Identifiable {
     public var id: UUID { workoutID }
 
@@ -208,6 +214,30 @@ public struct DerivedMetrics: Hashable, Sendable, Codable, Identifiable {
 
     /// Whether a heart-rate curve existed for this workout at all.
     public var hasHeartRateData: Bool { averageHeartRateBPM != nil }
+
+    /// Whether this record actually carries the named figure.
+    ///
+    /// The counterpart to `DerivedMetricKind.applies(to:)`: that says whether a figure
+    /// *could* describe a workout of some activity type, this says whether this
+    /// particular record ended up with one. The two differ legitimately — an indoor run
+    /// is entitled to a grade-adjusted pace and has no route to compute it from — and
+    /// only one direction is an invariant: a figure that does not apply is never
+    /// recorded. `DerivedMetricsCalculatorTests` asserts exactly that.
+    ///
+    /// `zoneSplits` is the one case where absence is not a nil. Empty means "no curve to
+    /// distribute", which is why it reads as not recorded rather than as five zeroes.
+    public func isRecorded(_ kind: DerivedMetricKind) -> Bool {
+        switch kind {
+        case .averageHeartRateBPM: return averageHeartRateBPM != nil
+        case .maximumHeartRateBPM: return maximumHeartRateBPM != nil
+        case .timeAboveCapSeconds: return timeAboveCapSeconds != nil
+        case .heartRateDriftFraction: return heartRateDriftFraction != nil
+        case .averageCadenceStepsPerMinute: return averageCadenceStepsPerMinute != nil
+        case .gradeAdjustedPaceSecondsPerKilometer: return gradeAdjustedPaceSecondsPerKilometer != nil
+        case .zoneSplits: return !zoneSplits.splits.isEmpty
+        case .distanceSplits: return distanceSplits != nil
+        }
+    }
 
     /// Looks a metric up by the name a rubric uses. This is the bridge that lets the
     /// rubric stay data (D1): the scorer asks for `.averageHeartRateBPM` rather than
