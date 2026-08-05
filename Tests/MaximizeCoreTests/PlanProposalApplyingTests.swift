@@ -14,15 +14,18 @@ final class PlanProposalApplyingTests: XCTestCase {
     // MARK: - Fixtures
 
     /// Tuesday and Friday restate `storedPlan()`'s own lift asks — legs-and-core, and
-    /// chest — so the *default* reply is what a well-behaved model sends: the whole
-    /// week, lift slot included, unrequested days carried forward by restating them
-    /// rather than by the app inventing an answer for a day the reply is silent on.
+    /// chest with its note — so the *default* reply is what a well-behaved model sends:
+    /// the whole week, lift slot included, unrequested days carried forward by
+    /// restating them rather than by the app inventing an answer for a day the reply is
+    /// silent on. Friday's `liftNote` is explicit as of MAX-148: the note is now a wire
+    /// field like any other, so a model has to resend it to keep it, the same as it
+    /// already had to resend `liftMuscleGroups`.
     private static let weekEntries = [
         #"{"weekday": "monday", "kind": "rest", "liftKind": "rest"}"#,
         #"{"weekday": "tuesday", "kind": "easy", "distanceMeters": 8000, "liftKind": "lift", "liftMuscleGroups": ["legs", "core"]}"#,
         #"{"weekday": "wednesday", "kind": "hard", "note": "6 × 800m", "liftKind": "rest"}"#,
         #"{"weekday": "thursday", "kind": "easy", "distanceMeters": 6000, "liftKind": "rest"}"#,
-        #"{"weekday": "friday", "kind": "rest", "liftKind": "lift", "liftMuscleGroups": ["chest"]}"#,
+        #"{"weekday": "friday", "kind": "rest", "liftKind": "lift", "liftMuscleGroups": ["chest"], "liftNote": "45 minutes"}"#,
         #"{"weekday": "saturday", "kind": "easy", "distanceMeters": 6000, "liftKind": "rest"}"#,
         #"{"weekday": "sunday", "kind": "long", "distanceMeters": 20000, "liftKind": "rest"}"#,
     ]
@@ -116,8 +119,9 @@ final class PlanProposalApplyingTests: XCTestCase {
     // MARK: - Lifts (MAX-141: now a slot a proposal can reach)
 
     /// A proposal that restates the athlete's existing lift days carries them onto the
-    /// draft faithfully — kind, muscle groups, and the note MAX-137 deliberately left
-    /// uneditable (carried, not re-derived, since the kind is unchanged on both days).
+    /// draft faithfully — kind, muscle groups, and, as of MAX-148, the note too: the
+    /// reply explicitly resends "45 minutes" for Friday, and it reaches the draft
+    /// because the wire field is what carries it now, not a kind-unchanged fallback.
     func testARestatedLiftIsAppliedFaithfully() throws {
         let applied = try revisionSession().draft.applying(try PlanProposal.parse(reply()))
 
@@ -191,7 +195,7 @@ final class PlanProposalApplyingTests: XCTestCase {
                 with: #", "liftKind": "rest""#
             )
             .replacingOccurrences(
-                of: #", "liftKind": "lift", "liftMuscleGroups": ["chest"]"#,
+                of: #", "liftKind": "lift", "liftMuscleGroups": ["chest"], "liftNote": "45 minutes""#,
                 with: #", "liftKind": "rest""#
             )
         }
@@ -201,6 +205,34 @@ final class PlanProposalApplyingTests: XCTestCase {
             XCTAssertEqual(applied[weekday].liftKind, .rest)
             XCTAssertTrue(applied[weekday].liftMuscleGroups.isEmpty)
         }
+    }
+
+    // MARK: - The lift's duration and note (MAX-148)
+
+    /// `storedPlan()`'s Friday lift has a note but no duration; a proposal that adds
+    /// one reaches the draft, because the duration is a wire field now rather than
+    /// something only a stored plan could carry.
+    func testAProposedLiftDurationReachesTheDraft() throws {
+        var week = PlanProposalApplyingTests.weekEntries
+        week[4] =
+            #"{"weekday": "friday", "kind": "rest", "liftKind": "lift", "liftMuscleGroups": ["chest"], "liftDurationSeconds": 3600, "liftNote": "45 minutes"}"#
+        let applied = try revisionSession().draft.applying(try PlanProposal.parse(reply(week: week)))
+
+        XCTAssertEqual(applied[.friday].liftDurationSeconds, 3_600)
+    }
+
+    /// The other half of "not carried": a lift the reply restates without a duration
+    /// this time loses the one it had, the same way an unrestated muscle group does.
+    func testALiftDurationTheProposalDoesNotRestateIsDropped() throws {
+        var week = PlanProposalApplyingTests.weekEntries
+        week[4] = #"{"weekday": "friday", "kind": "rest", "liftKind": "lift", "liftMuscleGroups": ["chest"]}"#
+        let applied = try revisionSession().draft.applying(try PlanProposal.parse(reply(week: week)))
+
+        XCTAssertNil(applied[.friday].liftDurationSeconds)
+        XCTAssertNil(applied[.friday].liftNote)
+        // The rest of Friday's lift ask is untouched by dropping the duration and note.
+        XCTAssertEqual(applied[.friday].liftKind, .lift)
+        XCTAssertEqual(applied[.friday].liftMuscleGroups, [.chest])
     }
 
     // MARK: - The run slot's duration (MAX-131's carried, uneditable field)

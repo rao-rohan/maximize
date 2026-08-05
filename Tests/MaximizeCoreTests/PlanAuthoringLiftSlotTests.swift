@@ -133,8 +133,111 @@ final class PlanAuthoringLiftSlotTests: XCTestCase {
         XCTAssertEqual(session.muscleGroups, [.legs, .core])
     }
 
-    /// A revision's carried-forward note (not editable on this screen) survives the
-    /// round trip through `liftSession()` untouched.
+    // MARK: - PlanDraft.DayDraft: editing the lift's duration and note (MAX-148)
+
+    /// Ignored while the slot is not `.lift` — the same "nowhere legal for the value
+    /// to go" rule `setLiftMuscleGroups` already follows.
+    func testLiftDurationAndNoteAreIgnoredUntilTheSlotIsLift() throws {
+        var draft = try seededDraft()
+        draft.setLiftDurationSeconds(2_700, on: .tuesday)
+        draft.setLiftNote("Lower body", on: .tuesday)
+
+        XCTAssertNil(draft[.tuesday].liftDurationSeconds)
+        XCTAssertNil(draft[.tuesday].liftNote)
+    }
+
+    func testSettingLiftDurationAndNoteOnceTheSlotIsLift() throws {
+        var draft = try seededDraft()
+        draft.setLiftKind(.lift, on: .tuesday)
+        draft.setLiftDurationSeconds(2_700, on: .tuesday)
+        draft.setLiftNote("  Lower body  ", on: .tuesday)
+
+        XCTAssertEqual(draft[.tuesday].liftDurationSeconds, 2_700)
+        // Trimmed, matching the run slot's own `setNote`.
+        XCTAssertEqual(draft[.tuesday].liftNote, "Lower body")
+
+        let session = try draft[.tuesday].liftSession()
+        XCTAssertEqual(session.durationSeconds, 2_700)
+        XCTAssertEqual(session.note, "Lower body")
+    }
+
+    /// Blank text collapses to `nil`, matching the run slot's own `setNote`.
+    func testBlankLiftNoteCollapsesToNil() throws {
+        var draft = try seededDraft()
+        draft.setLiftKind(.lift, on: .tuesday)
+        draft.setLiftNote("   ", on: .tuesday)
+        XCTAssertNil(draft[.tuesday].liftNote)
+    }
+
+    /// Choosing rest on the lift slot clears its duration and note, exactly as it
+    /// already clears its groups — a value reached through this type's own setters
+    /// must never make `liftSession()` throw.
+    func testChoosingRestOnTheLiftSlotClearsDurationAndNote() throws {
+        var draft = try seededDraft()
+        draft.setLiftKind(.lift, on: .tuesday)
+        draft.setLiftDurationSeconds(2_700, on: .tuesday)
+        draft.setLiftNote("Lower body", on: .tuesday)
+
+        draft.setLiftKind(.rest, on: .tuesday)
+        XCTAssertNil(draft[.tuesday].liftDurationSeconds)
+        XCTAssertNil(draft[.tuesday].liftNote)
+
+        // And values set afterwards are ignored, matching the groups.
+        draft.setLiftDurationSeconds(1_800, on: .tuesday)
+        draft.setLiftNote("Upper body", on: .tuesday)
+        XCTAssertNil(draft[.tuesday].liftDurationSeconds)
+        XCTAssertNil(draft[.tuesday].liftNote)
+    }
+
+    // MARK: - `.lift` is refused in the run slot at the type level (MAX-148)
+
+    /// The rule that used to live only in the screen's picker: `PlanDraft.DayDraft`
+    /// itself cannot express a lift in the run slot.
+    func testSetKindIgnoresLiftOnTheRunSlot() throws {
+        var draft = try seededDraft()
+        let before = draft[.tuesday].kind
+        draft.setKind(.lift, on: .tuesday)
+        XCTAssertEqual(draft[.tuesday].kind, before)
+    }
+
+    /// The defence one layer down from `setKind`: a `PlanDraft` reconstructed from a
+    /// stored `Plan` whose run slot already holds a lift — `WeeklyTemplate` itself does
+    /// not forbid one — is refused at the authoring door rather than saved as a plan
+    /// judged against the wrong slot.
+    func testPlanAuthoringSessionRefusesALiftInTheRunSlot() throws {
+        let corrupt = try Plan(
+            version: PlanVersion(1),
+            effectiveFrom: try day("2026-01-01"),
+            weeklyTemplate: try WeeklyTemplate([
+                .monday: .rest,
+                .tuesday: try ScheduledSession(kind: .lift),
+                .wednesday: .rest,
+                .thursday: .rest,
+                .friday: .rest,
+                .saturday: .rest,
+                .sunday: .rest,
+            ]),
+            longRunArc: try LongRunArc(weeks: [LongRunArc.Week(index: 1, distanceMeters: 16_000)]),
+            heartRateCapBPM: 150,
+            cadenceTarget: try CadenceBand(lowStepsPerMinute: 165, highStepsPerMinute: 170),
+            rubric: try Fixture.rubric()
+        )
+        let session = try PlanAuthoring.session(revising: try PlanCalendar([corrupt]), today: try today)
+        let draft = try PlanDraft(corrupt)
+
+        XCTAssertThrowsError(
+            try session.plan(from: draft, effectiveFrom: session.suggestedEffectiveFrom)
+        ) { error in
+            XCTAssertEqual(
+                error as? PlanAuthoringError,
+                .scheduledKindNotPrescribable(weekday: .tuesday)
+            )
+        }
+    }
+
+    /// A revision's carried-forward note survives the round trip through
+    /// `liftSession()` untouched — before any edit, `PlanDraft.init(_:)` decomposing a
+    /// stored plan losslessly.
     func testCarriedLiftNoteSurvivesTheDraftRoundTrip() throws {
         let stored = try Plan(
             version: PlanVersion(1),

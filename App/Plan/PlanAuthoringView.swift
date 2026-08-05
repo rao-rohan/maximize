@@ -327,6 +327,48 @@ struct PlanAuthoringView: View {
                         } label: {
                             row("Groups", PlanAuthoringFormatting.describe(day.liftSummary))
                         }
+
+                        // Collapsed by default rather than two more permanent controls
+                        // (MAX-148): seven weekdays × two slots is dense enough already,
+                        // and duration and note are the two lift fields an athlete sets
+                        // occasionally, not every time they open this screen. The label
+                        // states the pair so the row is still scannable closed.
+                        DisclosureGroup {
+                            Stepper(
+                                value: liftDurationMinutesBinding(
+                                    for: day.weekday,
+                                    seconds: day.liftDurationSeconds
+                                ),
+                                in: 0...240,
+                                step: 5
+                            ) {
+                                row(
+                                    "Duration",
+                                    day.liftDurationSeconds.map { PlanAuthoringFormatting.duration($0) }
+                                        ?? "None"
+                                )
+                            }
+
+                            TextField(
+                                "Note",
+                                text: Binding(
+                                    get: { day.liftNote ?? "" },
+                                    set: { value in
+                                        model.edit { $0.setLiftNote(value, on: day.weekday) }
+                                    }
+                                ),
+                                axis: .vertical
+                            )
+                            .lineLimit(1...3)
+                        } label: {
+                            row(
+                                "Duration & note",
+                                PlanAuthoringFormatting.liftDetail(
+                                    durationSeconds: day.liftDurationSeconds,
+                                    note: day.liftNote
+                                )
+                            )
+                        }
                     }
                 }
                 .padding(.vertical, Spacing.tight)
@@ -342,6 +384,20 @@ struct PlanAuthoringView: View {
                     + "distinct from resting."
             )
         }
+    }
+
+    /// Steps in whole minutes, stored in seconds. Zero reads as "no prescribed
+    /// duration" rather than a duration of zero, matching `distanceBinding`'s own
+    /// "None" convention for the run slot's distance.
+    private func liftDurationMinutesBinding(for weekday: Weekday, seconds: Double?) -> Binding<Double> {
+        Binding(
+            get: { ((seconds ?? 0) / 60).rounded() },
+            set: { minutes in
+                model.edit {
+                    $0.setLiftDurationSeconds(minutes <= 0 ? nil : minutes * 60, on: weekday)
+                }
+            }
+        )
     }
 
     /// Steps in the athlete's own unit, stored in metres. Zero reads as "no prescribed
