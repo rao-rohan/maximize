@@ -74,6 +74,16 @@ public struct PlanDraft: Hashable, Sendable {
         /// `PlanDraft.init(_:)` is documented as lossless, and losing a note here would
         /// silently delete it the next time the athlete changed an unrelated number.
         public private(set) var liftNote: String?
+
+        /// The lift's prescribed duration in **seconds**, carried but not editable here
+        /// — the same shape as `liftNote`, and for the same reason.
+        ///
+        /// **Carried is the operative word.** Without it, revising a plan rebuilt every
+        /// lift ask from kind, note and groups alone, so a prescribed "45 minutes, lower
+        /// body" came back as "lower body" with the duration silently gone. A revision
+        /// must not lose a field it never offered to edit, and the run slot has always
+        /// carried `durationSeconds` for exactly this reason.
+        public private(set) var liftDurationSeconds: Double?
         /// What the lift is for. Empty while `.lift` is a real, distinct state — "a
         /// lift with no groups named" — from `liftKind == .rest`, "no lift". See
         /// `liftSummary`.
@@ -87,6 +97,7 @@ public struct PlanDraft: Hashable, Sendable {
             self.note = session.note
             self.liftKind = liftSession.kind
             self.liftNote = liftSession.note
+            self.liftDurationSeconds = liftSession.durationSeconds
             self.liftMuscleGroups = liftSession.muscleGroups
         }
 
@@ -134,6 +145,11 @@ public struct PlanDraft: Hashable, Sendable {
             liftKind = kind
             if kind != .lift {
                 liftMuscleGroups = []
+                // Cleared for the same reason the groups are, and not optional:
+                // `ScheduledSession` rejects a rest day carrying a duration, so a value
+                // left behind would make `liftSession()` throw on a draft the athlete
+                // reached through this type's own setters.
+                liftDurationSeconds = nil
             }
         }
 
@@ -164,7 +180,12 @@ public struct PlanDraft: Hashable, Sendable {
         /// `PlanAuthoringError.wouldRewriteHistory` documents: the alternative to a
         /// defensive case is a `try!`, which non-test code may not write.
         public func liftSession() throws -> ScheduledSession {
-            try ScheduledSession(kind: liftKind, note: liftNote, muscleGroups: liftMuscleGroups)
+            try ScheduledSession(
+                kind: liftKind,
+                durationSeconds: liftDurationSeconds,
+                note: liftNote,
+                muscleGroups: liftMuscleGroups
+            )
         }
 
         /// The lift slot's ask, in the vocabulary that keeps "no lift" and "a lift with
