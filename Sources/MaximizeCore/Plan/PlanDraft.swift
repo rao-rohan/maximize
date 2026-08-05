@@ -361,6 +361,10 @@ public struct PlanDraft: Hashable, Sendable {
     /// "prescribe the whole week, every time". A field-by-field merge here would be a
     /// second opinion about what the model meant to change.
     ///
+    /// The one other carried field is the run slot's `durationSeconds`, for the same
+    /// reason as the lift slot and under a narrower rule — see
+    /// `carriedDurationSeconds(from:proposing:)`.
+    ///
     /// - Throws: `DomainError` only for the shapes `PlanDraft.init` itself refuses; a
     ///   parsed `PlanProposal` cannot express one (its arc is non-empty and strictly
     ///   ascending by construction), so this is belt-and-braces rather than a case a
@@ -370,9 +374,16 @@ public struct PlanDraft: Hashable, Sendable {
         var sessions: [Weekday: ScheduledSession] = [:]
         var liftSessions: [Weekday: ScheduledSession] = [:]
         for day in week {
-            sessions[day.weekday] = proposal[day.weekday]
+            let proposed = proposal[day.weekday]
+            sessions[day.weekday] = try ScheduledSession(
+                kind: proposed.kind,
+                distanceMeters: proposed.distanceMeters,
+                durationSeconds: carriedDurationSeconds(from: day, proposing: proposed),
+                note: proposed.note
+            )
             // Carried, not re-derived: `liftSession()` is the draft's own accessor, so
-            // the note MAX-137 deliberately keeps uneditable survives this too.
+            // the note and the duration MAX-131/MAX-137 deliberately keep uneditable
+            // survive this too.
             liftSessions[day.weekday] = try day.liftSession()
         }
         return try PlanDraft(
@@ -393,6 +404,30 @@ public struct PlanDraft: Hashable, Sendable {
             goalStatements: proposal.goalStatements.joined(separator: "\n"),
             goalTargetDay: proposal.goalTargetDay
         )
+    }
+
+    /// A prescribed run duration the proposal could not have expressed, kept when it is
+    /// still about the same session and dropped when it is not (MAX-131, MAX-101).
+    ///
+    /// `ScheduledSession.durationSeconds` is carried-but-uneditable on the run slot, and
+    /// `PlanProposal` has no field for it — so applying a proposal naively would silently
+    /// delete a "45 minutes easy" the athlete never had the chance to keep, which is the
+    /// exact failure `durationSeconds`' own documentation warns a revision must not
+    /// commit.
+    ///
+    /// **Only while the kind is unchanged.** A duration is a property of the ask, so it
+    /// survives the proposal editing that day's distance or note. It does not survive the
+    /// proposal *replacing* the session: carrying 45 minutes from a deleted easy run onto
+    /// a newly proposed hard session would be this mapping asserting something no one
+    /// said. A rest day cannot carry one at all, and a rest-to-rest day never has one to
+    /// carry (`setKind` clears it), so the illegal combination `ScheduledSession` refuses
+    /// is unreachable here.
+    private func carriedDurationSeconds(
+        from day: DayDraft,
+        proposing proposed: ScheduledSession
+    ) -> Double? {
+        guard proposed.kind == day.kind else { return nil }
+        return day.durationSeconds
     }
 
     // MARK: - Editing the week

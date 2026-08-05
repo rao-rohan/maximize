@@ -158,6 +158,71 @@ final class PlanProposalApplyingTests: XCTestCase {
         }
     }
 
+    // MARK: - The run slot's duration (MAX-131's carried, uneditable field)
+
+    /// `ScheduledSession.durationSeconds` is carried-but-uneditable on the run slot and
+    /// `PlanProposal` has no field for it, so a naive mapping would silently delete a
+    /// "45 minutes easy" — the exact failure that field's own documentation says a
+    /// revision must not commit. It survives the proposal editing the day's distance.
+    func testAPrescribedRunDurationSurvivesADistanceChangeOnTheSameKind() throws {
+        let session = try sessionRevising(thursdayDurationSeconds: 2_700)
+        let applied = try session.draft.applying(try PlanProposal.parse(reply()))
+
+        // The proposal moves Thursday from 8 km to 6 km, and leaves it an easy run.
+        XCTAssertEqual(applied[.thursday].kind, .easy)
+        XCTAssertEqual(applied[.thursday].distanceMeters, 6_000)
+        XCTAssertEqual(applied[.thursday].durationSeconds, 2_700)
+    }
+
+    /// And it does not survive the proposal *replacing* the session: carrying 45 minutes
+    /// from a deleted easy run onto a newly proposed hard one would assert something no
+    /// one said.
+    func testAPrescribedRunDurationIsDroppedWhenTheProposalChangesTheKind() throws {
+        let session = try sessionRevising(thursdayDurationSeconds: 2_700)
+        let proposal = try PlanProposal.parse(reply(week: [
+            #"{"weekday": "monday", "kind": "rest"}"#,
+            #"{"weekday": "tuesday", "kind": "easy", "distanceMeters": 8000}"#,
+            #"{"weekday": "wednesday", "kind": "rest"}"#,
+            #"{"weekday": "thursday", "kind": "hard", "note": "8 × 400m"}"#,
+            #"{"weekday": "friday", "kind": "rest"}"#,
+            #"{"weekday": "saturday", "kind": "easy", "distanceMeters": 6000}"#,
+            #"{"weekday": "sunday", "kind": "long", "distanceMeters": 20000}"#,
+        ]))
+        let applied = try session.draft.applying(proposal)
+
+        XCTAssertEqual(applied[.thursday].kind, .hard)
+        XCTAssertNil(applied[.thursday].durationSeconds)
+    }
+
+    /// A session opening on a plan whose Thursday carries a prescribed duration.
+    private func sessionRevising(thursdayDurationSeconds: Double) throws -> PlanAuthoringSession {
+        let plan = try Plan(
+            version: PlanVersion(3),
+            effectiveFrom: Fixture.day(2026, 6, 1),
+            weeklyTemplate: WeeklyTemplate([
+                .monday: .rest,
+                .tuesday: ScheduledSession(kind: .easy, distanceMeters: 8_000),
+                .wednesday: ScheduledSession(kind: .hard, note: "6 × 800m"),
+                .thursday: ScheduledSession(
+                    kind: .easy,
+                    distanceMeters: 8_000,
+                    durationSeconds: thursdayDurationSeconds
+                ),
+                .friday: .rest,
+                .saturday: ScheduledSession(kind: .easy, distanceMeters: 6_000),
+                .sunday: ScheduledSession(kind: .long, distanceMeters: 18_000),
+            ]),
+            longRunArc: LongRunArc(weeks: [LongRunArc.Week(index: 1, distanceMeters: 16_000)]),
+            heartRateCapBPM: 152,
+            cadenceTarget: CadenceBand(lowStepsPerMinute: 165, highStepsPerMinute: 170),
+            rubric: Fixture.rubric()
+        )
+        return try PlanAuthoring.session(
+            revising: try PlanCalendar([plan]),
+            today: try Fixture.day(2026, 8, 5)
+        )
+    }
+
     // MARK: - The door still accepts it
 
     /// The property MAX-099 promised and this ticket has to keep: the mapping's output
