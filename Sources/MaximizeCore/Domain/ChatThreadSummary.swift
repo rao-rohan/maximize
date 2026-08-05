@@ -254,6 +254,21 @@ public enum ChatThreadListCopy {
     /// plainly, in the same voice as `ChatConversationCopy.failedToLoad`.
     public static let couldNotLoadConversations = "Conversations could not be loaded."
 
+    /// The headline above each of those two sentences.
+    ///
+    /// Two parts rather than one because the app layer draws these with the platform's own
+    /// empty-state component, which is built as headline-plus-explanation. The sentences
+    /// above are unchanged from what MAX-150 settled; these are the short forms that sit
+    /// over them, and they are deliberately nouns — the sentence is what does the
+    /// explaining.
+    public static let noConversationsTitle = "No conversations"
+    public static let couldNotLoadConversationsTitle = "Conversations unavailable"
+
+    /// The SF Symbol each of those two states wears. The core says which symbol; the app
+    /// layer draws it — `ChatSubjectKind.glyphSystemImageName`'s own rule.
+    public static let noConversationsGlyphSystemImageName = "bubble.left.and.bubble.right"
+    public static let couldNotLoadConversationsGlyphSystemImageName = "exclamationmark.triangle"
+
     /// The heading above the list. Not "Chat history" and not "Threads": the leading
     /// toolbar button that pushes this screen is already labelled for the action, and the
     /// screen itself is the noun.

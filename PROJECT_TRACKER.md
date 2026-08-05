@@ -553,6 +553,7 @@ feature was governed by a plan that could not exist).
 | MAX-128 … MAX-143 | The lifting build, decomposed from MAX-109 | MAX-109 | see below ✅ |
 | MAX-126 | **"No verdict by design" is a state** — a lift stops being drawn and spoken as a run awaiting a score | MAX-111 | **Opus** ✅ |
 | MAX-150 | **Copy and absence voice: the chat and dashboard surfaces** — split from MAX-104 so the finished half does not wait behind the lifting build | MAX-104, split | Sonnet ✅ |
+| MAX-153 | **The chat shell** — composer, thread list, sheet chrome. The design pass the chat's *shell* never had | Owner | **Opus** |
 
 **MAX-066.** Splits currently need a GPS track, so a treadmill run has none — correctly
 rendered as an absence rather than fabricated. `distanceWalkingRunning` is already
@@ -1653,6 +1654,71 @@ is the overseer's, not a ticket's — flagged here rather than done.
 | MAX-148 | A lift's duration and note become editable, proposable, and type-safe | 137, 141 | Sonnet ✅ |
 | MAX-149 | Duration floor for fragments — **the classifier half of gap P3**; not yet wired to any author | 013, 131 | Sonnet ✅ |
 | MAX-151 | **Author the duration floor** — `StandardPlanSeed` states one, the authoring screen edits it, `PlanProposal` can propose it. Without this MAX-149 never fires | 149, 146, 148 | Sonnet |
+| MAX-153 | **The chat shell: composer, thread list, sheet chrome** — the design pass MAX-092–103 never had over the shell its features sit in | Owner, 092–103 | **Opus** |
+
+**MAX-153 — what was decided, what was rejected, and what it is blocked on.**
+
+The owner's ask was "ensure our chat interface is top shelf; look online for examples",
+plus, mid-ticket, "make sure the input is a Liquid Glass input with good button sizing"
+and "the app should be good to use."
+
+**Decided, and in the core where CI can see it.**
+
+- **`ChatComposerSendControl`** — four states for one 44pt box (`.send`, `.unavailable`,
+  `.awaitingReply`, `.stop`), resolved from `canSend`/`isStreaming` plus a
+  `ChatComposerCancellation` parameter. Streaming outranks `canSend` unconditionally.
+  Enabled and disabled send draw the **same glyph** so the target never changes shape
+  under a keystroke; every state is spoken distinguishably, because the visual difference
+  between two of them is a tint and `CLAUDE.md`'s hue rule applies to controls as much as
+  to charts.
+- **`ChatTranscriptFollow`** — follow-or-hold. Your own message always scrolls; incoming
+  content scrolls only if you were already at the bottom; **focusing the composer no
+  longer drags a scrolled-up reader down**, which is a deliberate departure from the
+  pre-153 behaviour and the ticket's most user-visible change. Unseen activity is a
+  **flag, not a count**, because the unit of arrival in a stream is a token — a counter
+  would read "New (417)".
+- **`ChatThreadListPresentation`** — recency banding (Today / Yesterday / Previous 7 days
+  / Previous 30 days / Earlier), newest band first, empty bands never emitted; a
+  Messages-style compact timestamp ladder (`now`, `12m`, `5h`, `Yesterday`, `Tue`,
+  `3 Aug`, `3 Aug 2025`) built from `CalendarDay` arithmetic rather than `DateFormatter`
+  so it is assertable on Linux CI; the row's scope line; and the whole VoiceOver sentence.
+- **Copy moved to `ChatThreadListCopy`** — the empty and failed sentences the view held as
+  literals, following MAX-150's precedent rather than opening a second voice.
+
+**Rejected, with reasons.**
+
+- **A tinted badge for "something arrived while you were away."** Information by hue
+  alone. The label carries it: "Jump to latest" against "New reply".
+- **A stop button during a stream, today.** `ChatModel` has no cancellation, and a stop
+  that does not stop is worse than none. `.awaitingReply` shows progress; the `.stop`
+  state exists, is tested, and turns on when one call site passes
+  `cancellation: .available`.
+- **`Text(_:style:.relative)` on a list row.** Wider than the title it competes with above
+  default Dynamic Type, re-lays-out every minute, and says "0 seconds ago". Kept for
+  VoiceOver, where width is free.
+- **A counter of unread messages.** See above.
+- **Scope on every row.** Nil for a workout thread (the title is already the run's date)
+  and for a training thread still titled by its own window — otherwise the row prints one
+  string twice.
+
+**Research citations** (all in the PR, all read for this ticket): Apple's HIG 44×44pt
+minimum tap target with the visible control permitted to be smaller than the region;
+`GlassEffectContainer` + `glassEffect` as the iOS 26 way to let the system merge and morph
+adjacent glass rather than hand-rolling a blur; `ScrollPosition` /
+`defaultScrollAnchor(.bottom)` and the jump-to-latest pattern for transcripts;
+Messages/Mail/Notes for the recency bands and the compact timestamp ladder; the
+grow-to-a-ceiling-then-scroll composer behaviour common to iMessage, WhatsApp and
+Telegram.
+
+**Blocked seam — the one thing this ticket could not land.** `ChatComposerView` and
+`ChatJumpToLatestButton` are written, documented and exercised in `DesignSystemGallery`,
+but **not wired**: the composer and the transcript's `onChange` handlers both live in
+`App/Chat/ChatConversationView.swift`, which **MAX-152 owns** for the waiting and
+streaming states. Rather than fight for the file, MAX-153 defined the seam (the send
+control is a value MAX-152 resolves; `activityIndicator` is the hook its animation
+replaces) and left the ~20-line integration to whoever lands second. **The exact diff is
+in MAX-153's PR body.** Until it is applied, the shipped user-visible change is the thread
+list, the sheet's scroll/dismiss precedence, and the design-system additions.
 
 **Four collisions the overseer must respect.**
 

@@ -211,14 +211,37 @@ final class ChatThreadListPresentationTests: XCTestCase {
         XCTAssertEqual(row.scope, ChatThreadSubtitle.text(for: subject))
     }
 
-    func testAWorkoutRowSaysWhatItIsAboutRatherThanRepeatingItsTitle() {
+    /// The sheet states "This run" under a workout thread's title because a sheet has one
+    /// title and §3.6(b) wants the scope stated unconditionally. A row has a glyph and a
+    /// kind beside it, and its title is already the run's date — so the third line would
+    /// be the second line again.
+    func testAWorkoutRowDropsAScopeItsTitleAlreadyStates() {
         let row = ChatThreadListPresentation.row(
             for: summary(subject: .workout(Fixture.workoutID), title: "3 Aug 2026 · Running", at: date(hoursAgo: 1)),
             now: now,
             timeZone: zone
         )
-        XCTAssertEqual(row.scope, "This run")
+        XCTAssertNil(row.scope)
         XCTAssertEqual(row.glyphSystemImageName, "figure.run")
+    }
+
+    /// A training thread nobody has spoken in yet is *titled* by its window
+    /// (`ChatThreadTitle.training`'s fallback), so stating the scope beneath it would
+    /// print the same string twice.
+    func testAnUnspokenTrainingRowDoesNotPrintItsWindowTwice() throws {
+        let scope = try august
+        let row = ChatThreadListPresentation.row(
+            for: summary(
+                subject: .training(scope),
+                title: ChatThreadTitle.training(scope: scope, firstUserMessage: nil),
+                at: date(hoursAgo: 1),
+                preview: nil
+            ),
+            now: now,
+            timeZone: zone
+        )
+        XCTAssertEqual(row.title, "1 – 31 Aug 2026")
+        XCTAssertNil(row.scope)
     }
 
     /// Absence is a designed state, and the row says which of the two it is drawing so the
@@ -274,5 +297,20 @@ final class ChatThreadListPresentationTests: XCTestCase {
             timeZone: zone
         )
         XCTAssertTrue(row.accessibilityLabel(spokenTimestamp: "an hour ago").hasSuffix("No messages yet"))
+    }
+
+    /// A row with no scope line to draw has no scope phrase to speak either — the spoken
+    /// sentence follows what is on screen rather than restating something dropped for
+    /// being redundant.
+    func testTheSpokenRowOmitsAScopeTheRowItselfDoesNotShow() {
+        let row = ChatThreadListPresentation.row(
+            for: summary(title: "3 Aug 2026 · Running", at: date(hoursAgo: 1), preview: "Held the cap"),
+            now: now,
+            timeZone: zone
+        )
+        XCTAssertEqual(
+            row.accessibilityLabel(spokenTimestamp: "an hour ago"),
+            "Workout chat. 3 Aug 2026 · Running. an hour ago. Held the cap"
+        )
     }
 }

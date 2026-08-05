@@ -64,7 +64,8 @@ public enum ChatThreadRecency: Int, Hashable, Sendable, CaseIterable, Comparable
 /// point nothing on the row says which window the conversation was frozen against. Two
 /// rows reading "Why did my HR climb" over two different months are the same row twice.
 /// The scope is what tells them apart, and it is the same string the sheet's subtitle
-/// shows once the thread is open (`ChatThreadSubtitle`), so the two cannot drift.
+/// shows once the thread is open (`ChatThreadSubtitle`), so the two cannot drift. It is
+/// nil wherever it would only repeat the title — see `scope` below.
 public struct ChatThreadListRow: Hashable, Sendable, Identifiable {
 
     /// The thread's own identifier — what a tap carries and what a delete takes.
@@ -77,9 +78,22 @@ public struct ChatThreadListRow: Hashable, Sendable, Identifiable {
     /// `ChatThreadTitle`'s derived name, never generated (§2.4).
     public let title: String
 
-    /// `ChatThreadSubtitle`'s wording of what the thread is about — "This run", or the
-    /// frozen window's label.
-    public let scope: String
+    /// The thread's frozen window, when stating it adds something.
+    ///
+    /// **Nil in the two cases where it would be noise**, which is a decision rather than
+    /// an omission:
+    ///
+    /// - A **workout** thread's title is already the run's date and activity type
+    ///   (§2.4), so "This run" underneath it is a second line saying what the first line
+    ///   said. The sheet shows that subtitle because a sheet has one title and needs the
+    ///   scope stated unconditionally; a list row has a glyph and a kind beside it.
+    /// - A **training** thread nobody has spoken in yet is *titled* by its window
+    ///   (`ChatThreadTitle.training`'s fallback), so the same string would appear twice.
+    ///
+    /// Once the athlete asks something, a training thread's title becomes their question
+    /// and this line is the only thing left saying which month it was about — which is
+    /// §3.6(b)'s whole mechanism, and the case worth the row's third line.
+    public let scope: String?
 
     /// One line of the last visible turn, or the absence sentence.
     public let preview: String
@@ -102,7 +116,7 @@ public struct ChatThreadListRow: Hashable, Sendable, Identifiable {
         kind: ChatSubjectKind,
         glyphSystemImageName: String,
         title: String,
-        scope: String,
+        scope: String?,
         preview: String,
         previewIsAbsence: Bool,
         timestamp: String,
@@ -132,7 +146,9 @@ public struct ChatThreadListRow: Hashable, Sendable, Identifiable {
     /// athlete distinguishes a run thread from a training thread at a glance by its shape,
     /// and that channel has to exist in words too.
     public func accessibilityLabel(spokenTimestamp: String) -> String {
-        "\(kind.accessibilityKindLabel). \(title). \(scope). \(spokenTimestamp). \(preview)"
+        [kind.accessibilityKindLabel, title, scope, spokenTimestamp, preview]
+            .compactMap { $0 }
+            .joined(separator: ". ")
     }
 }
 
@@ -215,12 +231,27 @@ public enum ChatThreadListPresentation {
             kind: summary.subject.kind,
             glyphSystemImageName: summary.subject.kind.glyphSystemImageName,
             title: summary.title,
-            scope: ChatThreadSubtitle.text(for: summary.subject),
+            scope: scope(for: summary),
             preview: summary.preview ?? ChatThreadListCopy.noMessagesYetPreview,
             previewIsAbsence: summary.preview == nil,
             timestamp: compactTimestamp(for: summary.lastActivityAt, now: now, timeZone: timeZone),
             lastActivityAt: summary.lastActivityAt
         )
+    }
+
+    /// See `ChatThreadListRow.scope` for the two cases this deliberately drops.
+    ///
+    /// It reads `ChatThreadSubtitle` rather than re-deriving the window, so a row and the
+    /// sheet it opens cannot spell one window two ways — the drift §3.6(b) is built to
+    /// stop.
+    private static func scope(for summary: ChatThreadSummary) -> String? {
+        let stated = ChatThreadSubtitle.text(for: summary.subject)
+        switch summary.subject {
+        case .workout:
+            return nil
+        case .training:
+            return stated == summary.title ? nil : stated
+        }
     }
 
     /// The narrowest honest timestamp for a list row.
