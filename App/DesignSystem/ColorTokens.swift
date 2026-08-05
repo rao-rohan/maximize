@@ -103,10 +103,12 @@ extension Color {
 
     /// **The accent. Change this one declaration to re-theme the app.**
     ///
-    /// PRD §14.2 / amendment A7 leave the accent to the owner and mark it explicitly
-    /// non-blocking, so this is a defensible default, not a decision. It is reserved
-    /// for the on-plan / effective state and for interactive affordances, used
-    /// sparingly (FR-4.3).
+    /// **Settled (MAX-084).** PRD §14.2 left the accent to the owner and marked it
+    /// non-blocking; amendment A7 now records this violet as the decision rather than
+    /// as the working default MAX-040 committed. `docs/PRD-AMENDMENTS.md` carries the
+    /// full contrast table in all four appearances and the five alternatives that were
+    /// measured and rejected. It is reserved for the on-plan / effective state and for
+    /// interactive affordances, used sparingly (FR-4.3).
     ///
     /// Chosen as a violet rather than a green, a blue, or a warm hue, because it has
     /// to survive three separate collisions:
@@ -140,8 +142,15 @@ extension Color {
     // from translucency because a blurred cap line is a wrong cap line. Kept neutral
     // on purpose — the saturated budget is already spent on the accent and the bands.
 
-    /// Gridlines behind a plot. Should be visible and never compete with the series.
+    /// Gridlines behind a plot. Should be visible and never compete with the series —
+    /// MAX-084 raised these values, which cleared only the second half of that.
     static let chartGridline = DesignPalette.chartGridline.color
+
+    /// The filled region where a run left the plan — the time above the HR cap
+    /// (FR-1.2). Opaque, and never drawn with a call-site `.opacity()`: the whole
+    /// reason this token exists is that the shading used to be a translucent literal
+    /// nothing could measure. See `DesignPalette.chartExcursion`.
+    static let chartExcursion = DesignPalette.chartExcursion.color
 
     /// A plan threshold drawn across a chart — the HR cap line (FR-1.2), the cadence
     /// target band edges (FR-1.3). Reads as "the rule", distinct from the data.

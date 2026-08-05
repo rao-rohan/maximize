@@ -489,7 +489,23 @@ public struct HeartRateDriftOverlayData: Hashable, Sendable {
     /// The oldest curve in a full stack. Faint, but deliberately not near-invisible — it
     /// is the "before" in a before-and-after, and FR-3.3 is about watching drift flatten
     /// across an interval, which needs the far end of the interval to stay legible.
-    public static let oldestContextOpacity = 0.28
+    ///
+    /// **MAX-084: was 0.28, and the comment above was not true of it.** Composited over
+    /// `surfaceInset` that measured 1.25:1 in dark, on a 1pt stroke — near-invisible by
+    /// any reading. 0.45 against the raised `chartSeriesMuted` takes it to 1.60:1, and
+    /// the whole ramp with it.
+    ///
+    /// Not raised further, for two reasons worth stating. The ramp spans
+    /// `newestContextOpacity` down to here, so every point spent on the floor is a
+    /// point of recency encoding given up — 0.75→0.45 is already a narrower span than
+    /// 0.75→0.28 was, and recency is the only axis separating twelve otherwise
+    /// identical lines. And **the residual problem is the 1pt stroke, not the colour**:
+    /// `DriftOverlayView` draws context curves at 1pt against the primary's 2pt, and at
+    /// 1.60:1 a hairline is still a hairline. Thickening it is the change that would
+    /// help most and the one arithmetic cannot adjudicate — twelve overlapping strokes
+    /// behave differently from one, and only a device can say whether the result reads
+    /// as history or as a tangle. Left for a ticket that can look at it.
+    public static let oldestContextOpacity = 0.45
 
     // MARK: - Saying what is missing
 

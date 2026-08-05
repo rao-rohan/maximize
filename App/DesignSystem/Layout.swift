@@ -92,4 +92,16 @@ enum LayoutMetrics {
     /// Stroke width for a hollow heatmap mark — a missed day. Heavier than `hairline`,
     /// which would vanish against a mark this small.
     static let heatmapMarkStroke: CGFloat = 1
+
+    /// Outside diameter of the score-band mark in a calendar cell (MAX-084).
+    ///
+    /// Small on purpose. A cell is roughly 42pt on a 390pt-wide phone and already holds
+    /// a date and a state glyph; the mark has to sit in a corner without crowding
+    /// either. Six points is about the floor at which a ring still reads as a ring —
+    /// see `ScoreBandMarkView` — and is the value a device check should scrutinise
+    /// first if the channel turns out not to read.
+    static let scoreBandMarkSize: CGFloat = 6
+
+    /// The same mark on the verdict header's band chip, which has room for it.
+    static let prominentScoreBandMarkSize: CGFloat = 10
 }

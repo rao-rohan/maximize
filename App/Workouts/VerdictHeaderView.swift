@@ -113,6 +113,15 @@ struct VerdictHeaderView: View {
                     .font(.metricSecondary)
                     .foregroundStyle(Color.textOnSaturatedFill)
                 Spacer(minLength: 0)
+                // The same non-colour band channel the calendar carries (MAX-084). The
+                // chip's copy is binary — `Score.isEffective` is a threshold, not a
+                // band — so `.marginal` and `.ineffective` both read "Not effective"
+                // and were told apart by hue alone, at 1.66:1 in dark and 1.04:1 in
+                // light. The mark is the channel that does not depend on seeing hue.
+                ScoreBandMarkView(
+                    band: automatic.band,
+                    diameter: LayoutMetrics.prominentScoreBandMarkSize
+                )
             }
             .padding(Spacing.compact)
             .frame(maxWidth: .infinity, alignment: .leading)
