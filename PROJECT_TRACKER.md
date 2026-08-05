@@ -496,7 +496,7 @@ feature was governed by a plan that could not exist).
 | MAX-083 | Week / month / year intervals, each with a fitting representation | Owner | **Opus** ✅ |
 | MAX-084 | Fix score-band and chart contrast; resolve A7 | MAX-082 | Sonnet ✅ |
 | MAX-085 | **The tab bar, once**: Plan becomes a third tab, iOS 26 `Tab` builder, `.tint()`, surface elevation, Liquid Glass chrome | MAX-082, Owner | **Opus** |
-| MAX-086 | Wire `AppearancePreference` — a setting that silently does nothing | MAX-082 | Sonnet |
+| MAX-086 | Wire `AppearancePreference` — a setting that silently does nothing | MAX-082 | Sonnet ✅ |
 | MAX-087 | A non-hue channel for the year heatmap's 6pt cells | MAX-084 | Sonnet |
 | MAX-105 | **The plan on the dashboard calendar** — scheduled beneath actual | Owner | **Opus** |
 | MAX-106 | The UI standard, written into `CLAUDE.md` | Owner | Sonnet ✅ |
@@ -560,6 +560,16 @@ app-layer wiring compiled fine and did nothing. Re-tiered to Sonnet: the mapping
 express "impose nothing" for `.system` distinctly from picking a scheme, and the
 preference has to take effect without a relaunch, which needs the existing settings
 observation path rather than a second one.
+
+**MAX-086 landed.** `MaximizeCore` gained `AppearancePreference.resolvedColorScheme:
+ResolvedColorScheme?` — `.system` maps to `nil`, so it reads as "impose nothing," not as
+a default the mapping quietly picked. `SettingsModel` gained a `.shared` instance;
+`SettingsView` and `MaximizeApp` now read and write that one object instead of each
+loading its own copy of `AppSettings`, so a save in the settings sheet is visible to the
+app root immediately — no relaunch, and no second notion of "the current appearance" to
+drift from the first. `MaximizeApp` is the sole place `ResolvedColorScheme?` becomes
+`.preferredColorScheme`. Compiles and its unit tests pass; not verified on a device —
+see the PR's "Needs device verification."
 
 **MAX-106 — the UI standard, written into `CLAUDE.md`.** The owner set a bar for the
 redesign; until this landed it lived only in individual agent briefs, so every ticket

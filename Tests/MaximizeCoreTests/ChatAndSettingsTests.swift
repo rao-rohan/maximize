@@ -140,6 +140,24 @@ final class SettingsTests: XCTestCase {
         )
         XCTAssertEqual(try roundTripped(settings), settings)
     }
+
+    // MARK: - AppearancePreference → ResolvedColorScheme (MAX-086)
+
+    /// `.system` must impose nothing, not default to the app's dark-first design.
+    /// `nil` here is what tells SwiftUI's `.preferredColorScheme` to leave the OS's
+    /// choice alone — a `.dark` fallback would silently override an athlete who
+    /// deliberately asked to follow the system.
+    func testSystemImposesNoColorScheme() {
+        XCTAssertNil(AppearancePreference.system.resolvedColorScheme)
+    }
+
+    func testLightResolvesToLight() {
+        XCTAssertEqual(AppearancePreference.light.resolvedColorScheme, .light)
+    }
+
+    func testDarkResolvesToDark() {
+        XCTAssertEqual(AppearancePreference.dark.resolvedColorScheme, .dark)
+    }
 }
 
 final class RestDayOverrideTests: XCTestCase {

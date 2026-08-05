@@ -26,6 +26,11 @@ import MaximizeCore
 /// `SettingsModel` for the load/save shape and how a store that failed to open is kept
 /// distinct from "settings are default".
 ///
+/// **MAX-086.** This screen's `model` is `SettingsModel.shared` — the same instance
+/// `MaximizeApp` reads to apply `AppearancePreference` — rather than a private copy.
+/// That is what makes an appearance change here take effect immediately instead of on
+/// next launch: see `SettingsModel.shared`'s docs.
+///
 /// **The stored API key is never shown here, not even partially masked.** This view
 /// only ever asks the store whether a key is present; it never reads or displays
 /// an actual key. The only raw key text that exists is what the user actively types
@@ -52,14 +57,22 @@ struct SettingsView: View {
     /// - Parameters:
     ///   - keyStore: where the Anthropic API key lives. Defaults to the real Keychain
     ///     store; a test or preview passes a fake.
-    ///   - settingsRepository: forwarded to `SettingsModel`, which defaults it to
-    ///     `PersistenceComposition.store` — never to a stub. See that type's docs.
+    ///   - settingsRepository: when supplied, backs this screen with a private
+    ///     `SettingsModel` over that repository — for a test or preview that must not
+    ///     touch the real store. Left `nil` (the production path), this screen shares
+    ///     `SettingsModel.shared` with the app root instead of loading its own copy,
+    ///     which is what lets an appearance change apply immediately: see that
+    ///     property's docs.
     init(
         keyStore: AnthropicAPIKeyStoring = KeychainAnthropicAPIKeyStore(),
         settingsRepository: (any SettingsRepository)? = nil
     ) {
         self.keyStore = keyStore
-        _model = State(initialValue: SettingsModel(settingsRepository: settingsRepository))
+        if let settingsRepository {
+            _model = State(initialValue: SettingsModel(settingsRepository: settingsRepository))
+        } else {
+            _model = State(initialValue: .shared)
+        }
     }
 
     var body: some View {
