@@ -150,15 +150,19 @@ enum Fixture {
         )
     }
 
+    /// - Parameter lift: the lift slot, defaulting to empty — i.e. rest on every weekday,
+    ///   which is what every plan on disk prescribes, so every existing caller keeps
+    ///   measuring exactly what it measured before A19 gave the day a second obligation.
     static func plan(
         version: Int = 1,
         heartRateCapBPM: Double = 150,
-        minimumSessionDurationSeconds: Double? = nil
+        minimumSessionDurationSeconds: Double? = nil,
+        lift: [Weekday: ScheduledSession] = [:]
     ) throws -> Plan {
         try Plan(
             version: PlanVersion(version),
             effectiveFrom: day(2026, 1, 1),
-            weeklyTemplate: weeklyTemplate(),
+            weeklyTemplate: weeklyTemplate(lift: lift),
             longRunArc: LongRunArc(weeks: [
                 LongRunArc.Week(index: 1, distanceMeters: 16_000),
                 LongRunArc.Week(index: 2, distanceMeters: 18_000),
@@ -211,7 +215,12 @@ enum Fixture {
     ) throws -> Score {
         // `ScheduledSession` rejects a rest day carrying a distance; no caller passes
         // `.rest` today, and this keeps the fixture from becoming a trap if one does.
-        let scheduledDistance: Double? = scheduledKind == .rest ? nil : 8_000
+        // A `.lift` is legal with a distance and meaningless with one (A20: a lift is
+        // scored on adherence, and HealthKit reports no distance for one), so the
+        // fixture declines to invent one rather than leaving a number no reader can use.
+        let scheduledDistance: Double? = (scheduledKind == .rest || scheduledKind == .lift)
+            ? nil
+            : 8_000
         let band: ScoreBand
         if points >= threshold {
             band = .effective
