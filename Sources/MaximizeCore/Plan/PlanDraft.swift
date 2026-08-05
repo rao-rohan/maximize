@@ -339,25 +339,24 @@ public struct PlanDraft: Hashable, Sendable {
     ///
     /// ## Why it is an instance method rather than an initializer
     ///
-    /// Because of the lift slot. `PlanProposal`'s vocabulary derives from
-    /// `ScheduledSessionKind.prescribable`, which excludes `.lift` until MAX-141, so a
-    /// proposal describes the **run** slot and says nothing at all about lifts. An
-    /// initializer taking only a proposal would have to invent an answer for the lift
-    /// slot, and the only answers available are "rest everywhere" — silently deleting
-    /// the lift days the athlete already has, on a revision — or a second seed. Applying
-    /// *onto* the draft the athlete is revising carries their lift days through
-    /// untouched, which is both the honest answer and the one the card is required to
-    /// state out loud (`PlanProposalReview.liftNote`, so that an athlete who asked for
-    /// "and lift on Tuesdays" is not told yes by omission).
+    /// Because of the fields neither slot lets a proposal touch. `PlanProposal`'s lift
+    /// slot (MAX-141) carries a kind and muscle groups — matching exactly what
+    /// `PlanDraft.DayDraft`'s own setters expose (`setLiftKind`, `setLiftMuscleGroups`)
+    /// — but not a note or a duration, because nothing offers to edit those yet on
+    /// either slot (`durationSeconds` since MAX-131, `liftNote`/`liftDurationSeconds`
+    /// since MAX-137). An initializer taking only a proposal would have nothing to carry
+    /// those forward *from*. Applying *onto* the draft the athlete is revising is what
+    /// gives this method something to carry them from — see
+    /// `carriedDurationSeconds(from:proposing:)` and its lift-slot twin below.
     ///
     /// Everything else is replaced outright rather than merged: the proposal is a whole
     /// plan, not a patch, and `PlanProposalInstruction` tells the model exactly that —
-    /// "prescribe the whole week, every time". A field-by-field merge here would be a
-    /// second opinion about what the model meant to change.
-    ///
-    /// The one other carried field is the run slot's `durationSeconds`, for the same
-    /// reason as the lift slot and under a narrower rule — see
-    /// `carriedDurationSeconds(from:proposing:)`.
+    /// "prescribe the whole week, every time", both slots. **This now includes the lift
+    /// slot's kind and muscle groups** — a weekday the proposal does not restate reverts
+    /// to rest, the same totality rule `WeeklyTemplate` itself applies, rather than
+    /// surviving untouched the way it did before MAX-141 gave a proposal a lift slot to
+    /// speak in at all. A field-by-field merge here would be a second opinion about what
+    /// the model meant to change.
     ///
     /// - Throws: `DomainError` only for the shapes `PlanDraft.init` itself refuses; a
     ///   parsed `PlanProposal` cannot express one (its arc is non-empty and strictly
@@ -375,10 +374,13 @@ public struct PlanDraft: Hashable, Sendable {
                 durationSeconds: carriedDurationSeconds(from: day, proposing: proposed),
                 note: proposed.note
             )
-            // Carried, not re-derived: `liftSession()` is the draft's own accessor, so
-            // the note and the duration MAX-131/MAX-137 deliberately keep uneditable
-            // survive this too.
-            liftSessions[day.weekday] = try day.liftSession()
+            let proposedLift = proposal.liftSession(for: day.weekday)
+            liftSessions[day.weekday] = try ScheduledSession(
+                kind: proposedLift.kind,
+                durationSeconds: carriedLiftDurationSeconds(from: day, proposing: proposedLift),
+                note: carriedLiftNote(from: day, proposing: proposedLift),
+                muscleGroups: proposedLift.muscleGroups
+            )
         }
         return try PlanDraft(
             heartRateCapBPM: proposal.heartRateCapBPM,
@@ -422,6 +424,34 @@ public struct PlanDraft: Hashable, Sendable {
     ) -> Double? {
         guard proposed.kind == day.kind else { return nil }
         return day.durationSeconds
+    }
+
+    /// The lift slot's twin of `carriedDurationSeconds(from:proposing:)`, for the same
+    /// reason: `liftDurationSeconds` is carried-but-uneditable (MAX-137's own doc), and
+    /// `PlanProposal` has no field for it, so naively rebuilding the lift session from
+    /// the proposal's kind and muscle groups alone would silently delete a "45 minutes"
+    /// the athlete never had a chance to keep.
+    ///
+    /// **Only while the lift kind is unchanged**, exactly as the run's version is — a
+    /// duration is a property of *that* ask, and carrying it onto a proposal that
+    /// replaced the ask (lift became rest, or vice versa) would assert a length nobody
+    /// stated for the new one.
+    private func carriedLiftDurationSeconds(
+        from day: DayDraft,
+        proposing proposedLift: ScheduledSession
+    ) -> Double? {
+        guard proposedLift.kind == day.liftKind else { return nil }
+        return day.liftDurationSeconds
+    }
+
+    /// `liftNote`'s twin of the same rule — carried only while the lift kind the
+    /// proposal names matches the one already on the draft.
+    private func carriedLiftNote(
+        from day: DayDraft,
+        proposing proposedLift: ScheduledSession
+    ) -> String? {
+        guard proposedLift.kind == day.liftKind else { return nil }
+        return day.liftNote
     }
 
     // MARK: - Editing the week

@@ -22,10 +22,10 @@ public enum ScheduledSessionKind: String, Hashable, Sendable, Codable, CaseItera
     /// band's `appliesTo` list in, so putting `.lift` anywhere but last would reorder
     /// copy the athlete already reads.
     ///
-    /// The weekly template has had a second slot since MAX-129, and the authoring
-    /// screen can prescribe one as of MAX-137 — through the lift slot's own picker
-    /// (`liftPrescribable`), never through `prescribable`, which still gates the run
-    /// slot only.
+    /// The weekly template has had a second slot since MAX-129, the authoring screen
+    /// can prescribe one as of MAX-137, and a chat proposal can as of MAX-141 — each
+    /// through the lift slot's own picker or wire field (`liftPrescribable`), never
+    /// through `prescribable`, which still gates the run slot only.
     case lift
 
     public init(_ classification: WorkoutClassification) {

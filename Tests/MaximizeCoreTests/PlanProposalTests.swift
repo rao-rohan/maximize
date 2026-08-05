@@ -18,13 +18,13 @@ final class PlanProposalTests: XCTestCase {
     /// The seven days of a plausible proposal, as JSON fragments, so a test can replace
     /// exactly one of them and leave the rest alone.
     private static let weekEntries = [
-        #"{"weekday": "monday", "kind": "rest"}"#,
-        #"{"weekday": "tuesday", "kind": "easy", "distanceMeters": 8000}"#,
-        #"{"weekday": "wednesday", "kind": "hard", "note": "6 × 800m"}"#,
-        #"{"weekday": "thursday", "kind": "easy", "distanceMeters": 8000}"#,
-        #"{"weekday": "friday", "kind": "rest"}"#,
-        #"{"weekday": "saturday", "kind": "other", "note": "Strength"}"#,
-        #"{"weekday": "sunday", "kind": "long", "distanceMeters": 18000}"#,
+        #"{"weekday": "monday", "kind": "rest", "liftKind": "rest"}"#,
+        #"{"weekday": "tuesday", "kind": "easy", "distanceMeters": 8000, "liftKind": "rest"}"#,
+        #"{"weekday": "wednesday", "kind": "hard", "note": "6 × 800m", "liftKind": "rest"}"#,
+        #"{"weekday": "thursday", "kind": "easy", "distanceMeters": 8000, "liftKind": "rest"}"#,
+        #"{"weekday": "friday", "kind": "rest", "liftKind": "rest"}"#,
+        #"{"weekday": "saturday", "kind": "other", "note": "Strength", "liftKind": "rest"}"#,
+        #"{"weekday": "sunday", "kind": "long", "distanceMeters": 18000, "liftKind": "rest"}"#,
     ]
 
     /// A reply the model could plausibly send, with named fields overridable one at a
@@ -222,6 +222,18 @@ final class PlanProposalTests: XCTestCase {
         assertParseFails(reply(week: week), .unknownWeekday(name: "moonday"))
     }
 
+    /// The leak this ticket closes: `.lift` is a real `ScheduledSessionKind` now that
+    /// `liftKind` gives a model a legitimate reason to type the word, so `"kind": "lift"`
+    /// in the **run** slot has to be caught rather than silently decoding — a lift
+    /// judged as the day's run ask is the exact cross-discipline confusion A17 exists to
+    /// prevent. See `PlanProposal.sessionKind(named:)`.
+    func testALiftProposedIntoTheRunSlotIsRefused() {
+        let week = PlanProposalTests.weekEntries.map {
+            $0.replacingOccurrences(of: #""kind": "hard""#, with: #""kind": "lift""#)
+        }
+        assertParseFails(reply(week: week), .unknownSessionKind(name: "lift"))
+    }
+
     /// Formatting, not content: capitalisation is the model's business.
     func testWeekdayAndKindNamesAreCaseInsensitive() throws {
         let week = PlanProposalTests.weekEntries.map {
@@ -245,7 +257,7 @@ final class PlanProposalTests: XCTestCase {
 
     func testAWeekNamingADayTwiceIsRefusedAndSaysWhich() {
         var week = PlanProposalTests.weekEntries
-        week[6] = #"{"weekday": "monday", "kind": "long", "distanceMeters": 18000}"#
+        week[6] = #"{"weekday": "monday", "kind": "long", "distanceMeters": 18000, "liftKind": "rest"}"#
         assertParseFails(
             reply(week: week),
             .weekIsNotOneSessionPerWeekday(missing: [.sunday], duplicated: [.monday])
@@ -257,17 +269,17 @@ final class PlanProposalTests: XCTestCase {
     /// nothing to clear on the athlete's behalf — the model said two contradictory things.
     func testARestDayCarryingWorkIsRefusedRatherThanTrimmed() {
         var week = PlanProposalTests.weekEntries
-        week[0] = #"{"weekday": "monday", "kind": "rest", "distanceMeters": 5000}"#
+        week[0] = #"{"weekday": "monday", "kind": "rest", "distanceMeters": 5000, "liftKind": "rest"}"#
         assertParseFails(reply(week: week), .restDayIsNotEmpty(weekday: .monday))
 
-        week[0] = #"{"weekday": "monday", "kind": "rest", "note": "Easy shakeout if I feel good"}"#
+        week[0] = #"{"weekday": "monday", "kind": "rest", "note": "Easy shakeout if I feel good", "liftKind": "rest"}"#
         assertParseFails(reply(week: week), .restDayIsNotEmpty(weekday: .monday))
     }
 
     /// The door's own vocabulary, because the door's own rule.
     func testAZeroDistanceOnAScheduledDayIsRejectedInTheDoorsWords() {
         var week = PlanProposalTests.weekEntries
-        week[1] = #"{"weekday": "tuesday", "kind": "easy", "distanceMeters": 0}"#
+        week[1] = #"{"weekday": "tuesday", "kind": "easy", "distanceMeters": 0, "liftKind": "rest"}"#
         assertParseFails(
             reply(week: week),
             .rejectedByAuthoring(.scheduledDistanceNotPositive(weekday: .tuesday))
@@ -279,6 +291,89 @@ final class PlanProposalTests: XCTestCase {
     func testAnOmittedDistanceIsNotAZeroDistance() throws {
         let proposal = try PlanProposal.parse(reply())
         XCTAssertNil(proposal[.wednesday].distanceMeters)
+    }
+
+    // MARK: - The lift slot (MAX-141)
+
+    /// A weekday that prescribes both a run and a lift round-trips: the ticket's own
+    /// acceptance criterion, and the normal case per LIFTING-SPEC §5 ("a day prescribing
+    /// both is the normal case, not an edge case").
+    func testADayPrescribingBothSlotsRoundTrips() throws {
+        var week = PlanProposalTests.weekEntries
+        week[1] = #"{"weekday": "tuesday", "kind": "easy", "distanceMeters": 8000, "liftKind": "lift", "liftMuscleGroups": ["legs", "core"]}"#
+        let proposal = try PlanProposal.parse(reply(week: week))
+
+        XCTAssertEqual(proposal[.tuesday].kind, .easy)
+        XCTAssertEqual(proposal[.tuesday].distanceMeters, 8000)
+        XCTAssertEqual(proposal.liftSession(for: .tuesday).kind, .lift)
+        XCTAssertEqual(proposal.liftSession(for: .tuesday).muscleGroups, [.legs, .core])
+
+        let data = try JSONEncoder().encode(proposal)
+        let text = try XCTUnwrap(String(data: data, encoding: .utf8))
+        XCTAssertEqual(try PlanProposal.parse(text), proposal)
+    }
+
+    /// A day that prescribes a lift and nothing else — the run slot stays rest.
+    func testADayPrescribingALiftOnlyParses() throws {
+        var week = PlanProposalTests.weekEntries
+        week[4] = #"{"weekday": "friday", "kind": "rest", "liftKind": "lift", "liftMuscleGroups": ["chest"]}"#
+        let proposal = try PlanProposal.parse(reply(week: week))
+
+        XCTAssertEqual(proposal[.friday], .rest)
+        XCTAssertEqual(proposal.liftSession(for: .friday).kind, .lift)
+        XCTAssertEqual(proposal.liftSession(for: .friday).muscleGroups, [.chest])
+    }
+
+    /// A lift with no muscle groups named is a real, legal statement — "lift on Tuesday,
+    /// groups unstated" — not an error. `ScheduledSession.muscleGroups`' own doc makes
+    /// this the honest reading: rest and "a lift with no groups named" stay distinct.
+    func testALiftWithNoMuscleGroupsNamedIsAccepted() throws {
+        var week = PlanProposalTests.weekEntries
+        week[1] = #"{"weekday": "tuesday", "kind": "easy", "distanceMeters": 8000, "liftKind": "lift"}"#
+        let proposal = try PlanProposal.parse(reply(week: week))
+
+        XCTAssertEqual(proposal.liftSession(for: .tuesday).kind, .lift)
+        XCTAssertTrue(proposal.liftSession(for: .tuesday).muscleGroups.isEmpty)
+    }
+
+    /// The rule `ScheduledSession` itself enforces — only a lift may name muscle
+    /// groups — reaching the proposal boundary in its own vocabulary.
+    func testARestLiftCarryingMuscleGroupsIsRefused() {
+        var week = PlanProposalTests.weekEntries
+        week[1] = #"{"weekday": "tuesday", "kind": "easy", "distanceMeters": 8000, "liftKind": "rest", "liftMuscleGroups": ["legs"]}"#
+        assertParseFails(reply(week: week), .liftRestDayIsNotEmpty(weekday: .tuesday))
+    }
+
+    /// `liftKind` is required, exactly as `kind` is: the lift slot's totality is
+    /// "rest included and explicit" (LIFTING-SPEC §2.2), and a proposal is a whole
+    /// plan restated every time rather than a patch — see `PlanDraft.applying(_:)`.
+    func testAnAbsentLiftKindIsNamed() {
+        let week = PlanProposalTests.weekEntries.map {
+            $0.replacingOccurrences(of: #", "liftKind": "rest""#, with: "")
+        }
+        assertParseFails(reply(week: week), .missingField(name: "liftKind"))
+    }
+
+    /// The lift slot's own, smaller vocabulary — not the run slot's.
+    func testAnUnknownLiftKindIsRefusedByName() {
+        var week = PlanProposalTests.weekEntries
+        week[1] = #"{"weekday": "tuesday", "kind": "easy", "distanceMeters": 8000, "liftKind": "easy"}"#
+        assertParseFails(reply(week: week), .unknownLiftKind(name: "easy"))
+    }
+
+    func testAnUnknownMuscleGroupIsRefusedByName() {
+        var week = PlanProposalTests.weekEntries
+        week[1] = #"{"weekday": "tuesday", "kind": "easy", "distanceMeters": 8000, "liftKind": "lift", "liftMuscleGroups": ["abs"]}"#
+        assertParseFails(reply(week: week), .unknownMuscleGroup(name: "abs"))
+    }
+
+    /// Formatting tolerance extends to the lift slot's own vocabulary too.
+    func testLiftKindAndMuscleGroupNamesAreCaseInsensitive() throws {
+        var week = PlanProposalTests.weekEntries
+        week[1] = #"{"weekday": "tuesday", "kind": "easy", "distanceMeters": 8000, "liftKind": "LIFT", "liftMuscleGroups": ["Legs", "CORE"]}"#
+        let proposal = try PlanProposal.parse(reply(week: week))
+        XCTAssertEqual(proposal.liftSession(for: .tuesday).kind, .lift)
+        XCTAssertEqual(proposal.liftSession(for: .tuesday).muscleGroups, [.legs, .core])
     }
 
     // MARK: - The long-run arc
@@ -384,16 +479,34 @@ final class PlanProposalTests: XCTestCase {
     /// The test §4.8 names explicitly. Adding a `ScheduledSessionKind` and forgetting the
     /// prompt fails here rather than silently producing a model that cannot propose the
     /// new kind.
-    /// **`prescribable`, not `allCases`** (MAX-128/MAX-129). There is one prescription
-    /// slot today, so `.lift` is deliberately not offered to the model — a lift proposed
-    /// into the run slot would be a plan the athlete cannot mean. Asserting over
-    /// `prescribable` keeps the forcing function intact for every kind that *is*
-    /// proposable, and MAX-141 widens it when the week has a second slot.
+    /// **`prescribable`, not `allCases`** (MAX-128/MAX-129). The **run** slot's
+    /// vocabulary stays five kinds — `.lift` is deliberately not offered here, because a
+    /// lift proposed into the run slot would be a plan the athlete cannot mean (A17).
+    /// The lift slot has its own, separate coverage test below, over its own vocabulary.
     func testTheSchemaNamesEveryProposableSessionKind() {
         for kind in ScheduledSessionKind.prescribable {
             XCTAssertTrue(
                 PlanProposal.schemaDescription.contains("\"\(kind.rawValue)\""),
                 "the plan schema never mentions the \(kind.rawValue) session kind"
+            )
+        }
+    }
+
+    /// The lift slot's own enum-coverage guarantee (MAX-141): a case added to
+    /// `ScheduledSessionKind.liftPrescribable` or to `MuscleGroup` has to appear in the
+    /// rendered schema, exactly as `testTheSchemaNamesEveryProposableSessionKind` pins
+    /// for the run slot.
+    func testTheSchemaNamesEveryLiftKindAndMuscleGroup() {
+        for kind in ScheduledSessionKind.liftPrescribable {
+            XCTAssertTrue(
+                PlanProposal.schemaDescription.contains("\"\(kind.rawValue)\""),
+                "the plan schema never mentions the \(kind.rawValue) lift kind"
+            )
+        }
+        for group in MuscleGroup.allCases {
+            XCTAssertTrue(
+                PlanProposal.schemaDescription.contains("\"\(group.rawValue)\""),
+                "the plan schema never mentions the \(group.rawValue) muscle group"
             )
         }
     }
@@ -497,13 +610,15 @@ final class PlanProposalTests: XCTestCase {
             proposal.longRunArc.map(\.index)
         )
         for weekday in Weekday.allCases {
-            // `.run` because a proposal can only prescribe the run slot: MAX-099's
-            // vocabulary derives from `ScheduledSessionKind.prescribable`, which excludes
-            // `.lift` until MAX-141 widens it. Asserting the lift slot here would be
-            // asserting a slot this type cannot yet fill.
             XCTAssertEqual(
                 plan.weeklyTemplate.session(on: weekday, for: .run),
                 proposal[weekday]
+            )
+            // MAX-141: the lift slot goes through the same door and comes out the same
+            // way, since none of the fixture's lift asks is anything but rest.
+            XCTAssertEqual(
+                plan.weeklyTemplate.session(on: weekday, for: .lift),
+                proposal.liftSession(for: weekday)
             )
         }
     }
@@ -586,8 +701,10 @@ final class PlanProposalTests: XCTestCase {
     /// acceptable to the door.
     private func draft(from proposal: PlanProposal) throws -> PlanDraft {
         var sessions: [Weekday: ScheduledSession] = [:]
+        var liftSessions: [Weekday: ScheduledSession] = [:]
         for day in proposal.week {
             sessions[day.weekday] = day.session
+            liftSessions[day.weekday] = day.liftSession
         }
         return try PlanDraft(
             heartRateCapBPM: proposal.heartRateCapBPM,
@@ -599,6 +716,7 @@ final class PlanProposalTests: XCTestCase {
             longRunArcWeeks: proposal.longRunArc.map {
                 PlanDraft.ArcWeekDraft(index: $0.index, distanceMeters: $0.distanceMeters)
             },
+            liftSessions: liftSessions,
             goalStatements: proposal.goalStatements.joined(separator: "\n"),
             goalTargetDay: proposal.goalTargetDay
         )

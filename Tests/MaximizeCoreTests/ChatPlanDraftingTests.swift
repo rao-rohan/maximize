@@ -24,13 +24,13 @@ final class ChatPlanDraftingTests: XCTestCase {
       "effectiveThresholdPoints": 70,
       "marginalThresholdPoints": 45,
       "week": [
-        {"weekday": "monday", "kind": "rest"},
-        {"weekday": "tuesday", "kind": "easy", "distanceMeters": 8000},
-        {"weekday": "wednesday", "kind": "hard", "note": "6 × 800m"},
-        {"weekday": "thursday", "kind": "easy", "distanceMeters": 6000},
-        {"weekday": "friday", "kind": "rest"},
-        {"weekday": "saturday", "kind": "easy", "distanceMeters": 6000},
-        {"weekday": "sunday", "kind": "long", "distanceMeters": 18000}
+        {"weekday": "monday", "kind": "rest", "liftKind": "rest"},
+        {"weekday": "tuesday", "kind": "easy", "distanceMeters": 8000, "liftKind": "rest"},
+        {"weekday": "wednesday", "kind": "hard", "note": "6 × 800m", "liftKind": "rest"},
+        {"weekday": "thursday", "kind": "easy", "distanceMeters": 6000, "liftKind": "rest"},
+        {"weekday": "friday", "kind": "rest", "liftKind": "rest"},
+        {"weekday": "saturday", "kind": "easy", "distanceMeters": 6000, "liftKind": "rest"},
+        {"weekday": "sunday", "kind": "long", "distanceMeters": 18000, "liftKind": "rest"}
       ],
       "longRunArc": [{"index": 1, "distanceMeters": 16000}, {"index": 2, "distanceMeters": 18000}],
       "goalStatements": ["Sub-1:45 half marathon"]
@@ -128,8 +128,11 @@ final class ChatPlanDraftingTests: XCTestCase {
         }
         let cap = try XCTUnwrap(review.sections.flatMap(\.rows).first { $0.id == "heartRateCap" })
         XCTAssertEqual(cap.change, .changed(from: "152 bpm"))
-        // And the lift day the proposal could not touch is named rather than left silent.
-        XCTAssertTrue(review.liftNote.contains("Tuesday"))
+        // And the lift day this reply does not restate is a visible, named change
+        // (MAX-141) rather than a silent carry-forward — see `PlanProposalReviewTests`.
+        let tuesdayLift = try XCTUnwrap(review.sections.flatMap(\.rows).first { $0.id == "lift.tuesday" })
+        XCTAssertEqual(tuesdayLift.value, "Rest")
+        XCTAssertEqual(tuesdayLift.change, .changed(from: "Lift · Legs"))
     }
 
     /// A fresh install: no plan in force, so the card states the plan rather than

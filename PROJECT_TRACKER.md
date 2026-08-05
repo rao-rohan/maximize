@@ -1297,7 +1297,10 @@ reply becomes a reviewable proposal card in the transcript, and accepting it ope
   draft being revised carries them through untouched — including the `liftNote` MAX-137
   deliberately left uneditable — and the card states that in words on **every** card
   (`PlanProposalReview.liftNote`, never optional), so an athlete who wrote "and lift on
-  Tuesdays" is not told yes by omission.
+  Tuesdays" is not told yes by omission. **Superseded by MAX-141**: the lift slot is now
+  a field a proposal sets, so the fixed sentence became a diffable "Lifts" section instead
+  — see that row below. The instance-method shape stays, for a narrower reason (the run
+  and lift slots' uneditable `durationSeconds`/`note`).
 - **The diff is a core value with tests, not a view.** `PlanProposalReview` builds the whole
   card — headline, summary, four sections of labelled rows, each row's `Change`
   (`stated`/`unchanged`/`changed(from:)`/`added`), the lift sentence and what accept and
@@ -1500,7 +1503,7 @@ is the overseer's, not a ticket's — flagged here rather than done.
 | MAX-138 | The plan screen shows both | 129 | Sonnet ✅ |
 | MAX-139 | Workout detail for a lift | 130, 133 | Sonnet |
 | MAX-140 | Trend tiles, honestly ("days run", the effective denominator) | 134 | Sonnet |
-| MAX-141 | `PlanProposal` covers lift days | 129, **099** | Sonnet 🔒 |
+| MAX-141 | `PlanProposal` covers lift days | 129, **099** | Sonnet 🔒 ✅ |
 | MAX-142 | ~~`TrainingContext` is per-session, not per-run~~ — **not needed**, MAX-095 landed briefed | 129, **095** | — ✅ |
 | MAX-143 | **Decide what to do with lifts already scored as runs** | 128 | Owner / overseer |
 | MAX-144 | ~~How adherence to a muscle-group prescription is judged~~ — **decided (A22)** | 129 | Owner ✅ |
@@ -1589,7 +1592,7 @@ lift slot — but each currently answers about the day's *run* while calling it 
 | `PlanDraft` setters, `PlanAuthoringError` | ~~the run slot only~~ **both, as of MAX-137** | MAX-137 ✅ |
 | `PlanDisplayData.WeekdayRow` | ~~one kind/distance/note per weekday~~ **both slots, as of MAX-138** | MAX-138 ✅ |
 | `TrendTileData` planned mileage | sums `planDay.scheduledSession.distanceMeters` | MAX-140 |
-| `PlanProposal` (MAX-099) | validates the same shape `PlanAuthoringSession` does | MAX-141 |
+| `PlanProposal` (MAX-099) | ~~validates the same shape `PlanAuthoringSession` does~~ **both slots, as of MAX-141** | MAX-141 ✅ |
 
 **MAX-141 does need updating, and its brief should say so.** `PlanProposal` validates
 against `PlanAuthoringSession`'s rules; those rules did not change for the run slot, so it
@@ -1597,6 +1600,74 @@ still compiles and still produces valid plans — but a proposal it accepts can 
 prescribe rest on every lift slot, which is now a silently incomplete plan rather than the
 only expressible one. Since the owner has reaffirmed that **the plan is configured through
 chat**, that ticket is the real authoring path, not MAX-137's form.
+
+**MAX-141 — done.** A `PlanProposal.Day` now carries the lift slot's ask alongside the
+run slot's: `liftKind` and `liftMuscleGroups`, matching exactly the two fields
+`PlanDraft.DayDraft`'s own setters expose (`setLiftKind`, `setLiftMuscleGroups`) — a note
+or a duration is proposable through neither the screen nor chat yet, so the wire schema
+was not widened to accept either. Decisions, and what each cost:
+
+- **`prescribable` stays closed; a second, parallel vocabulary opens instead.**
+  `ScheduledSessionKind.prescribable` still excludes `.lift` and still gates the run
+  slot's `kind` field — widening it was the one thing LIFTING-SPEC §2.2 forbids, since it
+  would let a reply prescribe a lift where the run ask goes. The lift slot gets its own
+  wire field, `liftKind`, read against `ScheduledSessionKind.liftPrescribable` through a
+  new lookup (`PlanProposal.liftKind(named:)`) with its own error case
+  (`unknownLiftKind`). **A latent gap this closed as a side effect**: `sessionKind(named:)`
+  previously searched `ScheduledSessionKind.allCases`, so a reply that sent `"kind":
+  "lift"` for the run slot would have decoded successfully before this ticket — nothing
+  in the vocabulary a model was *shown* offered the word, but nothing refused it either.
+  Restricting the lookup to `.prescribable` closes that door explicitly and is pinned by
+  `testALiftProposedIntoTheRunSlotIsRefused`.
+- **`liftKind` is required per weekday, not `decodeIfPresent`-and-default-rest.** This
+  was the real fork. `WeeklyTemplate`'s own wire format defaults an absent lift slot to
+  rest (§2.3, MAX-129) precisely so a pre-lifting plan needs no migration — a strong
+  precedent for doing the same here. Rejected anyway: `PlanDraft.applying(_:)`'s own doc
+  already commits to "the proposal is a whole plan, not a patch" for the run slot, where
+  every weekday's `kind` is required even though `"rest"` is one of its legal values.
+  Making the lift slot's presence optional while the run slot's is not would be one
+  proposal shape following two different rules for what silence means on the same day,
+  and it would make "the model forgot to restate Tuesday's lift" indistinguishable from
+  "the model means to drop it" — the first is exactly the kind of correctable mistake
+  §4.5's one retry exists for, and a required field turns it into `missingField`, not a
+  silent, unreviewable data loss. `liftMuscleGroups` stays optional (defaults to empty),
+  matching `distanceMeters`/`note` on the run slot.
+- **`applying(_:)` now replaces the lift slot outright, the same rule the run slot has
+  always followed — carrying forward only `liftNote`/`liftDurationSeconds` while the
+  lift kind is unchanged**, mirroring `carriedDurationSeconds(from:proposing:)`'s
+  existing rule for the run slot's own uneditable duration. The consequence worth
+  stating plainly: a proposal that restates the whole week *without* a weekday's lift
+  (silence reading as `"liftKind": "rest"`) now reverts that day to rest rather than
+  preserving it — this is what makes an unrequested drop of a lift day a `.changed` row
+  on the card instead of an invisible merge, and `PlanProposalInstruction.taskDescription`
+  was reworded to tell the model plainly to restate lift days from the fact sheet the
+  same way it already restates run days.
+- **`PlanProposalReview.liftNote` (the fixed "your lift days carry through unchanged"
+  sentence) is gone, replaced by a "Lifts" section** — seven rows, Monday-first, diffed
+  exactly like "The week." A lift is now a field a proposal can move, so it gets a row
+  like every other field; a fixed sentence would have been strictly less honest than the
+  diff once the diff could actually show one. `PlanProposalCardView`,
+  `PlanAuthoringModel.PlanPrefillNotice` and `PlanAuthoringView` (App layer, not built by
+  CI) were updated to match — no `swift test` coverage for that half, flagged under
+  **Needs device verification** in the PR.
+- **Rejected: proposing `liftDurationSeconds` or a lift `note`.** LIFTING-SPEC §4.3's
+  worked example ("a lift, 45 minutes, lower body") names a duration, and it would have
+  been easy to widen the schema to match. Not done, because `PlanDraft.DayDraft` itself
+  has no `setLiftNote` or lift-duration setter yet — MAX-137 shipped only `setLiftKind`
+  and `setLiftMuscleGroups` — so a proposal that set them would be prescribing through
+  chat something the authoring *screen* still cannot edit, and the card's accept action
+  hands the athlete a form that would silently ignore the field the model just set. This
+  is real remaining scope (the duration half of LIFTING-SPEC §4.3's example), not
+  finished here — it wants the ticket that gives `PlanDraft.DayDraft` those two setters
+  first, so chat and the screen gain the ability together.
+- **`unknownMuscleGroup` and `liftRestDayIsNotEmpty` are new error cases**, not reuses of
+  `unknownSessionKind`/`restDayIsNotEmpty` — each names a different field with a
+  different vocabulary, and reusing the run-slot case would have pointed a retry at the
+  wrong field's words. "A lift with no muscle groups named" is *not* one of these
+  errors: `ScheduledSession.muscleGroups`'s own doc makes it a real, legal statement
+  distinct from rest (A17), so the brief's suggested example of an invalid case was
+  wrong — the actual invalid case pinned under test is a **rest** lift slot naming
+  muscle groups (`liftRestDayIsNotEmpty`).
 
 **Scope taken mid-ticket: the lift slot names its muscle groups.** Owner's ask. `MuscleGroup`
 is a closed six-case core vocabulary — chest, back, shoulders, arms, legs, core — chosen so

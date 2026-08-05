@@ -23,13 +23,13 @@ final class PlanProposalModelInvokingTests: XCTestCase {
         {"heartRateCapBPM": 148, "cadenceLowStepsPerMinute": 165, \
         "cadenceHighStepsPerMinute": 172, "effectiveThresholdPoints": 70, \
         "marginalThresholdPoints": 45, "week": [\
-        {"weekday": "monday", "kind": "rest"}, \
-        {"weekday": "tuesday", "kind": "easy", "distanceMeters": 8000}, \
-        {"weekday": "wednesday", "kind": "hard", "note": "6 × 800m"}, \
-        {"weekday": "thursday", "kind": "easy", "distanceMeters": 6000}, \
-        {"weekday": "friday", "kind": "rest"}, \
-        {"weekday": "saturday", "kind": "easy", "distanceMeters": 6000}, \
-        {"weekday": "sunday", "kind": "long", "distanceMeters": 20000}], \
+        {"weekday": "monday", "kind": "rest", "liftKind": "rest"}, \
+        {"weekday": "tuesday", "kind": "easy", "distanceMeters": 8000, "liftKind": "rest"}, \
+        {"weekday": "wednesday", "kind": "hard", "note": "6 × 800m", "liftKind": "rest"}, \
+        {"weekday": "thursday", "kind": "easy", "distanceMeters": 6000, "liftKind": "rest"}, \
+        {"weekday": "friday", "kind": "rest", "liftKind": "rest"}, \
+        {"weekday": "saturday", "kind": "easy", "distanceMeters": 6000, "liftKind": "rest"}, \
+        {"weekday": "sunday", "kind": "long", "distanceMeters": 20000, "liftKind": "rest"}], \
         "longRunArc": [{"index": 1, "distanceMeters": 16000}], \
         "goalStatements": ["Half marathon"], "goalTargetDay": "2026-11-15"}
         """

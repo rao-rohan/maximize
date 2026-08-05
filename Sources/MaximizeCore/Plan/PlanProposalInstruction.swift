@@ -121,10 +121,13 @@ public struct PlanProposalInstruction: Hashable, Sendable {
         would actually recommend rather than hedging.
 
         - Change only what the conversation asks you to change. If they already have a \
-        plan, carry every field they did not mention through unchanged. An unrequested \
-        edit is shown to them as a change they did not ask for, and it costs you their \
-        trust in the ones they did.
-        - Prescribe the whole week, every time: all seven weekdays, rest days included.
+        plan, carry every field they did not mention through unchanged — that includes \
+        their lift days: restate each weekday's lift ask from the fact sheet exactly as \
+        it stands unless the conversation asks you to change it. An unrequested edit is \
+        shown to them as a change they did not ask for, and it costs you their trust in \
+        the ones they did.
+        - Prescribe the whole week, every time: all seven weekdays, rest days included, \
+        and both the run ask and the lift ask for each one.
         - Do not invent facts about the athlete. Where the conversation is silent — how \
         many days a week they can run, how far their long run goes — take the answer from \
         their current plan and their recent training.
