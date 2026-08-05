@@ -3,7 +3,7 @@
 **Last updated:** 2026-08-04
 **Spec:** [docs/PRD.md](./docs/PRD.md) + [docs/PRD-AMENDMENTS.md](./docs/PRD-AMENDMENTS.md) (amendments win)
 **Architecture:** Fully on-device. No backend.
-**Pipeline status:** 🟢 CI green — 700+ tests, core suite now on Linux. **Capture-to-score loop closed (MAX-033).** Core build/test, architecture guard, colour-token guard, unsigned iOS Simulator app build.
+**Pipeline status:** 🟢 CI green — 700+ tests, core suite on Linux. **Capture-to-score loop closed (MAX-033), and verified on a real iPhone: background delivery woke the app, the anchored fetch ran, and captured workouts render.** Core build/test, architecture guard, colour-token guard, unsigned iOS Simulator app build.
 
 ---
 
@@ -241,7 +241,7 @@ thin, and the brief carries that instruction explicitly.
 
 | ID | Ticket | Spec | Tier | Status | Depends on |
 |---|---|---|---|---|---|
-| MAX-048 | Deterministic duplicate resolution for `ChatThreadRecord` | D6, A1 | Sonnet | 🔲 | MAX-020 |
+| MAX-048 | Deterministic duplicate resolution for `ChatThreadRecord` | D6, A1 | Sonnet | ✅ | MAX-020 |
 | MAX-050 | Per-workout thread persistence | D6, FR-2.3 | Sonnet | ✅ | MAX-020 |
 | MAX-051 | Chat UI with token-streaming reveal | FR-2.1–2.4, D10 | Sonnet | 🔲 | MAX-024, MAX-041, MAX-050 |
 
@@ -280,10 +280,35 @@ schema change and therefore its own ticket.
 |---|---|---|---|---|---|
 | MAX-060 | Interval selector: week / month / custom | FR-3.1 | Sonnet | ✅ | MAX-020 |
 | MAX-061 | Score-colored calendar, type glyph, auto-converted rest days | FR-3.2, D4, D9, A6 | Sonnet | ✅ | MAX-017, MAX-060, MAX-040 |
-| MAX-062 | **Cross-run HR-drift overlay** on %-elapsed axis | FR-3.3, D5 | **Opus** | 🔲 | MAX-060, MAX-040, MAX-012 |
+| MAX-062 | **Cross-run HR-drift overlay** on %-elapsed axis | FR-3.3, D5 | **Opus** | ✅ | MAX-060, MAX-040, MAX-012 |
+| MAX-065 | Drift trendline over stored per-run figures | FR-3.3 | Sonnet | 🔲 | MAX-062 |
+
+**MAX-062 landed the overlay; MAX-065 is the half it reported rather than silently
+dropping.** FR-3.3 says the drift comparison should *ideally* carry a trendline. That is
+a second chart — one point per run, over `DerivedMetrics.heartRateDriftFraction` — not a
+line fitted through the normalised curves, and conflating the two would produce a
+trendline of a different quantity than the one labelled beside it. MAX-062 showed the
+stored per-run figures in the legend instead and said so.
+
+**Two MAX-062 decisions worth revisiting once it has been seen on a device**, neither a
+defect:
+
+- **Each normalised bucket is the time-weighted mean over its slice, not a point
+  sample.** This is the one that makes the overlay honest: HealthKit sampling is
+  irregular, so point sampling would make the drawn line a function of when the sensor
+  fired rather than of the heart rate. A test pins it — the same ramp at 2 and at 11
+  samples normalises identically. Do not "simplify" this.
+- **Runs under 8m 20s (`bucketCount × 5s`) are excluded rather than stretched**, because
+  a six-minute jog drawn at full width magnifies noise into apparent shape. Reversible in
+  one constant if the exclusion turns out to hide runs worth seeing.
+
+Also note the axis anchor: the %-elapsed axis spans the *curve's covered span*, not the
+workout duration, because `heartRateDriftFraction` is defined over the covered span. Any
+other anchor would put the 50% gridline at a different split from the one the number
+beside it was computed at — D2's disagreement, drawn.
 | MAX-063 | Summary tiles: mileage vs arc, effective days, streak, avg score | FR-3.4 | Sonnet | ✅ | MAX-017, MAX-060 |
 | MAX-064 | Settings: rest-days-per-week, display/accessibility prefs | §8 | Haiku | ✅ | MAX-020 |
-| MAX-049 | Settings screen writes to a stub, not the store | §8, D9 | Sonnet | 🔲 | MAX-064, MAX-020 |
+| MAX-049 | Settings screen writes to a stub, not the store | §8, D9 | Sonnet | ✅ | MAX-064, MAX-020 |
 
 **MAX-049 is a live bug in merged MAX-064 code**, found by MAX-063 and reported rather
 than fixed. `App/RootTabView.swift` constructs `SettingsView()` with no arguments, so
@@ -423,7 +448,7 @@ and CI selects a 26.x toolchain explicitly rather than trusting the runner defau
 |---|---|---|---|
 | R1 | No Swift toolchain in the dev container; `download.swift.org` blocked | CI is the only gate | Accepted — mitigated by fat-core architecture + macOS CI |
 | R2 | No device/simulator in the loop | HealthKit flows, UI, on-device performance unverified until a human checks | Accepted per direction. PRs must list what needs device verification |
-| R13 | App-layer wiring is compiled but never executed | A defaulted parameter silently selected a no-op store (MAX-049); nothing in CI could see it | Composition roots name their dependencies explicitly; no production call site relies on a default that can resolve to a stub |
+| R13 | App-layer wiring is compiled but never executed | A defaulted parameter silently selected a no-op store — in **two** files, the second added the same hour the first was found; nothing in CI could see either | The stub is deleted, so there is nothing to default to. No production call site may default to a repository that can resolve to a no-op |
 | R14 | CI is a hosted-minutes dependency | The whole merge gate vanished mid-session when the Actions allowance ran out — every job, including Ubuntu, failed in 2s with no runner | Repo is public, so standard runners are free and uncapped. Core suite moved to Linux (1x) so only `xcodebuild` needs macOS |
 | R3 | Anthropic key on-device | Weakens PRD §6 | Accepted for single-user (A5). **Tripwire: blocks any distribution** |
 | R5 | HealthKit background-delivery entitlement key | Wrong key means the wake silently never fires | **Resolved** at MAX-030 — `com.apple.developer.healthkit.background-delivery` confirmed against Apple docs; the PRD's guess was right. Base HealthKit entitlement and `NSHealthShareUsageDescription` also in place; all three fail the same silent way |
