@@ -2,15 +2,27 @@ import Foundation
 
 /// What just changed in the transcript (MAX-153).
 ///
-/// Two cases, because there are exactly two answers to the only question that matters
-/// here — *did the athlete cause this?*
+/// Three cases, answering two questions in order: *did the athlete cause this?* and, if
+/// not, *is it news?*
 public enum ChatTranscriptChange: Hashable, Sendable {
     /// The athlete's own message was appended. They pressed send a moment ago.
     case ownMessage
 
-    /// Anything that arrived without them asking for it *now*: a token of a streaming
-    /// reply, a completed turn, a notice, the plan proposal card.
+    /// Something was actually said: a token of a streaming reply, a completed turn, a
+    /// notice, the plan proposal card. This is the case that earns a badge when the
+    /// reader is away.
     case incoming
+
+    /// The transcript changed height without anything being said (MAX-152's ladder).
+    ///
+    /// The waiting shimmer appearing, a stall caption growing under a partial reply, a
+    /// failure notice replacing the indicator, the plan-drafting progress line — each
+    /// moves the content underneath the viewport, and a reader sitting at the bottom
+    /// should stay there. **None of them is a reply**, so none of them may set
+    /// `hasUnseenActivity`: telling somebody who scrolled up that a "New reply" arrived,
+    /// when what actually happened is that a placeholder resized, is the app crying wolf
+    /// about its own layout.
+    case reflow
 }
 
 /// What the transcript's scroll view should do about it.
@@ -44,7 +56,9 @@ public enum ChatTranscriptScrollDirective: Hashable, Sendable {
 ///    confirmation that it went. `.ownMessage` re-enters following unconditionally —
 ///    sending is also how a reader says "I am done re-reading."
 /// 2. **Incoming content scrolls only if you were already at the bottom.** Otherwise it
-///    is remembered (`hasUnseenActivity`) and nothing moves.
+///    is remembered (`hasUnseenActivity`) and nothing moves. A `.reflow` — the waiting
+///    shimmer appearing, a stall caption growing (MAX-152) — follows on the same
+///    condition but is never remembered, because it is not a reply.
 /// 3. **Focusing the composer does not move a reader who scrolled away.** This is a
 ///    deliberate departure from what this app did before MAX-153, which scrolled to the
 ///    bottom on focus. The case it was written for is real — the keyboard rising should
@@ -118,7 +132,7 @@ public struct ChatTranscriptFollow: Hashable, Sendable {
         hasUnseenActivity = false
     }
 
-    /// Something was appended to the transcript. See this type's "three rules".
+    /// The transcript changed. See this type's "three rules".
     public mutating func transcriptChanged(_ change: ChatTranscriptChange) -> ChatTranscriptScrollDirective {
         switch change {
         case .ownMessage:
@@ -130,6 +144,9 @@ public struct ChatTranscriptFollow: Hashable, Sendable {
                 return .stay
             }
             return .scrollToLatest
+        case .reflow:
+            // Follows, but is never news. See `ChatTranscriptChange.reflow`.
+            return isFollowing ? .scrollToLatest : .stay
         }
     }
 

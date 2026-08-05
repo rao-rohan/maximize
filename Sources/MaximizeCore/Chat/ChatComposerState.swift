@@ -86,6 +86,26 @@ public enum ChatComposerSendControl: Hashable, Sendable, CaseIterable {
         return canSend ? .send : .unavailable
     }
 
+    /// The same decision, taken from MAX-152's reply ladder rather than from a boolean.
+    ///
+    /// **This is the overload call sites should use.** `ChatModel.isStreaming` is itself
+    /// defined as `replyPhase.isLive`, so the two agree today — but "is a reply in flight"
+    /// now has exactly one authority, and reading it directly means a composer cannot be
+    /// handed a flag that has drifted from the phase the transcript is drawing.
+    ///
+    /// The composer does **not** distinguish the three live rungs. Waiting, streaming and
+    /// stalled are different things to say *in the transcript*, which is where
+    /// `ChatPendingReplyView` says them; to the send control they are one fact — a request
+    /// is open, so this is not a send affordance. Splitting the control three ways would
+    /// be the app narrating the same state twice, in two places, six inches apart.
+    public static func resolve(
+        canSend: Bool,
+        replyPhase: ChatReplyPhase,
+        cancellation: ChatComposerCancellation = .unavailable
+    ) -> ChatComposerSendControl {
+        resolve(canSend: canSend, isStreaming: replyPhase.isLive, cancellation: cancellation)
+    }
+
     /// Whether a tap does anything. The view pairs this with `.disabled(!isEnabled)` so
     /// the platform supplies its own dimming and its own VoiceOver trait.
     public var isEnabled: Bool {

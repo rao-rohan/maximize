@@ -55,6 +55,54 @@ final class ChatComposerSendControlTests: XCTestCase {
         )
     }
 
+    // MARK: - Reading MAX-152's ladder rather than a flag
+
+    /// The three live rungs are one fact to the send control: a request is open. They are
+    /// three different things to say in the *transcript*, and `ChatPendingReplyView` is
+    /// where they are said — the composer narrating them a second time, six inches away,
+    /// would be the app talking over itself.
+    func testEveryLiveRungOfTheReplyLadderIsTheSameControl() {
+        for phase in [ChatReplyPhase.awaitingFirstToken, .streaming, .stalled] {
+            XCTAssertEqual(
+                ChatComposerSendControl.resolve(canSend: false, replyPhase: phase),
+                .awaitingReply,
+                "\(phase)"
+            )
+        }
+    }
+
+    func testEveryTerminalRungLeavesTheControlBackOnSendOrDimmed() {
+        let terminal: [ChatReplyPhase] = [
+            .idle, .complete, .truncated, .emptyReply, .failed(.midStreamFailure),
+        ]
+        for phase in terminal {
+            XCTAssertEqual(ChatComposerSendControl.resolve(canSend: true, replyPhase: phase), .send, "\(phase)")
+            XCTAssertEqual(
+                ChatComposerSendControl.resolve(canSend: false, replyPhase: phase),
+                .unavailable,
+                "\(phase)"
+            )
+        }
+    }
+
+    /// The overload is the boolean one, taken from the ladder — asserted rather than
+    /// assumed, so the two cannot answer differently if either is ever edited.
+    func testThePhaseOverloadAgreesWithTheBooleanOne() {
+        let phases: [ChatReplyPhase] = [
+            .idle, .awaitingFirstToken, .streaming, .stalled,
+            .complete, .truncated, .emptyReply, .failed(.midStreamFailure),
+        ]
+        for phase in phases {
+            for canSend in [true, false] {
+                XCTAssertEqual(
+                    ChatComposerSendControl.resolve(canSend: canSend, replyPhase: phase),
+                    ChatComposerSendControl.resolve(canSend: canSend, isStreaming: phase.isLive),
+                    "\(phase) / \(canSend)"
+                )
+            }
+        }
+    }
+
     // MARK: - The target does not move
 
     /// Enabled and disabled send draw the same glyph. A control that changed shape on the

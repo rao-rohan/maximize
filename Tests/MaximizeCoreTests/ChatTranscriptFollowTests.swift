@@ -68,6 +68,43 @@ final class ChatTranscriptFollowTests: XCTestCase {
         XCTAssertEqual(follow, afterOne)
     }
 
+    // MARK: - Rule 2, second half — a reflow follows but is never news (MAX-152)
+
+    /// A reader at the bottom stays at the bottom when the waiting shimmer appears, when a
+    /// stall caption grows under a partial reply, or when a failure notice replaces the
+    /// indicator. All of those move the content; none is something either party said.
+    func testAReflowKeepsAFollowingReaderAtTheBottom() {
+        var follow = ChatTranscriptFollow()
+        let directive = follow.transcriptChanged(.reflow)
+        XCTAssertEqual(directive, .scrollToLatest)
+        XCTAssertTrue(follow.isFollowing)
+    }
+
+    /// The failure MAX-152's shimmer would otherwise cause: an athlete who scrolled up to
+    /// re-read is told "New reply" because a placeholder resized. It is not a reply, so it
+    /// does not badge and it does not move them.
+    func testAReflowNeitherMovesNorBadgesAReaderWhoScrolledAway() {
+        var follow = ChatTranscriptFollow()
+        follow.readerScrolledAway()
+
+        let directive = follow.transcriptChanged(.reflow)
+        XCTAssertEqual(directive, .stay)
+        XCTAssertFalse(follow.hasUnseenActivity, "a placeholder resizing is not a reply")
+        XCTAssertEqual(follow.jumpToLatestTitle, "Jump to latest")
+    }
+
+    /// And a reflow does not clear a badge an actual reply already earned: the phase
+    /// settling to `.complete` right after the last token must not erase the news.
+    func testAReflowDoesNotClearABadgeARealReplyEarned() {
+        var follow = ChatTranscriptFollow()
+        follow.readerScrolledAway()
+        _ = follow.transcriptChanged(.incoming)
+
+        _ = follow.transcriptChanged(.reflow)
+        XCTAssertTrue(follow.hasUnseenActivity)
+        XCTAssertEqual(follow.jumpToLatestTitle, "New reply")
+    }
+
     // MARK: - Rule 3 — focusing the composer does not move a reader who scrolled away
 
     /// The deliberate departure from this app's pre-MAX-153 behaviour, which scrolled to
