@@ -131,6 +131,55 @@ as invariants:
 - No force unwraps (`!`) in non-test code. If a value truly cannot be nil, encode
   that in the type.
 
+## The UI standard
+
+The bar is a top-flight iOS app, built on Apple's own design principles with current
+components. That is a real constraint, not an aspiration, so here is what it means
+concretely enough to review against.
+
+**Let the platform supply its chrome.** Liquid Glass belongs on chrome — bars, floating
+controls, sheets — and content surfaces stay flat (MAX-040). A sheet the system already
+glasses does not get glass reapplied; a floating control takes the system's capsule
+rather than a hard-coded radius. Hand-rolling something the OS ships is how an app stops
+looking like the OS, and it is the most common way a screen dates itself.
+
+**Prefer the current component to the familiar one.** Reach for the platform's present-day
+navigation, list, chart and tab APIs rather than the shape that has been in muscle memory
+for five years. When you deliberately depart from a platform default — and sometimes you
+should — say so in the PR and say why. An unexplained departure reads as an oversight.
+
+**Numerals do the hierarchy work.** PRD §7.4's brief is dense and quantitative, and the
+owner has since made "highly detailed" explicit. Density is the goal; minimalism is not.
+A screen earns its space by carrying numbers a person wants, not by carrying few. Where
+density and legibility conflict, legibility wins — but the fix is usually a clearer
+surface ramp, not fewer figures.
+
+**Accessibility is part of the ticket, not a follow-up.**
+
+- Dynamic Type: `@ScaledMetric(relativeTo:)` for any fixed dimension. A layout that breaks
+  at large sizes is broken.
+- **No information carried by hue alone.** Two states that differ only in colour are
+  indistinguishable to a meaningful fraction of people, and this codebase has already
+  found a real instance of it at 1.02:1. There is a test asserting the rule for score
+  bands; extend it rather than writing a parallel one.
+- Reduce Transparency and Increase Contrast degrade to solid chrome (MAX-070). A channel
+  that vanishes under an accessibility setting was never a channel.
+- Motion is purposeful and respects Reduce Motion.
+
+**Absence is a designed state.** "No plan authored yet", "no splits recorded", "no route
+for an indoor run" are things the app *knows*, not blanks. They get real copy in one
+consistent voice, at one weight, on one surface. Read a few existing absence strings
+before writing a new one.
+
+**Colour comes from tokens, always.** CI rejects raw literals anywhere under `App/` —
+`0xRRGGBB`, `Color(red:`, `UIColor(red:`, `Color(.sRGB`. Spacing comes from the `Spacing`
+ramp for the same reason; a gap needing a value that is not on it is usually a gap that
+is wrong, and the two documented exceptions each say why they are exceptions.
+
+**None of this is verifiable by CI.** The suite compiles the app target and never draws a
+pixel. Every PR that touches the UI says what a human should look at — see "What CI can
+and cannot prove". A design claim without a device check is an opinion.
+
 ## Commits and PRs
 
 - One logical change per commit; a commit that "also fixes" something unrelated
