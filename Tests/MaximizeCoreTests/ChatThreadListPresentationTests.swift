@@ -17,7 +17,7 @@ final class ChatThreadListPresentationTests: XCTestCase {
     /// pushed into today by a few hours of arithmetic.
     private let now = Date(timeIntervalSince1970: 1_785_931_200)
 
-    private func date(daysAgo: Double, hoursAgo: Double = 0, minutesAgo: Double = 0) -> Date {
+    private func date(daysAgo: Double = 0, hoursAgo: Double = 0, minutesAgo: Double = 0) -> Date {
         now.addingTimeInterval(-(daysAgo * 86_400 + hoursAgo * 3_600 + minutesAgo * 60))
     }
 
@@ -194,7 +194,7 @@ final class ChatThreadListPresentationTests: XCTestCase {
         )
 
         XCTAssertEqual(row.title, "Why did my HR climb")
-        XCTAssertEqual(row.scope, "1 – 31 Aug 2026")
+        XCTAssertEqual(try XCTUnwrap(row.scope), "1 – 31 Aug 2026")
         XCTAssertEqual(row.kind, .training)
         XCTAssertEqual(row.glyphSystemImageName, "chart.line.uptrend.xyaxis")
     }
@@ -208,7 +208,7 @@ final class ChatThreadListPresentationTests: XCTestCase {
             now: now,
             timeZone: zone
         )
-        XCTAssertEqual(row.scope, ChatThreadSubtitle.text(for: subject))
+        XCTAssertEqual(try XCTUnwrap(row.scope), ChatThreadSubtitle.text(for: subject))
     }
 
     /// The sheet states "This run" under a workout thread's title because a sheet has one
