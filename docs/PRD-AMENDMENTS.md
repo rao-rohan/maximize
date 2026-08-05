@@ -568,9 +568,52 @@ workout discipline disagree (honest, and the first crack in an invariant that ha
 project).
 
 **This one is flagged as an owner/overseer call rather than settled by a ticket**, and it is
-tracked as MAX-125. Fixing `StandardPlanSeed`'s bands does not retroactively fix a stored
-plan either: the athlete must author a revision for the corrected rubric to govern
-anything.
+tracked as ~~MAX-125~~ **MAX-143** — the ID above was a typo for the ticket §14 actually
+files. Fixing `StandardPlanSeed`'s bands does not retroactively fix a stored plan either:
+the athlete must author a revision for the corrected rubric to govern anything.
+
+### The owner's decision, 2026-08-05 — settled, and one thing it changes
+
+**Decision: label them.** The lean above is confirmed. No stored score is modified,
+deleted or rescored; D8 stands exactly as written; and the labelled score keeps its value,
+its band, its rationale and its place in the athlete's history.
+
+**What the decision changes about the paragraph above: the label is a record, not just a
+string.** "One string and no stored record" was written for a label that was only ever
+*shown*. It cannot do the job the same paragraph asks of it. The reason to label at all is
+that these scores must stop counting as scorer misjudgements — that is the corruption D8
+protects against, and it is a claim about a *number*, not about a screen. A sentence
+rendered in a header excludes nothing from anything.
+
+So `MiscategorisedScoreLabel` is an additive record beside the score: its own identifier,
+timestamped, keyed to the workout, carrying the ask the score was judged against and the
+discipline the workout actually was. `ScoreLedger.divergence` — the one place PRD §2's
+correction-rate signal is computed — returns nil for a labelled score. Everything else
+about the ledger is unchanged, including `wasCorrected` and the value the tallies count.
+
+**Two further things the decision leaves standing, restated so no ticket relitigates them.**
+It is still **not an annotation** — the rejection above holds in full, and a *separate record
+type* is what keeps "the scorer was asked the wrong question" from being filed as "a human
+corrected this". And it is still **not an exception to D8**: the invariant is untouched
+because nothing writes to a score, which is a stronger position than a narrow exception,
+not a weaker one.
+
+**It is stored rather than derived**, even though the rule is a pure function of two facts
+already on disk, and the reason is D1: a derived answer changes when the derivation changes,
+so a later ticket mapping a new HealthKit type to `.lift` would silently relabel history and
+move a metric computed over it. Pinning the judgement is the same argument D1 makes for
+storing the plan version on a `Score`.
+
+**How a score comes to be labelled: an idempotent pass at launch**, which reads stored rows
+and writes label rows, skips anything already labelled, and needs no "has this run" flag.
+**It is not a migration** — nothing stored is rewritten, re-typed or deleted — and that
+distinction is what makes it compatible with D8 rather than an exception to it.
+
+**The cost, stated plainly.** The average-score tile still counts these scores. This
+amendment excludes them from the *scorer-quality* metric, which is the one D8 exists to
+protect; whether a miscategorised score should also be excluded from the athlete's own
+averages is a different question about a number the athlete already reads, and it is not
+answered here.
 
 ---
 
