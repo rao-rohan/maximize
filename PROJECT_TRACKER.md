@@ -701,16 +701,28 @@ streak tile reads 0 for most of every month. The calendar half is closed by pass
 (never a clock read, matching `ScoreCalendar.resolve`'s own parameter), threaded into
 both places that depend on whether a day's outcome is in yet: `effectiveDayTally` now
 withholds any day on or after `today` from `eligibleCount`, and `resolveRestDayConversions`
-passes `today` through as C3's `outcomesUnknownFrom`. The streak walk's start point was the
-one that needed a real decision — walking back from `through` silently assumed `through`
-was decided, which is false whenever it reaches into the future. It now starts at the later
-of "never" and the most recent day whose outcome is known (the day before `today`, clamped
-to `through`), documented and tested at all three shapes: wholly past (agrees with the
-pre-MAX-110 answer), wholly future (streak `0`, nothing decided), and spanning `today` (the
-defect case — the walk no longer reaches the not-yet-run days at all). A test derives its
+passes `today` through as C3's `outcomesUnknownFrom`.
+
+The streak walk's start point needed a real decision, and the first draft got only half
+of it right. Walking back from `through` silently assumed `through` was decided, which
+is false whenever it reaches into the future — but stopping the walk at `today - 1`
+(the first draft's fix) is a *second*, smaller version of the same bug: it treats a
+workout already run and scored *this morning* as absent until tomorrow. Review caught
+it before merge. The asymmetry that was missing — **a miss is unknowable until the day
+ends, but a hit is knowable the instant it happens** — is not new to this ticket;
+`ScoreCalendar.resolve` already embodies it (a workout on `today` resolves to `.scored`,
+checked before the forthcoming guard, never to `.forthcoming`). The walk now matches
+that ordering instead of inventing a second rule: it visits `today` itself, an empty
+`today` is neutral (the day might not be over), but a workout already recorded and
+scored today extends or breaks the streak exactly like any other decided day. Tested at
+all three interval shapes (wholly past, wholly future, spanning `today`) plus the two
+`today`-specific cases (already a hit, already a below-threshold miss) that are the
+direct regression tests for the two drafts' respective bugs. A test derives its
 expected `EffectiveDayTally` from `ScoreCalendar.resolve`'s own output over the same
-interval rather than a second hand-worked number, so the two calculators drifting apart
-would fail it even if both suites' hardcoded expectations still looked right.
+interval rather than a second hand-worked number, and a sibling test does the same for
+the streak — both fail if the calendar and the tallies ever drift apart, even if either
+suite's hardcoded numbers still happen to look right.
+
 `TrendTilesModel` resolves `today` once at init, the same way `ScoreCalendarModel` does.
 
 *Also noticed, not acted on.* `docs/DESIGN-REVIEW.md` §5.4 proposed "a 1pt accent ring on
