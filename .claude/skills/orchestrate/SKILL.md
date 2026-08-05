@@ -162,6 +162,14 @@ mode of the whole loop, and it is silent. Putting it last in the brief is the ch
 mitigation. When it happens anyway: go into the worktree, read the diff yourself, push it
 and open the PR. Do not re-dispatch the ticket.
 
+**Anything you ask for *after* the push instruction will displace it.** The clearest case:
+briefs that end "…and this PR gets a security review before merge" produce agents that do
+the work, run the review, report the review — and never push. The review became the last
+thing, so it became the final act. If a ticket needs a self-review, ask for it *before* the
+push line, or run it yourself once the PR exists. The same applies to any closing request:
+a summary, a doc update, a tracker edit. Whatever is last is what gets treated as the
+finish line, so make sure that is the PR.
+
 ### While they run
 
 Do the work only you can do: review PRs that have landed, update the board, resolve
