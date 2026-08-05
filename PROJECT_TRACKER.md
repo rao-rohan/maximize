@@ -501,6 +501,7 @@ ticket that could not close it, and each fails quietly rather than loudly.
 |---|---|---|
 | C1 | **Always resolve rest-day budgets over whole Monday-first weeks — never split one week across two calls.** | `RestDayBudgeting` (MAX-016) is a pure function over the days it is handed. Ranking is relative to the misses in a week, so the same day can rank differently in two partial slices of that week. A function taking a day-set cannot tell a partial week from a short one |
 | C2 | **A `WorkoutIngestionSink` must not return before its write is durable.** | MAX-031's no-retry guarantee depends on it: acknowledging a wake whose data was not durably stored loses the workout permanently, and only the implementation knows when its write has landed |
+| C3 | **A caller that knows what day it is must tell `RestDayBudgeting`, via `outcomesUnknownFrom`.** | MAX-105. Forgiving a day that has not happened spends a small weekly budget on a non-event and leaves a real miss earlier in the same week unforgiven — but `RestDayBudgeting` is a pure function of the days it is handed, and a day-set carries no clock. `ScoreCalendar` and `TalliesCalculator` (MAX-110) both pass it now |
 
 ## Open questions
 
@@ -534,11 +535,15 @@ feature was governed by a plan that could not exist).
 | MAX-082 | Design review of the whole app | Device report | **Opus** ✅ |
 | MAX-083 | Week / month / year intervals, each with a fitting representation | Owner | **Opus** ✅ |
 | MAX-084 | Fix score-band and chart contrast; resolve A7 | MAX-082 | Sonnet ✅ |
-| MAX-085 | **The tab bar, once**: Plan becomes a third tab, iOS 26 `Tab` builder, `.tint()`, surface elevation, Liquid Glass chrome | MAX-082, Owner | **Opus** |
+| MAX-085 | **The tab bar, once**: Plan becomes a third tab, iOS 26 `Tab` builder, `.tint()`, surface elevation, Liquid Glass chrome | MAX-082, Owner | **Opus** ✅ |
 | MAX-086 | Wire `AppearancePreference` — a setting that silently does nothing | MAX-082 | Sonnet |
 | MAX-087 | A non-hue channel for the year heatmap's 6pt cells | MAX-084 | Sonnet ✅ |
-| MAX-105 | **The plan on the dashboard calendar** — scheduled beneath actual | Owner | **Opus** |
+| MAX-105 | **The plan on the dashboard calendar** — scheduled beneath actual | Owner | **Opus** ✅ |
 | MAX-106 | The UI standard, written into `CLAUDE.md` | Owner | Sonnet ✅ |
+| MAX-107 | Chat stream framing: close a frame without a blank line | Device report | Sonnet 🔒 ✅ |
+| MAX-108 | Tap a calendar day → its workouts; swipe between two on one day | Owner | Sonnet ✅ |
+| MAX-109 | **Plans cover lifting as well as running** — spec first | Owner | **Opus** |
+| MAX-110 | **Tallies count future scheduled days as missed** — the streak tile reads 0 for most of every month | MAX-105 | Sonnet ✅ |
 | MAX-090 | Chat-first product spec: plan generation and Q&A through chat | Owner | **Opus** 🔒 ✅ |
 | MAX-091 | Run both Claude clients on the Sonnet tier at `medium` effort | Owner, cost | Sonnet 🔒 ✅ |
 | MAX-092 … MAX-104 | The chat-first build, decomposed from MAX-090 | MAX-090 | see below |
@@ -603,6 +608,91 @@ duplicated: it now checks both `ScoreBandMark` (day grid) and `ScoreBandHeatmapM
 see the PR: whether a ~2.4pt inset mark actually reads as smaller rather than as noise
 is the one thing here only a phone can answer.
 
+**MAX-107 — the chat stream's framing. Merged, and it was a real bug.** From the device:
+chat failed on every turn with *"The response was not a recognizable streaming reply"*. A
+transcript captured against the live API showed the request and the stream were both fine,
+which located the fault in how the app reads the socket rather than in what it sends.
+
+The decoder closed a frame only on a blank line. SSE does specify that — but
+`URLSession.AsyncBytes.lines` is a line sequence, not an SSE parser, and makes no promise
+to deliver the blank separators. Without them every payload accumulated into one buffer,
+and several JSON objects separated by newlines is not a JSON object. Every turn, every
+model. **It predates the tier change and was not caused by it.**
+
+**The reason the suite could not catch it is the part worth keeping.** Every existing
+decoder test built its frames through a helper that appended the blank line itself, so the
+decoder was only ever asked to parse input that already carried the boundary it depended
+on. The fake transport and the real one disagreed on exactly one property, and only the
+fake was ever tested. CI never opens a socket, so nothing mechanical could see it. Where a
+test constructs the input a real adapter would produce, that construction is part of the
+contract and deserves the same scrutiny as the code.
+
+**MAX-108 — the calendar's days should be doors. Shipped.** From the owner. Tapping a day in
+the week or month view goes to that day's workouts; where a day holds two, a swipe moves
+between them rather than making the athlete go back and re-enter. Blocked until MAX-105
+landed, since both are in `ScoreCalendarView.swift`; now dispatchable. The two-workout case
+is the interesting half — a day with two runs is exactly the day you most want to compare,
+and back-out-and-re-enter is what makes comparison not worth doing. A day with **no**
+workout still needs an answer rather than a dead tap.
+
+**Which days are doors is a core decision.** `ScoreCalendarDay.destination`
+(`Sources/MaximizeCore/Dashboard/ScoreCalendar.swift`) is a new `ScoreCalendarDayDestination`
+— `.workouts([UUID])`, `.notYetDue`, `.nothingRecorded` — resolved in `ScoreCalendar.resolve`
+alongside `state` and `agreement`, and unit tested there rather than left for a view to
+infer from `state`'s case. That distinction turned out to matter: five of
+`ScoreCalendarDayState`'s cases share "nothing recorded" (`.missed`, `.convertedRest`,
+`.scheduledRest`, `.forthcoming`, `.unplanned`), and only `.forthcoming` names its own
+tense — `.scheduledRest` and `.unplanned` read identically whether the day is behind the
+athlete or still ahead. `destination` is decided against `today` instead, independent of
+which of the five a day landed in, so a future scheduled-rest or future-unplanned day
+correctly reads `.notYetDue` rather than a dead end. New tests pin both directions for
+each ambiguous state, plus the ordinary one/two/three-workout cases.
+
+**The transition.** `App/Dashboard/ScoreCalendarView.swift` turns the core's decision into
+one of three things, all sharing the exact cell visual MAX-105/MAX-084/MAX-087 already
+drew — no restyling, per the brief: a single workout pushes `WorkoutDetailView` directly on
+`DashboardView`'s existing `NavigationStack` (registered via a `ScoreCalendarDoorRoute`
+`navigationDestination` declared beside the cells, so `DashboardView.swift` — and, per the
+brief, `RootTabView.swift`, which MAX-085 now owns — needed no changes at all); two or more
+pushes the new `App/Workouts/DayWorkoutsView.swift`, a `TabView(.page)` over
+`WorkoutDetailView` with explicit previous/next buttons in a `.bottomBar` toolbar group (not
+the swipe alone — the accessibility brief requires the move be reachable without a gesture)
+and no page dots, since the "N of M" numeral already carries that; an empty destination
+shows a `.alert` carrying the *exact* sentence `ScoreCalendarFormatting.accessibilityLabel`
+already speaks to VoiceOver, so a sighted tap and a VoiceOver swipe learn the same fact
+instead of the tap reading as broken.
+
+**Every day-grid cell is a real `Button`/`NavigationLink` now**, `.buttonStyle(.plain)` to
+keep the default press/tint chrome from leaking onto MAX-105's fill and ring, with a
+`LayoutMetrics.minimumTapTarget` (44pt, Apple's own minimum) floored via
+`.frame(minWidth:minHeight:)` + `.contentShape` — sized independently of the drawn cell so a
+future ticket that shrinks the visual square still clears 44pt without this one having grown
+it. The year heatmap is explicitly untouched — its ~6pt marks are nowhere near a real tap
+target, and pretending otherwise would be worse than leaving it read-only, per the brief.
+
+**Needs device verification**, and the PR leads with it: the two-workout swipe (both the
+physical gesture and the previous/next buttons), the empty-day alert's wording, and a
+VoiceOver pass over a one-workout day, a two-workout day, and each of the three
+no-workout states.
+
+**MAX-109 — plans cover lifting as well as running. Spec first.** From the owner, and
+bigger than one sentence suggests: §10.2's classification reads a heart-rate profile
+against pace, the derived metrics are drift, cadence and grade-adjusted pace, the plan
+prescribes a **distance** arc, and the rubric scores against a distance and an HR cap. A
+lifting session has none of those. So it gets the MAX-090 treatment — an Opus spec that
+answers the load-bearing questions before code moves, including the one that decides the
+rest: **what is an *effective day* when the two disciplines disagree?** D9's rest-day
+budget, the streak, and D4's day colour all need one answer.
+
+**MAX-110 — the tallies still think the future is missed, and this one is visible today.**
+Found by MAX-105 while fixing the calendar's half. `TalliesCalculator` has no notion of
+`today`, so future scheduled days inflate the eligible-day count — and worse,
+`Tallies.currentStreak` walks back from the interval's end and **breaks on the first future
+scheduled day**. On the "this month" interval that means the streak tile reads **0 for most
+of every month**. The calendar half is closed (C3); the tallies half needs `today` on
+`TalliesInput` and changes numbers on a surface MAX-063 owns, which is why it was reported
+rather than fixed in place.
+
 **MAX-086 is split, and what remains is a real defect rather than polish.** It was filed
 off the design review as "absence-string voice; wire `AppearancePreference`" — two
 unrelated jobs sharing a row. The absence-voice half moves to **MAX-104**, because the new
@@ -647,6 +737,34 @@ making deliberately rather than as a side effect of a `Tab` being easy to add.
 MAX-102 delivers the tab's *content* as a tab root and is explicitly barred from
 `RootTabView.swift`; MAX-085 mounts it. Sequence: 102 → 085 → 098.
 
+**MAX-085 landed.** Four things, and one of them is a finding rather than a change.
+
+- **`RootTab` is in the core** (`Sources/MaximizeCore/Navigation/RootTab.swift`), holding
+  the order, labels and SF Symbols, with `RootTabTests` pinning them — including a test
+  named for the fact that Settings is not a tab, so putting it back fails with MAX-081's
+  reason attached. `RootTabView` is left with nothing to decide.
+- **The bar is current.** iOS 26 `Tab` builder, `.tabBarMinimizeBehavior(.onScrollDown)`
+  (all three tabs are long scrolling columns, so scrolling down should give the height
+  back), and `.tint(.accent)` at the root — the one line that finally connects MAX-084's
+  settled violet to everything the *system* draws. No `glassChrome(.tabBar)`: the system
+  bar brings its own, and re-applying it is the mistake `SettingsToolbar` documents.
+- **Cards have an edge.** New `surfaceBorder` token, hairline, on `ContentSurface.card`
+  only — not tiles (a grid of outlines is a wire mesh), not insets (a second line 16pt
+  inside the first). Increase Contrast strengthens it to a genuine 3:1 graphical object
+  against the screen instead of flattening it.
+- **The finding: the fill ramp cannot be widened by this ticket.** The design review's
+  preferred fix (§2.1a, lift `surfaceElevated` and `surfaceInset`) is blocked, because
+  `surfaceInset` is the surface every chart plots on and MAX-084 tuned every chart mark
+  against it to within hundredths of its floor — `chartGridline` sits at 1.43:1 against a
+  1.4 floor. Lifting the plot surface re-opens the whole chart palette, which is a chart
+  ticket. The edge carries the boundary instead; the reasoning and the four measured
+  values are in `DesignPalette.surfaceBorder`.
+
+Nothing here is provable by CI, and the PR says so at length. The open device questions
+are whether the bar reads as current-generation iOS, whether the violet looks right in
+place rather than in a swatch, and whether an edged card next to an unedged tile grid
+reads as deliberate or as unfinished.
+
 **MAX-105 — the plan on the dashboard calendar.** The owner's ask, and the most interesting
 design problem currently open, so it is Opus and it should be argued rather than assumed.
 
@@ -679,6 +797,73 @@ prescription is the wrong design for the hardest visual in the app. This is the 
 expensive collision on the board: either MAX-105 waits for MAX-111 and is designed once, or
 MAX-117 redesigns a ~42pt cell whose contrast budget MAX-084 and MAX-087 already spent.
 Sequence: **111 → 105 → 117**.
+
+**Shipped. What it decided, and what it found.**
+
+*The encoding.* The prescription is a ring at the cell's own edge (`Color.accent`, the
+token already reserved for the on-plan state); the state fill is inset inside it. One bit
+— asked, or not asked — so no legend is needed. A cell reads as ring + band (trained when
+asked), ring + red × (asked, didn't), ring + nothing inside (asked, not yet due), or band
+with no ring (trained off-plan, the divergence nothing previously showed). The ring never
+touches a band fill, which is why it costs nothing from the contrast budget MAX-084 and
+MAX-087 spent: `accent` on `surfaceElevated` is the only pairing it has to survive, and
+`WCAGContrastTests` now pins it in all four appearances. **Not drawn at year density** —
+`ScoreCalendarRepresentation.drawsThePlanLayer` carries that decision and the argument for
+it, which is that a ring around a 6pt mark would be paid for out of MAX-087's channel.
+
+*Kind-level divergence is modelled and spoken, not drawn.* `ScoreCalendarDay.agreement`
+compares the prescription against `Score.actualClassification` — both already stored, so
+no new reads and no re-derivation (D2) — and VoiceOver says "planned a long run; ran
+easy". It is deliberately not a fourth visual distinction in a cell that already carries
+three; the verdict header is where a single day's scheduled-versus-actual has room.
+
+*The future/missed defect was real and was on the device.* `resolve` had no notion of
+today, so the remainder of the current month rendered red. Fixed as a state
+(`.forthcoming`) reached before `.missed` can be, not as a filter in a view — and
+`today` is now a parameter, so the distinction is testable.
+
+**The tallies still think the future is missed.** Found while fixing the calendar,
+reported rather than fixed. `TalliesCalculator` has no `today`, so a future scheduled day
+enters `EffectiveDayTally.eligibleCount` and drags the rate down, and worse,
+`Tallies.currentStreak` walks back from `input.through` and breaks on the first future
+scheduled day it meets — which for the "this month" interval is usually the 31st, so the
+streak tile reads 0 for most of every month. The calendar half is closed by passing
+`RestDayBudgeting`'s new `outcomesUnknownFrom` (now **C3**); the tallies half needs
+`today` on `TalliesInput` and changes numbers on a surface MAX-063 owns. → **MAX-110**.
+
+**MAX-110 closed the tallies half.** `TalliesInput` gained a required `today`
+(never a clock read, matching `ScoreCalendar.resolve`'s own parameter), threaded into
+both places that depend on whether a day's outcome is in yet: `effectiveDayTally` now
+withholds any day on or after `today` from `eligibleCount`, and `resolveRestDayConversions`
+passes `today` through as C3's `outcomesUnknownFrom`.
+
+The streak walk's start point needed a real decision, and the first draft got only half
+of it right. Walking back from `through` silently assumed `through` was decided, which
+is false whenever it reaches into the future — but stopping the walk at `today - 1`
+(the first draft's fix) is a *second*, smaller version of the same bug: it treats a
+workout already run and scored *this morning* as absent until tomorrow. Review caught
+it before merge. The asymmetry that was missing — **a miss is unknowable until the day
+ends, but a hit is knowable the instant it happens** — is not new to this ticket;
+`ScoreCalendar.resolve` already embodies it (a workout on `today` resolves to `.scored`,
+checked before the forthcoming guard, never to `.forthcoming`). The walk now matches
+that ordering instead of inventing a second rule: it visits `today` itself, an empty
+`today` is neutral (the day might not be over), but a workout already recorded and
+scored today extends or breaks the streak exactly like any other decided day. Tested at
+all three interval shapes (wholly past, wholly future, spanning `today`) plus the two
+`today`-specific cases (already a hit, already a below-threshold miss) that are the
+direct regression tests for the two drafts' respective bugs. A test derives its
+expected `EffectiveDayTally` from `ScoreCalendar.resolve`'s own output over the same
+interval rather than a second hand-worked number, and a sibling test does the same for
+the streak — both fail if the calendar and the tallies ever drift apart, even if either
+suite's hardcoded numbers still happen to look right.
+
+`TrendTilesModel` resolves `today` once at init, the same way `ScoreCalendarModel` does.
+
+
+*Also noticed, not acted on.* `docs/DESIGN-REVIEW.md` §5.4 proposed "a 1pt accent ring on
+the current day" for the missing today-marker. MAX-105 has spent exactly that device on
+the plan, so whoever takes §5.4 needs a different one — and may not need one at all: the
+boundary between filled cells and unfilled forthcoming ones now *is* today.
 
 **MAX-091.** Both Claude clients moved from the Opus tier to the Sonnet tier at `medium`
 effort, on the owner's cost instruction. Three things came with the model that are not
@@ -734,7 +919,7 @@ twelve and is dispatchable immediately.
 | ID | Ticket | Depends on | Tier |
 |---|---|---|---|
 | MAX-092 | `ChatSubject` and thread identity | — | **Opus** ✅ |
-| MAX-093 | The stored record: additive fields, no migration | 092 | Sonnet |
+| MAX-093 | The stored record: additive fields, no migration | 092 | Sonnet ✅ |
 | MAX-094 | Shared fact-sheet formatting — pure extraction | — | Sonnet ✅ |
 | MAX-095 | `TrainingContext` + one context entry point | 092, 094 | **Opus** 🔒 |
 | MAX-096 | `ChatModel` generalised; transcript cap; training task text | 095 | **Opus** 🔒 |
@@ -878,6 +1063,37 @@ recorded lean is to label them; the decision is the owner's, tracked as MAX-125.
 
 Suggested order: **105 (briefed) → 110 → 111 → (112 ‖ 113) → 114 → 115 → 116 → 117**, with
 118 parallel after 112, 120 then 119 parallel after 111, and 121/122 last.
+
+**MAX-093 landed the stored record.** `StoredChatThread` is columnar —
+`subjectKindRawValue`, `workoutUUID` (a fixed sentinel for a training row),
+`scopeFromISO8601`/`scopeThroughISO8601`, and a real `lastActivityAt` column — following
+`ChatSubject`'s own `Codable` key names, which already named these as the columns this
+ticket would split it into. `MaximizeStore`'s `ChatThreadRepository` conformance is a
+genuine implementation now, not the MAX-092 stub: `store(_:)` is keyed on the thread's own
+`id` and evicts other rows for a workout subject at the door (§12 q3), and
+`mostRecentThread(for:)` implements the training-subject query — exact match on the frozen
+scope, newest `lastActivityAt` with `id` breaking a tie, the same rule
+`FakeChatThreadRepository` and `ChatThreadSummary.sortedByActivity(_:)` already run under
+`swift test`.
+
+- **No migration, proven as behaviour.** Every added column is either non-optional with a
+  default (`subjectKindRawValue` defaults to `"workout"`, `lastActivityAt` defaults to
+  `Date.distantPast` as an "unset" sentinel) or optional with none (`scopeFromISO8601`,
+  `scopeThroughISO8601`) — `DerivedMetricsRecord.distanceSplitsComputed`'s and
+  `.distanceSplitsJSON`'s precedent exactly. `StoredChatThread.toDomain()` detects the
+  `lastActivityAt` sentinel and falls back to MAX-092's derivation (last turn's timestamp,
+  or `createdAt`), so a pre-MAX-093 row reads back identically to how it read before this
+  ticket. `MaximizeSchemaV1`'s version number does not move, for the reason
+  `distanceSplitsJSON`'s doc comment already gives: this schema has never been promoted to
+  CloudKit production (A8), so the additive-only immutability rule has not started
+  applying.
+- **CloudKit's restrictions were kept, not cleaned up.** No new `@Attribute(.unique)`, and
+  every new non-optional column carries a default.
+- **Not verified by CI beyond compilation.** `MaximizeStore.swift` is App-layer and CI
+  never executes it (tracker R2, R13) — the SwiftData predicate logic (the
+  `subjectKindRawValue`/`workoutUUID` compound predicates, the training-scope equality
+  query) is reviewed by eye against `FakeChatThreadRepository`'s CI-checked behaviour, not
+  run. See the PR's **Needs device verification** section.
 
 ---
 

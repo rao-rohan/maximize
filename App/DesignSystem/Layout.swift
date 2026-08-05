@@ -105,6 +105,38 @@ enum LayoutMetrics {
     /// The same mark on the verdict header's band chip, which has room for it.
     static let prominentScoreBandMarkSize: CGFloat = 10
 
+    /// Stroke width of the plan layer's ring around a calendar cell the plan asks a
+    /// session of (MAX-105, FR-3.2).
+    ///
+    /// A hairline would be wrong here and `LayoutMetrics.hairline` is not reused: the
+    /// ring is a mark carrying meaning, not a rule separating rows, and §2.2 of
+    /// `docs/DESIGN-REVIEW.md` is a standing reminder of what a sub-point neutral line
+    /// looks like on this palette. One point in `Color.accent` measures 5.9:1 against
+    /// the calendar card it is drawn on — see `WCAGContrastTests`.
+    static let planRingWidth: CGFloat = 1
+
+    /// The same ring under Increase Contrast.
+    ///
+    /// `Ink`'s four-way resolution already brightens the accent under that setting, so
+    /// the ring's *colour* is handled centrally (MAX-070). Its *width* is not — design
+    /// review §8.3 notes that nothing in this app thickens a stroke the way Apple's own
+    /// controls do, and a one-point ring is exactly the mark that setting exists for.
+    static let planRingWidthIncreasedContrast: CGFloat = 2
+
+    /// The gap between the ring and the state fill inside it.
+    ///
+    /// Applied to every cell, ringed or not, so the grid's fills stay one size — a cell
+    /// that grew or shrank depending on whether the plan asked something of it would put
+    /// the plan back into a channel (size) that MAX-087 already spends elsewhere, and
+    /// would make the grid ragged besides.
+    ///
+    /// Sized so the ring at its Increase Contrast width still clears the fill: 2pt of
+    /// stroke plus a visible point of card between stroke and fill. Below that the ring
+    /// reads as a border *on* the fill rather than as a ground *behind* it, which is the
+    /// whole distinction — and it would put an accent stroke directly against a
+    /// saturated band colour, a pairing no ink in this palette survives.
+    static let planRingGutter: CGFloat = 3
+
     /// Visible-edge fraction of a year-heatmap mark's full footprint, for
     /// `ScoreBandHeatmapMark.majorInset` and `.minorInset` (MAX-087). `.fullBleed`
     /// needs no constant of its own — by definition it draws at the full footprint,
@@ -117,4 +149,15 @@ enum LayoutMetrics {
     /// Needs device verification: see `ScoreBandHeatmapMark`.
     static let heatmapMarkMajorInsetFraction: CGFloat = 0.64
     static let heatmapMarkMinorInsetFraction: CGFloat = 0.4
+
+    /// Apple's own minimum tap target, in points (MAX-108).
+    ///
+    /// A calendar day cell is roughly 42–47pt, driven by seven columns sharing a
+    /// phone's content width rather than by any target-size reasoning — see
+    /// `ScoreCalendarView`'s day-grid cells. Rather than growing the cell itself
+    /// (restyling the calendar, which this ticket is explicitly told not to spend),
+    /// the cell's hit area is floored at this value independently of what is drawn:
+    /// `.frame(minWidth:minHeight:)` combined with `.contentShape(Rectangle())`
+    /// enlarges only the tappable region, never the visible fill or ring.
+    static let minimumTapTarget: CGFloat = 44
 }

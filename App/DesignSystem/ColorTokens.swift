@@ -80,6 +80,14 @@ extension Color {
     /// Hairline rules between rows and sections.
     static let separator = DesignPalette.separator.color
 
+    /// The edge of a card (MAX-085). Drawn by `contentSurface(.card)` and by nothing
+    /// else — a view should never need to name it.
+    ///
+    /// It exists because the fill ramp alone measures 1.09:1 (design review §2.1) and
+    /// cannot be widened without moving the surface every chart plots on. `DesignPalette`
+    /// carries that argument and the four measured values.
+    static let surfaceBorder = DesignPalette.surfaceBorder.color
+
     // MARK: Text
 
     /// Metrics that matter, headings, primary values.

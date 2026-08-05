@@ -282,6 +282,74 @@ final class RestDayBudgetingTests: XCTestCase {
         XCTAssertEqual(overrides.map(\.date.description).sorted(), ["2026-01-09", "2026-01-10"])
     }
 
+    // MARK: - outcomesUnknownFrom (MAX-105)
+
+    /// A day still ahead of the athlete is not a miss, so it cannot be forgiven.
+    ///
+    /// Standing on Wednesday, the only days behind are Monday (`.easy`) and Tuesday
+    /// (`.hard`), so a budget of one goes to Monday. Unbounded — the default, and what
+    /// `TalliesCalculator` still passes — Friday's `.other` is the cheapest day in the
+    /// week and takes the allowance instead, spending it on a day nothing has happened
+    /// on yet.
+    func testDaysWhoseOutcomeIsNotYetKnownAreNotCandidates() throws {
+        let bounded = try RestDayBudgeting.convertingMissedDays(
+            planDays: fixtureWeek(),
+            workoutDays: [],
+            budget: budget(1),
+            createdAt: createdAt,
+            outcomesUnknownFrom: try day("2026-01-07")
+        )
+        XCTAssertEqual(bounded.map(\.date.description), ["2026-01-05"])
+
+        let unbounded = try RestDayBudgeting.convertingMissedDays(
+            planDays: fixtureWeek(),
+            workoutDays: [],
+            budget: budget(1),
+            createdAt: createdAt
+        )
+        XCTAssertEqual(unbounded.map(\.date.description), ["2026-01-09"])
+    }
+
+    /// The boundary is strict: the day named is itself excluded. Standing on Monday,
+    /// nothing in the week has happened yet and nothing converts.
+    func testTheBoundaryDayItselfIsNotACandidate() throws {
+        let overrides = try RestDayBudgeting.convertingMissedDays(
+            planDays: fixtureWeek(),
+            workoutDays: [],
+            budget: budget(3),
+            createdAt: createdAt,
+            outcomesUnknownFrom: try day("2026-01-05")
+        )
+        XCTAssertTrue(overrides.isEmpty)
+    }
+
+    /// Candidacy is bounded; the week's *shape* is not. Thursday is a `.long` day and
+    /// the most expensive thing in the week, but it is adjacent to Wednesday's rest —
+    /// and that adjacency must still count even when Wednesday is ahead of the
+    /// boundary, because a plan's rest days are known in advance.
+    ///
+    /// Monday and Thursday are both missed `.easy` days in the past, tied on kind.
+    /// Thursday wins the adjacency tie-break only because Friday is scheduled rest —
+    /// and Friday is on the far side of the boundary. Drop future days from the *shape*
+    /// as well as from the candidate pool and Monday takes the allowance instead, on the
+    /// date tie-break, which would be the wrong answer for a week the athlete can
+    /// already see the shape of.
+    func testFutureRestDaysStillShapeAdjacencyForPastCandidates() throws {
+        let week = [
+            try planDay("2026-01-05", .easy),  // Mon — nothing beside it
+            try planDay("2026-01-08", .easy),  // Thu — framed by Friday's rest
+            try planDay("2026-01-09", .rest),  // Fri — ahead of the boundary below
+        ]
+        let overrides = try RestDayBudgeting.convertingMissedDays(
+            planDays: week,
+            workoutDays: [],
+            budget: budget(1),
+            createdAt: createdAt,
+            outcomesUnknownFrom: try day("2026-01-09")
+        )
+        XCTAssertEqual(overrides.map(\.date.description), ["2026-01-08"])
+    }
+
     // MARK: - createdAt
 
     func testCreatedAtIsStampedFromTheParameterNotTheClock() throws {

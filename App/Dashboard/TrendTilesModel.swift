@@ -32,15 +32,38 @@ final class TrendTilesModel {
     /// `TimeZone.current` inside `MaximizeCore` itself, only threaded in from here.
     private let timeZone: TimeZone
 
+    /// The athlete's current day, resolved once here and handed to `TalliesInput`
+    /// (MAX-110). **This is the only place these tiles read a clock.**
+    /// `TalliesCalculator` decides whether a scheduled day is still forthcoming or has
+    /// been missed, and whether it is eligible to extend the streak, and it cannot do
+    /// that without knowing what day it is — but a `Date()` inside `MaximizeCore`, or
+    /// inside a SwiftUI `body`, would make that decision untestable and would re-read
+    /// the wall clock on every render. So the ambient read happens here, exactly once,
+    /// the same way `ScoreCalendarModel` resolves the `today` it hands to
+    /// `ScoreCalendar.resolve` — the calendar and these tiles must describe the same
+    /// day the same way, or the two halves of the same screen can disagree.
+    ///
+    /// Nil only when the system clock is outside `CalendarDay`'s 1...9999 AD domain,
+    /// which surfaces as `.failed` rather than being guessed at.
+    ///
+    /// Captured at init, so an app left open across midnight keeps yesterday's boundary
+    /// until the model is rebuilt — the same staleness `ScoreCalendarModel.today`
+    /// already accepts and documents.
+    private let today: CalendarDay?
+
     /// - Parameters:
     ///   - workoutRepository/scoreRepository/planRepository/settingsRepository: each
     ///     defaults to `PersistenceComposition.store`. Overridable so a preview or a
     ///     test can inject fakes instead of the real on-device store.
+    ///   - today: defaults to now, in `timeZone`. Overridable for the same reason
+    ///     `ScoreCalendarModel` allows it — a preview or a test pinning the day rather
+    ///     than depending on when it happens to run.
     init(
         workoutRepository: (any WorkoutRepository)? = nil,
         scoreRepository: (any ScoreRepository)? = nil,
         planRepository: (any PlanRepository)? = nil,
         settingsRepository: (any SettingsRepository)? = nil,
+        today: CalendarDay? = nil,
         timeZone: TimeZone = .current
     ) {
         self.workoutRepository = workoutRepository ?? PersistenceComposition.store
@@ -48,10 +71,12 @@ final class TrendTilesModel {
         self.planRepository = planRepository ?? PersistenceComposition.store
         self.settingsRepository = settingsRepository ?? PersistenceComposition.store
         self.timeZone = timeZone
+        self.today = today ?? (try? CalendarDay(Date(), in: timeZone))
     }
 
     func load(interval: TrendInterval) async {
-        guard let workoutRepository, let scoreRepository, let planRepository, let settingsRepository else {
+        guard let workoutRepository, let scoreRepository, let planRepository, let settingsRepository,
+              let today else {
             state = .failed
             return
         }
@@ -82,6 +107,7 @@ final class TrendTilesModel {
                 from: interval.from,
                 through: interval.through,
                 timeZone: timeZone,
+                today: today,
                 workouts: workouts,
                 scoreLedgers: scoreLedgers,
                 planCalendar: planCalendar,

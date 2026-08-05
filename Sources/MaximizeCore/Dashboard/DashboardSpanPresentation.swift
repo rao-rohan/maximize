@@ -17,6 +17,12 @@ import Foundation
 /// The reasoning for each row sits on the enum it produces. Two properties are shared
 /// by all three and worth stating once here:
 ///
+/// **The plan layer follows the calendar's row and nothing else.** MAX-105 draws the
+/// prescription as the ground beneath a day's outcome, at week and month density only;
+/// `ScoreCalendarRepresentation.drawsThePlanLayer` carries the choice and the argument
+/// for dropping it at a year. The future/missed distinction it introduces is *not*
+/// span-dependent and applies everywhere.
+///
 /// **Density stays roughly constant as the span grows.** A week draws 7 marks, a month
 /// 28–31, a year 365 — but the year's marks are an order of magnitude smaller and carry
 /// no text, so the ink per screen is comparable. What changes is what a mark *is for*:
@@ -98,6 +104,37 @@ public enum ScoreCalendarRepresentation: Hashable, Sendable, CaseIterable {
     /// `WCAGContrastTests`. Whether the resulting marks are legible at six points on an
     /// actual phone is the one thing about that fix that only a device can answer.
     case weekColumnHeatmap
+
+    /// Whether the plan layer (MAX-105) is drawn at this density.
+    ///
+    /// The plan layer is a ring at the cell's own edge around every day the plan asks a
+    /// session of — the prescription as ground, with the outcome drawn inside it. It is
+    /// **not** drawn in the year heatmap, and that is a decision rather than an
+    /// oversight:
+    ///
+    /// - **There is no edge left to ring.** A heatmap mark is about six points across
+    ///   with a 1.5pt gap to its neighbour (`LayoutMetrics.heatmapCellSpacing`). A 1pt
+    ///   ring plus its gutter would consume most of the mark, leaving a two-point core
+    ///   to carry the band.
+    /// - **It would collide with the channel MAX-087 just bought.** That ticket spends
+    ///   the mark's *area* on telling `.effective` from `.marginal` from `.ineffective`
+    ///   apart at a density where a corner pip has nowhere to sit. A ring shrinks the
+    ///   area available to it, so the plan layer would be paid for out of the band
+    ///   budget — the exact trade MAX-084 and MAX-087 were run to stop making.
+    /// - **A year does not ask the question the ring answers.** At six points a reader
+    ///   sees texture and gaps, not individual days; "was Thursday prescribed" is a
+    ///   week-and-month question, and both of those spans get the day grid.
+    ///
+    /// What the year *does* get from MAX-105 is the part that cannot be dropped: a
+    /// scheduled day that has not happened resolves to `.forthcoming` rather than
+    /// `.missed`, so the forward half of the current year stops rendering as several
+    /// hundred failures. See `ScoreCalendarDayState.isDrawnHollowAtHeatmapDensity`.
+    public var drawsThePlanLayer: Bool {
+        switch self {
+        case .dayGrid: return true
+        case .weekColumnHeatmap: return false
+        }
+    }
 }
 
 /// What the HR-drift section (FR-3.3, D5) is at a span.

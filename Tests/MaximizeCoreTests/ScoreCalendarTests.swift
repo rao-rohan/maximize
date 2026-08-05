@@ -37,17 +37,36 @@ final class ScoreCalendarTests: XCTestCase {
         )
     }
 
-    private func ledger(points: Int, workoutID: UUID) throws -> ScoreLedger {
-        try ScoreLedger(automatic: try Fixture.score(points: points, workoutID: workoutID))
+    private func ledger(
+        points: Int,
+        workoutID: UUID,
+        scheduledKind: ScheduledSessionKind = .easy,
+        actualClassification: WorkoutClassification = .easy
+    ) throws -> ScoreLedger {
+        try ScoreLedger(
+            automatic: try Fixture.score(
+                points: points,
+                workoutID: workoutID,
+                scheduledKind: scheduledKind,
+                actualClassification: actualClassification
+            )
+        )
     }
 
     private func calendar(_ plan: Plan? = nil) throws -> PlanCalendar {
         try PlanCalendar([plan ?? Fixture.plan()])
     }
 
+    /// `today` defaults to a day after every date these tests reason about, so the
+    /// whole suite is "the past" unless a test deliberately says otherwise. Every
+    /// pre-MAX-105 expectation therefore still reads as written: a scheduled day with
+    /// nothing recorded is a miss, because it has been and gone.
+    private static let defaultToday = "2026-12-31"
+
     private func resolve(
         from: String,
         through: String,
+        today: String = ScoreCalendarTests.defaultToday,
         workouts: [Workout] = [],
         scoreLedgers: [UUID: ScoreLedger] = [:],
         planCalendar: PlanCalendar?,
@@ -57,6 +76,7 @@ final class ScoreCalendarTests: XCTestCase {
             from: try day(from),
             through: try day(through),
             timeZone: .gmt,
+            today: try day(today),
             workouts: workouts,
             scoreLedgers: scoreLedgers,
             planCalendar: planCalendar,
@@ -64,9 +84,20 @@ final class ScoreCalendarTests: XCTestCase {
         )
     }
 
-    private func state(_ days: [ScoreCalendarDay], on text: String) throws -> ScoreCalendarDayState {
+    private func cell(_ days: [ScoreCalendarDay], on text: String) throws -> ScoreCalendarDay {
         let target = try day(text)
-        return try XCTUnwrap(days.first { $0.date == target }).state
+        return try XCTUnwrap(days.first { $0.date == target })
+    }
+
+    private func state(_ days: [ScoreCalendarDay], on text: String) throws -> ScoreCalendarDayState {
+        try cell(days, on: text).state
+    }
+
+    private func destination(
+        _ days: [ScoreCalendarDay],
+        on text: String
+    ) throws -> ScoreCalendarDayDestination {
+        try cell(days, on: text).destination
     }
 
     // MARK: - .scored
@@ -270,6 +301,7 @@ final class ScoreCalendarTests: XCTestCase {
                 from: try day("2026-01-10"),
                 through: try day("2026-01-05"),
                 timeZone: .gmt,
+                today: try day("2026-12-31"),
                 workouts: [],
                 planCalendar: nil,
                 restDayBudget: .standard
@@ -343,5 +375,432 @@ final class ScoreCalendarTests: XCTestCase {
             planCalendar: try calendar(try c1Plan()), restDayBudget: try RestDayBudget(daysPerWeek: 1)
         )
         XCTAssertEqual(try state(days, on: "2026-01-09"), .convertedRest(scheduledKind: .other))
+    }
+
+    // MARK: - MAX-105: a day that has not happened is not a day that was missed
+    //
+    // The defect this closes was visible on a real device: `resolve` had no notion of
+    // today, so every scheduled day between now and the end of the selected month
+    // resolved to `.missed` and rendered red. The fix is a state, not a filter — the
+    // resolver reaches `.forthcoming` before it can reach `.missed` or `.convertedRest`,
+    // so there is no path by which a future day acquires a miss for a view to hide.
+
+    func testAScheduledDayInTheFutureIsForthcomingRatherThanMissed() throws {
+        let days = try resolve(
+            from: "2026-01-08", through: "2026-01-08", // Thursday: easy, nothing recorded
+            today: "2026-01-06",                       // Tuesday — Thursday is still ahead
+            planCalendar: try calendar(),
+            restDayBudget: try RestDayBudget(daysPerWeek: 0)
+        )
+        XCTAssertEqual(try state(days, on: "2026-01-08"), .forthcoming(scheduledKind: .easy))
+    }
+
+    /// The same day, once it is behind the athlete. The two assertions differ only in
+    /// `today`, which is the whole point: nothing about the records changed.
+    func testTheSameScheduledDayIsMissedOnceItIsInThePast() throws {
+        let days = try resolve(
+            from: "2026-01-08", through: "2026-01-08",
+            today: "2026-01-09",
+            planCalendar: try calendar(),
+            restDayBudget: try RestDayBudget(daysPerWeek: 0)
+        )
+        XCTAssertEqual(try state(days, on: "2026-01-08"), .missed(scheduledKind: .easy))
+    }
+
+    /// Today itself is forthcoming, not missed. A scheduled run at six in the morning
+    /// has not been skipped, and a calendar that said so would be wrong for most of
+    /// every day the athlete looks at it.
+    func testTodayIsForthcomingNotMissed() throws {
+        let days = try resolve(
+            from: "2026-01-08", through: "2026-01-08",
+            today: "2026-01-08",
+            planCalendar: try calendar(),
+            restDayBudget: try RestDayBudget(daysPerWeek: 0)
+        )
+        XCTAssertEqual(try state(days, on: "2026-01-08"), .forthcoming(scheduledKind: .easy))
+    }
+
+    /// A workout recorded today still wins: `.forthcoming` only ever describes a day
+    /// with nothing on it.
+    func testADayWithAWorkoutIsNeverForthcoming() throws {
+        let workoutID = UUID()
+        let days = try resolve(
+            from: "2026-01-08", through: "2026-01-08",
+            today: "2026-01-08",
+            workouts: [try workout(id: workoutID, on: "2026-01-08")],
+            scoreLedgers: [workoutID: try ledger(points: 90, workoutID: workoutID)],
+            planCalendar: try calendar()
+        )
+        XCTAssertEqual(try state(days, on: "2026-01-08"), .scored(band: .effective, activityType: .running))
+    }
+
+    /// A scheduled rest day reads the same on either side of today. Rest was prescribed,
+    /// rest is what the day is, and there is no outcome still pending on it.
+    func testAFutureScheduledRestDayIsStillScheduledRest() throws {
+        let days = try resolve(
+            from: "2026-01-09", through: "2026-01-09", // Friday: rest in Fixture.plan()
+            today: "2026-01-06",
+            planCalendar: try calendar()
+        )
+        XCTAssertEqual(try state(days, on: "2026-01-09"), .scheduledRest)
+    }
+
+    /// The invariant behind the device report, asserted over a whole month rather than
+    /// one day: **no day on or after today may carry a miss**, converted or not. This is
+    /// the version CI can hold — a future edit that reintroduces the collapse fails here
+    /// even if it never touches the two single-day tests above.
+    func testNoDayOnOrAfterTodayIsEverMissedOrConverted() throws {
+        let days = try resolve(
+            from: "2026-01-01", through: "2026-01-31",
+            today: "2026-01-14",
+            planCalendar: try calendar(),
+            restDayBudget: try RestDayBudget(daysPerWeek: 2)
+        )
+        let today = try day("2026-01-14")
+        for entry in days where entry.date >= today {
+            switch entry.state {
+            case .missed, .convertedRest:
+                XCTFail("\(entry.date) has not happened yet and resolved to \(entry.state)")
+            default:
+                break
+            }
+        }
+        // And the past half still resolves misses, so the assertion above is not passing
+        // vacuously because nothing was ever missed.
+        XCTAssertTrue(
+            days.contains { $0.date < today && $0.state == .missed(scheduledKind: .easy) },
+            "expected at least one genuine miss before today"
+        )
+    }
+
+    /// The weekly rest-day budget is finite, so offering it days that have not happened
+    /// spends it on non-events and leaves genuine misses unforgiven.
+    ///
+    /// Reasoned against `c1Plan()` — Monday easy / Tuesday hard / Wednesday rest /
+    /// Thursday long / Friday other / Saturday easy / Sunday rest — because it is the
+    /// template that makes the bug visible. On Wednesday, with one day of budget, the
+    /// only days behind the athlete are Monday (easy, missed) and Tuesday (hard,
+    /// missed), so Monday converts. Offer the future as well and Friday's `.other`
+    /// wins on cost — the cheapest tier there is — so the allowance goes to a day
+    /// nobody has reached and Monday's real miss stays red.
+    func testTheRestDayBudgetIsNotSpentOnDaysThatHaveNotHappened() throws {
+        let days = try resolve(
+            from: "2026-01-05", through: "2026-01-11",
+            today: "2026-01-07",
+            planCalendar: try calendar(try c1Plan()),
+            restDayBudget: try RestDayBudget(daysPerWeek: 1)
+        )
+        XCTAssertEqual(try state(days, on: "2026-01-05"), .convertedRest(scheduledKind: .easy))
+        XCTAssertEqual(try state(days, on: "2026-01-06"), .missed(scheduledKind: .hard))
+        XCTAssertEqual(try state(days, on: "2026-01-07"), .scheduledRest)
+        XCTAssertEqual(try state(days, on: "2026-01-09"), .forthcoming(scheduledKind: .other))
+        XCTAssertEqual(try state(days, on: "2026-01-10"), .forthcoming(scheduledKind: .easy))
+    }
+
+    // MARK: - MAX-105: the plan layer
+
+    /// Every day carries the plan version in effect *on that day* (D1), whatever became
+    /// of it.
+    func testEveryDayCarriesThePrescriptionInEffectOnIt() throws {
+        let days = try resolve(from: "2026-01-05", through: "2026-01-11", planCalendar: try calendar())
+
+        let monday = try cell(days, on: "2026-01-05")   // rest
+        XCTAssertEqual(monday.prescription?.scheduledSession.kind, .rest)
+        XCTAssertEqual(monday.prescription?.planVersion, try PlanVersion(1))
+        XCTAssertFalse(monday.prescribesASession, "rest is not a session the plan can hold you to")
+
+        let sunday = try cell(days, on: "2026-01-11")   // long
+        XCTAssertEqual(sunday.prescription?.scheduledSession.kind, .long)
+        XCTAssertTrue(sunday.prescribesASession)
+    }
+
+    /// A day before every plan version has no prescription at all — distinct from a
+    /// prescription of rest, and the reason the plan layer is drawn on nothing there.
+    func testADayNoPlanGovernsCarriesNoPrescription() throws {
+        let days = try resolve(from: "2025-12-25", through: "2025-12-25", planCalendar: try calendar())
+        let resolved = try cell(days, on: "2025-12-25")
+        XCTAssertNil(resolved.prescription)
+        XCTAssertFalse(resolved.prescribesASession)
+    }
+
+    /// The long-run distance comes from the arc for the week the day falls in, so the
+    /// prescription is the plan's real ask rather than the template's placeholder — the
+    /// D1 resolution, not a re-derivation.
+    func testALongRunDayCarriesTheArcDistanceForItsWeek() throws {
+        let days = try resolve(from: "2026-01-11", through: "2026-01-18", planCalendar: try calendar())
+        // Fixture.plan()'s arc: week 1 → 16 km, week 2 → 18 km. effectiveFrom is
+        // Thursday 2026-01-01, so arc week 1 opens on Monday 2025-12-29.
+        XCTAssertEqual(try cell(days, on: "2026-01-11").prescription?.scheduledSession.distanceMeters, 18_000)
+        XCTAssertEqual(try cell(days, on: "2026-01-18").prescription?.scheduledSession.distanceMeters, 20_000)
+    }
+
+    // MARK: - MAX-105: plan versus execution
+
+    func testACompletedDayMatchingItsPrescriptionAgrees() throws {
+        let workoutID = UUID()
+        let days = try resolve(
+            from: "2026-01-06", through: "2026-01-06", // Tuesday: easy 8 km
+            workouts: [try workout(id: workoutID, on: "2026-01-06")],
+            scoreLedgers: [
+                workoutID: try ledger(
+                    points: 90, workoutID: workoutID,
+                    scheduledKind: .easy, actualClassification: .easy
+                ),
+            ],
+            planCalendar: try calendar()
+        )
+        XCTAssertEqual(try cell(days, on: "2026-01-06").agreement, .asPrescribed(kind: .easy))
+    }
+
+    func testACompletedDayDivergingFromItsPrescriptionSaysWhatWasAskedAndWhatWasRun() throws {
+        let workoutID = UUID()
+        let days = try resolve(
+            from: "2026-01-11", through: "2026-01-11", // Sunday: long run
+            workouts: [try workout(id: workoutID, on: "2026-01-11")],
+            scoreLedgers: [
+                workoutID: try ledger(
+                    points: 60, workoutID: workoutID,
+                    scheduledKind: .long, actualClassification: .easy
+                ),
+            ],
+            planCalendar: try calendar()
+        )
+        XCTAssertEqual(
+            try cell(days, on: "2026-01-11").agreement,
+            .divergent(prescribed: .long, performed: .easy)
+        )
+    }
+
+    /// A run on the plan's own rest day. Not a failure, and not agreement either — the
+    /// divergence the calendar could not show at all before this ticket.
+    func testASessionOnAScheduledRestDayIsUnprescribed() throws {
+        let workoutID = UUID()
+        let days = try resolve(
+            from: "2026-01-05", through: "2026-01-05", // Monday: scheduled rest
+            workouts: [try workout(id: workoutID, on: "2026-01-05")],
+            scoreLedgers: [workoutID: try ledger(points: 90, workoutID: workoutID)],
+            planCalendar: try calendar()
+        )
+        let resolved = try cell(days, on: "2026-01-05")
+        XCTAssertEqual(resolved.agreement, .unprescribed(performed: .easy))
+        XCTAssertFalse(resolved.prescribesASession)
+    }
+
+    func testASessionOnADayNoPlanGovernsIsUnprescribed() throws {
+        let workoutID = UUID()
+        let days = try resolve(
+            from: "2025-12-25", through: "2025-12-25",
+            workouts: [try workout(id: workoutID, on: "2025-12-25")],
+            scoreLedgers: [workoutID: try ledger(points: 90, workoutID: workoutID)],
+            planCalendar: try calendar()
+        )
+        XCTAssertEqual(try cell(days, on: "2025-12-25").agreement, .unprescribed(performed: .easy))
+    }
+
+    /// The comparison waits for the score, because the classification it compares
+    /// against is stored on the score (D2). The *ask* does not wait — the day still
+    /// carries its prescription.
+    func testARecordedButUnscoredDayHasAPrescriptionButNoAgreementYet() throws {
+        let workoutID = UUID()
+        let days = try resolve(
+            from: "2026-01-06", through: "2026-01-06",
+            workouts: [try workout(id: workoutID, on: "2026-01-06")],
+            planCalendar: try calendar()
+        )
+        let resolved = try cell(days, on: "2026-01-06")
+        XCTAssertNil(resolved.agreement)
+        XCTAssertTrue(resolved.prescribesASession)
+    }
+
+    /// The agreement is read off the same workout the band is, so a two-workout day
+    /// cannot report one session's band beside another session's divergence.
+    func testTheAgreementDescribesTheSameWorkoutTheBandDoes() throws {
+        let morning = UUID()
+        let evening = UUID()
+        let days = try resolve(
+            from: "2026-01-11", through: "2026-01-11", // Sunday: long run
+            workouts: [
+                try workout(id: morning, on: "2026-01-11", startOffsetSeconds: 0),
+                try workout(id: evening, on: "2026-01-11", startOffsetSeconds: 3_600 * 8),
+            ],
+            scoreLedgers: [
+                morning: try ledger(
+                    points: 30, workoutID: morning,
+                    scheduledKind: .long, actualClassification: .easy
+                ),
+                evening: try ledger(
+                    points: 90, workoutID: evening,
+                    scheduledKind: .long, actualClassification: .long
+                ),
+            ],
+            planCalendar: try calendar()
+        )
+        let resolved = try cell(days, on: "2026-01-11")
+        XCTAssertEqual(resolved.state, .scored(band: .effective, activityType: .running))
+        XCTAssertEqual(resolved.agreement, .asPrescribed(kind: .long))
+    }
+
+    // MARK: - MAX-108: the tappability decision
+    //
+    // "Is there anything behind this day" has to be decided here, not by a view
+    // guessing from `state`'s case — the whole reason being that several states share
+    // the same "nothing recorded" fact but not the same tense relative to `today`.
+
+    func testADayWithOneWorkoutHasThatWorkoutAsItsDestination() throws {
+        let workoutID = UUID()
+        let days = try resolve(
+            from: "2026-01-06", through: "2026-01-06",
+            workouts: [try workout(id: workoutID, on: "2026-01-06")],
+            scoreLedgers: [workoutID: try ledger(points: 90, workoutID: workoutID)],
+            planCalendar: try calendar()
+        )
+        XCTAssertEqual(try destination(days, on: "2026-01-06"), .workouts([workoutID]))
+    }
+
+    /// The interesting half. Both workouts are in the destination, ordered by start
+    /// time regardless of the order they were supplied in — the order a swipe between
+    /// them should present, and the same tiebreak the band-ranking and
+    /// earliest-unscored logic elsewhere in this type already use.
+    func testATwoWorkoutDayCarriesBothOrderedByStartTime() throws {
+        let morning = UUID()
+        let evening = UUID()
+        let workouts = [
+            try workout(id: evening, on: "2026-01-06", startOffsetSeconds: 3_600 * 8),
+            try workout(id: morning, on: "2026-01-06", startOffsetSeconds: 0),
+        ]
+        let scoreLedgers: [UUID: ScoreLedger] = [
+            morning: try ledger(points: 90, workoutID: morning),
+            evening: try ledger(points: 60, workoutID: evening),
+        ]
+        let days = try resolve(
+            from: "2026-01-06", through: "2026-01-06",
+            workouts: workouts, scoreLedgers: scoreLedgers, planCalendar: try calendar()
+        )
+        XCTAssertEqual(try destination(days, on: "2026-01-06"), .workouts([morning, evening]))
+    }
+
+    /// Three or more is not a special case — the door just carries every id.
+    func testAThreeWorkoutDayCarriesAllThreeOrderedByStartTime() throws {
+        let first = UUID()
+        let second = UUID()
+        let third = UUID()
+        let workouts = [
+            try workout(id: third, on: "2026-01-06", startOffsetSeconds: 3_600 * 16),
+            try workout(id: first, on: "2026-01-06", startOffsetSeconds: 0),
+            try workout(id: second, on: "2026-01-06", startOffsetSeconds: 3_600 * 8),
+        ]
+        let days = try resolve(
+            from: "2026-01-06", through: "2026-01-06",
+            workouts: workouts, planCalendar: try calendar()
+        )
+        XCTAssertEqual(try destination(days, on: "2026-01-06"), .workouts([first, second, third]))
+    }
+
+    /// An unscored workout still opens — the destination does not wait on a band the
+    /// way the state's own colour does.
+    func testAnAwaitingScoreDayStillHasAWorkoutDestination() throws {
+        let workoutID = UUID()
+        let days = try resolve(
+            from: "2026-01-06", through: "2026-01-06",
+            workouts: [try workout(id: workoutID, on: "2026-01-06", activityType: .hiking)],
+            planCalendar: try calendar()
+        )
+        XCTAssertEqual(try destination(days, on: "2026-01-06"), .workouts([workoutID]))
+    }
+
+    /// A missed day, behind the athlete: a true dead end.
+    func testAMissedDayHasNoRecordedDestination() throws {
+        let days = try resolve(
+            from: "2026-01-08", through: "2026-01-08", // Thursday: easy, nothing recorded
+            today: "2026-01-09",
+            planCalendar: try calendar(),
+            restDayBudget: try RestDayBudget(daysPerWeek: 0)
+        )
+        XCTAssertEqual(try destination(days, on: "2026-01-08"), .nothingRecorded)
+    }
+
+    /// The same day, still ahead of the athlete: not yet due, not a dead tap that
+    /// happens to read the same as one that is.
+    func testAForthcomingDayIsNotYetDue() throws {
+        let days = try resolve(
+            from: "2026-01-08", through: "2026-01-08",
+            today: "2026-01-06",
+            planCalendar: try calendar(),
+            restDayBudget: try RestDayBudget(daysPerWeek: 0)
+        )
+        XCTAssertEqual(try destination(days, on: "2026-01-08"), .notYetDue)
+    }
+
+    /// Today itself follows `.forthcoming`'s own strict boundary: not yet due, not
+    /// nothing-recorded, even though no workout exists yet either way.
+    func testTodayWithNothingRecordedIsNotYetDue() throws {
+        let days = try resolve(
+            from: "2026-01-08", through: "2026-01-08",
+            today: "2026-01-08",
+            planCalendar: try calendar(),
+            restDayBudget: try RestDayBudget(daysPerWeek: 0)
+        )
+        XCTAssertEqual(try destination(days, on: "2026-01-08"), .notYetDue)
+    }
+
+    /// A scheduled rest day carries no tense of its own in `state` — this is the case
+    /// the core has to get right that a view reading `state`'s case alone could not.
+    /// Behind the athlete, it is a dead end.
+    func testAPastScheduledRestDayHasNoRecordedDestination() throws {
+        let days = try resolve(
+            from: "2026-01-05", through: "2026-01-05", // Monday: scheduled rest
+            today: "2026-01-06",
+            planCalendar: try calendar()
+        )
+        XCTAssertEqual(try destination(days, on: "2026-01-05"), .nothingRecorded)
+    }
+
+    /// The same scheduled-rest day, still ahead: not yet due, even though `state` is
+    /// `.scheduledRest` on both sides of `today` and cannot tell the two apart itself.
+    func testAFutureScheduledRestDayIsNotYetDue() throws {
+        let days = try resolve(
+            from: "2026-01-09", through: "2026-01-09", // Friday: rest in Fixture.plan()
+            today: "2026-01-06",
+            planCalendar: try calendar()
+        )
+        XCTAssertEqual(try state(days, on: "2026-01-09"), .scheduledRest, "state alone cannot see the tense")
+        XCTAssertEqual(try destination(days, on: "2026-01-09"), .notYetDue)
+    }
+
+    /// `.unplanned` carries no tense either — a query reaching earlier than every plan
+    /// version. Past, it is a dead end.
+    func testAPastUnplannedDayHasNoRecordedDestination() throws {
+        let days = try resolve(
+            from: "2025-12-25", through: "2025-12-25", // before Fixture.plan()'s effectiveFrom
+            today: "2025-12-26",
+            planCalendar: try calendar()
+        )
+        XCTAssertEqual(try destination(days, on: "2025-12-25"), .nothingRecorded)
+    }
+
+    /// The same unplanned state, ahead of the athlete: still not yet due. Nothing about
+    /// "no plan governs this day" implies the day has already happened.
+    func testAFutureUnplannedDayIsNotYetDue() throws {
+        let days = try resolve(
+            from: "2025-12-25", through: "2025-12-25",
+            today: "2025-12-24",
+            planCalendar: try calendar()
+        )
+        XCTAssertEqual(try state(days, on: "2025-12-25"), .unplanned, "state alone cannot see the tense")
+        XCTAssertEqual(try destination(days, on: "2025-12-25"), .notYetDue)
+    }
+
+    /// A recorded workout always wins the destination too, mirroring `.forthcoming`'s
+    /// own rule that a workout on the day beats every other reading of it.
+    func testADayWithAWorkoutIsNeverNotYetDueEvenOnTheDayItself() throws {
+        let workoutID = UUID()
+        let days = try resolve(
+            from: "2026-01-08", through: "2026-01-08",
+            today: "2026-01-08",
+            workouts: [try workout(id: workoutID, on: "2026-01-08")],
+            scoreLedgers: [workoutID: try ledger(points: 90, workoutID: workoutID)],
+            planCalendar: try calendar()
+        )
+        XCTAssertEqual(try destination(days, on: "2026-01-08"), .workouts([workoutID]))
     }
 }
