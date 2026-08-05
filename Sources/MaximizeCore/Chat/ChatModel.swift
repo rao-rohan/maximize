@@ -194,6 +194,22 @@ public final class ChatModel {
     /// would leave a transcript answered from something it no longer describes.
     public let subject: ChatSubject
 
+    /// The sheet's title (§2.2, §2.4) — this thread's derived title, calling
+    /// `ChatThreadTitle.derive(for:workoutFacts:)`, the one place titling is decided
+    /// (MAX-092). "Chat" is a neutral placeholder for every state before `thread` is
+    /// set — loading, `.failed`, `.notYetScored`, `.noVerdict` — matching what this
+    /// screen's navigation title always read before this ticket generalised it.
+    public var title: String {
+        guard let thread else { return "Chat" }
+        return ChatThreadTitle.derive(for: thread, workoutFacts: workoutFacts)
+    }
+
+    /// The sheet's subtitle (§2.2, §3.6(b)) — this thread's scope, stated. Known from
+    /// `subject` alone, so unlike `title` it does not wait on `load()`.
+    public var subtitle: String {
+        ChatThreadSubtitle.text(for: subject)
+    }
+
     private let workoutRepository: (any WorkoutRepository)?
     private let scoreRepository: (any ScoreRepository)?
     private let planRepository: (any PlanRepository)?
@@ -206,7 +222,18 @@ public final class ChatModel {
     /// Built once by `load()`, from stored data only, and read again — never rebuilt —
     /// by every `send()` afterward (see this type's "D3" note).
     private var context: PromptContext?
-    private var thread: ChatThread?
+
+    /// The resolved thread, once `load()` has reached `.ready`. Exposed read-only
+    /// (MAX-097) — `title` above is what actually reads it; it is public in its own
+    /// right because a future consumer of "which thread is this, exactly" (MAX-103's
+    /// runs strip is the likely one) should not have to re-derive that from `subject`.
+    public private(set) var thread: ChatThread?
+
+    /// The run's date and activity type, resolved by `workoutContext()` for a workout
+    /// subject only (MAX-097). `nil` for a training subject, and `nil` for a workout
+    /// subject until `load()` has fetched the workout — `title` below already accounts
+    /// for both by falling back until `thread` itself is set.
+    public private(set) var workoutFacts: WorkoutThreadFacts?
 
     /// - Parameters:
     ///   - subject: what this thread is about (A11). The set is closed, which is what
@@ -259,6 +286,7 @@ public final class ChatModel {
         messages = []
         context = nil
         thread = nil
+        workoutFacts = nil
 
         guard let workoutRepository, let scoreRepository, let planRepository,
               let settingsRepository, let chatThreadRepository
@@ -330,6 +358,10 @@ public final class ChatModel {
             loadState = .failed
             return nil
         }
+        // MAX-097: resolved as soon as the workout is, regardless of which state this
+        // method exits through afterward, so `title` can name the run even while chat
+        // itself is `.notYetScored` or `.noVerdict`.
+        workoutFacts = WorkoutThreadFacts(day: try workout.calendarDay(in: timeZone), activityType: workout.activityType)
         // See "Why a workout thread requires an existing score": no ledger means no
         // stored classification, and this type does not derive one of its own.
         guard let ledger = try await scoreRepository.ledger(forWorkout: workoutID) else {

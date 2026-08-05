@@ -164,6 +164,27 @@ final class ChatThreadTitleTests: XCTestCase {
     }
 }
 
+/// §2.2 / §3.6(b): the sheet's subtitle.
+final class ChatThreadSubtitleTests: XCTestCase {
+
+    func testAWorkoutThreadsSubtitleNamesWhatItIsOf() throws {
+        XCTAssertEqual(ChatThreadSubtitle.text(for: .workout(Fixture.workoutID)), "This run")
+    }
+
+    func testATrainingThreadsSubtitleStatesTheFrozenWindow() throws {
+        let scope = try Fixture.scope(from: (2026, 8, 1), through: (2026, 8, 31))
+        XCTAssertEqual(ChatThreadSubtitle.text(for: .training(scope)), scope.label)
+    }
+
+    /// §3.6(b)'s whole point: the title can drift to "what was asked", so the subtitle
+    /// has to keep stating the window on its own, independent of any messages.
+    func testTheSubtitleDoesNotDependOnWhatWasAsked() throws {
+        let scope = try Fixture.scope(from: (2026, 8, 1), through: (2026, 8, 31))
+        let emptyThread = ChatSubject.training(scope)
+        XCTAssertEqual(ChatThreadSubtitle.text(for: emptyThread), scope.label)
+    }
+}
+
 /// The value a thread-list row renders from (§2.3).
 final class ChatThreadSummaryTests: XCTestCase {
 

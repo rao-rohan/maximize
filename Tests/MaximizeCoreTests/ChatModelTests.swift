@@ -197,6 +197,67 @@ final class ChatModelTests: XCTestCase {
         XCTAssertEqual(chatModel.messages.map(\.kind), [.user, .assistant])
     }
 
+    // MARK: - Title and subtitle (MAX-097, §2.2/§2.4/§3.6(b))
+
+    /// Before `load()` resolves a thread, the title is a neutral placeholder — matching
+    /// what this screen's navigation title always read before the sheet needed a real
+    /// one.
+    func testTitleIsAPlaceholderBeforeLoading() async throws {
+        let (chatModel, _) = try await model()
+        XCTAssertEqual(chatModel.title, "Chat")
+    }
+
+    /// Once ready, the workout thread's title is `ChatThreadTitle`'s own derivation —
+    /// this type calls it, it does not recompute it.
+    func testAWorkoutThreadsTitleIsTheRunsDateAndActivity() async throws {
+        let (chatModel, _) = try await model()
+        await chatModel.load()
+        XCTAssertEqual(chatModel.loadState, .ready)
+        XCTAssertEqual(chatModel.title, "1 Jan 2026 · Running")
+    }
+
+    /// The subtitle needs no load at all — it is known from `subject` alone.
+    func testSubtitleIsKnownImmediatelyFromTheSubject() async throws {
+        let (chatModel, _) = try await model()
+        XCTAssertEqual(chatModel.subtitle, "This run")
+    }
+
+    func testATrainingThreadsSubtitleStatesTheFrozenWindow() async throws {
+        let (chatModel, _) = try await model(subject: .training(try scope()))
+        XCTAssertEqual(chatModel.subtitle, (try scope()).label)
+    }
+
+    /// An empty training thread's title falls back to its window label — same value the
+    /// subtitle already states, and both are correct at once (§2.4's own documented
+    /// fallback).
+    func testAnEmptyTrainingThreadsTitleFallsBackToItsWindow() async throws {
+        let (chatModel, _) = try await model(subject: .training(try scope()))
+        await chatModel.load()
+        XCTAssertEqual(chatModel.loadState, .ready)
+        XCTAssertEqual(chatModel.title, (try scope()).label)
+    }
+
+    /// Once the athlete has asked something, the title follows the question — and the
+    /// subtitle keeps stating the window regardless, which is the whole of §3.6(b)'s
+    /// "state it everywhere it could matter."
+    func testATrainingThreadsTitleFollowsTheFirstQuestionWhileSubtitleStaysTheWindow() async throws {
+        let threadRepository = FakeChatThreadRepository()
+        let chatClient = FakeStreamingChatModelInvoking(
+            events: [.text("Slightly, yes."), .completed(.endTurn)]
+        )
+        let (chatModel, _) = try await model(
+            subject: .training(try scope()),
+            threadRepository: threadRepository,
+            chatClient: chatClient
+        )
+        await chatModel.load()
+        chatModel.composerText = "Has my drift flattened?"
+        await chatModel.send()
+
+        XCTAssertEqual(chatModel.title, "Has my drift flattened?")
+        XCTAssertEqual(chatModel.subtitle, (try scope()).label)
+    }
+
     // MARK: - Sending: the happy path
 
     func testCanSendRequiresReadyNonEmptyComposerAndNotAlreadyStreaming() async throws {
