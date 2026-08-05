@@ -716,7 +716,7 @@ twelve and is dispatchable immediately.
 | ID | Ticket | Depends on | Tier |
 |---|---|---|---|
 | MAX-092 | `ChatSubject` and thread identity | — | **Opus** ✅ |
-| MAX-093 | The stored record: additive fields, no migration | 092 | Sonnet |
+| MAX-093 | The stored record: additive fields, no migration | 092 | Sonnet ✅ |
 | MAX-094 | Shared fact-sheet formatting — pure extraction | — | Sonnet ✅ |
 | MAX-095 | `TrainingContext` + one context entry point | 092, 094 | **Opus** 🔒 |
 | MAX-096 | `ChatModel` generalised; transcript cap; training task text | 095 | **Opus** 🔒 |
@@ -762,6 +762,37 @@ a `ChatSubject` — `.workout(UUID)` or `.training(TrainingScope)` — plus a
   migration — and MAX-093 replaces the two derivations it leans on. **The lesson for
   future decomposition: a ticket that grows a protocol owns every conformer of it, and
   the brief should say so.**
+
+**MAX-093 landed the stored record.** `StoredChatThread` is columnar —
+`subjectKindRawValue`, `workoutUUID` (a fixed sentinel for a training row),
+`scopeFromISO8601`/`scopeThroughISO8601`, and a real `lastActivityAt` column — following
+`ChatSubject`'s own `Codable` key names, which already named these as the columns this
+ticket would split it into. `MaximizeStore`'s `ChatThreadRepository` conformance is a
+genuine implementation now, not the MAX-092 stub: `store(_:)` is keyed on the thread's own
+`id` and evicts other rows for a workout subject at the door (§12 q3), and
+`mostRecentThread(for:)` implements the training-subject query — exact match on the frozen
+scope, newest `lastActivityAt` with `id` breaking a tie, the same rule
+`FakeChatThreadRepository` and `ChatThreadSummary.sortedByActivity(_:)` already run under
+`swift test`.
+
+- **No migration, proven as behaviour.** Every added column is either non-optional with a
+  default (`subjectKindRawValue` defaults to `"workout"`, `lastActivityAt` defaults to
+  `Date.distantPast` as an "unset" sentinel) or optional with none (`scopeFromISO8601`,
+  `scopeThroughISO8601`) — `DerivedMetricsRecord.distanceSplitsComputed`'s and
+  `.distanceSplitsJSON`'s precedent exactly. `StoredChatThread.toDomain()` detects the
+  `lastActivityAt` sentinel and falls back to MAX-092's derivation (last turn's timestamp,
+  or `createdAt`), so a pre-MAX-093 row reads back identically to how it read before this
+  ticket. `MaximizeSchemaV1`'s version number does not move, for the reason
+  `distanceSplitsJSON`'s doc comment already gives: this schema has never been promoted to
+  CloudKit production (A8), so the additive-only immutability rule has not started
+  applying.
+- **CloudKit's restrictions were kept, not cleaned up.** No new `@Attribute(.unique)`, and
+  every new non-optional column carries a default.
+- **Not verified by CI beyond compilation.** `MaximizeStore.swift` is App-layer and CI
+  never executes it (tracker R2, R13) — the SwiftData predicate logic (the
+  `subjectKindRawValue`/`workoutUUID` compound predicates, the training-scope equality
+  query) is reviewed by eye against `FakeChatThreadRepository`'s CI-checked behaviour, not
+  run. See the PR's **Needs device verification** section.
 
 ---
 
