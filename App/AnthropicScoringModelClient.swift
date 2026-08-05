@@ -138,12 +138,12 @@ final class AnthropicScoringModelClient: ScoringModelInvoking, @unchecked Sendab
         let body = RequestBody(
             model: model,
             maxTokens: maxTokens,
-            // `instruction.task` is identical for every workout (see
-            // `ScoringInstruction`'s documentation) — sent as a cacheable system
-            // block for exactly the reason that type's doc comment states. Today's
-            // task text is well under this model's 1024-token cacheable minimum, so
-            // the marker is currently a no-op: it does not error, it just never
-            // creates an entry. Left in place because it costs nothing and starts
+            // `instruction.task` is identical for every workout of one discipline (see
+            // `ScoringInstruction`'s documentation, MAX-147) — sent as a cacheable
+            // system block for exactly the reason that type's doc comment states.
+            // Today's task text is well under this model's 1024-token cacheable
+            // minimum, so the marker is currently a no-op: it does not error, it just
+            // never creates an entry. Left in place because it costs nothing and starts
             // working on its own if the task text ever grows past the minimum.
             system: [RequestBody.SystemBlock(text: instruction.task)],
             // Disabled deliberately, for latency: §11 asks for scoring within
