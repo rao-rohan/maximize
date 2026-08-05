@@ -81,6 +81,35 @@ final class ChatModelTests: XCTestCase {
         return (chatModel, resolvedStore)
     }
 
+    /// Opens by thread id rather than by subject (§2.3, MAX-097's review). Mirrors
+    /// `model(subject:...)` in every other respect.
+    private func model(
+        threadID: UUID,
+        store: InMemoryWorkoutStore? = nil,
+        threadRepository: FakeChatThreadRepository = FakeChatThreadRepository(),
+        chatClient: FakeStreamingChatModelInvoking = FakeStreamingChatModelInvoking(),
+        now: @escaping @Sendable () -> Date = { Fixture.epoch }
+    ) async throws -> (ChatModel, InMemoryWorkoutStore) {
+        let resolvedStore: InMemoryWorkoutStore
+        if let store {
+            resolvedStore = store
+        } else {
+            resolvedStore = try await readyStore()
+        }
+        let chatModel = ChatModel(
+            threadID: threadID,
+            workoutRepository: resolvedStore,
+            scoreRepository: resolvedStore,
+            planRepository: resolvedStore,
+            settingsRepository: resolvedStore,
+            chatThreadRepository: threadRepository,
+            chatClient: chatClient,
+            timeZone: utc,
+            now: now
+        )
+        return (chatModel, resolvedStore)
+    }
+
     // MARK: - Loading
 
     func testAllRepositoriesNilFailsRatherThanLookingEmpty() async throws {
@@ -195,6 +224,147 @@ final class ChatModelTests: XCTestCase {
         XCTAssertEqual(chatModel.loadState, .ready)
         XCTAssertEqual(chatModel.messages.map(\.text), ["Was that on plan?", "Yes, right on the cap."])
         XCTAssertEqual(chatModel.messages.map(\.kind), [.user, .assistant])
+    }
+
+    // MARK: - Title and subtitle (MAX-097, §2.2/§2.4/§3.6(b))
+
+    /// Before `load()` resolves a thread, the title is a neutral placeholder — matching
+    /// what this screen's navigation title always read before the sheet needed a real
+    /// one.
+    func testTitleIsAPlaceholderBeforeLoading() async throws {
+        let (chatModel, _) = try await model()
+        XCTAssertEqual(chatModel.title, "Chat")
+    }
+
+    /// Once ready, the workout thread's title is `ChatThreadTitle`'s own derivation —
+    /// this type calls it, it does not recompute it.
+    func testAWorkoutThreadsTitleIsTheRunsDateAndActivity() async throws {
+        let (chatModel, _) = try await model()
+        await chatModel.load()
+        XCTAssertEqual(chatModel.loadState, .ready)
+        XCTAssertEqual(chatModel.title, "1 Jan 2026 · Running")
+    }
+
+    /// The subtitle needs no load at all — it is known from `subject` alone.
+    func testSubtitleIsKnownImmediatelyFromTheSubject() async throws {
+        let (chatModel, _) = try await model()
+        XCTAssertEqual(chatModel.subtitle, "This run")
+    }
+
+    func testATrainingThreadsSubtitleStatesTheFrozenWindow() async throws {
+        let (chatModel, _) = try await model(subject: .training(try scope()))
+        XCTAssertEqual(chatModel.subtitle, (try scope()).label)
+    }
+
+    /// An empty training thread's title falls back to its window label — same value the
+    /// subtitle already states, and both are correct at once (§2.4's own documented
+    /// fallback).
+    func testAnEmptyTrainingThreadsTitleFallsBackToItsWindow() async throws {
+        let (chatModel, _) = try await model(subject: .training(try scope()))
+        await chatModel.load()
+        XCTAssertEqual(chatModel.loadState, .ready)
+        XCTAssertEqual(chatModel.title, (try scope()).label)
+    }
+
+    /// Once the athlete has asked something, the title follows the question — and the
+    /// subtitle keeps stating the window regardless, which is the whole of §3.6(b)'s
+    /// "state it everywhere it could matter."
+    func testATrainingThreadsTitleFollowsTheFirstQuestionWhileSubtitleStaysTheWindow() async throws {
+        let threadRepository = FakeChatThreadRepository()
+        let chatClient = FakeStreamingChatModelInvoking(
+            events: [.text("Slightly, yes."), .completed(.endTurn)]
+        )
+        let (chatModel, _) = try await model(
+            subject: .training(try scope()),
+            threadRepository: threadRepository,
+            chatClient: chatClient
+        )
+        await chatModel.load()
+        chatModel.composerText = "Has my drift flattened?"
+        await chatModel.send()
+
+        XCTAssertEqual(chatModel.title, "Has my drift flattened?")
+        XCTAssertEqual(chatModel.subtitle, (try scope()).label)
+    }
+
+    // MARK: - Opening by thread id (§2.3, review follow-up)
+
+    /// **The regression the review caught.** Two training threads over an identical,
+    /// frozen window are legitimately allowed to coexist —
+    /// `ChatThreadRepository`'s own contract deliberately does not deduplicate training
+    /// subjects, because **New chat** over an unchanged window is still a real action.
+    /// Resolving *by subject* after a thread-list tap would silently open whichever one
+    /// is newest, not the one actually tapped. This is the test that would have caught
+    /// it, and it fails without `init(threadID:...)` reading the exact thread rather
+    /// than re-resolving its subject.
+    func testOpeningByIDReturnsExactlyThatThreadEvenWhenAnotherSharesItsScope() async throws {
+        let threadRepository = FakeChatThreadRepository()
+        let sharedScope = try scope()
+
+        var older = try Fixture.thread(subject: .training(sharedScope), lastActivityAt: Fixture.at(0))
+        older = try older.appending(try Fixture.message(.user, "What did week one look like?", at: 0))
+        var newer = try Fixture.thread(subject: .training(sharedScope), lastActivityAt: Fixture.at(100))
+        newer = try newer.appending(try Fixture.message(.user, "Has drift flattened?", at: 100))
+        try await threadRepository.store(older)
+        try await threadRepository.store(newer)
+
+        // Sanity check that the fixture actually reproduces the ambiguity: resolving by
+        // subject really does pick the newer one — that is the defect opening by id has
+        // to avoid, not a hypothetical.
+        let bySubject = try await threadRepository.mostRecentThread(for: .training(sharedScope))
+        XCTAssertEqual(bySubject?.id, newer.id)
+
+        let (chatModel, _) = try await model(threadID: older.id, threadRepository: threadRepository)
+        await chatModel.load()
+
+        XCTAssertEqual(chatModel.loadState, .ready)
+        XCTAssertEqual(chatModel.thread?.id, older.id)
+        XCTAssertEqual(chatModel.subject, .training(sharedScope))
+        XCTAssertEqual(chatModel.messages.map(\.text), ["What did week one look like?"])
+    }
+
+    /// The subject is read off the stored thread, not supplied by a caller — exercised
+    /// on the workout path too, not only the training path the defect above was found on.
+    func testOpeningAWorkoutThreadByIDResolvesItsSubjectFromTheStoredThread() async throws {
+        let threadRepository = FakeChatThreadRepository()
+        let thread = try Fixture.thread(subject: .workout(Fixture.workoutID))
+        try await threadRepository.store(thread)
+
+        let (chatModel, _) = try await model(threadID: thread.id, threadRepository: threadRepository)
+        await chatModel.load()
+
+        XCTAssertEqual(chatModel.loadState, .ready)
+        XCTAssertEqual(chatModel.subject, .workout(Fixture.workoutID))
+        XCTAssertEqual(chatModel.thread?.id, thread.id)
+    }
+
+    /// A thread id that no longer resolves is what a delete on another screen leaves
+    /// behind — an ordinary, real state, not a crash and not `.failed`.
+    func testOpeningANonexistentThreadIDIsThreadNotFoundRatherThanFailed() async throws {
+        let (chatModel, _) = try await model(threadID: UUID())
+        await chatModel.load()
+
+        XCTAssertEqual(chatModel.loadState, .threadNotFound)
+        XCTAssertNil(chatModel.subject)
+        XCTAssertTrue(chatModel.messages.isEmpty)
+    }
+
+    /// `subject` is set as soon as the stored thread is read, *before* the rest of
+    /// `load()` runs — so a state that returns early from further down, like
+    /// `.notYetScored`, still has it. Without this a thread-id-opened sheet would show a
+    /// blank subtitle for a run that just has not been scored yet.
+    func testOpeningByIDStillKnowsTheSubjectWhenNotYetScored() async throws {
+        let threadRepository = FakeChatThreadRepository()
+        let thread = try Fixture.thread(subject: .workout(Fixture.workoutID))
+        try await threadRepository.store(thread)
+        let unscoredStore = try await readyStore(seedScore: false)
+
+        let (chatModel, _) = try await model(threadID: thread.id, store: unscoredStore, threadRepository: threadRepository)
+        await chatModel.load()
+
+        XCTAssertEqual(chatModel.loadState, .notYetScored)
+        XCTAssertEqual(chatModel.subject, .workout(Fixture.workoutID))
+        XCTAssertEqual(chatModel.subtitle, "This run")
     }
 
     // MARK: - Sending: the happy path

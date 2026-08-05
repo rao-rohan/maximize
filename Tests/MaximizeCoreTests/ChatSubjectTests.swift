@@ -162,4 +162,21 @@ final class ChatSubjectTests: XCTestCase {
     func testTheSubjectSetIsClosedAtTwo() {
         XCTAssertEqual(ChatSubjectKind.allCases.count, 2)
     }
+
+    // MARK: - The thread-list glyph (§2.3)
+
+    /// "A run glyph for a workout thread, a chart glyph for a training thread" — the two
+    /// have to differ, and neither is the empty string a view would silently render as
+    /// nothing.
+    func testEveryKindHasItsOwnNonEmptyGlyph() {
+        let names = Set(ChatSubjectKind.allCases.map(\.glyphSystemImageName))
+        XCTAssertEqual(names.count, ChatSubjectKind.allCases.count, "each kind draws a distinct glyph")
+        XCTAssertTrue(names.allSatisfy { !$0.isEmpty })
+    }
+
+    func testEveryKindHasItsOwnAccessibilityLabel() {
+        let labels = Set(ChatSubjectKind.allCases.map(\.accessibilityKindLabel))
+        XCTAssertEqual(labels.count, ChatSubjectKind.allCases.count)
+        XCTAssertTrue(labels.allSatisfy { !$0.isEmpty })
+    }
 }

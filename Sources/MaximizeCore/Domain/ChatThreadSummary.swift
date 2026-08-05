@@ -94,6 +94,37 @@ public enum ChatThreadTitle {
     }
 }
 
+/// The sheet's subtitle (§2.2, §3.6(b)) — the thread's scope, stated plainly under its
+/// title.
+///
+/// ## Why this exists beside a title that can already say the same thing
+///
+/// For a workout thread the title already identifies the run (its date and activity
+/// type), so a subtitle restating that would be near-redundant — it still appears,
+/// worded as what the conversation is *of* rather than *when*, for the same reason the
+/// spec asks for it unconditionally: a person opening the sheet should never have to
+/// infer the scope from the title's shape.
+///
+/// For a training thread the title can drift away from stating the window at all — once
+/// the athlete has asked a real question, `ChatThreadTitle` names *that* instead
+/// (§2.4) — so the subtitle is what keeps the window visible for the entire life of the
+/// conversation. That is §3.6(b)'s mechanism: the thread's scope is frozen and the
+/// dashboard's is not, so stating the window everywhere it could matter is what turns a
+/// disagreement between the two into a labelled difference rather than an ambush.
+///
+/// Unlike `ChatThreadTitle`, this needs no messages — only the subject — so it is known
+/// the instant a thread is opened, before `ChatModel.load()` resolves anything.
+public enum ChatThreadSubtitle {
+    public static func text(for subject: ChatSubject) -> String {
+        switch subject {
+        case .workout:
+            return "This run"
+        case let .training(scope):
+            return scope.label
+        }
+    }
+}
+
 /// What a thread-list row renders from (§2.3).
 ///
 /// A value, not a view model: the row shows a title, a subject glyph, a relative

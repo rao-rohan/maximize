@@ -789,6 +789,16 @@ express "impose nothing" for `.system` distinctly from picking a scheme, and the
 preference has to take effect without a relaunch, which needs the existing settings
 observation path rather than a second one.
 
+**MAX-086 landed.** `MaximizeCore` gained `AppearancePreference.resolvedColorScheme:
+ResolvedColorScheme?` — `.system` maps to `nil`, so it reads as "impose nothing," not as
+a default the mapping quietly picked. `SettingsModel` gained a `.shared` instance;
+`SettingsView` and `MaximizeApp` now read and write that one object instead of each
+loading its own copy of `AppSettings`, so a save in the settings sheet is visible to the
+app root immediately — no relaunch, and no second notion of "the current appearance" to
+drift from the first. `MaximizeApp` is the sole place `ResolvedColorScheme?` becomes
+`.preferredColorScheme`. Compiles and its unit tests pass; not verified on a device —
+see the PR's "Needs device verification."
+
 **MAX-106 — the UI standard, written into `CLAUDE.md`.** The owner set a bar for the
 redesign; until this landed it lived only in individual agent briefs, so every ticket
 depended on the overseer restating it. Rules that live in a dispatch message decay. The
@@ -1046,8 +1056,8 @@ twelve and is dispatchable immediately.
 | MAX-094 | Shared fact-sheet formatting — pure extraction | — | Sonnet ✅ |
 | MAX-095 | `TrainingContext` + one context entry point | 092, 094 | **Opus** 🔒 ✅ |
 | MAX-096 | `ChatModel` generalised; transcript cap; training task text | 095 | **Opus** 🔒 ✅ |
-| MAX-097 | Thread list, derived titles, new chat, scope subtitle | 093, 096 | Sonnet |
-| MAX-098 | The persistent glass button | 097 | Sonnet |
+| MAX-097 | Thread list, derived titles, new chat, scope subtitle | 093, 096 | Sonnet ✅ |
+| MAX-098 | The persistent glass button | 097 | Sonnet ✅ |
 | MAX-099 | `PlanProposal` — type, parse, schema derived from core enums | 095 | **Opus** 🔒 ✅ |
 | MAX-100 | The Anthropic client for plan proposals | 099 | Sonnet 🔒 |
 | MAX-101 | Conversational plan authoring; proposal card; handoff | 098, 100 | **Opus** |
@@ -1172,6 +1182,102 @@ Five things are worth carrying forward:
 now hold two copies of the same code-fence handling. Extracting a shared envelope helper
 means editing `Scoring/`, which this ticket does not own; a test pins that the two tolerate
 the same formatting, so the duplication cannot drift unnoticed. **Worth a small follow-up.**
+
+**MAX-097 gave the sheet a past.** `ChatSheet` now owns one `NavigationStack` holding the
+open conversation and, pushed on top of it, the thread list — `WorkoutChatSectionView`'s
+"Open chat" button presents `ChatSheet(subject: .workout(workoutID))` in place of the bare
+transcript screen it opened before, and the workout path renders identically once inside it.
+Four things worth carrying forward:
+
+- **The title and subtitle are read off `ChatModel`, never re-derived.** `ChatModel` gained
+  two computed properties, `title` and `subtitle` — the first calls `ChatThreadTitle.derive`
+  against the loaded thread (falling back to "Chat" before one exists, matching this
+  screen's title before this ticket); the second calls a new `ChatThreadSubtitle.text(for:)`
+  (core, beside `ChatThreadTitle`) and needs no load at all, since a subject's scope is
+  known immediately. `ChatModel` also grew a public `workoutFacts`, resolved the moment the
+  workout is (even through `.notYetScored`/`.noVerdict`), so the title can name the run in
+  every state that has one.
+- **The scope-mismatch note is one pure function.** `ChatScopeNotice.text(for:currentInterval:)`
+  (core) is nil for a workout subject unconditionally and nil for a training subject whose
+  frozen scope still matches the resolved current interval; otherwise it names both windows.
+  `ChatConversationView` renders it as a quiet banner above the transcript, tappable through
+  to the same **New chat** action the toolbar button performs.
+- **Subject-dependent copy for the conversation surface moved to core too.**
+  `ChatConversationCopy` (failed-to-load, the empty-transcript invitation, the composer
+  placeholder) mirrors `ChatModel.userFacingMessage(for:)`'s established "worded from the
+  subject" pattern; the workout strings are pinned byte-for-byte to what shipped before this
+  ticket.
+- **"New chat" resolves the *current* interval, not a stored one.** `ChatSheet` freezes a
+  fresh `TrainingScope` from `currentInterval` (defaulting to "this week" when no live
+  dashboard selection is handed in — today's only caller, the workout entry point, has
+  none) and reassigns its active subject; `ChatThreadRepository.mostRecentThread(for:)`
+  is what decides whether that resumes an existing thread or starts a genuinely new one,
+  unchanged. Selecting a row in the thread list does the same reassignment and pops back to
+  the conversation.
+
+**What MAX-098 inherits.** The persistent Ask button presents `ChatSheet(subject:
+currentInterval:)` exactly as `WorkoutChatSectionView` does — `ChatSheet`'s own doc comment
+gives the call. `App/RootTabView.swift` is untouched, per this ticket's brief.
+
+**One thing this ticket deliberately left alone.** The "runs in this conversation" strip
+(§2.2, MAX-103's board) is not built — the sheet has no runs strip yet.
+
+**Review found a real defect in the first pass, and it is fixed.** Selecting a thread-list
+row originally reassigned the sheet's *subject* rather than opening the tapped thread by
+identity — harmless for a workout thread (one thread per run, by policy) but wrong for
+training: two training threads can legitimately share an identical frozen `TrainingScope`
+(`ChatThreadRepository` deliberately does not deduplicate them — **New chat** over an
+unchanged window is still a real action), and resolving by subject after a tap would
+silently reopen whichever of the two is newest, not the one shown. `ChatModel` now has two
+entry points — `init(subject:...)`, unchanged, for the Ask button and **New chat**; and a
+new `init(threadID:...)` for the thread list, which reads the subject off the *stored*
+thread rather than trusting a caller-supplied one, so a row tap can never open a different
+thread than the one tapped. A thread id that no longer resolves (deleted from another
+screen) is `ChatModel.LoadState.threadNotFound` — ordinary, not a failure.
+`ChatModelTests.testOpeningByIDReturnsExactlyThatThreadEvenWhenAnotherSharesItsScope` is
+the regression test: it reproduces the ambiguity (asserting subject-based resolution really
+does pick the wrong one), then asserts opening by id picks the right one anyway.
+
+**MAX-098 built the door.** Chat now has one entry point, on every screen, in the same
+place — the plumbing MAX-092–097 landed is reachable for the first time. Five things worth
+carrying forward:
+
+- **It is the `TabView`'s bottom accessory, not an overlay** — §12's open question 6,
+  answered. `tabViewBottomAccessory` exists on the iOS 26 SDK and is what this ships. The
+  argument is not only idiom: the system insets the tab content's safe area around the
+  accessory and moves it with the tab bar as `.tabBarMinimizeBehavior(.onScrollDown)`
+  minimises it, so §7.3's "it never disappears; it may move" is the platform's behaviour
+  rather than something `RootTabView` hand-writes. An overlay would have given neither, and
+  would sit permanently over the bottom-trailing corner of three dense scrolling screens.
+  **The cost, stated:** the accessory is a full-width bar, so this is *not* §2.1's
+  bottom-trailing capsule, and `glassChrome(.floatingControl)` still has no call site — the
+  system draws the accessory's container in Liquid Glass and re-applying it would be the
+  mistake `RootTabView` and `SettingsToolbar.swift` already argue against for the tab bar
+  and the sheet. **Whether the full-width shape reads well is the first item on the device
+  list**, and reverting to an overlay is a change to one modifier in one file.
+- **The subject is a core decision, with tests.** `ChatEntryPoint.resolve(focus:currentInterval:)`
+  (`MaximizeCore/Chat/ChatEntryPoint.swift`) turns "a run is on screen, or none is" into the
+  `ChatSubject`, the visible label, a compact label, and what VoiceOver says. No view asks
+  itself whether it is a workout screen. `ChatEntryPointFocus` carries the other half: it
+  **matches the identifier on release**, because `onAppear`/`onDisappear` are not ordered
+  across a screen change and `DayWorkoutsView` pages between two detail screens (MAX-108) —
+  clearing unconditionally would leave the button reading "Ask" on a screen showing a run.
+  Both orderings are pinned by tests.
+- **`RootTabView` owns the interval model now.** §3.4 makes the interval selector the app's
+  single notion of "what period are we talking about", and the Ask button needs it on every
+  tab; `DashboardView` is handed the same instance it used to own and is otherwise
+  unchanged. A consequence worth knowing: a training thread opened from the Workouts or Plan
+  tab is about whatever window the dashboard is *currently* on, not always "this week". The
+  sheet states its window either way (§2.2, §3.6(b)).
+- **`WorkoutChatSectionView` lost its button and gained a preview.** Two chat buttons on one
+  screen opening the same conversation is worse than either alone (§2.1). The card is now
+  design review §4.4's ask: the last exchange when there is one, the invitation copy when
+  there is not, and `ChatConversationCopy`'s wording for both rather than a literal. Its
+  preview text comes from `ChatThreadSummary`, so the card and the thread-list row shorten
+  the same message identically.
+- **A14 holds.** The button presents a sheet and nothing else — no pre-warm, no pre-fetch,
+  no speculative call. `ChatSheet` is constructed only on presentation and `ChatModel.load()`
+  reads stored records; the model is reached when the athlete sends.
 
 ### Phase 9 — Lifting (MAX-109)
 

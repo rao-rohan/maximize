@@ -78,6 +78,29 @@ public struct TrainingScope: Hashable, Sendable, Codable {
 public enum ChatSubjectKind: String, Hashable, Sendable, Codable, CaseIterable {
     case workout
     case training
+
+    /// The thread-list row's glyph (§2.3) — "a run glyph for a workout thread, a chart
+    /// glyph for a training thread."
+    ///
+    /// A plain string, matching `RootTab`'s own note: "no SF Symbols import, no UIKit.
+    /// The core says *which* symbol; the app layer is what draws it." Which glyph a row
+    /// wears is a decision about what the row says, not styling, so it belongs here
+    /// rather than switching over `ChatSubject` a second time in a view.
+    public var glyphSystemImageName: String {
+        switch self {
+        case .workout: return "figure.run"
+        case .training: return "chart.line.uptrend.xyaxis"
+        }
+    }
+
+    /// What VoiceOver says this row is, ahead of its title — the glyph, in words, for
+    /// someone who cannot see its shape.
+    public var accessibilityKindLabel: String {
+        switch self {
+        case .workout: return "Workout chat"
+        case .training: return "Training chat"
+        }
+    }
 }
 
 /// What a chat thread is about (A11).

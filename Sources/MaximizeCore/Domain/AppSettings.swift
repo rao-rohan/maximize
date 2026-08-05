@@ -120,6 +120,37 @@ public enum AppearancePreference: String, Hashable, Sendable, Codable, CaseItera
     case system
     case light
     case dark
+
+    /// What this preference imposes on the app's color scheme, or `nil` to impose
+    /// nothing (MAX-086).
+    ///
+    /// `MaximizeCore` cannot import SwiftUI (see CLAUDE.md, "thin shell, fat core"),
+    /// so `ResolvedColorScheme?` is as far as the core goes; the app layer's one
+    /// `.preferredColorScheme` call site does the last step of turning this into
+    /// SwiftUI's `ColorScheme?`.
+    ///
+    /// `.system` deliberately maps to `nil`, not to a resolved case. `nil` is what
+    /// tells SwiftUI "impose nothing, let the OS decide" — a different thing from
+    /// picking a scheme. Mapping `.system` to `.dark` (the app's own default
+    /// appearance, per `AppSettings.standard`) would silently override the OS for
+    /// someone who deliberately asked to follow it.
+    public var resolvedColorScheme: ResolvedColorScheme? {
+        switch self {
+        case .system: return nil
+        case .light: return .light
+        case .dark: return .dark
+        }
+    }
+}
+
+/// A platform-neutral stand-in for SwiftUI's `ColorScheme` (MAX-086). Exists only so
+/// `AppearancePreference.resolvedColorScheme` can express "impose light" or "impose
+/// dark" from within `MaximizeCore`, which may not import SwiftUI. The app layer maps
+/// this one-to-one onto `ColorScheme` in the single place it calls
+/// `.preferredColorScheme`.
+public enum ResolvedColorScheme: Hashable, Sendable, Codable {
+    case light
+    case dark
 }
 
 /// User settings (PRD §8 `settings`).

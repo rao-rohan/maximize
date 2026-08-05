@@ -9,6 +9,15 @@ import MaximizeCore
 /// land as further siblings inside `content` below — the seam is still this view's body, and
 /// `WorkoutDetailData` (see `WorkoutDetailModel`) is where each of those adds its
 /// section's data without touching `WorkoutVerdict`.
+///
+/// ## MAX-098: this screen tells the Ask button what it is looking at
+///
+/// The persistent chat control is subject-aware (§2.1): on this screen it reads "Ask
+/// about this run" and opens *this run's* thread rather than a training one.
+/// `chatEntryPointFocus(workoutID:)` is the whole of this view's part in that — it
+/// reports an identifier while the screen is on top and nothing else. Every decision
+/// downstream of it, including the rule that makes paging between two runs
+/// (`DayWorkoutsView`) land on the right one, is `ChatEntryPoint` in `MaximizeCore`.
 struct WorkoutDetailView: View {
     @State private var model: WorkoutDetailModel
 
@@ -33,6 +42,7 @@ struct WorkoutDetailView: View {
         .contentSurface(.screen)
         .navigationTitle("Workout")
         .navigationBarTitleDisplayMode(.inline)
+        .chatEntryPointFocus(workoutID: workoutID)
         .task {
             // Render what is stored first, then give a workout the background wake could
             // not score its chance (R8, MAX-033). Both steps are no-ops when there is
