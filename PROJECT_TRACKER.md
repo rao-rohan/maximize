@@ -1441,7 +1441,7 @@ is the overseer's, not a ticket's — flagged here rather than done.
 | MAX-129 | The per-discipline prescription; the no-op decode test | 128 | **Opus** ✅ |
 | MAX-130 | Discipline-gated derived metrics; stop fabricating cadence | 128 | **Opus** ✅ |
 | MAX-131 | Rubric vocabulary for lifts — **closes gap P3** | 128 | **Opus** ✅ |
-| MAX-132 | Seed bands for lift days; the `easy.wellOverCap` shadow | 131 | Sonnet |
+| MAX-132 | Seed bands for lift days; the `easy.wellOverCap` shadow | 131 | Sonnet ✅ |
 | MAX-133 | Match a workout to its own discipline's ask | 129, 131 | **Opus** |
 | MAX-134 | Obligations, not days: tallies, streak, rest-day budget | 129, 133 | **Opus** |
 | MAX-135 | The calendar's mixed day | 134, **105** | **Opus** |
@@ -1749,6 +1749,64 @@ The two that were not are now `RubricCondition.actualDiscipline(oneOf:)` and
   tests distance only, so an HR-only treadmill fragment still reaches the scorer.
   LIFTING-SPEC §9.2 wants a duration floor there; the plan can now express one, and
   changing the classifier is a behaviour change this ticket's brief forbade.
+
+**MAX-132 — `StandardPlanSeed` learns to speak the vocabulary MAX-131 gave it, and closes
+the shadow §11.4 escalates.** Two changes to `Sources/MaximizeCore/Plan/StandardPlanSeed.swift`,
+both additive to the seed, neither reaching a stored plan (D1):
+
+- **Three adherence bands for `.lift`, per A20 and LIFTING-SPEC §3.5.** `lift.completed`
+  (≥ 70% of the prescribed duration, 75–100), `lift.short` (< 70%, 40–74), and
+  `lift.happened` (the ask stated no duration at all, 70–95) — the same
+  "specific case, then a coarser fallback" shape the `long`/`hard` bands already use, and
+  the same 0.8-vs-"prescribed by structure" pattern `hard.completed` established.
+  **The fraction is 0.7, not the run bands' 0.8** — held loosely, and stated as an
+  editable opinion in the code comment rather than a quotation. None of the three
+  reference a load or a volume, which is what A20 requires.
+- **`activeEnergyKilocalories` was considered again and declined again**, for the reason
+  MAX-131 already gave: it is a volume proxy, and A20's own words rule it out.
+- **Every one of the three new bands carries `.actualDiscipline(oneOf: [.lift])`, not
+  only the one that strictly needs it to resolve a metric.** `appliesTo: [.lift]` filters
+  by the scheduled kind, not by what actually happened — the exact gap `easy.wellOverCap`
+  had. Without the guard, a scheduled lift day on which the athlete ran instead could let
+  that run's duration satisfy `lift.completed` by coincidence, planting the same defect
+  this ticket exists to close, one band down. This is a decision this ticket made beyond
+  its literal brief ("adherence bands for lift days"); it is small, and reusing
+  `.actualDiscipline` is exactly what MAX-131 built the vocabulary for.
+- **`easy.wellOverCap` gains `.actualDiscipline(oneOf: [.run])`**, closing the shadow
+  §11.4 escalates: today the band's only condition is average heart rate above cap + 8,
+  which any lift clears as a matter of course, so a lift scheduled on an easy-run day
+  matched it and was permanently scored 20–45, *"Well above the easy cap for the whole
+  run."* Same identifier, same score range, same rationale — only the condition list
+  grew, so a `Score` this band already produced for an actual easy run is unaffected.
+- **This is a code change to a data-producing function, not a threshold change.** D1
+  governs thresholds inside a *stored* plan version; this file only ever supplies the
+  bytes a *new* first plan version starts from (see the file's own top-of-file note).
+  Nothing here touches `Sources/MaximizeCore/Scoring/`.
+- **Reusing MAX-131's shadow-test fixtures rather than a parallel set.** All four new
+  tests live in `LiftRubricVocabularyTests.swift`, and the regression test
+  (`testTheSeedsWellOverCapBandNoLongerMatchesALiftAndJudgesTheRunAsBefore`) reuses
+  `Self.lift()` and `Self.liftMetrics(averageHeartRateBPM:)` from
+  `testADisciplineConditionMakesTheWellOverCapShadowUnwritable` — but evaluates
+  `StandardPlanSeed.rubricBands()` itself rather than a rubric the test authors, which
+  is the gap the earlier test left (it proved the vocabulary *could* close the shadow;
+  nothing before this ticket proved the seed *actually does*). The other three tests
+  cover a full-duration lift (`lift.completed`), a short one (`lift.short`), and a day
+  scheduled as a lift on which something else was recorded (falls to
+  `fallback.recorded` — none of the lift bands' `.actualDiscipline` guard is satisfied).
+- **Rejected: matching a workout to the lift slot in this ticket.** `RubricEvaluator`
+  still reads `planDay.scheduledSession` — the run slot — for every workout;
+  routing a workout to the session of its own discipline is MAX-133, dispatched
+  separately and in parallel, and it owns `Scoring/RubricEvaluation.swift` and
+  `Scoring/WorkoutScorer.swift`. So **nothing reaches these bands yet** — every test
+  above writes the `.lift` kind onto the run slot to exercise the vocabulary through the
+  real evaluator, the same device `testABandCanRequireAFractionOfThePrescribedDuration`
+  already used. This is expected, not a gap this ticket left.
+- **Rejected: fixing the scores already written under the unguarded band.** D8 makes an
+  auto-score immutable and the plan is versioned data (D1) — this seed change cannot
+  reach a stored plan, only the first version a *new* plan starts from. The lifts already
+  scored 20–45 by `easy.wellOverCap` or 40–69 by `fallback.recorded` stay scored that way.
+  What to do about them is §11.4's escalation, tracked as MAX-143 and explicitly not this
+  ticket's to decide — no migration and no rescore were written.
 
 **MAX-145 — the athlete says what a lift worked, and the app learns to wait for it.**
 A22 built. The picker is the small half; the two consequences the amendment named are the

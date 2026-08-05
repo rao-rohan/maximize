@@ -376,6 +376,100 @@ final class LiftRubricVocabularyTests: XCTestCase {
         )
     }
 
+    // MARK: - MAX-132: the seed's lift bands, and the well-over-cap fix
+
+    /// A lift that ran the prescribed length takes `StandardPlanSeed`'s top lift band.
+    ///
+    /// Written on the **run** slot, for the same reason
+    /// `testABandCanRequireAFractionOfThePrescribedDuration` is: `RubricEvaluator`
+    /// still reads `planDay.scheduledSession` for every workout, and MAX-133 is what
+    /// teaches it to read a workout's own discipline's ask. What is pinned here is the
+    /// seed's bands, which are discipline-agnostic about how they get reached.
+    func testTheSeedsLiftBandsScoreAFullDurationLiftWell() throws {
+        let template = try Self.liftScheduledTemplate(durationSeconds: 2_700)
+
+        XCTAssertEqual(
+            try Self.evaluate(
+                rubric: try Self.seedRubric(),
+                weeklyTemplate: template,
+                workout: try Self.lift(durationSeconds: 2_700),
+                classification: .other,
+                metrics: try Self.liftMetrics(averageHeartRateBPM: 130)
+            ).band.identifier,
+            "lift.completed"
+        )
+    }
+
+    /// A lift cut well short of the ask falls to the seed's lower band, not the top one.
+    func testTheSeedsLiftBandsScoreAShortLiftLower() throws {
+        let template = try Self.liftScheduledTemplate(durationSeconds: 2_700)
+
+        XCTAssertEqual(
+            try Self.evaluate(
+                rubric: try Self.seedRubric(),
+                weeklyTemplate: template,
+                workout: try Self.lift(durationSeconds: 900),
+                classification: .other,
+                metrics: try Self.liftMetrics(averageHeartRateBPM: 130)
+            ).band.identifier,
+            "lift.short"
+        )
+    }
+
+    /// A day the plan scheduled as a lift, on which the athlete did something else
+    /// entirely — the lift itself simply did not happen. None of the seed's lift bands
+    /// may fire on that: each carries `.actualDiscipline(oneOf: [.lift])`, and a run's
+    /// discipline is `.run`. The day still has a recorded workout, so it is not the
+    /// unreachable `skipped` row either — it lands on the plan's unconditional
+    /// catch-all, exactly as any other workout with no rule written for it does.
+    func testTheSeedsLiftBandsDoNotMatchWhenTheLiftDidNotHappen() throws {
+        let template = try Self.liftScheduledTemplate(durationSeconds: 2_700)
+
+        XCTAssertEqual(
+            try Self.evaluate(
+                rubric: try Self.seedRubric(),
+                weeklyTemplate: template,
+                workout: try Fixture.workout(durationSeconds: 3_000)
+            ).band.identifier,
+            "fallback.recorded"
+        )
+    }
+
+    /// The regression MAX-132 exists to pin: `StandardPlanSeed`'s own `easy.wellOverCap`
+    /// band, as shipped, no longer matches a lift — and the run it was written about is
+    /// judged exactly as it was before this ticket.
+    ///
+    /// Reuses `testADisciplineConditionMakesTheWellOverCapShadowUnwritable`'s fixtures
+    /// (`Self.lift()`, `Self.liftMetrics`) rather than a parallel set, and asserts the
+    /// same two facts against the seed itself rather than against a rubric the test
+    /// authors.
+    func testTheSeedsWellOverCapBandNoLongerMatchesALiftAndJudgesTheRunAsBefore() throws {
+        let seedRubric = try Self.seedRubric()
+        let liftWithAHighHeartRate = try Self.lift()
+        let metrics = try Self.liftMetrics(averageHeartRateBPM: 162)
+
+        XCTAssertNotEqual(
+            try Self.evaluate(
+                rubric: seedRubric,
+                workout: liftWithAHighHeartRate,
+                classification: .other,
+                metrics: metrics
+            ).band.identifier,
+            "easy.wellOverCap",
+            "the shadow A21 records must stay closed in the seed itself"
+        )
+
+        // And the run the band was written about is judged exactly as before.
+        XCTAssertEqual(
+            try Self.evaluate(
+                rubric: seedRubric,
+                workout: try Fixture.workout(),
+                metrics: try ScoringFixture.metrics(averageHeartRateBPM: 160)
+            ).band.identifier,
+            "easy.wellOverCap"
+        )
+    }
+
     // MARK: - `.scheduledDuration` and the plan's first duration
 
     func testScheduledDurationResolvesAsAFractionOfTheAsk() throws {
@@ -536,13 +630,49 @@ final class LiftRubricVocabularyTests: XCTestCase {
     // MARK: - Scaffolding
 
     /// A strength workout, as HealthKit records one: no distance, no route.
-    private static func lift() throws -> Workout {
+    ///
+    /// `durationSeconds` defaults to 2,700 (45 minutes) — the length every existing
+    /// call site relies on — and is a parameter only for MAX-132's adherence tests,
+    /// which need a short lift as well as a full-length one.
+    private static func lift(durationSeconds: Double = 2_700) throws -> Workout {
         try Fixture.workout(
             activityType: .traditionalStrengthTraining,
-            durationSeconds: 2_700,
+            durationSeconds: durationSeconds,
             distanceMeters: nil,
             hasRoute: false
         )
+    }
+
+    /// `StandardPlanSeed.rubricBands()`, assembled into the rubric it actually ships as
+    /// part of `StandardPlanSeed.draft()` — the seed's own thresholds, the seed's own
+    /// band order. MAX-132's tests read this rather than a hand-authored rubric so they
+    /// are pinning what the seed does, not what a test believes it should do.
+    private static func seedRubric() throws -> ScoringRubric {
+        try ScoringRubric(
+            effectiveThreshold: ScoreValue(StandardPlanSeed.effectiveThresholdPoints),
+            marginalThreshold: ScoreValue(StandardPlanSeed.marginalThresholdPoints),
+            bands: StandardPlanSeed.rubricBands()
+        )
+    }
+
+    /// `Fixture.weeklyTemplate()`, except Tuesday's **run** slot prescribes a lift of
+    /// the given length rather than an easy run.
+    ///
+    /// Written on the run slot, not the lift slot — see the note on
+    /// `testABandCanRequireAFractionOfThePrescribedDuration`. `RubricEvaluator` does
+    /// not read `PlanDay.liftSession` yet (MAX-133), so this is the only slot the
+    /// evaluator that exists today will consult; the vocabulary and the seed's bands
+    /// are themselves discipline-agnostic about which slot eventually routes to them.
+    private static func liftScheduledTemplate(durationSeconds: Double) throws -> WeeklyTemplate {
+        try WeeklyTemplate([
+            .monday: .rest,
+            .tuesday: ScheduledSession(kind: .lift, durationSeconds: durationSeconds),
+            .wednesday: ScheduledSession(kind: .hard, note: "6 × 800m"),
+            .thursday: ScheduledSession(kind: .easy, distanceMeters: 8_000),
+            .friday: .rest,
+            .saturday: ScheduledSession(kind: .easy, distanceMeters: 6_000),
+            .sunday: ScheduledSession(kind: .long, distanceMeters: 18_000),
+        ])
     }
 
     /// What MAX-130 leaves on a lift: average heart rate, maximum heart rate, zone
