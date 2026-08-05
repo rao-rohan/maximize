@@ -8,7 +8,7 @@ import SwiftUI
 /// detail screen once the conversation moved to a screen of its own.
 ///
 /// The sheet is created only when presented, so opening a workout does not construct a
-/// `WorkoutChatModel` or a chat client for a conversation nobody asked for.
+/// `ChatModel` or a chat client for a conversation nobody asked for.
 struct WorkoutChatSectionView: View {
     let workoutID: UUID
 

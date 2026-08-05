@@ -3,13 +3,20 @@ import XCTest
 import MaximizeCoreTestSupport
 @testable import MaximizeCore
 
-/// FR-2.1–2.4, D10: drives `WorkoutChatModel` end-to-end against `InMemoryWorkoutStore`,
+/// FR-2.1–2.4, D10, A11: drives `ChatModel` end-to-end against `InMemoryWorkoutStore`,
 /// `FakeChatThreadRepository` and `FakeStreamingChatModelInvoking` — the seam MAX-050
 /// built specifically so this ticket needs neither SwiftData, a simulator, nor a device.
+///
+/// The workout half of this file is MAX-051's suite, unchanged except for the type's
+/// name and the subject it is handed. That is deliberate, and it is the regression:
+/// MAX-096 generalised the model, and a workout thread must behave exactly as it did
+/// before.
 @MainActor
-final class WorkoutChatModelTests: XCTestCase {
+final class ChatModelTests: XCTestCase {
 
     // MARK: - Fixtures
+
+    private let utc = TimeZone(identifier: "UTC") ?? .current
 
     private func metrics(planVersion: Int = 1) throws -> DerivedMetrics {
         try DerivedMetrics(
@@ -25,8 +32,8 @@ final class WorkoutChatModelTests: XCTestCase {
         )
     }
 
-    /// A store with a scored workout — the state `WorkoutChatModel.load()` needs to
-    /// reach `.ready`. Callers that want `.notYetScored` skip `seedScore`.
+    /// A store with a scored workout — the state `ChatModel.load()` needs to reach
+    /// `.ready`. Callers that want `.notYetScored` skip `seedScore`.
     private func readyStore(
         seedScore: Bool = true,
         activityType: ActivityType = .running
@@ -40,76 +47,87 @@ final class WorkoutChatModelTests: XCTestCase {
         return store
     }
 
+    /// The week `Fixture.workout()` falls in — Thursday 2026-01-01 through the following
+    /// Wednesday, deliberately *not* Monday-aligned so `ChatModel`'s C1 widening is
+    /// exercised rather than assumed.
+    private func scope() throws -> TrainingScope {
+        try Fixture.scope(from: (2026, 1, 1), through: (2026, 1, 7))
+    }
+
     private func model(
+        subject: ChatSubject = .workout(Fixture.workoutID),
         store: InMemoryWorkoutStore? = nil,
         threadRepository: FakeChatThreadRepository = FakeChatThreadRepository(),
         chatClient: FakeStreamingChatModelInvoking = FakeStreamingChatModelInvoking(),
         now: @escaping @Sendable () -> Date = { Fixture.epoch }
-    ) async throws -> (WorkoutChatModel, InMemoryWorkoutStore?) {
+    ) async throws -> (ChatModel, InMemoryWorkoutStore) {
         let resolvedStore: InMemoryWorkoutStore
         if let store {
             resolvedStore = store
         } else {
             resolvedStore = try await readyStore()
         }
-        let workoutModel = WorkoutChatModel(
-            workoutID: Fixture.workoutID,
+        let chatModel = ChatModel(
+            subject: subject,
             workoutRepository: resolvedStore,
             scoreRepository: resolvedStore,
             planRepository: resolvedStore,
+            settingsRepository: resolvedStore,
             chatThreadRepository: threadRepository,
             chatClient: chatClient,
-            timeZone: TimeZone(identifier: "UTC") ?? .current,
+            timeZone: utc,
             now: now
         )
-        return (workoutModel, resolvedStore)
+        return (chatModel, resolvedStore)
     }
 
     // MARK: - Loading
 
     func testAllRepositoriesNilFailsRatherThanLookingEmpty() async throws {
-        let workoutModel = WorkoutChatModel(
-            workoutID: Fixture.workoutID,
+        let chatModel = ChatModel(
+            subject: .workout(Fixture.workoutID),
             workoutRepository: nil,
             scoreRepository: nil,
             planRepository: nil,
+            settingsRepository: nil,
             chatThreadRepository: nil,
             chatClient: FakeStreamingChatModelInvoking()
         )
-        await workoutModel.load()
-        XCTAssertEqual(workoutModel.loadState, .failed)
+        await chatModel.load()
+        XCTAssertEqual(chatModel.loadState, .failed)
     }
 
-    func testOneNilRepositoryAmongFourStillFails() async throws {
+    func testOneNilRepositoryAmongFiveStillFails() async throws {
         let store = try await readyStore()
-        let workoutModel = WorkoutChatModel(
-            workoutID: Fixture.workoutID,
+        let chatModel = ChatModel(
+            subject: .workout(Fixture.workoutID),
             workoutRepository: store,
             scoreRepository: store,
             planRepository: store,
+            settingsRepository: store,
             chatThreadRepository: nil,
             chatClient: FakeStreamingChatModelInvoking()
         )
-        await workoutModel.load()
-        XCTAssertEqual(workoutModel.loadState, .failed)
+        await chatModel.load()
+        XCTAssertEqual(chatModel.loadState, .failed)
     }
 
     func testUnknownWorkoutFails() async throws {
         let store = InMemoryWorkoutStore(planCalendar: try PlanCalendar([Fixture.plan()]))
-        let (workoutModel, _) = try await model(store: store)
-        await workoutModel.load()
-        XCTAssertEqual(workoutModel.loadState, .failed)
+        let (chatModel, _) = try await model(store: store)
+        await chatModel.load()
+        XCTAssertEqual(chatModel.loadState, .failed)
     }
 
-    /// The load-bearing state this ticket adds: an unscored workout has no stored
+    /// The load-bearing state MAX-051 added: an unscored workout has no stored
     /// classification, so chat is not available yet — and that is ordinary, not a
     /// failure.
     func testUnscoredWorkoutIsNotYetScoredRatherThanFailed() async throws {
         let store = try await readyStore(seedScore: false)
-        let (workoutModel, _) = try await model(store: store)
-        await workoutModel.load()
-        XCTAssertEqual(workoutModel.loadState, .notYetScored)
-        XCTAssertTrue(workoutModel.messages.isEmpty)
+        let (chatModel, _) = try await model(store: store)
+        await chatModel.load()
+        XCTAssertEqual(chatModel.loadState, .notYetScored)
+        XCTAssertTrue(chatModel.messages.isEmpty)
     }
 
     /// MAX-126. Same missing ledger, different reason, and the difference is the whole
@@ -121,10 +139,10 @@ final class WorkoutChatModelTests: XCTestCase {
             seedScore: false,
             activityType: .traditionalStrengthTraining
         )
-        let (workoutModel, _) = try await model(store: store)
-        await workoutModel.load()
-        XCTAssertEqual(workoutModel.loadState, .noVerdict)
-        XCTAssertTrue(workoutModel.messages.isEmpty)
+        let (chatModel, _) = try await model(store: store)
+        await chatModel.load()
+        XCTAssertEqual(chatModel.loadState, .noVerdict)
+        XCTAssertTrue(chatModel.messages.isEmpty)
     }
 
     /// D8, from chat's side: a lift that *was* scored before MAX-111 still has a stored
@@ -132,9 +150,9 @@ final class WorkoutChatModelTests: XCTestCase {
     /// conversation that already worked.
     func testAnAlreadyScoredLiftStillReachesReady() async throws {
         let store = try await readyStore(activityType: .traditionalStrengthTraining)
-        let (workoutModel, _) = try await model(store: store)
-        await workoutModel.load()
-        XCTAssertEqual(workoutModel.loadState, .ready)
+        let (chatModel, _) = try await model(store: store)
+        await chatModel.load()
+        XCTAssertEqual(chatModel.loadState, .ready)
     }
 
     func testChatThreadReadFailurePropagatesAsFailed() async throws {
@@ -142,16 +160,16 @@ final class WorkoutChatModelTests: XCTestCase {
         let threadRepository = FakeChatThreadRepository()
         struct Boom: Error {}
         threadRepository.failReads(with: Boom())
-        let (workoutModel, _) = try await model(store: store, threadRepository: threadRepository)
-        await workoutModel.load()
-        XCTAssertEqual(workoutModel.loadState, .failed)
+        let (chatModel, _) = try await model(store: store, threadRepository: threadRepository)
+        await chatModel.load()
+        XCTAssertEqual(chatModel.loadState, .failed)
     }
 
     func testReadyLoadsAnEmptyThreadWhenNoneIsStoredYet() async throws {
-        let (workoutModel, _) = try await model()
-        await workoutModel.load()
-        XCTAssertEqual(workoutModel.loadState, .ready)
-        XCTAssertTrue(workoutModel.messages.isEmpty)
+        let (chatModel, _) = try await model()
+        await chatModel.load()
+        XCTAssertEqual(chatModel.loadState, .ready)
+        XCTAssertTrue(chatModel.messages.isEmpty)
     }
 
     /// A stored thread's visible turns restore in order; a `.system` seed row (the
@@ -171,36 +189,36 @@ final class WorkoutChatModelTests: XCTestCase {
         )
         try await threadRepository.store(thread)
 
-        let (workoutModel, _) = try await model(threadRepository: threadRepository)
-        await workoutModel.load()
+        let (chatModel, _) = try await model(threadRepository: threadRepository)
+        await chatModel.load()
 
-        XCTAssertEqual(workoutModel.loadState, .ready)
-        XCTAssertEqual(workoutModel.messages.map(\.text), ["Was that on plan?", "Yes, right on the cap."])
-        XCTAssertEqual(workoutModel.messages.map(\.kind), [.user, .assistant])
+        XCTAssertEqual(chatModel.loadState, .ready)
+        XCTAssertEqual(chatModel.messages.map(\.text), ["Was that on plan?", "Yes, right on the cap."])
+        XCTAssertEqual(chatModel.messages.map(\.kind), [.user, .assistant])
     }
 
     // MARK: - Sending: the happy path
 
     func testCanSendRequiresReadyNonEmptyComposerAndNotAlreadyStreaming() async throws {
-        let (workoutModel, _) = try await model()
-        XCTAssertFalse(workoutModel.canSend, "not ready yet")
+        let (chatModel, _) = try await model()
+        XCTAssertFalse(chatModel.canSend, "not ready yet")
 
-        await workoutModel.load()
-        XCTAssertFalse(workoutModel.canSend, "composer is empty")
+        await chatModel.load()
+        XCTAssertFalse(chatModel.canSend, "composer is empty")
 
-        workoutModel.composerText = "   "
-        XCTAssertFalse(workoutModel.canSend, "whitespace-only")
+        chatModel.composerText = "   "
+        XCTAssertFalse(chatModel.canSend, "whitespace-only")
 
-        workoutModel.composerText = "How was my drift?"
-        XCTAssertTrue(workoutModel.canSend)
+        chatModel.composerText = "How was my drift?"
+        XCTAssertTrue(chatModel.canSend)
     }
 
     func testSendIsANoOpWhenItCannotSend() async throws {
-        let (workoutModel, _) = try await model()
-        await workoutModel.load()
+        let (chatModel, _) = try await model()
+        await chatModel.load()
         // composerText is empty; canSend is false.
-        await workoutModel.send()
-        XCTAssertTrue(workoutModel.messages.isEmpty)
+        await chatModel.send()
+        XCTAssertTrue(chatModel.messages.isEmpty)
     }
 
     /// FR-2.4: the reveal actually streams (each token visible before the turn ends),
@@ -210,19 +228,19 @@ final class WorkoutChatModelTests: XCTestCase {
         let chatClient = FakeStreamingChatModelInvoking(
             events: [.text("You "), .text("held the cap "), .text("the whole way."), .completed(.endTurn)]
         )
-        let (workoutModel, _) = try await model(threadRepository: threadRepository, chatClient: chatClient)
-        await workoutModel.load()
+        let (chatModel, _) = try await model(threadRepository: threadRepository, chatClient: chatClient)
+        await chatModel.load()
 
-        workoutModel.composerText = "Was that on plan?"
-        await workoutModel.send()
+        chatModel.composerText = "Was that on plan?"
+        await chatModel.send()
 
-        XCTAssertFalse(workoutModel.isStreaming)
-        XCTAssertEqual(workoutModel.streamingText, "", "cleared once the turn is over")
-        XCTAssertEqual(workoutModel.composerText, "")
-        XCTAssertEqual(workoutModel.messages.map(\.kind), [.user, .assistant])
-        XCTAssertEqual(workoutModel.messages.map(\.text), ["Was that on plan?", "You held the cap the whole way."])
-        XCTAssertFalse(workoutModel.messages[1].wasTruncated)
-        XCTAssertFalse(workoutModel.messages[1].wasInterruptedByFailure)
+        XCTAssertFalse(chatModel.isStreaming)
+        XCTAssertEqual(chatModel.streamingText, "", "cleared once the turn is over")
+        XCTAssertEqual(chatModel.composerText, "")
+        XCTAssertEqual(chatModel.messages.map(\.kind), [.user, .assistant])
+        XCTAssertEqual(chatModel.messages.map(\.text), ["Was that on plan?", "You held the cap the whole way."])
+        XCTAssertFalse(chatModel.messages[1].wasTruncated)
+        XCTAssertFalse(chatModel.messages[1].wasInterruptedByFailure)
 
         XCTAssertEqual(threadRepository.writes, 1)
         let stored = try XCTUnwrap(threadRepository.allThreads.first)
@@ -233,13 +251,13 @@ final class WorkoutChatModelTests: XCTestCase {
     func testTruncatedCompletionIsPersistedAndFlagged() async throws {
         let chatClient = FakeStreamingChatModelInvoking(events: [.text("A long reply…"), .completed(.truncated)])
         let threadRepository = FakeChatThreadRepository()
-        let (workoutModel, _) = try await model(threadRepository: threadRepository, chatClient: chatClient)
-        await workoutModel.load()
+        let (chatModel, _) = try await model(threadRepository: threadRepository, chatClient: chatClient)
+        await chatModel.load()
 
-        workoutModel.composerText = "Tell me everything about this run."
-        await workoutModel.send()
+        chatModel.composerText = "Tell me everything about this run."
+        await chatModel.send()
 
-        XCTAssertTrue(workoutModel.messages.last?.wasTruncated ?? false)
+        XCTAssertTrue(chatModel.messages.last?.wasTruncated ?? false)
         XCTAssertEqual(threadRepository.writes, 1, "a truncated reply is still real and storable")
     }
 
@@ -247,15 +265,15 @@ final class WorkoutChatModelTests: XCTestCase {
     /// full history (including the just-completed turn) reaches the next instruction.
     func testFactSheetIsIdenticalAcrossTurnsAndHistoryAccumulates() async throws {
         let chatClient = FakeStreamingChatModelInvoking(events: [.text("Answer one."), .completed(.endTurn)])
-        let (workoutModel, _) = try await model(chatClient: chatClient)
-        await workoutModel.load()
+        let (chatModel, _) = try await model(chatClient: chatClient)
+        await chatModel.load()
 
-        workoutModel.composerText = "First question?"
-        await workoutModel.send()
+        chatModel.composerText = "First question?"
+        await chatModel.send()
 
         chatClient.events = [.text("Answer two."), .completed(.endTurn)]
-        workoutModel.composerText = "Second question?"
-        await workoutModel.send()
+        chatModel.composerText = "Second question?"
+        await chatModel.send()
 
         XCTAssertEqual(chatClient.callCount, 2)
         let first = chatClient.receivedInstructions[0]
@@ -276,45 +294,45 @@ final class WorkoutChatModelTests: XCTestCase {
     func testFailedStreamKeepsPartialTextVisibleButPersistsNothing() async throws {
         let chatClient = FakeStreamingChatModelInvoking(events: [.text("Partial rep"), .failed(.interrupted)])
         let threadRepository = FakeChatThreadRepository()
-        let (workoutModel, _) = try await model(threadRepository: threadRepository, chatClient: chatClient)
-        await workoutModel.load()
+        let (chatModel, _) = try await model(threadRepository: threadRepository, chatClient: chatClient)
+        await chatModel.load()
 
-        workoutModel.composerText = "Why did my HR spike?"
-        await workoutModel.send()
+        chatModel.composerText = "Why did my HR spike?"
+        await chatModel.send()
 
-        XCTAssertFalse(workoutModel.isStreaming)
-        XCTAssertEqual(workoutModel.messages.map(\.kind), [.user, .assistant, .notice])
-        XCTAssertEqual(workoutModel.messages[1].text, "Partial rep")
-        XCTAssertTrue(workoutModel.messages[1].wasInterruptedByFailure)
+        XCTAssertFalse(chatModel.isStreaming)
+        XCTAssertEqual(chatModel.messages.map(\.kind), [.user, .assistant, .notice])
+        XCTAssertEqual(chatModel.messages[1].text, "Partial rep")
+        XCTAssertTrue(chatModel.messages[1].wasInterruptedByFailure)
         XCTAssertEqual(threadRepository.writes, 0, "only completed turns are persisted")
         XCTAssertEqual(threadRepository.threadCount, 0)
     }
 
     func testFailureWithNoTextYetShowsOnlyANotice() async throws {
         let chatClient = FakeStreamingChatModelInvoking(events: [.failed(.requestFailed)])
-        let (workoutModel, _) = try await model(chatClient: chatClient)
-        await workoutModel.load()
+        let (chatModel, _) = try await model(chatClient: chatClient)
+        await chatModel.load()
 
-        workoutModel.composerText = "Was that hard?"
-        await workoutModel.send()
+        chatModel.composerText = "Was that hard?"
+        await chatModel.send()
 
-        XCTAssertEqual(workoutModel.messages.map(\.kind), [.user, .notice])
+        XCTAssertEqual(chatModel.messages.map(\.kind), [.user, .notice])
     }
 
     /// "No key stored" is the app's ordinary day-one state (constraint #5): a plain
     /// message pointing at Settings, not a crash or a stuck spinner.
     func testNoAPIKeyStoredPointsAtSettings() async throws {
         let chatClient = FakeStreamingChatModelInvoking(events: [.failed(.noAPIKeyStored)])
-        let (workoutModel, _) = try await model(chatClient: chatClient)
-        await workoutModel.load()
+        let (chatModel, _) = try await model(chatClient: chatClient)
+        await chatModel.load()
 
-        workoutModel.composerText = "How did I do?"
-        await workoutModel.send()
+        chatModel.composerText = "How did I do?"
+        await chatModel.send()
 
-        XCTAssertFalse(workoutModel.isStreaming, "never a spinner that never resolves")
-        let notice = try XCTUnwrap(workoutModel.messages.last)
+        XCTAssertFalse(chatModel.isStreaming, "never a spinner that never resolves")
+        let notice = try XCTUnwrap(chatModel.messages.last)
         XCTAssertEqual(notice.kind, .notice)
-        XCTAssertTrue(notice.text.contains("Settings"), notice.text)
+        XCTAssertEqual(notice.text, "Add an Anthropic API key in Settings to chat about this workout.")
     }
 
     /// A retry after a failure is a fresh question, not a resumed one — the previous
@@ -322,17 +340,292 @@ final class WorkoutChatModelTests: XCTestCase {
     /// instruction, since neither was ever persisted.
     func testRetryAfterFailureDoesNotReplayTheDroppedTurn() async throws {
         let chatClient = FakeStreamingChatModelInvoking(events: [.text("half…"), .failed(.interrupted)])
-        let (workoutModel, _) = try await model(chatClient: chatClient)
-        await workoutModel.load()
+        let (chatModel, _) = try await model(chatClient: chatClient)
+        await chatModel.load()
 
-        workoutModel.composerText = "First try?"
-        await workoutModel.send()
+        chatModel.composerText = "First try?"
+        await chatModel.send()
 
         chatClient.events = [.text("Full answer."), .completed(.endTurn)]
-        workoutModel.composerText = "Second try?"
-        await workoutModel.send()
+        chatModel.composerText = "Second try?"
+        await chatModel.send()
 
         let secondInstruction = try XCTUnwrap(chatClient.receivedInstructions.last)
         XCTAssertEqual(secondInstruction.turns.map(\.text), ["Second try?"])
+    }
+
+    // MARK: - The training subject (MAX-096)
+
+    func testTrainingThreadLoadsAndOpensReady() async throws {
+        let (chatModel, _) = try await model(subject: .training(try scope()))
+        await chatModel.load()
+
+        XCTAssertEqual(chatModel.loadState, .ready)
+        XCTAssertTrue(chatModel.messages.isEmpty)
+    }
+
+    /// A training window with nothing in it is not a failure and not a missing verdict —
+    /// it is a window the roll-up describes as empty. The two workout-only states must
+    /// stay unreachable here, or a view will offer to wait for a score on a month.
+    func testATrainingWindowWithNoSessionsStillOpens() async throws {
+        let empty = InMemoryWorkoutStore(planCalendar: try PlanCalendar([Fixture.plan()]))
+        let (chatModel, _) = try await model(subject: .training(try scope()), store: empty)
+        await chatModel.load()
+
+        XCTAssertEqual(chatModel.loadState, .ready)
+    }
+
+    /// An athlete who has authored no plan still has a window worth describing — the
+    /// opposite of the workout path, where a missing plan calendar is a load failure
+    /// because there is nothing to measure the run against.
+    func testATrainingWindowOpensBeforeAnyPlanIsAuthored() async throws {
+        let store = InMemoryWorkoutStore(planCalendar: nil)
+        try await store.store(Fixture.workout())
+        let (chatModel, _) = try await model(subject: .training(try scope()), store: store)
+        await chatModel.load()
+
+        XCTAssertEqual(chatModel.loadState, .ready)
+    }
+
+    /// The training path streams, appends and persists exactly as the workout path does —
+    /// everything after `load()` is written once and does not branch on the subject.
+    func testTrainingThreadStreamsAndAppendsACompletedTurn() async throws {
+        let threadRepository = FakeChatThreadRepository()
+        let chatClient = FakeStreamingChatModelInvoking(
+            events: [.text("Your drift has flattened."), .completed(.endTurn)]
+        )
+        let (chatModel, _) = try await model(
+            subject: .training(try scope()),
+            threadRepository: threadRepository,
+            chatClient: chatClient
+        )
+        await chatModel.load()
+
+        chatModel.composerText = "Has my drift flattened this week?"
+        await chatModel.send()
+
+        XCTAssertEqual(chatModel.messages.map(\.kind), [.user, .assistant])
+        XCTAssertEqual(threadRepository.writes, 1)
+        let stored = try XCTUnwrap(threadRepository.allThreads.first)
+        XCTAssertEqual(stored.subject, .training(try scope()))
+        XCTAssertEqual(
+            stored.visibleMessages.map(\.content),
+            ["Has my drift flattened this week?", "Your drift has flattened."]
+        )
+    }
+
+    /// A11's payoff: the thread the model opens is the one for *this* subject. A workout
+    /// thread stored for the same run must not surface in a training conversation.
+    func testATrainingThreadDoesNotOpenAWorkoutThread() async throws {
+        let threadRepository = FakeChatThreadRepository()
+        var workoutThread = try Fixture.thread(subject: .workout(Fixture.workoutID))
+        workoutThread = try workoutThread.appending(try Fixture.message(.user, "About that run", at: 1))
+        try await threadRepository.store(workoutThread)
+
+        let (chatModel, _) = try await model(
+            subject: .training(try scope()),
+            threadRepository: threadRepository
+        )
+        await chatModel.load()
+
+        XCTAssertEqual(chatModel.loadState, .ready)
+        XCTAssertTrue(chatModel.messages.isEmpty, "the run's own conversation is a different thread")
+    }
+
+    /// §3.5: a training turn is asked to do a different job, against a different fact
+    /// sheet. Both halves of the instruction change with the subject, and neither is
+    /// composed anywhere but `ContextBuilder` and this model (A12).
+    func testTrainingAndWorkoutTurnsSendDifferentTasksAndFactSheets() async throws {
+        let store = try await readyStore()
+        let threadRepository = FakeChatThreadRepository()
+
+        let workoutClient = FakeStreamingChatModelInvoking(events: [.text("A."), .completed(.endTurn)])
+        let (workoutModel, _) = try await model(
+            store: store,
+            threadRepository: threadRepository,
+            chatClient: workoutClient
+        )
+        await workoutModel.load()
+        workoutModel.composerText = "How was it?"
+        await workoutModel.send()
+
+        let trainingClient = FakeStreamingChatModelInvoking(events: [.text("B."), .completed(.endTurn)])
+        let (trainingModel, _) = try await model(
+            subject: .training(try scope()),
+            store: store,
+            threadRepository: threadRepository,
+            chatClient: trainingClient
+        )
+        await trainingModel.load()
+        trainingModel.composerText = "How was the week?"
+        await trainingModel.send()
+
+        let workoutInstruction = try XCTUnwrap(workoutClient.receivedInstructions.last)
+        let trainingInstruction = try XCTUnwrap(trainingClient.receivedInstructions.last)
+        XCTAssertEqual(workoutInstruction.task, ChatModel.workoutTask)
+        XCTAssertEqual(trainingInstruction.task, ChatModel.trainingTask)
+        XCTAssertNotEqual(workoutInstruction.factSheet, trainingInstruction.factSheet)
+    }
+
+    func testNoAPIKeyNoticeIsWordedForTheTrainingSubject() async throws {
+        let chatClient = FakeStreamingChatModelInvoking(events: [.failed(.noAPIKeyStored)])
+        let (chatModel, _) = try await model(subject: .training(try scope()), chatClient: chatClient)
+        await chatModel.load()
+
+        chatModel.composerText = "How am I doing?"
+        await chatModel.send()
+
+        let notice = try XCTUnwrap(chatModel.messages.last)
+        XCTAssertEqual(notice.text, "Add an Anthropic API key in Settings to chat about your training.")
+    }
+
+    // MARK: - The task texts (§3.5)
+
+    /// §3.6(b)'s mechanism, asserted rather than assumed: a frozen scope only becomes
+    /// legible if every aggregate the model quotes carries the window it was measured
+    /// over. This is the clause that turns a mismatch into a labelled difference rather
+    /// than an ambush, so it does not get quietly reworded away.
+    func testTrainingTaskRequiresNamingTheWindowBesideEveryAggregate() async {
+        let task = ChatModel.trainingTask
+        XCTAssertTrue(task.contains("name the window you measured it over"), task)
+        XCTAssertTrue(task.contains("in the same sentence"), task)
+    }
+
+    /// D8 from chat's side: a model invited to re-score in prose produces a correction
+    /// recorded nowhere, which is the opposite of the divergence signal PRD §2 wants.
+    func testTrainingTaskForbidsRevisingAScore() async {
+        let task = ChatModel.trainingTask
+        XCTAssertTrue(task.contains("not up for revision"), task)
+        XCTAssertTrue(task.contains("never re-score a session"), task)
+        XCTAssertTrue(task.contains("record on the run itself"), task)
+    }
+
+    /// The remaining three §3.5 requirements, so a future edit cannot drop one silently.
+    func testTrainingTaskStatesTheSummarysLimitsAndRefusesMedicalAdvice() async {
+        let task = ChatModel.trainingTask
+        XCTAssertTrue(task.contains("Answer using only that summary"), task)
+        XCTAssertTrue(task.contains("Never invent a figure"), task)
+        XCTAssertTrue(task.contains("no kilometre"), task)
+        XCTAssertTrue(task.contains("heart-rate curve"), task)
+        XCTAssertTrue(task.contains("that run's own conversation"), task)
+        XCTAssertTrue(task.contains("No medical advice"), task)
+    }
+
+    /// Neither task may carry a number, a date or anything else about this athlete —
+    /// that is what lets it travel as a cacheable block shared by every thread of its
+    /// kind, and it is the same contract `ScoringInstruction.task` carries.
+    func testNeitherTaskCarriesHealthData() async {
+        for task in [ChatModel.workoutTask, ChatModel.trainingTask] {
+            XCTAssertNil(task.rangeOfCharacter(from: .decimalDigits), task)
+        }
+    }
+
+    // MARK: - The transcript cap (§8.2, A14)
+
+    private func alternatingTurns(_ count: Int) throws -> [ChatTurn] {
+        try (0..<count).map { index in
+            try ChatTurn(speaker: index.isMultiple(of: 2) ? .user : .assistant, text: "turn \(index)")
+        }
+    }
+
+    func testATranscriptWithinTheCapIsReplayedWhole() async throws {
+        let all = try alternatingTurns(ChatInstruction.maximumReplayedTurns)
+        let instruction = try ChatInstruction(task: "task", factSheet: "sheet", turns: all)
+
+        XCTAssertEqual(instruction.droppedTurnCount, 0)
+        XCTAssertEqual(instruction.turns, all)
+    }
+
+    /// The cap keeps the *most recent* turns — the ones a question is most likely to
+    /// depend on — and drops from the front.
+    func testTheCapDropsTheOldestTurns() async throws {
+        let all = try alternatingTurns(ChatInstruction.maximumReplayedTurns + 6)
+        let instruction = try ChatInstruction(task: "task", factSheet: "sheet", turns: all)
+
+        XCTAssertEqual(instruction.droppedTurnCount, 6)
+        XCTAssertEqual(instruction.turns.last, all.last)
+        XCTAssertFalse(instruction.turns.contains(all[0]), "the oldest turn is gone")
+        XCTAssertFalse(instruction.turns.contains(all[5]), "so are the five after it")
+        XCTAssertTrue(instruction.turns.contains(all[6]), "and the window opens on the seventh")
+    }
+
+    /// A14's reason for the notice, stated as a test: a model answering confidently as
+    /// though it had seen the start of a conversation it did not is worse than one that
+    /// says it lost the thread. So when turns are dropped the instruction says so — in
+    /// the transcript itself, where nothing downstream has to remember to render it.
+    func testDroppedTurnsAreAnnouncedInTheTranscript() async throws {
+        let all = try alternatingTurns(ChatInstruction.maximumReplayedTurns + 3)
+        let instruction = try ChatInstruction(task: "task", factSheet: "sheet", turns: all)
+
+        let leading = try XCTUnwrap(instruction.turns.first)
+        XCTAssertEqual(leading.speaker, .user, "the Messages API needs the user to speak first")
+        XCTAssertEqual(leading.text, ChatInstruction.droppedTurnsNotice(3))
+        XCTAssertTrue(leading.text.contains("3 turns"), leading.text)
+        XCTAssertEqual(
+            instruction.turns.count,
+            ChatInstruction.maximumReplayedTurns + 1,
+            "the notice rides on top of a full window; it does not displace a turn"
+        )
+    }
+
+    func testNoNoticeIsAddedWhenNothingWasDropped() async throws {
+        let instruction = try ChatInstruction(
+            task: "task",
+            factSheet: "sheet",
+            turns: try alternatingTurns(4)
+        )
+        XCTAssertEqual(instruction.turns.map(\.text), ["turn 0", "turn 1", "turn 2", "turn 3"])
+    }
+
+    /// The bound is enforced by the type rather than by the caller remembering: a model
+    /// that simply hands over the whole stored thread still cannot send more than the
+    /// cap, and the model does exactly that.
+    func testALongThreadReachesTheModelCappedAndAnnounced() async throws {
+        let threadRepository = FakeChatThreadRepository()
+        var thread = try Fixture.thread(subject: .workout(Fixture.workoutID))
+        // 50 stored turns, so the 51st — the question being asked — pushes 11 off the
+        // front of the window.
+        for index in 0..<50 {
+            thread = try thread.appending(try Fixture.message(
+                index.isMultiple(of: 2) ? .user : .assistant,
+                "stored turn \(index)",
+                at: Double(index + 1)
+            ))
+        }
+        try await threadRepository.store(thread)
+
+        let chatClient = FakeStreamingChatModelInvoking(events: [.text("Answer."), .completed(.endTurn)])
+        let (chatModel, _) = try await model(
+            threadRepository: threadRepository,
+            chatClient: chatClient,
+            // Later than every stored turn, so appending the new pair stays in order.
+            now: { Fixture.at(1_000) }
+        )
+        await chatModel.load()
+        chatModel.composerText = "And now?"
+        await chatModel.send()
+
+        let instruction = try XCTUnwrap(chatClient.receivedInstructions.last)
+        XCTAssertEqual(instruction.droppedTurnCount, 11)
+        XCTAssertEqual(instruction.turns.count, ChatInstruction.maximumReplayedTurns + 1)
+        XCTAssertEqual(instruction.turns.first?.text, ChatInstruction.droppedTurnsNotice(11))
+        XCTAssertEqual(instruction.turns.last?.text, "And now?")
+        XCTAssertFalse(
+            instruction.turns.contains { $0.text == "stored turn 0" },
+            "the start of the conversation is not replayed"
+        )
+    }
+
+    /// The cap trims the conversation and nothing else. The fact sheet is not shortened
+    /// alongside it — it is what the answer is built from, and D3 forbids trimming it
+    /// here or anywhere.
+    func testTheCapNeverTouchesTheFactSheet() async throws {
+        let sheet = String(repeating: "fact sheet line\n", count: 200)
+        let instruction = try ChatInstruction(
+            task: "task",
+            factSheet: sheet,
+            turns: try alternatingTurns(ChatInstruction.maximumReplayedTurns * 2)
+        )
+        XCTAssertEqual(instruction.factSheet, sheet)
     }
 }
