@@ -1820,15 +1820,34 @@ Messages/Mail/Notes for the recency bands and the compact timestamp ladder; the
 grow-to-a-ceiling-then-scroll composer behaviour common to iMessage, WhatsApp and
 Telegram.
 
-**Blocked seam — the one thing this ticket could not land.** `ChatComposerView` and
-`ChatJumpToLatestButton` are written, documented and exercised in `DesignSystemGallery`,
-but **not wired**: the composer and the transcript's `onChange` handlers both live in
-`App/Chat/ChatConversationView.swift`, which **MAX-152 owns** for the waiting and
-streaming states. Rather than fight for the file, MAX-153 defined the seam (the send
-control is a value MAX-152 resolves; `activityIndicator` is the hook its animation
-replaces) and left the ~20-line integration to whoever lands second. **The exact diff is
-in MAX-153's PR body.** Until it is applied, the shipped user-visible change is the thread
-list, the sheet's scroll/dismiss precedence, and the design-system additions.
+**Installed, after MAX-152 merged.** The composer and the transcript's `onChange` handlers
+live in `App/Chat/ChatConversationView.swift`, which MAX-152 held while it was in flight;
+MAX-153 wrote the views against a documented seam and installed them once that file was
+free. What landed in the file:
+
+- The hand-rolled `TextField` + `Image` row and the `.glassChrome(.toolbar)` wrapped round
+  it are gone, replaced by `ChatComposerView`. **The outer glass went with them** —
+  `ChatComposerView` carries its own `GlassEffectContainer`, and a second glass modifier
+  round a view that glasses itself is chrome over chrome.
+- The send control resolves from **MAX-152's `replyPhase`**, not from a boolean:
+  `ChatComposerSendControl.resolve(canSend:replyPhase:)`. `ChatModel.isStreaming` is
+  itself `replyPhase.isLive`, so there is one authority on "a reply is in flight". The
+  composer does not distinguish waiting / streaming / stalled — those are three things to
+  say in the transcript, and `ChatPendingReplyView` says them there.
+- Every unconditional `scrollToBottom` became a `ChatTranscriptFollow` directive, including
+  the focus handler that used to drag a scrolled-up reader to the end.
+- **A third change kind, `.reflow`,** was added for MAX-152's shimmer. The waiting
+  indicator appearing and a stall caption growing both move the content, so a reader at
+  the bottom stays pinned — but neither is a reply, so neither may badge somebody who
+  scrolled away. Telling them "New reply" because a placeholder resized is the app crying
+  wolf about its own layout.
+- `.defaultScrollAnchor(.bottom, for: .initialOffset)` so a thread with history opens at
+  its newest turn. `for: .initialOffset` deliberately: where the scroll view *starts* is
+  the platform's question; what it does when content grows is `ChatTranscriptFollow`'s,
+  and two mechanisms answering one behaviour is how they drift.
+- **Retry is MAX-152's and stays in the transcript**, beside the failure notice that
+  explains what went wrong. The composer offers none — two retry affordances in two
+  registers is worse than either alone.
 
 **Four collisions the overseer must respect.**
 
