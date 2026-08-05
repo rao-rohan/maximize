@@ -28,11 +28,57 @@ enum PlanAuthoringFormatting {
         case .hard: return "Hard session"
         case .rest: return "Rest"
         case .other: return "Other"
-        // Unreachable from this screen: the picker is driven by
-        // `ScheduledSessionKind.prescribable`, which excludes `.lift` until the template
-        // has a slot for it. Spelled out rather than defaulted so the sweep is visible.
+        // Reachable now (MAX-137) through the lift slot's own picker, which is driven
+        // by `ScheduledSessionKind.liftPrescribable` rather than `prescribable` — the
+        // run slot's picker still excludes it, so this case never fires there.
         case .lift: return "Lift"
         }
+    }
+
+    static func describe(_ group: MuscleGroup) -> String {
+        switch group {
+        case .chest: return "Chest"
+        case .back: return "Back"
+        case .shoulders: return "Shoulders"
+        case .arms: return "Arms"
+        case .legs: return "Legs"
+        case .core: return "Core"
+        }
+    }
+
+    /// The lift slot's own empty-state copy — "Rest" and "Groups not stated" read as
+    /// two different sentences on purpose, matching the distinction
+    /// `LiftPrescriptionSummary` keeps in the core (A17).
+    static func describe(_ summary: LiftPrescriptionSummary) -> String {
+        switch summary {
+        case .rest: return "Rest"
+        case .unstatedGroups: return "Lift · groups not stated"
+        case let .groups(groups):
+            return "Lift · " + groups.ordered.map { describe($0) }.joined(separator: ", ")
+        }
+    }
+
+    /// The compact caption above a weekday's two pickers — what a scanning eye reads
+    /// before either slot's own detail.
+    static func describe(_ summary: PlanDraft.DayDraft.ObligationSummary) -> String {
+        switch summary {
+        case .rest: return "Rest"
+        case .runOnly: return "Run only"
+        case .liftOnly: return "Lift only"
+        case .both: return "Run + lift"
+        }
+    }
+
+    /// A resolved lift `ScheduledSession`'s copy, for the preview section — reads
+    /// identically to `describe(_ summary:)` above by going through the same
+    /// `LiftPrescriptionSummary`, so a governed day and the draft that produced it never
+    /// say the lift slot two different things.
+    static func describeLiftSession(_ session: ScheduledSession) -> String {
+        var text = describe(session.liftPrescriptionSummary)
+        if let note = session.note, !note.isEmpty {
+            text += " · " + note
+        }
+        return text
     }
 
     static func describe(_ mode: PlanAuthoringSession.Mode) -> String {
@@ -74,5 +120,15 @@ enum PlanAuthoringFormatting {
             text += " · " + note
         }
         return text
+    }
+
+    /// One line for a resolved day, both slots — what the "first week this version
+    /// governs" preview shows, so reviewing a week means reading seven rows rather than
+    /// fourteen (MAX-137). The lift half is omitted entirely when the day prescribes
+    /// none, matching the run slot's own "just say what's asked" shape.
+    static func describeBothSessions(_ planDay: PlanDay, unit: DistanceUnit) -> String {
+        let run = describeSession(planDay.scheduledSession, unit: unit)
+        guard !planDay.liftSession.isRest else { return run }
+        return run + "  +  " + describeLiftSession(planDay.liftSession)
     }
 }

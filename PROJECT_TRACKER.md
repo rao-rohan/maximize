@@ -1358,7 +1358,7 @@ is the overseer's, not a ticket's — flagged here rather than done.
 | MAX-134 | Obligations, not days: tallies, streak, rest-day budget | 129, 133 | **Opus** |
 | MAX-135 | The calendar's mixed day | 134, **105** | **Opus** |
 | MAX-136 | Context and fact sheet learn discipline | 129, 130 | **Opus** 🔒 |
-| MAX-137 | Plan authoring for two slots | 129 | Sonnet |
+| MAX-137 | Plan authoring for two slots | 129 | Sonnet ✅ |
 | MAX-138 | The plan screen shows both | 129 | Sonnet |
 | MAX-139 | Workout detail for a lift | 130, 133 | Sonnet |
 | MAX-140 | Trend tiles, honestly ("days run", the effective denominator) | 134 | Sonnet |
@@ -1446,7 +1446,7 @@ lift slot — but each currently answers about the day's *run* while calling it 
 | `RestDayBudgeting` / `TalliesCalculator` | `PlanDay.canBeMissed`, `costTier` | MAX-134 |
 | `ScoreCalendar.dayState` / `agreement` | the day's single prescribed kind | MAX-135 |
 | `TrainingFactSheet` / `WorkoutFactSheet` | `entry.session`, `planDay.scheduledSession` | MAX-136 |
-| `PlanDraft` setters, `PlanAuthoringError` | the run slot only | MAX-137 |
+| `PlanDraft` setters, `PlanAuthoringError` | ~~the run slot only~~ **both, as of MAX-137** | MAX-137 ✅ |
 | `PlanDisplayData.WeekdayRow` | one kind/distance/note per weekday | MAX-138 |
 | `TrendTileData` planned mileage | sums `planDay.scheduledSession.distanceMeters` | MAX-140 |
 | `PlanProposal` (MAX-099) | validates the same shape `PlanAuthoringSession` does | MAX-141 |
@@ -1490,6 +1490,42 @@ is what keeps the lift slot's totality meaningful.
 >
 > Recommended lean: **2 now, 3 as it costs nothing extra, and 1 only if the owner decides the
 > signal is worth the non-goal.** Recorded, not taken — flagged for the overseer to dispatch.
+
+**MAX-137 — plan authoring for two slots.** `PlanDraft.DayDraft` decomposes the lift slot
+the same way the run slot already was — `liftKind` / `liftMuscleGroups`, `private(set)` and
+mutated through `setLiftKind`, `setLiftMuscleGroups`/`toggleLiftMuscleGroup` — rather than
+carrying it as an opaque `ScheduledSession` with no editor. `liftNote` stays carried but
+unedited: a lift's duration is still only expressible as free text until a future ticket
+gives `ScheduledSession` a structured duration field, and this ticket did not widen its own
+scope to build that.
+
+- **The lift slot gets its own picker vocabulary, not the run slot's.**
+  `ScheduledSessionKind.liftPrescribable = [.rest, .lift]` — a genuinely smaller set, not
+  `prescribable` with one case swapped, because the rubric has no easy/long/hard gradient
+  for a lift (LIFTING-SPEC §3.5): a lift day is either prescribed or it is not. Handing the
+  run slot's five-case vocabulary to the lift picker would let a plan write a run-shaped ask
+  into the lift slot — the same cross-discipline confusion `prescribable` exists to keep out
+  of the run slot, arriving from the other direction.
+- **The two empty states are a core type, not a view switch.** `LiftPrescriptionSummary`
+  (`.rest` / `.unstatedGroups` / `.groups(Set<MuscleGroup>)`) is the one place "no lift" and
+  "a lift with no groups named" are decided apart; `PlanDraft.DayDraft.liftSummary` and
+  `ScheduledSession.liftPrescriptionSummary` both read it, so the editable week and the
+  resolved preview can never describe the same day two different ways. Copy
+  ("Rest" / "Lift · groups not stated" / "Lift · Chest, Back") lives in
+  `PlanAuthoringFormatting`, same split as everywhere else in this app.
+- **How a weekday's two asks summarise is also core.** `DayDraft.ObligationSummary`
+  (rest/runOnly/liftOnly/both) is the caption a scanning eye reads above each day's two
+  pickers — "checking seven days of two slots" per the ticket's brief — computed once, under
+  test, rather than a view re-deriving "does this day have anything" from two kinds.
+- **The preview section shows both slots per day**, `describeBothSessions(_:unit:)`, so "the
+  first week this version governs" is seven rows again, not fourteen.
+- **A run-only plan is unaffected.** Every lift setter clears itself back to `.rest` /
+  no-groups the same way the run slot's `setKind(.rest)` already did, and a draft that never
+  touches the lift slot authors byte-for-byte what it did before this ticket —
+  `testARunOnlyPlanAuthorsExactlyAsBefore` pins it.
+- **`PlanAuthoringError` gained one belt-and-braces case**, `liftSessionInvalid`, for the
+  combination the new setters cannot actually produce — the same reasoning
+  `wouldRewriteHistory` already documents for why a real case beats a `try!`.
 
 **MAX-130 — a lift's metrics are decided, not merely withheld.** MAX-111 put `if isRun` in
 front of three expressions in `DerivedMetricsCalculator`. That fixed the three metrics that
