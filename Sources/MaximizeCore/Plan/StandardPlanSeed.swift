@@ -124,6 +124,34 @@ public enum StandardPlanSeed {
     ///
     /// None of this is load-bearing for anyone who disagrees — it is the *starting*
     /// rubric, versioned like everything else.
+    ///
+    /// ## The lift bands, and the shadow they close (MAX-132, A20, A21)
+    ///
+    /// §10.3 is a running rubric; it says nothing about a lift because nothing in the
+    /// PRD does. `LIFTING-SPEC.md` §3.5 is what supplies the ask here: adherence bands
+    /// (`lift.completed`, `lift.short`, `lift.happened`) for the `.lift` scheduled kind,
+    /// none of them naming a load or a volume, because no such number exists in the
+    /// record (A20). See the bands themselves for why each carries
+    /// `.actualDiscipline(oneOf: [.lift])`.
+    ///
+    /// The same ticket adds that condition, in its `.run` form, to `easy.wellOverCap`
+    /// below — the fix for the defect A21 records: a lift on an easy-run day cleared
+    /// the band's only condition (average heart rate over cap + 8, which any lift does
+    /// as a matter of course) and was permanently scored 20–45 as a failed easy run.
+    ///
+    /// **This seed change cannot reach a stored plan, and does not try to.** D1 makes
+    /// the plan versioned data: every plan already saved keeps the bands it was saved
+    /// with, seed included, and this file only ever supplies the *first* version an
+    /// athlete's plan starts from. So the lifts already scored 20–45 or 40–69 by the
+    /// unfixed bands stay scored that way (D8) — that is §11.4's escalation, tracked as
+    /// MAX-143 and explicitly not this ticket's to resolve.
+    ///
+    /// **Nothing routes a workout to these bands yet.** `RubricEvaluator` still reads
+    /// `planDay.scheduledSession` — the **run** slot — for every workout, regardless of
+    /// the workout's own discipline; matching a workout to the ask of its own
+    /// discipline is MAX-133, not yet landed. So a lift stays unscored under MAX-111's
+    /// ingestion gate until MAX-133 lands, exactly as before this change. That is
+    /// expected, not a bug in this ticket.
     public static func rubricBands() throws -> [RubricBand] {
         [
             try RubricBand(
@@ -180,10 +208,22 @@ public enum StandardPlanSeed {
                 scoreRange: ScoreRange(lowest: 55, highest: 74),
                 rationale: "Ran above the easy cap."
             ),
+            // MAX-132 / A21: this band used to carry only the metric condition below,
+            // which is a statement about heart rate and nothing about what was actually
+            // done. A lift's average heart rate clears an easy-run cap + 8 as a matter
+            // of course, so a lift scheduled on an easy-run day matched this band and
+            // was permanently recorded as "Well above the easy cap for the whole run" —
+            // the defect §11.4 escalates. `.actualDiscipline(oneOf: [.run])` closes it:
+            // the band now says what it always meant to say, "an easy run whose heart
+            // rate ran hot", rather than "anything with a hot heart rate". Nothing else
+            // about the band changes — same identifier, same range, same rationale — so
+            // a `Score` this band already produced for an actual easy run is unaffected
+            // (see `LiftRubricVocabularyTests` for the pinned regression).
             try RubricBand(
                 identifier: "easy.wellOverCap",
                 appliesTo: [.easy],
                 conditions: [
+                    .actualDiscipline(oneOf: [.run]),
                     .metric(
                         metric: .averageHeartRateBPM,
                         comparison: .greaterThan,
@@ -242,6 +282,70 @@ public enum StandardPlanSeed {
                 conditions: [.actualClassification(oneOf: [.hard, .long])],
                 scoreRange: ScoreRange(lowest: 70, highest: 95),
                 rationale: "Completed a hard session as scheduled."
+            ),
+            // A20/MAX-131: a lift is judged on adherence — did the prescribed session
+            // happen, on the day, for roughly the prescribed length — never on load or
+            // volume, because HealthKit records neither. Three bands cover the three
+            // shapes that ask can take, in the same "specific case, then a coarser
+            // fallback" order the `long`/`hard` bands above already use.
+            //
+            // **Every one of these three carries `.actualDiscipline(oneOf: [.lift])`,
+            // not only the one that needs it to resolve a metric.** `appliesTo: [.lift]`
+            // filters by what the day *scheduled*, not by what the athlete actually did
+            // — precisely the gap that let `easy.wellOverCap` match a lift above. A
+            // scheduled lift day where the athlete did something else entirely (went
+            // for a run instead) must not let that run's duration satisfy a lift band
+            // just because it happened to be long enough; without this guard it could.
+            // Omitting it here would plant the exact defect this ticket exists to fix,
+            // one band down.
+            //
+            // The fraction is 0.7, not the run bands' 0.8 — a lift's clock more often
+            // runs from the first warm-up set to racking the last plate, which pads the
+            // prescribed length in a way a run's distance does not, so a slightly looser
+            // floor is the honest match rather than reusing a number chosen for a
+            // different measurement. Held loosely, like every number in this file.
+            try RubricBand(
+                identifier: "lift.completed",
+                appliesTo: [.lift],
+                conditions: [
+                    .actualDiscipline(oneOf: [.lift]),
+                    .metric(
+                        metric: .durationSeconds,
+                        comparison: .greaterThanOrEqual,
+                        reference: .scheduledDuration(fraction: 0.7)
+                    ),
+                ],
+                scoreRange: ScoreRange(lowest: 75, highest: 100),
+                rationale: "Completed the prescribed lift."
+            ),
+            try RubricBand(
+                identifier: "lift.short",
+                appliesTo: [.lift],
+                conditions: [
+                    .actualDiscipline(oneOf: [.lift]),
+                    .metric(
+                        metric: .durationSeconds,
+                        comparison: .lessThan,
+                        reference: .scheduledDuration(fraction: 0.7)
+                    ),
+                ],
+                scoreRange: ScoreRange(lowest: 40, highest: 74),
+                rationale: "Cut the lift short of the prescribed length."
+            ),
+            // The day's lift ask can prescribe no duration at all (`ScheduledSession
+            // .durationSeconds` is optional on a lift by design — "lift on Tuesday,
+            // length unstated" is a real, distinct statement, not a gap). Both bands
+            // above need `.scheduledDuration` to resolve, and it cannot when the ask
+            // states no duration, so both silently fail to match rather than firing on
+            // a comparison against nothing. This is the fallback that keeps such a day
+            // scoreable — the same role `hard.completed` plays for a hard day prescribed
+            // by structure ("6 × 800m") rather than by distance.
+            try RubricBand(
+                identifier: "lift.happened",
+                appliesTo: [.lift],
+                conditions: [.actualDiscipline(oneOf: [.lift])],
+                scoreRange: ScoreRange(lowest: 70, highest: 95),
+                rationale: "Lifted as scheduled; the plan named no target length."
             ),
             try RubricBand(
                 identifier: "rest.ranAnyway",
