@@ -574,6 +574,53 @@ anything.
 
 ---
 
+## A22 — Muscle groups are entered by hand, on the workout. The manual-entry non-goal is spent, narrowly.
+
+**Supersedes:** PRD §3's non-goal *"manual entry/editing"*, for this one field only.
+
+**Decision (owner, 2026-08-05):** *"you can set the muscle group in the detail view of the
+workout if it is strength training."*
+
+A17 lets a plan prescribe muscle groups. Nothing could check it: HealthKit reports
+`traditionalStrengthTraining` and says nothing about what was worked, which is the same wall
+A20 hit choosing adherence over volume. MAX-144 costed three ways out; this is the owner
+taking the first, and it is the only one that makes a lift's prescription a **standard**
+rather than documentation.
+
+**The non-goal is spent deliberately, and narrowly**, the way A10 was. It buys exactly one
+field, on one kind of workout, entered after the fact on the screen where you are already
+looking at that session. It does **not** open manual entry of workouts, distances, durations,
+heart rates or scores — every one of those still comes from HealthKit or from the scorer, and
+a later ticket proposing otherwise does not inherit this amendment's permission.
+
+### What it forces, and this is the load-bearing part
+
+**A lift cannot be scored at ingestion.** D2 computes metrics once when a workout arrives;
+D8 makes an auto-score immutable. But the muscle groups arrive *later*, whenever the athlete
+opens the detail screen — so a lift scored at ingestion would either be scored against
+information nobody had yet, or need revising afterwards, which D8 forbids outright.
+
+So: **a lift is not scored until the athlete says what they trained.** Until then it is
+neither awaiting a model nor permanently unscoreable — it is **awaiting the athlete**, which
+is a third state and a better one, because it is the app asking a question rather than
+guessing an answer. MAX-126 established `noVerdict` for "there will never be a verdict";
+this needs its sibling.
+
+That state is also the feature's own prompt. A lift sitting on the calendar saying *"tell me
+what you trained"* is how the athlete learns the field exists, and it costs no onboarding.
+
+### Where the entry lives
+
+**Not on `Workout`.** That record mirrors what HealthKit reported and nothing else writes to
+it; putting athlete-supplied data there would make it two things at once. This is
+athlete-supplied truth *about* a workout, which is the shape `ScoreAnnotation` already has —
+additive, timestamped, never overwriting what was captured (D8's own discipline, applied to
+an input rather than to a verdict).
+
+**A lift with no groups entered is not zero groups.** Absence is first-class in this codebase
+and the distinction matters here: "I have not told you yet" and "I trained nothing" are
+different, and only the first should prompt.
+
 ## Requirements unaffected
 
 Everything in §7 (features), §9 (metric definitions), §10 (scoring logic), §13 (risks)
