@@ -555,7 +555,7 @@ feature was governed by a plan that could not exist).
 | MAX-150 | **Copy and absence voice: the chat and dashboard surfaces** — split from MAX-104 so the finished half does not wait behind the lifting build | MAX-104, split | Sonnet ✅ |
 | MAX-152 | **The chat's waiting and streaming states** — the full ladder between "sent" and "answered", and every stream failure as a designed state with words | Owner | **Opus** |
 | MAX-154 | **Error handling, audited app-wide** — every failure path outside chat swept as a set, the failure-to-copy mapping moved into the core, and the inventory recorded below | Owner | **Opus** |
-| MAX-155 | **An HTTP status code reaches the athlete's screen** — `PlanProposalDrafting.description` renders `ScoringModelError.description` verbatim on the plan proposal card. Chat surface, so it waits for MAX-152 | MAX-154 | Sonnet |
+| MAX-155 | **An HTTP status code reaches the athlete's screen** — `PlanDraftingFailure.description` interpolates `PlanProposalModelError.description` in `ChatModel.noteDraftingFailure`, so "…returned an unexpected status (400)." renders on the plan proposal card. **MAX-152 has landed and did not fix this** — its `ChatFailureNotice` covers `ChatStreamError`, and the drafting path is a separate error type. Route it through `ChatFailureNotice`'s no-default, no-numerals, nothing-interpolated discipline | MAX-154 | Sonnet |
 | MAX-156 | **`ScoringError.description` interpolates a workout identifier and a date** — latent, not leaking today, and one `.public` log line away from being a real one | MAX-154 | Sonnet |
 
 **MAX-066.** Splits currently need a GPS track, so a treadmill run has none — correctly
