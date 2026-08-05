@@ -10,7 +10,7 @@ import Foundation
 ///
 /// ## No locale, on purpose
 ///
-/// English month names from a fixed table, exactly as `WorkoutFactSheet`'s `weekdayName`
+/// English month names from a fixed table, exactly as `FactSheetFormatting.weekdayName`
 /// already does, rather than a `DateFormatter`. Three reasons, in order of weight:
 ///
 /// 1. A thread title is **stored data's shadow** — the same thread must render the same

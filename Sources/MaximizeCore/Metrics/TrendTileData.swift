@@ -236,7 +236,16 @@ public struct TrendTileData: Hashable, Sendable {
         "\(Int((rate * 100).rounded()))%"
     }
 
-    private static func formattedAverageScore(_ score: Double) -> String {
+    /// One decimal place.
+    ///
+    /// Internal rather than private because `TrainingFactSheet` (MAX-095) calls it:
+    /// CHAT-FIRST-SPEC.md §3.6(c) requires a figure that appears in both a tile and a
+    /// fact sheet to render at the tile's precision or coarser, and the average score is
+    /// the one figure that appears in both. Delegating is stronger than asserting the two
+    /// agree — the same reasoning that has this type delegate to
+    /// `SummaryTileData.formattedDistance` rather than repeat it — and it keeps the
+    /// decision where the tile makes it.
+    static func formattedAverageScore(_ score: Double) -> String {
         String(format: "%.1f", locale: nil, score)
     }
 }
