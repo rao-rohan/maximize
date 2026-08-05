@@ -369,8 +369,17 @@ function, so its branch never renders), and `enteredKey` is not cleared on the
 ### Deliberately not built
 
 Live coaching · manual entry/editing · strength analysis · HealthKit writes · multi-user ·
-nutrition · Claude on the dashboard tab · **any server component** (A1). PRD §3, §12.
+nutrition · ~~Claude on the dashboard tab~~ · **any server component** (A1). PRD §3, §12.
 Listed so nobody helpfully adds one.
+
+**Claude on the dashboard tab is struck, on purpose (A10).** The chat-first pivot puts a
+persistent Ask button on every screen, and on the dashboard it opens a thread about an
+interval of training — which *is* the deferred `summarize my month` feature. It is
+superseded on the record rather than allowed to arrive as a side effect of where a button
+was placed, because that is exactly the failure this list exists to catch. The rest of the
+list stands, and **live coaching in particular is now load-bearing**: A14 makes "no
+unattended chat call" an invariant, so a proactive coach is not a small extension of the
+chat work but a decision against a written rule.
 
 ---
 
@@ -489,8 +498,9 @@ feature was governed by a plan that could not exist).
 | MAX-085 | Surface elevation, `.tint()` adoption, Liquid Glass chrome | MAX-082 | Sonnet |
 | MAX-086 | Absence-string voice; wire `AppearancePreference` | MAX-082 | Haiku |
 | MAX-087 | A non-hue channel for the year heatmap's 6pt cells | MAX-084 | Sonnet |
-| MAX-090 | Chat-first product spec: plan generation and Q&A through chat | Owner | **Opus** 🔒 |
+| MAX-090 | Chat-first product spec: plan generation and Q&A through chat | Owner | **Opus** 🔒 ✅ |
 | MAX-091 | Run both Claude clients on the Sonnet tier at `medium` effort | Owner, cost | Sonnet 🔒 ✅ |
+| MAX-092 … MAX-104 | The chat-first build, decomposed from MAX-090 | MAX-090 | see below |
 
 **MAX-066.** Splits currently need a GPS track, so a treadmill run has none — correctly
 rendered as an absence rather than fabricated. `distanceWalkingRunning` is already
@@ -557,16 +567,53 @@ request in the suite (see R1 and the files' own doc comments). What CI proves he
 the app target still compiles. That the request shape is accepted, and that a Sonnet-tier
 score is as good as an Opus-tier one, are both device checks against a real key.
 
-**MAX-090** is the chat-first product spec: plan generation and data questions through a
-chat surface, with a persistent composer, thread history, and an entry-point-aware
-context. It is a spec ticket, not an implementation one — its deliverable is
-`docs/CHAT-FIRST-SPEC.md`, the amendments it forces (A9 onward), and a ticket breakdown
-for the overseer to decompose. Two constraints are already settled by the owner and are
-not the spec's to re-open: the detailed dashboard and workout-detail screens **stay** —
-chat is additive — and the entry point a chat is opened from must be a structured value
-the core understands, not a free-text hint, because a free-text hint would be a second
-unvalidated way of saying what context to assemble, which D3 forbids. It carries 🔒
-because it decides what enters a Claude prompt.
+**MAX-090** is the chat-first product spec, and it is **delivered**:
+[`docs/CHAT-FIRST-SPEC.md`](./docs/CHAT-FIRST-SPEC.md) plus amendments **A9–A15**. Nothing
+in it is built. Two constraints were settled by the owner up front and the spec did not
+re-open them: the detailed dashboard and workout-detail screens **stay** — chat is additive
+— and the subject a chat is opened with must be a structured value the core understands,
+not a free-text hint, because a free-text hint would be a second unvalidated way of saying
+what context to assemble, which D3 forbids.
+
+The two decisions worth knowing without reading all of it:
+
+- **D3 is generalised, not weakened.** One context module keeps one entry point,
+  `build(for subject:)`, over a closed subject set. A training thread gets a **roll-up** —
+  plan in effect, tallies, one line per run, scope stated — not a stack of fact sheets. No
+  HR curves, no splits, no coordinates, no rationales. The rule with teeth is that every
+  aggregate comes from the same core function the corresponding screen reads, with a test
+  asserting a context and a tile agree over the same interval. Chat and a tile now describe
+  the same number to the same person, so a divergence is a visible defect.
+- **D1 is untouched.** The model emits a **proposal**, never a plan. It becomes a version
+  only through `PlanAuthoringSession`, the door MAX-080 built. The near-miss to watch for
+  in review is a helper that applies a proposal *and stores it*.
+
+Its §11 proposed thirteen tickets as MAX-091–103; they are renumbered **MAX-092–104** here
+and in the document, because MAX-091 was taken by the tier change that landed while the
+spec was being written. MAX-101 (the read-only plan screen) is independent of the other
+twelve and is dispatchable immediately.
+
+| ID | Ticket | Depends on | Tier |
+|---|---|---|---|
+| MAX-092 | `ChatSubject` and thread identity | — | **Opus** |
+| MAX-093 | The stored record: additive fields, no migration | 092 | Sonnet |
+| MAX-094 | Shared fact-sheet formatting — pure extraction | — | Sonnet |
+| MAX-095 | `TrainingContext` + one context entry point | 092, 094 | **Opus** 🔒 |
+| MAX-096 | `ChatModel` generalised; transcript cap; training task text | 095 | **Opus** 🔒 |
+| MAX-097 | Thread list, derived titles, new chat, scope subtitle | 093, 096 | Sonnet |
+| MAX-098 | The persistent glass button | 097 | Sonnet |
+| MAX-099 | `PlanProposal` — type, parse, schema derived from core enums | 095 | **Opus** 🔒 |
+| MAX-100 | The Anthropic client for plan proposals | 099 | Sonnet 🔒 |
+| MAX-101 | Conversational plan authoring; proposal card; handoff | 098, 100 | **Opus** |
+| MAX-102 | **The read-only plan screen with version history** | — | Sonnet |
+| MAX-103 | "Runs in this conversation" strip | 098 | Sonnet |
+| MAX-104 | Copy and absence voice over the new surfaces | 098, 102 | Sonnet |
+
+Three collisions the spec calls out and the overseer must respect: **094 lands before 095**
+(both touch `WorkoutFactSheet.swift`, and 094 is the extraction 095 builds on); **MAX-085
+lands before 098** (both touch `RootTabView.swift`, and the button should be built against
+the migrated tab bar rather than merged into it afterwards); and **102 before 101** (both
+touch `App/Plan/`, and 102 is the smaller, independent one).
 
 ---
 

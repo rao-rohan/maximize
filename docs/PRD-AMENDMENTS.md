@@ -193,6 +193,167 @@ it has worked fine because there is only one device and nobody has reinstalled.
 
 ---
 
+# The chat-first pivot (A9–A15)
+
+A9 through A15 all come from one direction change by the owner and are recorded together.
+The reasoning behind them is [docs/CHAT-FIRST-SPEC.md](./CHAT-FIRST-SPEC.md) (MAX-090);
+what follows is only the part that supersedes the PRD. **None of it is built yet** — these
+amendments describe the target the MAX-092–104 tickets are working toward, and are recorded
+now so that no ticket has to re-derive them, and so that A10 in particular cannot land by
+accident.
+
+## A9 — Chat is a second primary interaction, with three named jobs.
+
+**Supersedes:** §7.2's framing of chat as a per-workout feature, and FR-2.1's assumption
+that a chat thread always has a workout.
+
+The owner's direction: *"I want the interactions of this app to be mainly through a chat…
+I want to be able to generate my plan, view my plan through the chat interface. I want to
+be able to ask questions about my data through the chat."*
+
+Chat gets exactly three jobs — **generate a plan**, **read a plan**, **ask questions about
+the data** — reached from a persistent control present on every screen.
+
+**Chat is additive, and this is the load-bearing half of the amendment.** The owner's own
+clarification put the detailed dashboard and workout-detail screens explicitly in scope:
+they are not demoted, not thinned, and not replaced by prose. §5's dense-and-quantitative
+brief and §7.4's numerals-do-the-hierarchy-work are *reinforced* by this pivot, not
+softened. A future ticket proposing to replace a chart with a paragraph is out of scope of
+this amendment and should be refused on its authority.
+
+## A10 — Claude reaches the dashboard. The §3 non-goal is spent deliberately.
+
+**Supersedes:** §3's non-goal *"Claude on the dashboard tab (`summarize my month`)"*, §12's
+deferral of it to v2, and the matching line in `PROJECT_TRACKER.md`'s "Deliberately not
+built".
+
+A9's persistent control appears on the dashboard, and there it opens a thread about the
+athlete's training over an interval rather than about one run. That *is* the deferred
+feature, so it is superseded on the record.
+
+Written as its own amendment rather than folded into A9 because the "Deliberately not
+built" list exists, in its own words, "so nobody helpfully adds one". A non-goal that
+disappears because of where a button was placed is exactly the failure that list is for.
+This amendment is the deliberate spend.
+
+## A11 — Thread identity is independent of a workout.
+
+**Supersedes:** D6's assumption of one thread per workout, and MAX-048's duplicate-
+resolution rule inasmuch as it keys identity on the workout.
+
+A thread is keyed on its own identifier and carries a **subject**: either one workout, or
+the athlete's training over a resolved date range. The workout link becomes one of two
+subjects rather than the thread's identity.
+
+**No migration.** Existing threads have a workout subject; the fields this adds are
+additive and optional, which is the same discipline A8 requires of the schema for a
+different reason.
+
+**Scope is resolved once, at thread creation, and frozen.** A training thread inherits the
+interval control's current range, converts it to absolute days, and keeps them. It does not
+slide with the calendar — a conversation is about a bounded set of facts, and a window that
+moved would make yesterday's answer cite runs that are no longer in context. New chat is
+how you get a newer window. See A12's agreement property for what this obliges the UI to
+state.
+
+## A12 — D3 is generalised to a subject, not weakened.
+
+**Supersedes:** nothing. **Amends** D3's wording, which assumed a single workout.
+
+D3 says one context builder feeds both scorer and chat. A thread with no workout has no
+`WorkoutContext` to build, and the two obvious escapes — concatenating N workout fact
+sheets, or letting the chat layer assemble its own — are both rejected in the spec (§3.1),
+the first on privacy grounds and the second because it is precisely the divergence D3
+exists to prevent.
+
+The generalisation, in four rules:
+
+1. **One module, one entry point.** `Sources/MaximizeCore/Context/` keeps a single
+   `build(for subject:)`. `WorkoutContextBuilder` is unchanged and is called *by* it, so
+   the scorer and a workout thread still receive byte-identical context.
+2. **A closed subject set.** Adding a third subject is an amendment, not a ticket.
+3. **A shared renderer.** Both fact sheets format the same measurement through the same
+   formatters, enforced by a test asserting the two paths agree. Without this, "one module"
+   is true and worthless — `+4.2%` against `4.2 %` is a divergence at the only boundary
+   that matters.
+4. **No arithmetic in a context.** Every aggregate a training context quotes is produced by
+   the same core function the corresponding screen reads — `TalliesCalculator` for tallies,
+   the trendline fit for a slope. This is D2 restated at a new boundary, and it now has
+   teeth it did not need before: chat and a tile describe the same number to the same
+   person, so a divergence is a **visible product defect**, not an internal untidiness.
+
+**A training context is a roll-up, not a stack of fact sheets** — the plan in effect, the
+tallies over the scope, one line per run, and the scope stated. No heart-rate curves, no
+splits, no coordinates, no score rationales. Bounded by the scope and again by an explicit
+maximum, because health data leaving the device must never be sized by a number nothing has
+validated.
+
+**What this costs, plainly.** More leaves the device than before: today one run's facts go
+when the athlete opens a thread and types; after this, a summary of up to N runs goes per
+training turn. That is a real change to the privacy posture and is recorded as one. It is
+bounded by the four rules above and by A14's no-unattended-call invariant, and every ticket
+touching `Context/` or a prompt gets a `/security-review`.
+
+## A13 — A model-drafted plan is a proposal. D1 is untouched.
+
+**Clarifies:** D1. It supersedes nothing.
+
+D1 says the plan is versioned data whose immutability keeps historical scores
+reproducible. Generating a plan is an *authoring* act, and the two are compatible as long
+as there is exactly one door into storage.
+
+**The model emits a proposal, never a plan.** A proposal is parsed and validated in the
+core, rendered for review, and can only become a plan version by the athlete tapping
+through `PlanAuthoringSession` — the same door `PlanAuthoringView` uses, built by MAX-080.
+
+**The near-miss to watch for in review:** a helper that applies a proposal to a draft *and
+also stores it*. Applying is fine. Storing is D1's door, and it opens by hand.
+
+## A14 — Cost discipline for a chat-first app, and one invariant.
+
+**Supersedes:** §11's single-line cost note.
+
+Four bounds, and one rule that is not a bound:
+
+- **The tier is Sonnet at `medium` effort**, both clients, on the owner's instruction
+  (MAX-091). `effort` is a per-request lever, so a single route can be raised without
+  moving the app's cost floor.
+- **Context is a roll-up** (A12), doubly bounded. The largest lever, chosen for privacy
+  first; the saving points the same way.
+- **The replayed transcript is capped**, and when turns are dropped the model is told so —
+  a model answering confidently as though it had seen the start of a conversation it did
+  not is worse than one that says it lost the thread. Summarising the dropped turns with a
+  second call is rejected: it is a second assembler of context (A12) *and* it doubles the
+  calls.
+- **Plan drafting is one call per tap**, bounded by being a button.
+
+**And the invariant: no unattended chat call. Ever.** Every chat call is initiated by the
+athlete typing or tapping. The only unattended model call in this app is and remains the
+scorer's, one per ingested workout.
+
+Written as an invariant because the obvious next request — a proactive coach, a weekly
+summary that writes itself, a notification carrying an insight — would change the cost
+profile by an order of magnitude *and* would send health data to a model with nobody
+present. Adding one is a decision made deliberately, with this paragraph in front of it.
+
+## A15 — The plan gets a read-only screen.
+
+**Adds to** §7. Supersedes nothing.
+
+The plan is the reference every score is measured against, and today it is legible only
+while you are editing it: there is an authoring form and no way to simply *look* at what is
+in effect.
+
+A9 asks chat to answer plan questions, and it will. This amendment says a screen is also
+required, because "what is my current plan" is a lookup rather than a conversation, and
+making the athlete spend a model call — against a key they pay for — to read back their own
+stored configuration is the wrong shape for it.
+
+**This is the one item in the pivot nobody asked for**, recorded as such. It is deliberately
+independent of every other ticket in the chat-first set, so dropping it costs nothing else.
+
+---
+
 ## Requirements unaffected
 
 Everything in §7 (features), §9 (metric definitions), §10 (scoring logic), §13 (risks)
