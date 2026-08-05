@@ -119,6 +119,16 @@ public struct DerivedMetrics: Hashable, Sendable, Codable, Identifiable {
 
     public let zoneSplits: ZoneSplits
 
+    /// FR-1.5's per-kilometre/mile pace breakdown — cut at ingestion, at every display
+    /// unit, and stored (D2). Not to be confused with `zoneSplits` above, which is time
+    /// per *heart-rate zone*: a different measurement that happens to share the word.
+    ///
+    /// Nil means *this run has no breakdown*: an indoor run with no route, a workout with
+    /// no recorded distance, a route too short or too far from the recorded distance to
+    /// cut up, or a workout whose metrics were computed before MAX-046 existed.
+    /// `DistanceSplitCalculator` documents each case. Never an empty `DistanceSplits`.
+    public let distanceSplits: DistanceSplits?
+
     /// The plan version whose cap and zones these numbers were computed against.
     /// Without it, "time above cap" is a number with no stated cap, and a later plan
     /// version would silently reinterpret it.
@@ -133,6 +143,7 @@ public struct DerivedMetrics: Hashable, Sendable, Codable, Identifiable {
         averageCadenceStepsPerMinute: Double? = nil,
         gradeAdjustedPaceSecondsPerKilometer: Double? = nil,
         zoneSplits: ZoneSplits = .empty,
+        distanceSplits: DistanceSplits? = nil,
         planVersion: PlanVersion
     ) throws {
         try Validate.optionalWithin(averageHeartRateBPM, HeartRateSample.plausibleBPM, "DerivedMetrics.averageHeartRateBPM")
@@ -165,6 +176,7 @@ public struct DerivedMetrics: Hashable, Sendable, Codable, Identifiable {
         self.averageCadenceStepsPerMinute = averageCadenceStepsPerMinute
         self.gradeAdjustedPaceSecondsPerKilometer = gradeAdjustedPaceSecondsPerKilometer
         self.zoneSplits = zoneSplits
+        self.distanceSplits = distanceSplits
         self.planVersion = planVersion
     }
 
@@ -190,7 +202,7 @@ public struct DerivedMetrics: Hashable, Sendable, Codable, Identifiable {
     private enum CodingKeys: String, CodingKey {
         case workoutID, averageHeartRateBPM, maximumHeartRateBPM, timeAboveCapSeconds
         case heartRateDriftFraction, averageCadenceStepsPerMinute
-        case gradeAdjustedPaceSecondsPerKilometer, zoneSplits, planVersion
+        case gradeAdjustedPaceSecondsPerKilometer, zoneSplits, distanceSplits, planVersion
     }
 
     public init(from decoder: any Decoder) throws {
@@ -208,6 +220,10 @@ public struct DerivedMetrics: Hashable, Sendable, Codable, Identifiable {
                 Double.self, forKey: .gradeAdjustedPaceSecondsPerKilometer
             ),
             zoneSplits: container.decode(ZoneSplits.self, forKey: .zoneSplits),
+            // `decodeIfPresent`: a record encoded before MAX-046 carries no key here, and
+            // the honest reading of that is "no breakdown recorded", not a decode failure
+            // that would lose every other metric on the run.
+            distanceSplits: container.decodeIfPresent(DistanceSplits.self, forKey: .distanceSplits),
             planVersion: container.decode(PlanVersion.self, forKey: .planVersion)
         )
     }

@@ -264,6 +264,54 @@ final class DerivedMetricsCalculatorTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(metrics.averageCadenceStepsPerMinute), 165, accuracy: 1e-9)
     }
 
+    // MARK: - FR-1.5: the pace breakdown (MAX-046)
+    //
+    // The breakdown's own arithmetic is pinned in `DistanceSplitsTests`. What is checked
+    // here is that it is computed *at ingestion*, on the metrics record, which is D2's
+    // requirement and the whole reason MAX-046 was not a display ticket.
+
+    /// A route exactly as long as the recorded 10 km, so the track describes the run and
+    /// the breakdown is producible.
+    private func matchingRoute() throws -> Route {
+        try MetricsFixture.meridianRoute(
+            altitudes: Array<Double?>(repeating: 50, count: 10),
+            latitudeStepDegrees: (10_000 / 9) / MetricsFixture.metersPerLatitudeDegree
+        )
+    }
+
+    func testDistanceSplitsAreComputedOnTheMetricsRecord() throws {
+        let input = try DerivedMetricsInput(
+            workout: try Fixture.workout(),
+            route: try matchingRoute()
+        )
+        let metrics = try DerivedMetricsCalculator.compute(input, plan: try Fixture.plan())
+
+        let splits = try XCTUnwrap(metrics.distanceSplits)
+        XCTAssertEqual(try XCTUnwrap(splits.series(in: .kilometers)).splits.count, 10)
+        XCTAssertNotNil(splits.series(in: .miles))
+    }
+
+    /// FR-0.6 again: a treadmill run's breakdown is *absent*, never a set of identical
+    /// fabricated splits derived by dividing its distance by its duration.
+    func testIndoorRunHasNoDistanceSplits() throws {
+        let metrics = try DerivedMetricsCalculator.compute(
+            try referenceInput(activityType: .treadmillRunning, altitudes: nil),
+            plan: try Fixture.plan()
+        )
+        XCTAssertNil(metrics.distanceSplits)
+    }
+
+    /// The reference route is 3 336 m of track against a 10 km run — a truncated or
+    /// dropped-out track, which cannot be stretched into a breakdown (see
+    /// `DistanceSplitCalculator`). Every other metric on the run is unaffected.
+    func testTrackThatCannotDescribeTheRunLeavesTheRestOfTheMetricsIntact() throws {
+        let metrics = try DerivedMetricsCalculator.compute(try referenceInput(), plan: try Fixture.plan())
+
+        XCTAssertNil(metrics.distanceSplits)
+        XCTAssertEqual(try XCTUnwrap(metrics.gradeAdjustedPaceSecondsPerKilometer), 360, accuracy: 1e-9)
+        XCTAssertEqual(metrics.zoneSplits.totalSeconds, 3_600, accuracy: 1e-9)
+    }
+
     // MARK: - Input invariants
 
     func testSeriesFromAnotherWorkoutIsRejected() throws {

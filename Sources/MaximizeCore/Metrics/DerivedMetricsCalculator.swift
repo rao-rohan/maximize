@@ -149,6 +149,14 @@ public enum DerivedMetricsCalculator {
                 parameters: gradeAdjustment
             ),
             zoneSplits: zoneSplits,
+            // FR-1.5, and D2's whole point: the pace breakdown is cut here, once, from
+            // the route and the recorded distance — not in a view, and not a second time
+            // for the chat. `DistanceSplitCalculator` documents what it measures against
+            // and every case in which it truthfully returns nil.
+            distanceSplits: DistanceSplitCalculator.splits(
+                workout: input.workout,
+                route: input.route
+            ),
             planVersion: plan.version
         )
     }
