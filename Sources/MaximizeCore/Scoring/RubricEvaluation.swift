@@ -13,8 +13,20 @@ public struct RubricEvaluation: Hashable, Sendable {
     /// cap and cadence band were used, and the one recorded on the resulting `Score`.
     public let plan: Plan
 
-    /// The day's resolved ask.
+    /// The day's resolved ask — **both** slots, because a `PlanDay` carries two (A17).
+    /// Which of them this evaluation was made against is `discipline`'s to say.
     public let planDay: PlanDay
+
+    /// The discipline of the workout this evaluation judged, and therefore which of the
+    /// day's two asks it was judged against (A17, MAX-133).
+    ///
+    /// Stored rather than recomputed from the workout, because a `RubricEvaluation`
+    /// outlives the context it came from — it is handed to `WorkoutScorer` on its own,
+    /// and the prescription it carries into a permanent `Score` has to name the slot it
+    /// was read from. Storing the discipline rather than the resolved `ScheduledSession`
+    /// keeps the *fact* here and leaves the resolution to `PlanDay`, so there is exactly
+    /// one place that turns a (day, discipline) pair into an ask.
+    public let discipline: Discipline
 
     /// What the classifier decided actually happened (§10.2).
     public let classification: WorkoutClassification
@@ -23,14 +35,31 @@ public struct RubricEvaluation: Hashable, Sendable {
     /// semantics, so band order is part of the plan's meaning.
     public let band: RubricBand
 
-    init(plan: Plan, planDay: PlanDay, classification: WorkoutClassification, band: RubricBand) {
+    init(
+        plan: Plan,
+        planDay: PlanDay,
+        discipline: Discipline,
+        classification: WorkoutClassification,
+        band: RubricBand
+    ) {
         self.plan = plan
         self.planDay = planDay
+        self.discipline = discipline
         self.classification = classification
         self.band = band
     }
 
-    public var scheduledSession: ScheduledSession { planDay.scheduledSession }
+    /// The ask this workout was judged against: the day's prescription **for its own
+    /// discipline** (A17, LIFTING-SPEC §5).
+    ///
+    /// `.rest` when the day prescribed nothing for that discipline, which is not a gap
+    /// but the plan's answer — there was no ask to be relative to, and `PlanDay`'s
+    /// totality is what makes saying so free.
+    ///
+    /// This is the value `WorkoutScorer` writes into a `Score`, which is why LIFTING-SPEC
+    /// §5 can say "`Score` gains nothing": the field it already had now names the right
+    /// slot.
+    public var scheduledSession: ScheduledSession { planDay.scheduledSession(for: discipline) }
     public var rubric: ScoringRubric { plan.rubric }
 
     /// The score range the matched band permits. A model proposal outside it is
@@ -79,6 +108,28 @@ public enum RubricEvaluator {
 
     /// Selects the first rubric band whose conditions all hold.
     ///
+    /// ## The day has two asks, and a workout is shown exactly one of them
+    ///
+    /// The session resolved here is `planDay.scheduledSession(for:)` on the **workout's
+    /// own discipline** (A17, LIFTING-SPEC §5) — a lift is judged against the day's lift
+    /// ask, a run against the day's run ask. Since `RubricBand.appliesTo` filters on the
+    /// *scheduled* kind, that one line is what makes a lift band reachable at all, and it
+    /// is also what makes the reverse structurally impossible: an easy-run band cannot
+    /// fire on a lift, because a lift is never shown the easy-run day's bands.
+    ///
+    /// The discipline is read off `Workout.activityType`, a fact HealthKit recorded —
+    /// never off `classification`, which is a judgement `WorkoutClassifier` makes from a
+    /// heart-rate curve and which does not answer `.lift` at all today. The same
+    /// distinction `RubricCondition.actualDiscipline` documents, for the same reason.
+    ///
+    /// **A discipline the day prescribed nothing for resolves to `.rest`**, and is judged
+    /// by whatever the rubric says about a rest day — `rest.ranAnyway`, per LIFTING-SPEC
+    /// §5. That is the honest reading: there was no ask to be relative to, `.rest` is how
+    /// a plan says so, and lifting on a day that asked for no lift is a judgement about
+    /// lifting rather than about the run that day also wanted.
+    ///
+    /// ## Scheduled versus actual
+    ///
     /// Bands are filtered by the **scheduled** session kind (`RubricBand.appliesTo`)
     /// and then tested against what **actually** happened. That split is deliberate and
     /// it is how §10.3's "hard-instead" row works: the band applies to easy days, and
@@ -92,15 +143,18 @@ public enum RubricEvaluator {
             throw ScoringError.noPlanInEffect(day: context.day)
         }
 
-        let scheduledKind = planDay.scheduledSession.kind
+        let discipline = context.workout.activityType.discipline
+        let scheduledSession = planDay.scheduledSession(for: discipline)
+        let scheduledKind = scheduledSession.kind
         for band in plan.rubric.bands(for: scheduledKind) {
             let matched = band.conditions.allSatisfy { condition in
-                holds(condition, in: context, under: plan, on: planDay)
+                holds(condition, in: context, under: plan, against: scheduledSession)
             }
             if matched {
                 return RubricEvaluation(
                     plan: plan,
                     planDay: planDay,
+                    discipline: discipline,
                     classification: context.classification,
                     band: band
                 )
@@ -115,11 +169,17 @@ public enum RubricEvaluator {
 
     /// Evaluates one clause. A band matches when **all** of its clauses hold
     /// (`RubricBand.conditions`); disjunction is expressed as two bands.
+    ///
+    /// - Parameter scheduledSession: the ask already resolved for the workout's own
+    ///   discipline. Passed in rather than re-read from the `PlanDay`, so an ask-relative
+    ///   reference (`.scheduledDistance`, `.scheduledDuration`) resolves against the same
+    ///   slot the bands were filtered by — a lift's "70% of the prescribed duration" must
+    ///   mean 70% of the *lift* ask, never of the run the day also wanted.
     private static func holds(
         _ condition: RubricCondition,
         in context: WorkoutContext,
         under plan: Plan,
-        on planDay: PlanDay
+        against scheduledSession: ScheduledSession
     ) -> Bool {
         switch condition {
         case let .metric(metric, comparison, reference):
@@ -139,7 +199,7 @@ public enum RubricEvaluator {
             // distance, or `.scheduledDuration` on a day with no prescribed duration.
             // Same reasoning: unresolvable comparison, no match.
             guard let measured = context.metrics.value(for: metric, workout: context.workout),
-                  let threshold = plan.resolve(reference, against: planDay.scheduledSession)
+                  let threshold = plan.resolve(reference, against: scheduledSession)
             else {
                 return false
             }
