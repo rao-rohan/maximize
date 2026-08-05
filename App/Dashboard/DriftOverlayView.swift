@@ -55,6 +55,13 @@ import MaximizeCore
 /// choice, and the fact that it also means not reading 200 stored heart-rate curves to
 /// render one screen, is made in `MaximizeCore` — this view renders whichever state the
 /// model was handed.
+///
+/// It also happens to fix `docs/DESIGN-REVIEW.md` §4.3 at one span: the year renders a
+/// single chart with no nested `sectionHeading` under the card's own, because there is
+/// only one section left. At a week and a month the ~700pt card and the nested heading are
+/// still there — splitting them into sibling cards and adding a `subsectionHeading` token
+/// is the review's **T8**, and it is a change to the type scale rather than to this span
+/// decision, so it is deliberately left alone here.
 struct DriftOverlayView: View {
     let interval: TrendInterval
 

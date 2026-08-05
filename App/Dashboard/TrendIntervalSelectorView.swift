@@ -17,6 +17,13 @@ import MaximizeCore
 /// `.contentSurface(.card)`, never glass (FR-4.2) — this is a data control, not chrome,
 /// and it sits in the dashboard's content column alongside the calendar and tiles it
 /// scopes.
+///
+/// **`docs/DESIGN-REVIEW.md` §4.2 wants this control out of the content column** and into
+/// the navigation bar as a toolbar `Menu`, so the dashboard leads with a fact rather than
+/// a control, with the custom-range pickers moved to a sheet. That is not this ticket, but
+/// MAX-083 removes the obstacle it named: there are no pickers left to find a sheet for,
+/// so what has to move is a three-way `Menu` and a label. MAX-081 has since given this
+/// screen the `NavigationStack` that move needs.
 struct TrendIntervalSelectorView: View {
     var model: TrendIntervalSelectionModel
 

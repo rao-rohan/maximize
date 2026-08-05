@@ -28,10 +28,9 @@ import MaximizeCore
 /// See `ScoreCalendarRepresentation` for the full argument, including why the rows are
 /// weekdays rather than months and what the density costs.
 ///
-/// ## Colour is never the only channel (constraint #4)
+/// ## Channels other than hue, and one this view does not have
 ///
-/// At the day grid, two channels carry every state independently of hue, so a
-/// colour-blind athlete reads the same calendar a sighted one does:
+/// Two channels carry states independently of hue in the day grid:
 ///
 /// 1. **A `.missed` day and a `.scored(.ineffective, _)` day share the same red
 ///    fill** (D9 says a miss "shows red"; the rubric's own "skipped → 0–15" band
@@ -42,12 +41,23 @@ import MaximizeCore
 ///    (`ScoreCalendarFormatting.accessibilityLabel`), not just a glyph name — the
 ///    channel that does not depend on shape recognition at all.
 ///
-/// At heatmap density a cell is too small for a glyph, so the shape channel narrows to
-/// the distinction that matters most — a missed day is drawn hollow, a badly-scored day
-/// filled (`ScoreCalendarDayState.isDrawnHollowAtHeatmapDensity`) — while the VoiceOver
-/// sentence, dated with its month, carries everything. Effective versus marginal is
-/// carried by hue alone at that size; that trade is stated rather than hidden, and the
-/// month is one tap away.
+/// **They do not cover `.effective` versus `.marginal`, and this file used to claim they
+/// did.** `docs/DESIGN-REVIEW.md` §8.1 measured it: the two fills contrast with each
+/// other at 1.02:1, so they are the same square in greyscale, and the glyph encodes what
+/// activity was done rather than how it scored — so a good run day and a not-quite day
+/// differ only along the exact hue axis deuteranopia collapses. Fixing that is the
+/// review's **T6** (a third non-hue channel, most likely a corner mark per band), which
+/// is a change to how a *cell* is drawn at every span and is out of MAX-083's scope. The
+/// claim is corrected here rather than repeated, since asserting a property the code does
+/// not have is how the gap survived review the first time.
+///
+/// The year heatmap inherits that gap and adds no new one it can help. A cell there is
+/// too small for a glyph, so the shape channel narrows to the distinction that matters
+/// most — a missed day is drawn hollow, a badly-scored day filled
+/// (`ScoreCalendarDayState.isDrawnHollowAtHeatmapDensity`) — while the VoiceOver
+/// sentence, dated with its month since nothing on screen says which day it is, carries
+/// everything. Whatever T6 adds should be checked at this density too; a corner mark on a
+/// six-point square is the case that will test it.
 ///
 /// `.scheduledRest` and `.convertedRest` sit on the same neutral fill as
 /// `.awaitingScore` and `.unplanned` (`ScoreBandColors.swift`'s own doc comment: a

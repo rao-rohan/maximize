@@ -82,15 +82,19 @@ public enum ScoreCalendarRepresentation: Hashable, Sendable, CaseIterable {
     /// which corresponds to nothing in this plan at all — the 14th of a month is not a
     /// recurring anything.
     ///
-    /// **The cost, stated.** At this size a cell holds no date and no glyph, so the
-    /// shape channel MAX-061 relies on is gone and hue is doing more work than it does
-    /// at the other two spans. The mitigation is partial, not complete: a `.missed` day is
+    /// **The cost, stated.** At this size a cell holds no date and no glyph, so the shape
+    /// channel MAX-061 relies on is gone. The mitigation is partial: a `.missed` day is
     /// drawn hollow rather than filled (`ScoreCalendarDayState.isDrawnHollowAtHeatmapDensity`),
     /// which separates it from `.ineffective` without hue, and every cell keeps its
-    /// full-sentence VoiceOver label. Distinguishing `.effective` from `.marginal` at
-    /// this density genuinely does rely on colour; the remedy is to switch to the month,
-    /// where the glyphs come back. This is the one trade-off in MAX-083 worth a second
-    /// opinion on a device.
+    /// full-sentence VoiceOver label, dated with its month.
+    ///
+    /// `.effective` versus `.marginal` is carried by hue alone here — but note that
+    /// `docs/DESIGN-REVIEW.md` §8.1 measured the same gap in the *day grid*, where those
+    /// two fills contrast at 1.02:1 and the glyph encodes activity rather than band. So
+    /// this is a pre-existing gap the heatmap inherits, not one it introduces, and the
+    /// remedy is the review's T6 (a third non-hue channel) rather than switching span.
+    /// Whether the marks are legible at six points at all is the one thing in MAX-083
+    /// that only a device can answer.
     case weekColumnHeatmap
 }
 
