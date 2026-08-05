@@ -30,16 +30,25 @@ import MaximizeCore
 struct PlanAuthoringView: View {
     @State private var model: PlanAuthoringModel
 
-    /// - Parameters: forwarded to `PlanAuthoringModel`, which defaults them to
-    ///   `PersistenceComposition.store` — never to a stub. See that type's docs.
+    /// - Parameters:
+    ///   - planRepository/settingsRepository: forwarded to `PlanAuthoringModel`, which
+    ///     defaults them to `PersistenceComposition.store` — never to a stub. See that
+    ///     type's docs.
+    ///   - proposal: a chat proposal to open prefilled from (MAX-101, §4.6). Nil is the
+    ///     ordinary case — an athlete opening the screen from the plan tab or Settings.
+    ///     Prefilling changes nothing about how this screen saves: the version number and
+    ///     the permitted date range are still derived from storage, and Save is still the
+    ///     only thing that writes.
     init(
         planRepository: (any PlanRepository)? = nil,
-        settingsRepository: (any SettingsRepository)? = nil
+        settingsRepository: (any SettingsRepository)? = nil,
+        proposal: PlanProposal? = nil
     ) {
         _model = State(
             initialValue: PlanAuthoringModel(
                 planRepository: planRepository,
-                settingsRepository: settingsRepository
+                settingsRepository: settingsRepository,
+                proposal: proposal
             )
         )
     }
@@ -69,6 +78,7 @@ struct PlanAuthoringView: View {
     @ViewBuilder
     private func editingSections(_ editing: PlanAuthoringModel.Editing) -> some View {
         Group {
+            prefillSection(editing)
             statusSection(editing)
             effectiveFromSection(editing)
             capSection(editing)
@@ -81,6 +91,28 @@ struct PlanAuthoringView: View {
             goalsSection(editing)
             previewSection(editing)
             saveSection(editing)
+        }
+    }
+
+    // MARK: - Arrived from a chat proposal (MAX-101)
+
+    /// Says, at the top of the form, that these values came from a conversation and that
+    /// none of them is saved yet.
+    ///
+    /// Absent entirely for a hand-authored plan — an athlete who opened this screen and
+    /// typed is not prefilled from anything and does not need telling so. That makes this
+    /// the rare section whose absence is correct rather than a designed empty state.
+    ///
+    /// Every string comes from the core (`PlanProposalReview`), so the sentence about
+    /// lifts here is the same sentence the card said a tap ago.
+    @ViewBuilder
+    private func prefillSection(_ editing: PlanAuthoringModel.Editing) -> some View {
+        if let prefill = editing.prefill {
+            Section("From your conversation") {
+                Text(prefill.headline)
+                quietText(prefill.explanation)
+                quietText(prefill.liftNote)
+            }
         }
     }
 

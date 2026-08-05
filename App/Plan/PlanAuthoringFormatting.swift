@@ -7,55 +7,40 @@ import MaximizeCore
 /// Whether a version may take effect on a day, what it would govern, and whether a
 /// draft converts are all `PlanAuthoringSession`'s answers; this turns an
 /// already-decided value into words.
+///
+/// ## The plan's vocabulary moved down to `PlanCopy` (MAX-101)
+///
+/// Weekday names, session kinds, muscle groups, distances and the one-line rendering of
+/// a day's ask now live in `MaximizeCore.PlanCopy`, and the functions below call through
+/// rather than restating them. They moved because a second reader appeared that is not a
+/// screen: `PlanProposalReview` decides what the proposal card says, including its
+/// per-field diff rows, and §4.6 makes that a core decision under test. Two renderings of
+/// "Long run · 18.0 km" — one on the card, one on the form the card hands off to — would
+/// be A12 rule 3's divergence arriving on the exact surface whose job is to let an
+/// athlete compare two statements of a plan.
+///
+/// The names are kept here so no call site changed, and so this file stays the one place
+/// the authoring screen's own copy (`describe(_ mode:)`, `explain(_ mode:)`,
+/// `describeBothSessions`) is written.
 enum PlanAuthoringFormatting {
 
     static func describe(_ weekday: Weekday) -> String {
-        switch weekday {
-        case .monday: return "Monday"
-        case .tuesday: return "Tuesday"
-        case .wednesday: return "Wednesday"
-        case .thursday: return "Thursday"
-        case .friday: return "Friday"
-        case .saturday: return "Saturday"
-        case .sunday: return "Sunday"
-        }
+        PlanCopy.weekday(weekday)
     }
 
     static func describe(_ kind: ScheduledSessionKind) -> String {
-        switch kind {
-        case .easy: return "Easy run"
-        case .long: return "Long run"
-        case .hard: return "Hard session"
-        case .rest: return "Rest"
-        case .other: return "Other"
-        // Reachable now (MAX-137) through the lift slot's own picker, which is driven
-        // by `ScheduledSessionKind.liftPrescribable` rather than `prescribable` — the
-        // run slot's picker still excludes it, so this case never fires there.
-        case .lift: return "Lift"
-        }
+        PlanCopy.sessionKind(kind)
     }
 
     static func describe(_ group: MuscleGroup) -> String {
-        switch group {
-        case .chest: return "Chest"
-        case .back: return "Back"
-        case .shoulders: return "Shoulders"
-        case .arms: return "Arms"
-        case .legs: return "Legs"
-        case .core: return "Core"
-        }
+        PlanCopy.muscleGroup(group)
     }
 
     /// The lift slot's own empty-state copy — "Rest" and "Groups not stated" read as
     /// two different sentences on purpose, matching the distinction
     /// `LiftPrescriptionSummary` keeps in the core (A17).
     static func describe(_ summary: LiftPrescriptionSummary) -> String {
-        switch summary {
-        case .rest: return "Rest"
-        case .unstatedGroups: return "Lift · groups not stated"
-        case let .groups(groups):
-            return "Lift · " + groups.ordered.map { describe($0) }.joined(separator: ", ")
-        }
+        PlanCopy.liftSummary(summary)
     }
 
     /// The compact caption above a weekday's two pickers — what a scanning eye reads
@@ -74,11 +59,7 @@ enum PlanAuthoringFormatting {
     /// `LiftPrescriptionSummary`, so a governed day and the draft that produced it never
     /// say the lift slot two different things.
     static func describeLiftSession(_ session: ScheduledSession) -> String {
-        var text = describe(session.liftPrescriptionSummary)
-        if let note = session.note, !note.isEmpty {
-            text += " · " + note
-        }
-        return text
+        PlanCopy.liftSession(session)
     }
 
     static func describe(_ mode: PlanAuthoringSession.Mode) -> String {
@@ -108,18 +89,11 @@ enum PlanAuthoringFormatting {
     }
 
     static func distance(_ meters: Double, unit: DistanceUnit) -> String {
-        String(format: "%.1f %@", unit.converted(fromMeters: meters), unit.abbreviation)
+        PlanCopy.distance(meters, unit: unit)
     }
 
     static func describeSession(_ session: ScheduledSession, unit: DistanceUnit) -> String {
-        var text = describe(session.kind)
-        if let meters = session.distanceMeters {
-            text += " · " + distance(meters, unit: unit)
-        }
-        if let note = session.note, !note.isEmpty {
-            text += " · " + note
-        }
-        return text
+        PlanCopy.session(session, unit: unit)
     }
 
     /// One line for a resolved day, both slots — what the "first week this version
