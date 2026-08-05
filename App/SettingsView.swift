@@ -15,8 +15,8 @@ import MaximizeCore
 /// on-device store (`PersistenceComposition.store`), and survive relaunch.
 ///
 /// **MAX-049.** Before this ticket, this view's `settingsRepository` parameter defaulted
-/// to `DefaultSettingsRepository.shared` (see the bottom of this file) — a no-op stub
-/// whose `store(_:)` did nothing and whose `settings()` always answered `.standard`. The
+/// to a no-op stub — since deleted — whose `store(_:)` did nothing and whose
+/// `settings()` always answered `.standard`. The
 /// screen still moved a picker and showed a value; the value simply never survived
 /// relaunch, and rest-day budget feeds rest-day conversion (MAX-061's calendar,
 /// MAX-017's tallies), so the whole app ran on `.standard` regardless of what the
@@ -271,35 +271,5 @@ struct SettingsView: View {
         } catch {
             keyStatusMessage = "Could not clear the key."
         }
-    }
-}
-
-// MARK: - Repository injection stub
-
-/// A no-op `SettingsRepository`: `settings()` always answers `.standard`, and
-/// `store(_:)` writes nothing.
-///
-/// **This is MAX-049's stub.** `SettingsView` and `SettingsModel` no longer default to
-/// it — `SettingsModel.init` falls back to `PersistenceComposition.store` instead, so
-/// nothing on the settings screen can reach this type by accident any more.
-///
-/// It is still declared, rather than deleted, because `ScoreCalendarModel.swift`
-/// (MAX-061) defaults its own `settingsRepository` parameter to
-/// `DefaultSettingsRepository.shared` — the identical defect this ticket fixes here, in
-/// a different call site. That is a separate bug in code MAX-049 does not own; removing
-/// this type would break that file's build rather than fix its defect. See this
-/// ticket's PR description for the report; deleting this stub is contingent on that
-/// call site being fixed too.
-actor DefaultSettingsRepository: SettingsRepository {
-    static let shared = DefaultSettingsRepository()
-
-    private init() {}
-
-    func settings() async throws -> AppSettings {
-        .standard
-    }
-
-    func store(_ settings: AppSettings) async throws {
-        // No-op stub
     }
 }
