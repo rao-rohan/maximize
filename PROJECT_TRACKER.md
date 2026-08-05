@@ -492,7 +492,7 @@ ticket that could not close it, and each fails quietly rather than loudly.
 |---|---|---|
 | C1 | **Always resolve rest-day budgets over whole Monday-first weeks — never split one week across two calls.** | `RestDayBudgeting` (MAX-016) is a pure function over the days it is handed. Ranking is relative to the misses in a week, so the same day can rank differently in two partial slices of that week. A function taking a day-set cannot tell a partial week from a short one |
 | C2 | **A `WorkoutIngestionSink` must not return before its write is durable.** | MAX-031's no-retry guarantee depends on it: acknowledging a wake whose data was not durably stored loses the workout permanently, and only the implementation knows when its write has landed |
-| C3 | **A caller that knows what day it is must tell `RestDayBudgeting`, via `outcomesUnknownFrom`.** | MAX-105. Forgiving a day that has not happened spends a small weekly budget on a non-event and leaves a real miss earlier in the same week unforgiven — but `RestDayBudgeting` is a pure function of the days it is handed, and a day-set carries no clock. `ScoreCalendar` passes it; `TalliesCalculator` cannot yet (→ MAX-107) |
+| C3 | **A caller that knows what day it is must tell `RestDayBudgeting`, via `outcomesUnknownFrom`.** | MAX-105. Forgiving a day that has not happened spends a small weekly budget on a non-event and leaves a real miss earlier in the same week unforgiven — but `RestDayBudgeting` is a pure function of the days it is handed, and a day-set carries no clock. `ScoreCalendar` passes it; `TalliesCalculator` cannot yet (→ MAX-110) |
 
 ## Open questions
 
@@ -531,7 +531,10 @@ feature was governed by a plan that could not exist).
 | MAX-087 | A non-hue channel for the year heatmap's 6pt cells | MAX-084 | Sonnet ✅ |
 | MAX-105 | **The plan on the dashboard calendar** — scheduled beneath actual | Owner | **Opus** ✅ |
 | MAX-106 | The UI standard, written into `CLAUDE.md` | Owner | Sonnet ✅ |
-| MAX-107 | Tallies count future scheduled days as missed — effective-day rate and streak | MAX-105 | Sonnet |
+| MAX-107 | Chat stream framing: close a frame without a blank line | Device report | Sonnet 🔒 ✅ |
+| MAX-108 | Tap a calendar day → its workouts; swipe between two on one day | Owner | Sonnet |
+| MAX-109 | **Plans cover lifting as well as running** — spec first | Owner | **Opus** |
+| MAX-110 | **Tallies count future scheduled days as missed** — the streak tile reads 0 for most of every month | MAX-105 | Sonnet |
 | MAX-090 | Chat-first product spec: plan generation and Q&A through chat | Owner | **Opus** 🔒 ✅ |
 | MAX-091 | Run both Claude clients on the Sonnet tier at `medium` effort | Owner, cost | Sonnet 🔒 ✅ |
 | MAX-092 … MAX-104 | The chat-first build, decomposed from MAX-090 | MAX-090 | see below |
@@ -593,6 +596,51 @@ duplicated: it now checks both `ScoreBandMark` (day grid) and `ScoreBandHeatmapM
 (year heatmap) as two representations of the same rule. **Needs device verification** —
 see the PR: whether a ~2.4pt inset mark actually reads as smaller rather than as noise
 is the one thing here only a phone can answer.
+
+**MAX-107 — the chat stream's framing. Merged, and it was a real bug.** From the device:
+chat failed on every turn with *"The response was not a recognizable streaming reply"*. A
+transcript captured against the live API showed the request and the stream were both fine,
+which located the fault in how the app reads the socket rather than in what it sends.
+
+The decoder closed a frame only on a blank line. SSE does specify that — but
+`URLSession.AsyncBytes.lines` is a line sequence, not an SSE parser, and makes no promise
+to deliver the blank separators. Without them every payload accumulated into one buffer,
+and several JSON objects separated by newlines is not a JSON object. Every turn, every
+model. **It predates the tier change and was not caused by it.**
+
+**The reason the suite could not catch it is the part worth keeping.** Every existing
+decoder test built its frames through a helper that appended the blank line itself, so the
+decoder was only ever asked to parse input that already carried the boundary it depended
+on. The fake transport and the real one disagreed on exactly one property, and only the
+fake was ever tested. CI never opens a socket, so nothing mechanical could see it. Where a
+test constructs the input a real adapter would produce, that construction is part of the
+contract and deserves the same scrutiny as the code.
+
+**MAX-108 — the calendar's days should be doors.** From the owner. Tapping a day in the
+week or month view goes to that day's workouts; where a day holds two, a swipe moves
+between them rather than making the athlete go back and re-enter. Blocked until MAX-105
+landed, since both are in `ScoreCalendarView.swift`; now dispatchable. The two-workout case
+is the interesting half — a day with two runs is exactly the day you most want to compare,
+and back-out-and-re-enter is what makes comparison not worth doing. A day with **no**
+workout still needs an answer rather than a dead tap.
+
+**MAX-109 — plans cover lifting as well as running. Spec first.** From the owner, and
+bigger than one sentence suggests: §10.2's classification reads a heart-rate profile
+against pace, the derived metrics are drift, cadence and grade-adjusted pace, the plan
+prescribes a **distance** arc, and the rubric scores against a distance and an HR cap. A
+lifting session has none of those. So it gets the MAX-090 treatment — an Opus spec that
+answers the load-bearing questions before code moves, including the one that decides the
+rest: **what is an *effective day* when the two disciplines disagree?** D9's rest-day
+budget, the streak, and D4's day colour all need one answer.
+
+**MAX-110 — the tallies still think the future is missed, and this one is visible today.**
+Found by MAX-105 while fixing the calendar's half. `TalliesCalculator` has no notion of
+`today`, so future scheduled days inflate the eligible-day count — and worse,
+`Tallies.currentStreak` walks back from the interval's end and **breaks on the first future
+scheduled day**. On the "this month" interval that means the streak tile reads **0 for most
+of every month**. The calendar half is closed (C3); the tallies half needs `today` on
+`TalliesInput` and changes numbers on a surface MAX-063 owns, which is why it was reported
+rather than fixed in place.
 
 **MAX-086 is split, and what remains is a real defect rather than polish.** It was filed
 off the design review as "absence-string voice; wire `AppearancePreference`" — two
@@ -695,7 +743,7 @@ enters `EffectiveDayTally.eligibleCount` and drags the rate down, and worse,
 scheduled day it meets — which for the "this month" interval is usually the 31st, so the
 streak tile reads 0 for most of every month. The calendar half is closed by passing
 `RestDayBudgeting`'s new `outcomesUnknownFrom` (now **C3**); the tallies half needs
-`today` on `TalliesInput` and changes numbers on a surface MAX-063 owns. → **MAX-107**.
+`today` on `TalliesInput` and changes numbers on a surface MAX-063 owns. → **MAX-110**.
 
 *Also noticed, not acted on.* `docs/DESIGN-REVIEW.md` §5.4 proposed "a 1pt accent ring on
 the current day" for the missing today-marker. MAX-105 has spent exactly that device on
