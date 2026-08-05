@@ -1047,7 +1047,7 @@ twelve and is dispatchable immediately.
 | MAX-095 | `TrainingContext` + one context entry point | 092, 094 | **Opus** 🔒 ✅ |
 | MAX-096 | `ChatModel` generalised; transcript cap; training task text | 095 | **Opus** 🔒 ✅ |
 | MAX-097 | Thread list, derived titles, new chat, scope subtitle | 093, 096 | Sonnet ✅ |
-| MAX-098 | The persistent glass button | 097 | Sonnet |
+| MAX-098 | The persistent glass button | 097 | Sonnet ✅ |
 | MAX-099 | `PlanProposal` — type, parse, schema derived from core enums | 095 | **Opus** 🔒 ✅ |
 | MAX-100 | The Anthropic client for plan proposals | 099 | Sonnet 🔒 |
 | MAX-101 | Conversational plan authoring; proposal card; handoff | 098, 100 | **Opus** |
@@ -1227,6 +1227,47 @@ screen) is `ChatModel.LoadState.threadNotFound` — ordinary, not a failure.
 `ChatModelTests.testOpeningByIDReturnsExactlyThatThreadEvenWhenAnotherSharesItsScope` is
 the regression test: it reproduces the ambiguity (asserting subject-based resolution really
 does pick the wrong one), then asserts opening by id picks the right one anyway.
+
+**MAX-098 built the door.** Chat now has one entry point, on every screen, in the same
+place — the plumbing MAX-092–097 landed is reachable for the first time. Five things worth
+carrying forward:
+
+- **It is the `TabView`'s bottom accessory, not an overlay** — §12's open question 6,
+  answered. `tabViewBottomAccessory` exists on the iOS 26 SDK and is what this ships. The
+  argument is not only idiom: the system insets the tab content's safe area around the
+  accessory and moves it with the tab bar as `.tabBarMinimizeBehavior(.onScrollDown)`
+  minimises it, so §7.3's "it never disappears; it may move" is the platform's behaviour
+  rather than something `RootTabView` hand-writes. An overlay would have given neither, and
+  would sit permanently over the bottom-trailing corner of three dense scrolling screens.
+  **The cost, stated:** the accessory is a full-width bar, so this is *not* §2.1's
+  bottom-trailing capsule, and `glassChrome(.floatingControl)` still has no call site — the
+  system draws the accessory's container in Liquid Glass and re-applying it would be the
+  mistake `RootTabView` and `SettingsToolbar.swift` already argue against for the tab bar
+  and the sheet. **Whether the full-width shape reads well is the first item on the device
+  list**, and reverting to an overlay is a change to one modifier in one file.
+- **The subject is a core decision, with tests.** `ChatEntryPoint.resolve(focus:currentInterval:)`
+  (`MaximizeCore/Chat/ChatEntryPoint.swift`) turns "a run is on screen, or none is" into the
+  `ChatSubject`, the visible label, a compact label, and what VoiceOver says. No view asks
+  itself whether it is a workout screen. `ChatEntryPointFocus` carries the other half: it
+  **matches the identifier on release**, because `onAppear`/`onDisappear` are not ordered
+  across a screen change and `DayWorkoutsView` pages between two detail screens (MAX-108) —
+  clearing unconditionally would leave the button reading "Ask" on a screen showing a run.
+  Both orderings are pinned by tests.
+- **`RootTabView` owns the interval model now.** §3.4 makes the interval selector the app's
+  single notion of "what period are we talking about", and the Ask button needs it on every
+  tab; `DashboardView` is handed the same instance it used to own and is otherwise
+  unchanged. A consequence worth knowing: a training thread opened from the Workouts or Plan
+  tab is about whatever window the dashboard is *currently* on, not always "this week". The
+  sheet states its window either way (§2.2, §3.6(b)).
+- **`WorkoutChatSectionView` lost its button and gained a preview.** Two chat buttons on one
+  screen opening the same conversation is worse than either alone (§2.1). The card is now
+  design review §4.4's ask: the last exchange when there is one, the invitation copy when
+  there is not, and `ChatConversationCopy`'s wording for both rather than a literal. Its
+  preview text comes from `ChatThreadSummary`, so the card and the thread-list row shorten
+  the same message identically.
+- **A14 holds.** The button presents a sheet and nothing else — no pre-warm, no pre-fetch,
+  no speculative call. `ChatSheet` is constructed only on presentation and `ChatModel.load()`
+  reads stored records; the model is reached when the athlete sends.
 
 ### Phase 9 — Lifting (MAX-109)
 
