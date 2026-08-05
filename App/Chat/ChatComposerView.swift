@@ -35,15 +35,16 @@ import MaximizeCore
 /// Hand-rolling that as a blurred rectangle is exactly the "most common way a screen dates
 /// itself" `CLAUDE.md` names.
 ///
-/// Both go through `glassChrome(_:in:)` rather than `.glassEffect` directly, which is what
+/// Both go through `glassChrome(_:)` rather than `.glassEffect` directly, which is what
 /// keeps MAX-070's Reduce Transparency fallback and MAX-040's glass-over-data tripwire in
 /// force. A composer floating over a scrolling transcript is chrome by every definition in
 /// `Surfaces.swift`; the transcript underneath stays flat.
 ///
-/// **The shapes are the platform's, not ours.** Both the field and the button take
-/// `.floatingControl`, whose own capsule is the system's — no shape and no `CornerRadius`
-/// constant appears in this file, because `CornerRadius`'s own doc comment says chrome
-/// radii do not come from there.
+/// **The glass shapes are the platform's, not ours.** Both the field and the button take
+/// `.floatingControl`, and the role brings the system's own capsule with it — so neither
+/// call site names a shape, and no `CornerRadius` constant appears in this file, because
+/// `CornerRadius`'s own doc comment says chrome radii do not come from there. (The one
+/// `Capsule` written out below is a `contentShape` — a hit region, not a drawn radius.)
 ///
 /// ## A deliberate departure: no `onSubmit`
 ///
