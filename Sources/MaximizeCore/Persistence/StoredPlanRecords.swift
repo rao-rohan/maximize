@@ -100,7 +100,7 @@ public struct StoredRestDayOverride: Hashable, Sendable {
     }
 }
 
-/// `ChatThread` as stored (PRD §8 `chat_thread`, D6).
+/// `ChatThread` as stored (PRD §8 `chat_thread`, D6, A11).
 ///
 /// The PRD specifies the messages as `json: [{role, content, ts}]`, and that is what is
 /// stored: one blob per thread. Threads are read whole — a conversation is replayed
@@ -110,33 +110,78 @@ public struct StoredRestDayOverride: Hashable, Sendable {
 /// D6 is why this record syncs like the rest: the conversation about a run is part of
 /// the longitudinal record and must survive a reinstall.
 ///
-/// ## `createdAt` is storage metadata (MAX-048), and now seeds one domain field
+/// ## The subject is columnar, not a blob (MAX-093)
+///
+/// `ChatSubject`'s own `Codable` conformance already names its wire keys after the
+/// columns this type was always going to need — `kind`, `workoutID`, `from`, `through`
+/// (see that type's doc comment) — so this is that split, not a new encoding invented
+/// for storage. The columns exist because `threadSummaries()` and
+/// `mostRecentThread(for:)` have to *query* by subject (which workout, which frozen
+/// range) and a subject folded into an opaque JSON blob is not something a predicate can
+/// see into.
+///
+/// - `subjectKindRawValue` — `ChatSubjectKind.rawValue`, always present.
+/// - `workoutUUID` — meaningful only when the kind is `.workout`; carries a fixed
+///   sentinel otherwise (see `Self.noWorkoutSentinel`) rather than becoming optional, so
+///   the column keeps the same shape it had before this ticket.
+/// - `scopeFromISO8601` / `scopeThroughISO8601` — `CalendarDay`'s `YYYY-MM-DD` form,
+///   meaningful only when the kind is `.training`. Optional, and default-less: exactly
+///   `DerivedMetricsRecord.distanceSplitsJSON`'s precedent for "a column that only some
+///   rows use."
+///
+/// ## Why no migration is needed
+///
+/// Every column MAX-093 adds is either non-optional with a default (`subjectKindRawValue`,
+/// `lastActivityAt`) or optional with none (`scopeFromISO8601`, `scopeThroughISO8601`) —
+/// the same two shapes `DerivedMetricsRecord.distanceSplitsComputed` and
+/// `.distanceSplitsJSON` already used for exactly this reason (see that type's doc
+/// comment). SwiftData's lightweight migration adds a nullable or defaulted attribute to
+/// an existing table without rewriting a row: a `ChatThreadRecord` written before this
+/// build has `subjectKindRawValue` read back as `"workout"` (correct — A11: "every
+/// existing thread has a workout subject") and both scope columns read back as `nil`
+/// (correct — a workout thread has no scope to carry). No `MigrationStage` is required
+/// and `MaximizeSchemaV1`'s version number does not move, for the reason
+/// `distanceSplitsComputed`'s doc comment already gives: this schema has never been
+/// promoted to CloudKit production (mirroring is off, A8), so the additive-only
+/// immutability rule that would otherwise demand a version bump has not started
+/// applying.
+///
+/// ## `lastActivityAt` and its sentinel
+///
+/// A genuine column now, rather than the derivation MAX-092 shipped — but the
+/// derivation is not thrown away, because a pre-MAX-093 row has no value for it and
+/// SwiftData will hand back the column's default. `Date.distantPast` is that default
+/// (matching `createdAt`'s own precedent immediately below), and `toDomain()` treats it
+/// as "unset" and falls back to exactly the rule MAX-092 used: the last message's
+/// timestamp, or `createdAt` for a thread nobody has spoken in. A record written by this
+/// build always supplies a real value, so the sentinel is only ever read on a thread
+/// that predates this column — which is precisely the "no migration" claim, restated as
+/// behaviour rather than asserted.
+///
+/// ## `createdAt` is storage metadata (MAX-048)
 ///
 /// `createdAt` exists so the store can break a tie deterministically when CloudKit
 /// mirroring produces two `ChatThreadRecord`s for one workout: the schema cannot carry a
 /// unique constraint (see `MaximizeSchemaV1`'s CloudKit notes), so
-/// `MaximizeStore.threadRecords(for:)` needs the same kind of explicit ordering
+/// `MaximizeStore.workoutThreadRecords(for:)` needs the same kind of explicit ordering
 /// `workoutRecords(for:)` already has via `StoredWorkout.ingestedAt`. That job is
-/// unchanged.
-///
-/// What changed at MAX-092: `ChatThread` gained `lastActivityAt`, which the thread list
-/// sorts on, and this record has no column for it yet — MAX-093 adds one. Until then
-/// `toDomain()` derives it as *the last message's timestamp, or `createdAt` for a thread
-/// with no messages*, which is precisely the value MAX-093 will backfill existing rows
-/// with. It is a derivation, not a guess: every turn carries its own timestamp, so the
-/// only thread whose activity is not already recorded is one nobody has spoken in.
-///
-/// ## This record can carry only a workout subject, until MAX-093
-///
-/// A11 gives a thread a `ChatSubject`, and the columns for the training case
-/// (`subjectKind` and two day strings) are MAX-093's, not this ticket's. So
-/// `init(_:createdAt:)` refuses a training thread rather than silently storing it as
-/// some workout's. Nothing constructs a training thread before MAX-095, so the refusal
-/// is unreachable today and is here to make sure it stays that way if the tickets land
-/// out of order.
+/// unchanged and untouched by this ticket.
 public struct StoredChatThread: Hashable, Sendable {
     public var threadUUID: UUID
+
+    public var subjectKindRawValue: String
+
+    /// Meaningful only when `subjectKindRawValue == ChatSubjectKind.workout.rawValue`.
+    /// Carries `Self.noWorkoutSentinel` for a training thread rather than becoming
+    /// optional — see the type-level doc for why.
     public var workoutUUID: UUID
+
+    /// `CalendarDay`'s `YYYY-MM-DD` form. Meaningful only for a training subject; `nil`
+    /// for a workout subject, including every row written before this column existed.
+    public var scopeFromISO8601: String?
+
+    /// See `scopeFromISO8601`.
+    public var scopeThroughISO8601: String?
 
     /// A JSON-encoded `[ChatMessage]`.
     public var messagesJSON: Data
@@ -144,50 +189,111 @@ public struct StoredChatThread: Hashable, Sendable {
     /// Duplicate-resolution tiebreak (MAX-048). See the type-level doc above.
     public var createdAt: Date
 
-    public init(threadUUID: UUID, workoutUUID: UUID, messagesJSON: Data, createdAt: Date) {
+    /// What the thread list sorts on and "which thread opens" resolves by (§2.2, §2.3).
+    /// `Date.distantPast` marks a row written before this column existed; see the
+    /// type-level doc for the fallback `toDomain()` applies in that case.
+    public var lastActivityAt: Date
+
+    /// A fixed, deterministic stand-in for "no workout" — not a fresh `UUID()` on every
+    /// construction, which would make two `StoredChatThread` values built from the same
+    /// training thread compare unequal for a reason that has nothing to do with their
+    /// content.
+    public static let noWorkoutSentinel = UUID(uuidString: "00000000-0000-0000-0000-000000000000")
+        ?? UUID()
+
+    /// The sentinel `lastActivityAt` reads back as on a row written before this column
+    /// existed. See the type-level doc.
+    public static let unsetLastActivityAt = Date.distantPast
+
+    public init(
+        threadUUID: UUID,
+        subjectKindRawValue: String,
+        workoutUUID: UUID,
+        scopeFromISO8601: String?,
+        scopeThroughISO8601: String?,
+        messagesJSON: Data,
+        createdAt: Date,
+        lastActivityAt: Date
+    ) {
         self.threadUUID = threadUUID
+        self.subjectKindRawValue = subjectKindRawValue
         self.workoutUUID = workoutUUID
+        self.scopeFromISO8601 = scopeFromISO8601
+        self.scopeThroughISO8601 = scopeThroughISO8601
         self.messagesJSON = messagesJSON
         self.createdAt = createdAt
+        self.lastActivityAt = lastActivityAt
     }
 
     /// - Parameter createdAt: Not derived from `thread`. The caller (`MaximizeStore`)
     ///   decides this: the existing record's `createdAt` on an update, or the current
     ///   time on first insert.
-    /// - Throws: `DomainError.inconsistent` for anything but a workout subject. See this
-    ///   type's note on MAX-093. The reason names the subject *kind* only — an
-    ///   identifier in an error is an identifier in a log, which CLAUDE.md rules out.
     public init(_ thread: ChatThread, createdAt: Date) throws {
-        guard let workoutUUID = thread.subject.workoutID else {
-            throw DomainError.inconsistent(
-                reason: "StoredChatThread cannot carry a \(thread.subject.kind.rawValue) subject "
-                    + "until MAX-093 adds the columns for it"
-            )
-        }
         let messagesJSON = try PersistencePayload.encode(
             thread.messages,
             field: "StoredChatThread.messagesJSON"
         )
-        self.init(
-            threadUUID: thread.id,
-            workoutUUID: workoutUUID,
-            messagesJSON: messagesJSON,
-            createdAt: createdAt
-        )
+        switch thread.subject {
+        case let .workout(workoutUUID):
+            self.init(
+                threadUUID: thread.id,
+                subjectKindRawValue: ChatSubjectKind.workout.rawValue,
+                workoutUUID: workoutUUID,
+                scopeFromISO8601: nil,
+                scopeThroughISO8601: nil,
+                messagesJSON: messagesJSON,
+                createdAt: createdAt,
+                lastActivityAt: thread.lastActivityAt
+            )
+        case let .training(scope):
+            self.init(
+                threadUUID: thread.id,
+                subjectKindRawValue: ChatSubjectKind.training.rawValue,
+                workoutUUID: Self.noWorkoutSentinel,
+                scopeFromISO8601: scope.from.description,
+                scopeThroughISO8601: scope.through.description,
+                messagesJSON: messagesJSON,
+                createdAt: createdAt,
+                lastActivityAt: thread.lastActivityAt
+            )
+        }
     }
 
     public func toDomain() throws -> ChatThread {
+        guard let kind = ChatSubjectKind(rawValue: subjectKindRawValue) else {
+            throw DomainError.malformed(
+                field: "StoredChatThread.subjectKindRawValue",
+                value: subjectKindRawValue
+            )
+        }
+        let subject: ChatSubject
+        switch kind {
+        case .workout:
+            subject = .workout(workoutUUID)
+        case .training:
+            guard let scopeFromISO8601, let scopeThroughISO8601 else {
+                throw DomainError.inconsistent(
+                    reason: "StoredChatThread has a training subjectKind but is missing its scope columns"
+                )
+            }
+            subject = .training(try TrainingScope(
+                from: try CalendarDay(iso8601: scopeFromISO8601),
+                through: try CalendarDay(iso8601: scopeThroughISO8601)
+            ))
+        }
         let messages = try PersistencePayload.decode(
             [ChatMessage].self,
             from: messagesJSON,
             field: "StoredChatThread.messagesJSON"
         )
+        let resolvedLastActivityAt = lastActivityAt == Self.unsetLastActivityAt
+            ? (messages.last?.timestamp ?? createdAt)
+            : lastActivityAt
         return try ChatThread(
             id: threadUUID,
-            subject: .workout(workoutUUID),
+            subject: subject,
             messages: messages,
-            // See this type's note: the column arrives with MAX-093.
-            lastActivityAt: messages.last?.timestamp ?? createdAt
+            lastActivityAt: resolvedLastActivityAt
         )
     }
 }

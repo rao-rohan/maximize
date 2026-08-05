@@ -139,9 +139,17 @@ extension MaximizeStore: WorkoutRepository {
                     where: #Predicate<ScoreAnnotationRecord> { $0.workoutUUID == id }
                 )
             case .chatThread:
+                // Scoped to the workout kind as well as the identifier: a training
+                // thread's `workoutUUID` column carries `StoredChatThread
+                // .noWorkoutSentinel`, a fixed value, not this workout's id, so it is
+                // never eligible for this cascade regardless — this predicate just says
+                // so rather than relying on the sentinel never colliding.
+                let workoutKind = ChatSubjectKind.workout.rawValue
                 try modelContext.delete(
                     model: ChatThreadRecord.self,
-                    where: #Predicate<ChatThreadRecord> { $0.workoutUUID == id }
+                    where: #Predicate<ChatThreadRecord> {
+                        $0.subjectKindRawValue == workoutKind && $0.workoutUUID == id
+                    }
                 )
             }
         }
@@ -324,20 +332,15 @@ extension MaximizeStore: PlanRepository {
 
 // MARK: - Chat threads (D6, A11)
 
-/// **The only part of this ticket that reaches outside `MaximizeCore`, and it is here
-/// under protest.** MAX-092 is a core ticket; the stored record is MAX-093's. But
-/// `ChatThreadRepository` grew, and this type conforms to it, so leaving the file alone
-/// would have failed the `ios-app` CI job — a knowingly red merge gate, which CLAUDE.md
-/// does not permit. What is below is therefore the *minimum* that compiles: no new
-/// column, no schema version, no migration, and no attempt at the training subject.
-/// MAX-093 replaces the derivations marked below with stored fields.
+/// **MAX-093: the stored record actually carries a subject, genuinely implemented
+/// against SwiftData.** MAX-092 left this extension as the minimum that compiled — no
+/// new column, no attempt at the training subject, every derivation marked with what
+/// this ticket would replace it with. Every one of those markers is gone now:
+/// `StoredChatThread` is columnar (see its doc comment), and every method below is a
+/// real implementation, not a stub with a subject it cannot represent.
 extension MaximizeStore: ChatThreadRepository {
 
     /// Rows for §2.3's list, newest activity first.
-    ///
-    /// `lastActivityAt` and the subject are both derived from what the record already
-    /// holds (see `StoredChatThread`) — every existing thread has a workout subject, per
-    /// A11's "no migration". MAX-093 makes them columns.
     func threadSummaries() async throws -> [ChatThreadSummary] {
         var summaries: [ChatThreadSummary] = []
         for record in try modelContext.fetch(FetchDescriptor<ChatThreadRecord>()) {
@@ -352,32 +355,59 @@ extension MaximizeStore: ChatThreadRepository {
         try threadRecord(id: id)?.stored.toDomain()
     }
 
-    /// Deterministic per MAX-048, which this does not move: `threadRecords(for:)`'s
-    /// `(createdAt, threadUUID)` order still decides which of two duplicate rows for one
-    /// workout wins, and it is still the *oldest* that does. With one thread per workout
-    /// that choice is only ever visible for a CloudKit-race duplicate, so re-picking it
-    /// here would change a decision MAX-048 made deliberately for no reason.
+    /// **Workout subject:** deterministic per MAX-048, unmoved by this ticket —
+    /// `workoutThreadRecords(for:)`'s `(createdAt, threadUUID)` order still decides
+    /// which of two duplicate rows for one workout wins, and it is still the *oldest*
+    /// that does. With one thread per workout that choice is only ever visible for a
+    /// CloudKit-race duplicate, so re-picking it here would change a decision MAX-048
+    /// made deliberately for no reason.
     ///
-    /// Nil for a training subject because no record can hold one yet — a correct answer
-    /// today, and MAX-093's to widen.
+    /// **Training subject, new at MAX-093:** several threads can legitimately share a
+    /// subject (§3.4 — "New chat" over a newer window is the product), so "which one"
+    /// is a real query rather than a tiebreak between rows that should not both exist.
+    /// The rule is `ChatThreadRepository`'s contract — newest `lastActivityAt`, `id`
+    /// breaking a tie — matched to `ChatThreadSummary.sortedByActivity(_:)`'s tiebreak
+    /// direction (higher `uuidString` wins) so that this method and `threadSummaries()`
+    /// agree on which row is "the" one for a subject. `FakeChatThreadRepository` runs
+    /// the identical rule under `swift test`; this is that rule's App-layer twin.
     func mostRecentThread(for subject: ChatSubject) async throws -> ChatThread? {
-        guard let workoutID = subject.workoutID else { return nil }
-        return try threadRecords(for: workoutID).first?.stored.toDomain()
+        switch subject {
+        case let .workout(workoutID):
+            return try workoutThreadRecords(for: workoutID).first?.stored.toDomain()
+        case let .training(scope):
+            let candidates = try trainingThreadRecords(matching: scope).map { try $0.stored.toDomain() }
+            return candidates.max { left, right in
+                if left.lastActivityAt != right.lastActivityAt {
+                    return left.lastActivityAt < right.lastActivityAt
+                }
+                return left.id.uuidString < right.id.uuidString
+            }
+        }
     }
 
-    /// The upsert chokepoint (D6), matching `store(_ workout:)`'s shape.
+    /// The upsert chokepoint (D6), keyed on the thread's own `id` (A11) — not on the
+    /// workout, which is what MAX-092's stub could not yet do because nothing but a
+    /// workout subject could be stored at all.
     ///
-    /// `createdAt` is preserved across an update, never reset to "now": its only job is
-    /// breaking a tie between duplicate rows deterministically (MAX-048), and
-    /// resetting it on every edit would make that tie float with whichever replica
-    /// wrote last — the opposite of the point. It is set once, on a record's first
-    /// insert here, and carried forward unchanged after that.
+    /// `createdAt` is preserved across an update to the *same* thread, never reset to
+    /// "now": its only job is breaking a tie between duplicate rows deterministically
+    /// (MAX-048), and resetting it on every edit would make that tie float with
+    /// whichever replica wrote last — the opposite of the point.
     ///
-    /// Still keyed on the workout rather than the thread's own id: that is what keeps
-    /// "one thread per workout" true (§12, question 3) with no unique constraint to
-    /// lean on. A training thread throws out of `StoredChatThread`'s initializer.
+    /// **"One thread per workout" is enforced here, at the door, exactly as
+    /// `FakeChatThreadRepository` enforces it** (§12, question 3): storing a
+    /// workout-subject thread evicts any *other* row for that workout before writing.
+    /// Training subjects are deliberately not deduplicated — coexisting threads over
+    /// different windows is the product (§3.4).
     func store(_ thread: ChatThread) async throws {
-        let existing = try thread.subject.workoutID.flatMap { try threadRecords(for: $0).first }
+        if let workoutID = thread.subject.workoutID {
+            let superseded = try workoutThreadRecords(for: workoutID)
+                .filter { $0.threadUUID != thread.id }
+            for record in superseded {
+                modelContext.delete(record)
+            }
+        }
+        let existing = try threadRecord(id: thread.id)
         let stored = try StoredChatThread(thread, createdAt: existing?.stored.createdAt ?? Date())
         if let existing {
             existing.stored = stored
@@ -395,7 +425,8 @@ extension MaximizeStore: ChatThreadRepository {
         try modelContext.save()
     }
 
-    /// The run a workout thread's title names (§2.4).
+    /// The run a workout thread's title names (§2.4). `nil` for a training subject —
+    /// there is no single run to look up.
     ///
     /// `TimeZone.current` matches `WorkoutDetailModel`'s own default and its reasoning:
     /// the day a run belongs to is the day the athlete was in when they started it, and
@@ -416,8 +447,8 @@ extension MaximizeStore: ChatThreadRepository {
         return try modelContext.fetch(descriptor).first
     }
 
-    /// Records matching a workout identifier, oldest `createdAt` first, `threadUUID`
-    /// breaking a tie.
+    /// Workout-subject records matching a workout identifier, oldest `createdAt` first,
+    /// `threadUUID` breaking a tie.
     ///
     /// Mirrors `workoutRecords(for:)`: CloudKit cannot enforce "one thread per
     /// workout" (see `MaximizeSchema`'s CloudKit notes), so a sync race between two
@@ -431,14 +462,43 @@ extension MaximizeStore: ChatThreadRepository {
     /// pre-migration duplicates ties on the primary key and needs the secondary one to
     /// stay deterministic. `UUID` has conformed to `Comparable` since iOS 17
     /// (this app's floor is iOS 26), so the ordering is well-defined even then.
-    private func threadRecords(for identifier: UUID) throws -> [ChatThreadRecord] {
-        try modelContext.fetch(
+    ///
+    /// Filtered on `subjectKindRawValue` as well as `workoutUUID`, so a training
+    /// thread's fixed `StoredChatThread.noWorkoutSentinel` can never be mistaken for a
+    /// real workout's identifier, however improbable that collision is.
+    private func workoutThreadRecords(for identifier: UUID) throws -> [ChatThreadRecord] {
+        let workoutKind = ChatSubjectKind.workout.rawValue
+        return try modelContext.fetch(
             FetchDescriptor<ChatThreadRecord>(
-                predicate: #Predicate<ChatThreadRecord> { $0.workoutUUID == identifier },
+                predicate: #Predicate<ChatThreadRecord> {
+                    $0.subjectKindRawValue == workoutKind && $0.workoutUUID == identifier
+                },
                 sortBy: [
                     SortDescriptor<ChatThreadRecord>(\.createdAt, order: .forward),
                     SortDescriptor<ChatThreadRecord>(\.threadUUID, order: .forward),
                 ]
+            )
+        )
+    }
+
+    /// Training-subject records whose frozen scope exactly matches `scope` (A11, §3.4).
+    ///
+    /// An equality match, not a range query: a thread's scope is resolved once and
+    /// frozen at creation, so "the thread for this window" means the same two days, not
+    /// an overlap. This is not the half-open `start <= x < end` convention
+    /// `WorkoutRepository.workouts(startingIn:)` documents — there is no interval
+    /// containment here to get a boundary wrong on.
+    private func trainingThreadRecords(matching scope: TrainingScope) throws -> [ChatThreadRecord] {
+        let trainingKind = ChatSubjectKind.training.rawValue
+        let from: String? = scope.from.description
+        let through: String? = scope.through.description
+        return try modelContext.fetch(
+            FetchDescriptor<ChatThreadRecord>(
+                predicate: #Predicate<ChatThreadRecord> {
+                    $0.subjectKindRawValue == trainingKind
+                        && $0.scopeFromISO8601 == from
+                        && $0.scopeThroughISO8601 == through
+                }
             )
         )
     }

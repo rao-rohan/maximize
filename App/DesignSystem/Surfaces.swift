@@ -69,6 +69,29 @@ enum ContentSurface {
         case .inset: return Spacing.snug
         }
     }
+
+    /// The hairline edge, on cards only (MAX-085).
+    ///
+    /// The design review measured a card at **1.09:1** against the screen behind it and
+    /// concluded, correctly, that the app was reading as a wireframe: every screen here
+    /// is a vertical stack of cards, and a card with no visible boundary is not a card,
+    /// it is text floating on black. The fills cannot be pushed apart — `surfaceInset`
+    /// is the surface every chart plots on and MAX-084 tuned every chart mark against it
+    /// to within hundredths of its floor, so lifting the ramp re-opens the whole chart
+    /// palette. See `DesignPalette.surfaceBorder` for the full argument and the numbers.
+    ///
+    /// **Cards only, deliberately.** A `.tile` is drawn in grids and in list rows —
+    /// `SummaryTilesView`, `TrendTilesView`, `WorkoutRow`, every calendar cell — and
+    /// outlining each one turns a grid into a wire mesh, which is a worse problem than
+    /// the one being fixed. `.inset` is a well *inside* a card that already has an edge;
+    /// a second line 16 points in from the first reads as a mistake. Whether the tiles
+    /// need something of their own is a device question, and it is in the PR.
+    fileprivate var border: Color? {
+        switch self {
+        case .card: return .surfaceBorder
+        case .screen, .tile, .inset: return nil
+        }
+    }
 }
 
 extension View {
@@ -113,6 +136,21 @@ private struct ContentSurfaceModifier: ViewModifier {
             content
                 .padding(surface.padding)
                 .background(surface.fill, in: shape)
+                .overlay {
+                    if let border = surface.border {
+                        // `strokeBorder` rather than `stroke`: it insets the line inside
+                        // the shape, so a hairline is not half-eaten by the clip below
+                        // and the corner radius stays the one the design system named.
+                        //
+                        // Not `@ScaledMetric`. Dynamic Type scales *content*, and this
+                        // is a device-pixel rule — the platform's own separators do not
+                        // grow with type size either, and one that did would read as a
+                        // heavy outline at AX5 rather than as an edge. Increase Contrast
+                        // is what strengthens it, through the token's own high-contrast
+                        // values (MAX-070), and that is the setting that should.
+                        shape.strokeBorder(border, lineWidth: LayoutMetrics.hairline)
+                    }
+                }
                 .clipShape(shape)
                 .environment(\.isWithinContentSurface, true)
         }

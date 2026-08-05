@@ -66,6 +66,54 @@ public enum DesignPalette {
         lightHighContrast: 0xA8A8B4
     )
 
+    /// The edge of a card (MAX-085). Drawn as a hairline around `ContentSurface.card`
+    /// and nothing else.
+    ///
+    /// ## Why an edge and not a wider fill ramp
+    ///
+    /// The design review (MAX-082 §2.1) measured `surfaceElevated` on `surface` at
+    /// **1.09:1** — roughly half Apple's own dark step of 1.23:1 — and offered two
+    /// fixes: widen the fills, or give cards a border. It leaned toward widening. The
+    /// fills turn out to be boxed in on both sides, which is why this token exists
+    /// instead:
+    ///
+    /// - **`surfaceInset` cannot move.** It is the surface every chart in the app plots
+    ///   on, and MAX-084 tuned each chart mark against it to within hundredths of its
+    ///   floor — `chartGridline` measures 1.43:1 in light against a 1.4 floor,
+    ///   `chartExcursion` 2.01:1 against 2.0. Lifting the plot surface pushes both under
+    ///   water and re-opens the entire chart palette.
+    /// - **`surfaceElevated` therefore cannot move either**, because the room above it
+    ///   is `surfaceInset`'s. Raising the card to the ~1.16:1 the review proposed leaves
+    ///   the well inside the card at 1.05:1 — a bigger loss than the gain.
+    /// - **`surface` has nowhere to go.** In light it is already white; in dark, taking
+    ///   it to pure black buys the card step only 1.09 → 1.17 and spends the palette's
+    ///   blue-black identity on its largest area to get there.
+    ///
+    /// So the boundary is carried by an edge, which is also the more literally iOS 26
+    /// answer of the two. Widening the ramp properly means re-tuning the chart tokens
+    /// against a lighter plot surface — a real ticket, and a chart ticket, not this one.
+    ///
+    /// ## The values
+    ///
+    /// **1.61:1** against the card fill in dark, 1.51:1 in light — deliberately stronger
+    /// than `separator` (1.31:1 / 1.34:1), because a card's outer boundary should outrank
+    /// the rules drawn *inside* it, and weaker than any chart mark, because it is
+    /// structure rather than data. It is drawn at `LayoutMetrics.hairline`, so a 1.3:1
+    /// edge of the kind the review sketched would have been half a point of almost
+    /// nothing.
+    ///
+    /// Increase Contrast **raises** it rather than flattening it — 2.49:1 and 2.78:1 on
+    /// the card, and 3.10:1 / 3.24:1 against the screen behind it, which clears WCAG
+    /// 1.4.11's 3:1 for a graphical object. That is the setting's whole point here: the
+    /// one surface cue this palette has room for gets stronger, not weaker, for the
+    /// people who asked for stronger cues.
+    public static let surfaceBorder = Ink(
+        dark: 0x3A3A45,
+        light: 0xC9C9D3,
+        darkHighContrast: 0x5A5A68,
+        lightHighContrast: 0x8E8E9A
+    )
+
     // MARK: Text
 
     public static let textPrimary = Ink(

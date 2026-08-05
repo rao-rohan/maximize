@@ -149,4 +149,15 @@ enum LayoutMetrics {
     /// Needs device verification: see `ScoreBandHeatmapMark`.
     static let heatmapMarkMajorInsetFraction: CGFloat = 0.64
     static let heatmapMarkMinorInsetFraction: CGFloat = 0.4
+
+    /// Apple's own minimum tap target, in points (MAX-108).
+    ///
+    /// A calendar day cell is roughly 42–47pt, driven by seven columns sharing a
+    /// phone's content width rather than by any target-size reasoning — see
+    /// `ScoreCalendarView`'s day-grid cells. Rather than growing the cell itself
+    /// (restyling the calendar, which this ticket is explicitly told not to spend),
+    /// the cell's hit area is floored at this value independently of what is drawn:
+    /// `.frame(minWidth:minHeight:)` combined with `.contentShape(Rectangle())`
+    /// enlarges only the tappable region, never the visible fill or ring.
+    static let minimumTapTarget: CGFloat = 44
 }

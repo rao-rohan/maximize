@@ -454,6 +454,118 @@ final class DesignPaletteContrastTests: XCTestCase {
         }
     }
 
+    // MARK: Surface elevation — MAX-085
+
+    /// The whole of the design review's §2.1 finding, as an invariant that outlives the
+    /// particular fix.
+    ///
+    /// A card has to be *seen* as a card. It can earn that from its fill step, from its
+    /// edge, or from both; what it may not do is neither. Today the fill step is 1.09:1
+    /// — the number the review measured — and the edge carries it, which is why
+    /// `surfaceBorder` exists (see `DesignPalette` for why the fills could not simply be
+    /// widened). If a later ticket re-tunes the chart palette and widens the ramp
+    /// properly, this test keeps passing on the other term rather than having to be
+    /// rewritten.
+    func testACardSeparatesFromTheScreenBySomething() {
+        for appearance in Appearance.allCases {
+            let screen = appearance.token(DesignPalette.surface)
+            let card = appearance.token(DesignPalette.surfaceElevated)
+            let edge = appearance.token(DesignPalette.surfaceBorder)
+            let fillStep = WCAGContrast.contrastRatio(card, screen)
+            let edgeStep = WCAGContrast.contrastRatio(edge, card)
+            XCTAssertGreaterThanOrEqual(
+                max(fillStep, edgeStep), 1.4,
+                """
+                a card is invisible against the screen [\(appearance.rawValue)]: its fill \
+                steps \(String(format: "%.2f", fillStep)):1 and its edge \
+                \(String(format: "%.2f", edgeStep)):1 — neither reads as a boundary
+                """
+            )
+        }
+    }
+
+    /// The edge against both of the things it lies between. A hairline that reads on the
+    /// card but vanishes into the screen behind it is half an edge.
+    func testTheCardEdgeIsVisibleFromBothSides() {
+        assertAtLeast(
+            1.4, DesignPalette.surfaceBorder, on: DesignPalette.surfaceElevated,
+            "surfaceBorder on the card"
+        )
+        assertAtLeast(
+            1.4, DesignPalette.surfaceBorder, on: DesignPalette.surface,
+            "surfaceBorder on the screen"
+        )
+    }
+
+    /// A card's outer boundary outranks the rules drawn inside it. Stated as an ordering
+    /// rather than as two numbers, for the same reason the chart ladder is: it is the
+    /// relationship that matters, and it is what a future edit to either token breaks.
+    func testTheCardEdgeOutranksTheSeparatorsInsideIt() {
+        for appearance in Appearance.allCases {
+            let card = appearance.token(DesignPalette.surfaceElevated)
+            let edge = WCAGContrast.contrastRatio(appearance.token(DesignPalette.surfaceBorder), card)
+            let rule = WCAGContrast.contrastRatio(appearance.token(DesignPalette.separator), card)
+            XCTAssertGreaterThan(
+                edge, rule,
+                """
+                the card edge (\(String(format: "%.2f", edge)):1) is quieter than the \
+                separators inside the card (\(String(format: "%.2f", rule)):1) \
+                [\(appearance.rawValue)] — the boundary should outrank its contents
+                """
+            )
+        }
+    }
+
+    /// And the ceiling from the other side: the edge is structure, so it stays quieter
+    /// than the quietest thing a card exists to hold. `textTertiary` is that floor —
+    /// axis ticks and timestamps — and an edge louder than the type in the card is an
+    /// outline, which is a different and worse design.
+    func testTheCardEdgeStaysQuieterThanTheTypeItSurrounds() {
+        for appearance in Appearance.allCases {
+            let card = appearance.token(DesignPalette.surfaceElevated)
+            let edge = WCAGContrast.contrastRatio(appearance.token(DesignPalette.surfaceBorder), card)
+            let quietestText = WCAGContrast.contrastRatio(appearance.token(DesignPalette.textTertiary), card)
+            XCTAssertLessThan(
+                edge, quietestText,
+                """
+                the card edge (\(String(format: "%.2f", edge)):1) is louder than \
+                textTertiary on the same card (\(String(format: "%.2f", quietestText)):1) \
+                [\(appearance.rawValue)] — that is an outline, not an edge
+                """
+            )
+        }
+    }
+
+    /// FR-4.5 / MAX-070: Increase Contrast must strengthen this app's cues, and the
+    /// surface ramp is the one most easily flattened by accident, because its high
+    /// contrast variants were written before there was an edge to keep in step with them.
+    func testIncreaseContrastStrengthensTheCardEdge() {
+        assertRaised(
+            DesignPalette.surfaceBorder.darkHighContrast, on: DesignPalette.surfaceElevated.darkHighContrast,
+            isAtLeast: DesignPalette.surfaceBorder.dark, on: DesignPalette.surfaceElevated.dark,
+            "surfaceBorder on the card [dark]"
+        )
+        assertRaised(
+            DesignPalette.surfaceBorder.lightHighContrast, on: DesignPalette.surfaceElevated.lightHighContrast,
+            isAtLeast: DesignPalette.surfaceBorder.light, on: DesignPalette.surfaceElevated.light,
+            "surfaceBorder on the card [light]"
+        )
+    }
+
+    /// Under Increase Contrast the edge stops being a design flourish and becomes a
+    /// genuine graphical object, so it is held to WCAG 1.4.11's 3:1 against the screen
+    /// it separates the card from — which the standard appearances are not, deliberately.
+    func testTheCardEdgeMeetsTheGraphicalObjectMinimumUnderIncreaseContrast() {
+        assertAA(
+            DesignPalette.surfaceBorder.darkHighContrast, DesignPalette.surface.darkHighContrast,
+            .largeTextOrNonText, "surfaceBorder on the screen [dark, Increase Contrast]"
+        )
+        assertAA(
+            DesignPalette.surfaceBorder.lightHighContrast, DesignPalette.surface.lightHighContrast,
+            .largeTextOrNonText, "surfaceBorder on the screen [light, Increase Contrast]"
+        )
+    }
+
     private func ink(for band: ScoreBand) -> DesignPalette.Ink {
         switch band {
         case .effective: return DesignPalette.scoreEffective
