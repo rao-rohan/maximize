@@ -147,6 +147,18 @@ uncovered the blobs, and the comment would not have warned anyone.
 
 **Comment fixed in this PR; the code is deliberately unchanged** — see §3 and §4/R1.
 
+**Update (MAX-069):** R1's follow-up landed. `applyFileProtection` now also walks the
+`Store` directory and sets the protection class on every regular file it finds there —
+not by naming Core Data's external-storage directory (still an undocumented
+implementation detail, still not hardcoded), but by enumerating whatever is actually
+present. The directory attribute in `prepareStoreURL` remains the primary protection —
+this walk is additive, not a replacement — so nothing about the "the bytes are
+protected today" conclusion above changes. What changes is that a future edit removing
+the directory attribute would no longer *silently* uncover the blobs on its own; the
+walk still needs `makeOnDisk` to run once before it re-asserts protection, so it is a
+second independent check, not a guarantee that closes the gap instantly. Not verified
+by CI or on a device as of this update — see that PR's **Needs device verification**.
+
 ---
 
 ### INFORMATIONAL
@@ -215,6 +227,12 @@ a code path that has never executed anywhere in this pipeline (tracker R2), the 
 directory name is a Core Data implementation detail this code would then depend on, and
 the protection is already correct via inheritance. If it is done, it belongs in a ticket
 that can be verified on a device with `ls -l@` / a data-protection check — see §5.
+
+**Done in MAX-069.** Resolved without taking on the dependency this note warned about:
+`applyFileProtection` walks the `Store` directory with `FileManager.enumerator` and
+re-asserts the protection class on every regular file it finds, at any depth, rather
+than hardcoding Core Data's support-directory name. Still unverified on a device or by
+CI, per this note's own caveat — see MAX-069's PR.
 
 **R2 — Give `README.md` content, including the distribution constraint.** The repo is
 public as of today and its README is one line. M1 is fixed for the person following the

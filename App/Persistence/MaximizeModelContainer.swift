@@ -33,6 +33,16 @@ import SwiftData
 /// default is a thing that can change out from under a decision, and this one is
 /// load-bearing enough to write down.
 ///
+/// **MAX-069.** `applyFileProtection` used to name three files — the store and its two
+/// SQLite sidecars — as if that were the complete list. It is not: three models use
+/// `@Attribute(.externalStorage)`, and Core Data writes those bytes into its own
+/// support directory, not into those three files. They were protected anyway, purely
+/// by inheriting `prepareStoreURL`'s directory attribute; `applyFileProtection` now
+/// also walks that directory and sets the class on every file it actually finds there,
+/// so the protection no longer rests entirely on one attribute nobody is checking is
+/// still set. See `applyFileProtection`'s own doc comment for the reasoning and its
+/// limits.
+///
 /// **Not verified by CI.** No line in this file has ever executed — there is no
 /// simulator or device in this pipeline (tracker R2). See the PR for what a human should
 /// check.
@@ -164,6 +174,14 @@ enum MaximizeModelContainer {
             .url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
             .appendingPathComponent(storeDirectoryName, isDirectory: true)
 
+        // MAX-069: do not remove `attributes:` here as "redundant" with the explicit
+        // sweep below. This is the *primary* protection for the three
+        // `@Attribute(.externalStorage)` blobs (see `applyFileProtection`'s doc
+        // comment) — it is what protects them from the instant Core Data creates
+        // them, which is before this process gets a chance to run anything against
+        // them. The sweep is a second, independent check; it is not a replacement for
+        // this line, and removing this line would not be caught by any test in this
+        // repo (tracker R2).
         try fileManager.createDirectory(
             at: directory,
             withIntermediateDirectories: true,
@@ -172,25 +190,53 @@ enum MaximizeModelContainer {
         return directory.appendingPathComponent(storeFileName, isDirectory: false)
     }
 
-    /// Sets the protection class on the store and the two sidecar files SQLite keeps
-    /// beside it.
+    /// Sets the protection class on the store, the two sidecar files SQLite keeps
+    /// beside it, and — via `sweepExternalStorageFiles` — everything else Core Data
+    /// has written into the `Store` directory.
     ///
-    /// **These three are not every file holding data.** Three models carry
-    /// `@Attribute(.externalStorage)` — `HeartRateSeriesRecord.samplesJSON`,
-    /// `RouteRecord.pointsJSON`, `ChatThreadRecord.messagesJSON` — and Core Data writes
-    /// those bytes to its own support directory beside the store rather than into the
-    /// SQLite row. Between them that is the HR curve, the GPS track and the chat
-    /// transcript: the most sensitive content in the store, and none of it is named
-    /// below. What covers it is the *directory* attribute set in `prepareStoreURL`,
-    /// which iOS applies as the default class for files created underneath it. So the
-    /// belt is doing the real work here and the braces are the incomplete half —
-    /// stated explicitly at MAX-072, because the previous wording read as though this
-    /// list were exhaustive and it is not.
+    /// ## Why this function used to protect less than it looked like it did (MAX-072 L3)
     ///
-    /// Failures are swallowed on purpose. A file that does not exist yet is the normal
-    /// case on first launch, and refusing to start the app because a protection
-    /// attribute could not be set on a not-yet-created write-ahead log would trade a
-    /// working app for no app.
+    /// Three models carry `@Attribute(.externalStorage)` —
+    /// `HeartRateSeriesRecord.samplesJSON`, `RouteRecord.pointsJSON`,
+    /// `ChatThreadRecord.messagesJSON` — and Core Data writes those bytes into its own
+    /// support directory beside the store rather than into the SQLite row. Between
+    /// them that is the HR curve, the GPS track and the chat transcript: the most
+    /// sensitive content in the store. The three paths named below never covered them;
+    /// what covered them was the *directory* attribute `prepareStoreURL` sets, which
+    /// iOS applies as the default class for every file created underneath it,
+    /// including whatever Core Data names its support directory. The bytes were
+    /// protected; the code just didn't say so, and read as though the list below were
+    /// exhaustive.
+    ///
+    /// ## What MAX-069 adds, and what it deliberately does not do
+    ///
+    /// `sweepExternalStorageFiles` walks the `Store` directory and re-asserts the
+    /// protection class directly on every regular file it finds, at any depth — not
+    /// just the three named here. It does **not** hardcode Core Data's support
+    /// directory name to go find it specifically. That name is a Core Data
+    /// implementation detail no Apple document contracts, and a wrong guess would
+    /// compile, run, and silently protect nothing while reading as though it did —
+    /// strictly worse than the inheritance this file already relies on. A plain walk
+    /// needs no name: it protects whatever is actually there.
+    ///
+    /// This is additive, not load-bearing. `prepareStoreURL`'s directory attribute
+    /// remains the thing that actually protects a file at the moment Core Data creates
+    /// it — the walk only runs when `makeOnDisk` is called, so a file created and then
+    /// never opened again before that walk still depended on inheritance for the gap
+    /// in between. Keeping both means the directory attribute is no longer the *only*
+    /// thing standing between "protected" and "silently not," which was L3's actual
+    /// complaint.
+    ///
+    /// Failures — of any file in the list below, and of the sweep — are swallowed on
+    /// purpose. A file that does not exist yet is the normal case on first launch, and
+    /// refusing to start the app because a protection attribute could not be set on a
+    /// not-yet-created write-ahead log would trade a working app for no app.
+    ///
+    /// **Not verified by CI.** No line here has ever executed — see this file's
+    /// top-level doc comment and tracker R2. Whether `FileManager`'s enumerator
+    /// actually walks into Core Data's real support directory on a real device, and
+    /// what protection class the files inside it show under `ls -l@` before and after
+    /// this runs, is unverified until a human checks it there. See the PR.
     private static func applyFileProtection(around storeURL: URL) {
         let fileManager = FileManager.default
         let paths = [
@@ -200,6 +246,48 @@ enum MaximizeModelContainer {
         ]
         for path in paths where fileManager.fileExists(atPath: path) {
             try? fileManager.setAttributes([.protectionKey: fileProtection], ofItemAtPath: path)
+        }
+        sweepExternalStorageFiles(in: storeURL.deletingLastPathComponent())
+    }
+
+    /// Walks every file under `directory` (the `Store` directory) and re-asserts
+    /// `fileProtection` on each regular file found, regardless of name or nesting —
+    /// see `applyFileProtection`'s doc comment for why this does not target Core
+    /// Data's external-storage directory by name.
+    ///
+    /// Deliberately **not** `.skipsHiddenFiles`: Core Data's own support directories
+    /// are conventionally dot-prefixed, which is exactly the kind of entry that option
+    /// would skip.
+    ///
+    /// An `errorHandler` that returns `true` is required to keep a single unreadable
+    /// or mid-write entry from aborting the whole walk — the default behavior of
+    /// `FileManager.enumerator` is to stop enumeration on the first error, which is
+    /// the wrong failure mode here for the same reason the per-file `try?` above is:
+    /// one file in a transient state should not cost every other file its protection.
+    ///
+    /// **Cost, stated plainly:** this runs on every `makeOnDisk` call — every cold
+    /// launch — and its cost scales with the total number of external-storage blob
+    /// files the athlete has ever accumulated (every HR curve, route and chat
+    /// transcript, not just recent ones), because `setAttributes` is idempotent and
+    /// this does not try to skip files already carrying the right class. For the
+    /// workout volumes this app is built for that is at most a few thousand small
+    /// files, which is not expected to be perceptible — but it was not measured on a
+    /// device, and a human verifying this ticket should watch launch time on a store
+    /// with real history, not an empty one.
+    private static func sweepExternalStorageFiles(in directory: URL) {
+        let fileManager = FileManager.default
+        guard let enumerator = fileManager.enumerator(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [],
+            errorHandler: { _, _ in true }
+        ) else {
+            return
+        }
+        for case let fileURL as URL in enumerator {
+            let isRegularFile = (try? fileURL.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile ?? false
+            guard isRegularFile else { continue }
+            try? fileManager.setAttributes([.protectionKey: fileProtection], ofItemAtPath: fileURL.path)
         }
     }
 }
