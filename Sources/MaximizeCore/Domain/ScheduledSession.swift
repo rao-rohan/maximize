@@ -114,6 +114,25 @@ public struct ScheduledSession: Hashable, Sendable, Codable {
     /// model grows structure for intervals).
     public let distanceMeters: Double?
 
+    /// Prescribed duration in **seconds**, or nil where the plan prescribes a session
+    /// without one.
+    ///
+    /// **The plan's first duration, and the closure of tracker gap P3** ("`Plan` records
+    /// no durations at all"). It arrives because a lift has no distance to be prescribed
+    /// in: A20 scores a lift on whether the session the plan asked for happened, and "for
+    /// roughly how long" is the only part of that judgement the record can measure. A run
+    /// may carry one too — the field is about what a plan may *say*, and "45 minutes
+    /// easy" is a sentence a plan says — but nothing authors one for a run today.
+    ///
+    /// **Optional on a lift as well, on purpose.** "Lift on Tuesday, length unstated" is
+    /// a thing a plan may mean, and it is a different statement from `.rest`. A rubric
+    /// band written against `.scheduledDuration` simply does not match on such a day —
+    /// see `RubricEvaluator`, which treats an unresolvable reference as no-match, exactly
+    /// as it already does for a `.scheduledDistance` on a day with no prescribed
+    /// distance. Requiring a duration would make the shorter statement inexpressible to
+    /// buy a guarantee the evaluator does not need.
+    public let durationSeconds: Double?
+
     /// Free text from the plan, shown in the verdict header and passed to the scorer
     /// as context.
     public let note: String?
@@ -136,12 +155,19 @@ public struct ScheduledSession: Hashable, Sendable, Codable {
     public init(
         kind: ScheduledSessionKind,
         distanceMeters: Double? = nil,
+        durationSeconds: Double? = nil,
         note: String? = nil,
         muscleGroups: Set<MuscleGroup> = []
     ) throws {
         try Validate.optionalPositive(distanceMeters, "ScheduledSession.distanceMeters")
+        try Validate.optionalPositive(durationSeconds, "ScheduledSession.durationSeconds")
         guard !(kind == .rest && distanceMeters != nil) else {
             throw DomainError.inconsistent(reason: "A rest day cannot carry a scheduled distance")
+        }
+        // The same rule as the line above, for the same reason: a rest day asks for
+        // nothing, so a length attached to one is a number no reader can interpret.
+        guard !(kind == .rest && durationSeconds != nil) else {
+            throw DomainError.inconsistent(reason: "A rest day cannot carry a scheduled duration")
         }
         // Same shape of rule as the one above, for the same reason: a value that cannot
         // mean anything for this kind is a value somebody will later try to read. A run
@@ -154,6 +180,7 @@ public struct ScheduledSession: Hashable, Sendable, Codable {
         }
         self.kind = kind
         self.distanceMeters = distanceMeters
+        self.durationSeconds = durationSeconds
         self.note = note
         self.muscleGroups = muscleGroups
     }
@@ -161,6 +188,7 @@ public struct ScheduledSession: Hashable, Sendable, Codable {
     private init(uncheckedKind kind: ScheduledSessionKind) {
         self.kind = kind
         self.distanceMeters = nil
+        self.durationSeconds = nil
         self.note = nil
         self.muscleGroups = []
     }
@@ -172,9 +200,17 @@ public struct ScheduledSession: Hashable, Sendable, Codable {
     public var isRest: Bool { kind == .rest }
 
     private enum CodingKeys: String, CodingKey {
-        case kind, distanceMeters, note, muscleGroups
+        case kind, distanceMeters, durationSeconds, note, muscleGroups
     }
 
+    /// `durationSeconds` is written with `encodeIfPresent` and read with
+    /// `decodeIfPresent`, for the reason MAX-129 gave for `liftSession` and
+    /// `muscleGroups`: every `ScheduledSession` already on disk — inside a stored plan,
+    /// and inside every stored `Score`, which is immutable under D8 — prescribes no
+    /// duration, so omitting the key leaves those bytes exactly as they are and a plan
+    /// authored before this ticket decodes to a plan that prescribed no duration, which
+    /// is precisely what it meant.
+    ///
     /// Written as a **canonically ordered array**, and omitted entirely when empty.
     ///
     /// Ordered because a `Set`'s iteration order is not stable, and `PersistencePayload`
@@ -186,6 +222,7 @@ public struct ScheduledSession: Hashable, Sendable, Codable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(kind, forKey: .kind)
         try container.encodeIfPresent(distanceMeters, forKey: .distanceMeters)
+        try container.encodeIfPresent(durationSeconds, forKey: .durationSeconds)
         try container.encodeIfPresent(note, forKey: .note)
         if !muscleGroups.isEmpty {
             try container.encode(muscleGroups.ordered, forKey: .muscleGroups)
@@ -197,6 +234,7 @@ public struct ScheduledSession: Hashable, Sendable, Codable {
         try self.init(
             kind: container.decode(ScheduledSessionKind.self, forKey: .kind),
             distanceMeters: container.decodeIfPresent(Double.self, forKey: .distanceMeters),
+            durationSeconds: container.decodeIfPresent(Double.self, forKey: .durationSeconds),
             note: container.decodeIfPresent(String.self, forKey: .note),
             muscleGroups: Set(
                 container.decodeIfPresent([MuscleGroup].self, forKey: .muscleGroups) ?? []
