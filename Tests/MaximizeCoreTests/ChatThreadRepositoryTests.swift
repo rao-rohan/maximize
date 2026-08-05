@@ -199,6 +199,32 @@ final class ChatThreadRepositoryTests: XCTestCase {
         }
     }
 
+    /// The two orderings must agree, or the list's top row for a subject is not the
+    /// thread tapping Ask opens — a small, durable lie that would only ever appear on
+    /// the tie nobody tests by hand. Asserted against the tie specifically, because
+    /// that is the only case where the two rules could differ.
+    func testTheListsTopRowIsTheThreadTheAskButtonOpens() async throws {
+        let repository = FakeChatThreadRepository()
+        let scope = try trainingSubject()
+        let low = try Fixture.thread(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000001") ?? UUID(),
+            subject: scope,
+            lastActivityAt: Fixture.epoch
+        )
+        let high = try Fixture.thread(
+            id: UUID(uuidString: "FFFFFFFF-0000-0000-0000-000000000001") ?? UUID(),
+            subject: scope,
+            lastActivityAt: Fixture.epoch
+        )
+
+        try await repository.store(low)
+        try await repository.store(high)
+        let opened = try await repository.mostRecentThread(for: scope)
+        let summaries = try await repository.threadSummaries()
+
+        XCTAssertEqual(summaries.first?.id, opened?.id)
+    }
+
     // MARK: - The list (§2.3)
 
     func testSummariesComeBackNewestActivityFirst() async throws {

@@ -241,6 +241,10 @@ final class ChatThreadSummaryTests: XCTestCase {
 
     /// A sort with no total order lets a list reshuffle between two reads of identical
     /// data — the class of defect MAX-048 was filed for.
+    ///
+    /// The direction is not arbitrary: it matches `mostRecentThread(for:)`, which takes
+    /// the maximum, so the list's top row is the thread the Ask button opens.
+    /// `ChatThreadRepositoryTests` pins the two against each other.
     func testTiesAreBrokenByIdentifierSoTheOrderIsTotal() throws {
         let low = ChatThreadSummary(try Fixture.thread(
             id: UUID(uuidString: "00000000-0000-0000-0000-000000000001") ?? UUID(),

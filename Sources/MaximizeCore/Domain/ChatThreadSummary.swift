@@ -171,6 +171,12 @@ public struct ChatThreadSummary: Hashable, Sendable, Identifiable {
     /// a sort with no total order lets the list reshuffle between two reads of identical
     /// data.
     ///
+    /// **The tie is broken the same way `mostRecentThread(for:)` breaks it — higher
+    /// identifier first.** That is what makes the two agree: the thread the Ask button
+    /// opens for a subject is the one that sorts highest among that subject's rows. A
+    /// list whose top row was not the thread the button opened would be a small, durable
+    /// lie, and it would only ever appear on the tie nobody tests by hand.
+    ///
     /// Compared as `uuidString` rather than through `UUID: Comparable`: this package's
     /// tests run on Linux against swift-corelibs-foundation (CI's core job), and a
     /// conformance whose availability differs between that and Apple's Foundation is not
@@ -181,7 +187,7 @@ public struct ChatThreadSummary: Hashable, Sendable, Identifiable {
             if left.lastActivityAt != right.lastActivityAt {
                 return left.lastActivityAt > right.lastActivityAt
             }
-            return left.id.uuidString < right.id.uuidString
+            return left.id.uuidString > right.id.uuidString
         }
     }
 }
