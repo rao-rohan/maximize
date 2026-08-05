@@ -344,9 +344,14 @@ struct ChatConversationView: View {
                         WorkoutChatBubble(message: message)
                     }
 
-                    if model.isStreaming {
-                        WorkoutChatStreamingBubble(text: model.streamingText)
-                    }
+                    // MAX-152: waiting, streaming and stalled are three rungs of one
+                    // ladder, and which one is showing was decided in `MaximizeCore`.
+                    // This view hands the phase over and draws what comes back — it
+                    // reads no timings, counts no tokens and branches on nothing about
+                    // the stream.
+                    ChatPendingReplyView(phase: model.replyPhase, text: model.streamingText)
+
+                    retryButton
 
                     // §4.6: the proposal appears *in the transcript*, as a card, at the
                     // end — it is the most recent thing that happened. It is not a
@@ -368,12 +373,39 @@ struct ChatConversationView: View {
             // view, where the same gesture was how you read the rest of the workout.
             .scrollDismissesKeyboard(.interactively)
             .onChange(of: model.messages.count) { scrollToBottom(proxy) }
-            .onChange(of: model.isStreaming) { scrollToBottom(proxy) }
+            // The phase rather than a streaming flag (MAX-152): the placeholder giving
+            // way to the first tokens, and a stall growing a caption underneath the
+            // partial reply, both change the transcript's height without changing the
+            // message count.
+            .onChange(of: model.replyPhase) { scrollToBottom(proxy) }
             .onChange(of: model.planDrafting) { scrollToBottom(proxy) }
             .onChange(of: isComposerFocused) {
                 guard isComposerFocused else { return }
                 scrollToBottom(proxy)
             }
+        }
+    }
+
+    /// MAX-152: "Try again", offered for exactly the failures where asking again could
+    /// help.
+    ///
+    /// `model.canRetry` is the whole condition, and it is `ChatModel`'s — a missing key,
+    /// a rejected key, a refusal and a reply this app could not read all answer false,
+    /// because a button that re-runs a call guaranteed to fail identically is worse than
+    /// no button. The failure's own notice, immediately above, says what to do instead in
+    /// each of those cases.
+    ///
+    /// One tap, one call. Nothing here retries on a timer or on appearance (A14).
+    @ViewBuilder
+    private var retryButton: some View {
+        if model.canRetry {
+            Button(ChatConversationCopy.retryAction) {
+                Task { await model.retry() }
+            }
+            .buttonStyle(.bordered)
+            .tint(Color.accent)
+            .font(.metricLabel)
+            .accessibilityHint(ChatConversationCopy.retryActionHint)
         }
     }
 
@@ -504,7 +536,10 @@ struct ChatConversationView: View {
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
-        let animation: Animation? = reduceMotion ? nil : .easeOut(duration: 0.2)
+        // `Motion.scrollSettle` rather than a duration written here (MAX-152): the ramp
+        // names the job, and a second call site that wanted "about the same speed" is how
+        // a design system ends up with three of them.
+        let animation: Animation? = reduceMotion ? nil : Motion.scrollSettle
         withAnimation(animation) {
             proxy.scrollTo(Self.transcriptBottomAnchor, anchor: .bottom)
         }
@@ -589,22 +624,9 @@ private struct WorkoutChatBubble: View {
     }
 }
 
-/// The reply as it arrives. FR-4.4 names "streaming-text reveal" directly as the kind
-/// of motion this app wants; `accessibleAnimation` is MAX-070's seam for it, so this is
-/// the first call site to use it rather than the first to reinvent Reduce Motion
-/// handling.
-private struct WorkoutChatStreamingBubble: View {
-    let text: String
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            Text(text.isEmpty ? "…" : text)
-                .font(.bodyCopy)
-                .foregroundStyle(Color.textPrimary)
-                .padding(Spacing.compact)
-                .background(Color.surfaceInset, in: RoundedRectangle(cornerRadius: CornerRadius.tile, style: .continuous))
-                .accessibleAnimation(.easeOut(duration: 0.15), value: text)
-            Spacer(minLength: Spacing.hero)
-        }
-    }
-}
+// The reply-in-flight bubble used to live here as `WorkoutChatStreamingBubble`, drawing
+// an ellipsis whenever there was no text yet. MAX-152 replaced it with
+// `ChatPendingReplyView`, because that ellipsis was three different states wearing one
+// face: a request with nothing back, a reply arriving, and a reply that had stopped
+// arriving all rendered identically. The states are `ChatReplyPhase`'s now, and the
+// drawing is that file's.
