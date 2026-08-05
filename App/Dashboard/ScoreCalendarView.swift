@@ -104,17 +104,40 @@ struct ScoreCalendarView: View {
 private struct ScoreCalendarDayCell: View {
     let day: ScoreCalendarDay
 
+    /// Scaled rather than fixed: `microLabel` is `caption2`, which grows with Dynamic
+    /// Type, so a hard-coded box would be outgrown by its own glyph at accessibility
+    /// sizes — the state mark would spill over the date above it. Tied to the same
+    /// text style the glyph is rendered in, so the two grow together.
+    @ScaledMetric(relativeTo: .caption2) private var glyphSize = LayoutMetrics.calendarGlyphSize
+
     var body: some View {
-        VStack(spacing: Spacing.hairspace) {
-            Text("\(day.date.day)")
-                .font(.microLabel)
-                .foregroundStyle(inkColor)
-            Image(systemName: ScoreCalendarFormatting.systemImageName(for: day.state))
-                .font(.microLabel)
-                .foregroundStyle(inkColor)
-        }
-        .frame(maxWidth: .infinity)
-        .aspectRatio(1, contentMode: .fit)
+        // The square is driven by the column's width alone, never by what is drawn
+        // inside it. `Color.clear` has no intrinsic size, so `aspectRatio(1, .fit)`
+        // resolves against the proposed width and every cell in the grid comes out
+        // identical; the content is overlaid and cannot push the frame around.
+        //
+        // Sizing the *content* instead is what went wrong before: the glyph changes
+        // with the day's state, and SF Symbols do not share an intrinsic height —
+        // `minus` is a thin dash, `figure.run.square.stack` is a tall stacked mark.
+        // A VStack around them is correspondingly different heights, so squaring to
+        // "fit the content" made a day's size depend on what the athlete did that
+        // day. Rest days came out visibly smaller than runs.
+        Color.clear
+            .aspectRatio(1, contentMode: .fit)
+            .overlay {
+                VStack(spacing: Spacing.hairspace) {
+                    Text("\(day.date.day)")
+                        .font(.microLabel)
+                        .foregroundStyle(inkColor)
+                    Image(systemName: ScoreCalendarFormatting.systemImageName(for: day.state))
+                        .font(.microLabel)
+                        .foregroundStyle(inkColor)
+                        // Symbols vary in intrinsic width too, so a fixed square keeps
+                        // the glyph optically centred rather than nudging the number
+                        // off-axis on wider marks.
+                        .frame(width: glyphSize, height: glyphSize)
+                }
+            }
         // Not `.contentSurface(.tile)`: that fixes the fill to `.surfaceElevated`,
         // and this cell's fill is exactly the thing D4 asks it to carry — the score
         // band. `CornerRadius.tile` is reused anyway, matching `ContentSurface`'s own

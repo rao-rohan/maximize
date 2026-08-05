@@ -64,4 +64,13 @@ enum LayoutMetrics {
     /// vertical dimension of data to protect here, only a horizontal position, so the
     /// full chart height would just be empty space above and below the marker.
     static let compactChartHeight: CGFloat = 96
+
+    /// The box a calendar cell's state glyph is drawn in (FR-3.2, D4).
+    ///
+    /// Fixed rather than intrinsic because SF Symbols do not share a size: the day
+    /// states resolve to marks as different as `minus` and
+    /// `figure.run.square.stack`, and letting each one size itself made the grid
+    /// ragged — a rest day drew visibly smaller than a run. Squaring the box also
+    /// keeps a wide glyph from shifting the date above it off-centre.
+    static let calendarGlyphSize: CGFloat = 12
 }
