@@ -232,6 +232,17 @@ enum MaximizeSchemaV1: VersionedSchema {
         /// bump is what the *first* shape change after promotion has to buy; this one
         /// does not.
         var distanceSplitsJSON: Data?
+
+        /// MAX-067's backfill marker. Defaulted `false` — unlike every other Bool in this
+        /// file, deliberately not `true` — because that default is the entire migration:
+        /// existing rows gain this column as `false`, which is exactly the honest answer
+        /// for a row written before the split calculator existed. A row written by this
+        /// build always sets it explicitly through `StoredDerivedMetrics`, so the default
+        /// is only ever actually read on a pre-MAX-067 row. See
+        /// `DerivedMetrics.distanceSplitsComputed` for the full reasoning, and the note on
+        /// `distanceSplitsJSON` above for why a nullable/defaulted column is Core Data's
+        /// lightweight-migration case and does not need a schema version bump under A8.
+        var distanceSplitsComputed: Bool = false
         var planVersionNumber: Int = 1
 
         init(_ stored: StoredDerivedMetrics) {
@@ -244,6 +255,7 @@ enum MaximizeSchemaV1: VersionedSchema {
             gradeAdjustedPaceSecondsPerKilometer = stored.gradeAdjustedPaceSecondsPerKilometer
             zoneSplitsJSON = stored.zoneSplitsJSON
             distanceSplitsJSON = stored.distanceSplitsJSON
+            distanceSplitsComputed = stored.distanceSplitsComputed
             planVersionNumber = stored.planVersionNumber
         }
 
@@ -259,6 +271,7 @@ enum MaximizeSchemaV1: VersionedSchema {
                     gradeAdjustedPaceSecondsPerKilometer: gradeAdjustedPaceSecondsPerKilometer,
                     zoneSplitsJSON: zoneSplitsJSON,
                     distanceSplitsJSON: distanceSplitsJSON,
+                    distanceSplitsComputed: distanceSplitsComputed,
                     planVersionNumber: planVersionNumber
                 )
             }
@@ -272,6 +285,7 @@ enum MaximizeSchemaV1: VersionedSchema {
                 gradeAdjustedPaceSecondsPerKilometer = newValue.gradeAdjustedPaceSecondsPerKilometer
                 zoneSplitsJSON = newValue.zoneSplitsJSON
                 distanceSplitsJSON = newValue.distanceSplitsJSON
+                distanceSplitsComputed = newValue.distanceSplitsComputed
                 planVersionNumber = newValue.planVersionNumber
             }
         }

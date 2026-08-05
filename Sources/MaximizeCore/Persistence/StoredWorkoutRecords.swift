@@ -246,6 +246,16 @@ public struct StoredDerivedMetrics: Hashable, Sendable {
     /// groups by a split, and a row per split would be a dozen records per run to serve a
     /// query nobody intends to make (the same reasoning D7 applies to the HR series).
     public var distanceSplitsJSON: Data?
+
+    /// MAX-067's backfill marker — see `DerivedMetrics.distanceSplitsComputed` for what it
+    /// means and why `distanceSplitsJSON` alone cannot carry the answer.
+    ///
+    /// `false` rather than `true` is the safe default for a *stored* record specifically
+    /// because a row written before this column existed must read back as "never asked",
+    /// not "asked, and the answer was no splits" — the opposite of the throwing
+    /// initializer's default on `DerivedMetrics` itself, which is `true` because
+    /// hand-built and freshly-computed values have no such history to be honest about.
+    public var distanceSplitsComputed: Bool
     public var planVersionNumber: Int
 
     public init(
@@ -258,6 +268,7 @@ public struct StoredDerivedMetrics: Hashable, Sendable {
         gradeAdjustedPaceSecondsPerKilometer: Double?,
         zoneSplitsJSON: Data,
         distanceSplitsJSON: Data?,
+        distanceSplitsComputed: Bool,
         planVersionNumber: Int
     ) {
         self.workoutUUID = workoutUUID
@@ -269,6 +280,7 @@ public struct StoredDerivedMetrics: Hashable, Sendable {
         self.gradeAdjustedPaceSecondsPerKilometer = gradeAdjustedPaceSecondsPerKilometer
         self.zoneSplitsJSON = zoneSplitsJSON
         self.distanceSplitsJSON = distanceSplitsJSON
+        self.distanceSplitsComputed = distanceSplitsComputed
         self.planVersionNumber = planVersionNumber
     }
 
@@ -290,6 +302,7 @@ public struct StoredDerivedMetrics: Hashable, Sendable {
             gradeAdjustedPaceSecondsPerKilometer: metrics.gradeAdjustedPaceSecondsPerKilometer,
             zoneSplitsJSON: zoneSplitsJSON,
             distanceSplitsJSON: distanceSplitsJSON,
+            distanceSplitsComputed: metrics.distanceSplitsComputed,
             planVersionNumber: metrics.planVersion.number
         )
     }
@@ -315,6 +328,7 @@ public struct StoredDerivedMetrics: Hashable, Sendable {
                     field: "StoredDerivedMetrics.distanceSplitsJSON"
                 )
             },
+            distanceSplitsComputed: distanceSplitsComputed,
             planVersion: try PlanVersion(planVersionNumber)
         )
     }

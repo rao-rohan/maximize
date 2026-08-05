@@ -125,9 +125,33 @@ public struct DerivedMetrics: Hashable, Sendable, Codable, Identifiable {
     ///
     /// Nil means *this run has no breakdown*: an indoor run with no route, a workout with
     /// no recorded distance, a route too short or too far from the recorded distance to
-    /// cut up, or a workout whose metrics were computed before MAX-046 existed.
-    /// `DistanceSplitCalculator` documents each case. Never an empty `DistanceSplits`.
+    /// cut up, or a workout whose metrics were computed before MAX-046 existed and have
+    /// not yet been through MAX-067's backfill. `DistanceSplitCalculator` documents each
+    /// case that can produce nil once the calculator has actually run.
+    /// `distanceSplitsComputed` is what tells those apart.
     public let distanceSplits: DistanceSplits?
+
+    /// Whether `DistanceSplitCalculator` has ever run against this record, independent of
+    /// whether it found a breakdown to store (MAX-067).
+    ///
+    /// Before this flag existed, `distanceSplits == nil` meant two different things with
+    /// no way to tell them apart: "there is truly nothing to cut up" (no route, no
+    /// recorded distance, a track too implausible to trust) and "this record predates
+    /// MAX-046, and the split calculator has simply never been asked." That ambiguity is
+    /// exactly what stopped a backfill from falling out for free — without it, a sweep
+    /// cannot distinguish a workout it has already re-enriched and definitively found no
+    /// splits for from one it has never touched, and would either refetch a permanently
+    /// route-less workout's HealthKit samples forever or stop before ever reaching one
+    /// that genuinely could gain a breakdown.
+    ///
+    /// Defaults `true` because every in-memory construction of `DerivedMetrics` — the
+    /// calculator's own output (`DerivedMetricsCalculator.compute` always attempts the
+    /// split calculation, MAX-046 onward) and every test that builds one directly by hand
+    /// — is, by construction, already past the question this flag answers. `false` is
+    /// reached exactly one way: `StoredDerivedMetrics.toDomain()` reading a row written
+    /// before this column existed, where SwiftData's lightweight migration defaults it to
+    /// `false` for precisely that reason — see `DerivedMetricsRecord.distanceSplitsComputed`.
+    public let distanceSplitsComputed: Bool
 
     /// The plan version whose cap and zones these numbers were computed against.
     /// Without it, "time above cap" is a number with no stated cap, and a later plan
@@ -144,6 +168,7 @@ public struct DerivedMetrics: Hashable, Sendable, Codable, Identifiable {
         gradeAdjustedPaceSecondsPerKilometer: Double? = nil,
         zoneSplits: ZoneSplits = .empty,
         distanceSplits: DistanceSplits? = nil,
+        distanceSplitsComputed: Bool = true,
         planVersion: PlanVersion
     ) throws {
         try Validate.optionalWithin(averageHeartRateBPM, HeartRateSample.plausibleBPM, "DerivedMetrics.averageHeartRateBPM")
@@ -177,6 +202,7 @@ public struct DerivedMetrics: Hashable, Sendable, Codable, Identifiable {
         self.gradeAdjustedPaceSecondsPerKilometer = gradeAdjustedPaceSecondsPerKilometer
         self.zoneSplits = zoneSplits
         self.distanceSplits = distanceSplits
+        self.distanceSplitsComputed = distanceSplitsComputed
         self.planVersion = planVersion
     }
 
@@ -202,7 +228,8 @@ public struct DerivedMetrics: Hashable, Sendable, Codable, Identifiable {
     private enum CodingKeys: String, CodingKey {
         case workoutID, averageHeartRateBPM, maximumHeartRateBPM, timeAboveCapSeconds
         case heartRateDriftFraction, averageCadenceStepsPerMinute
-        case gradeAdjustedPaceSecondsPerKilometer, zoneSplits, distanceSplits, planVersion
+        case gradeAdjustedPaceSecondsPerKilometer, zoneSplits, distanceSplits
+        case distanceSplitsComputed, planVersion
     }
 
     public init(from decoder: any Decoder) throws {
@@ -224,6 +251,12 @@ public struct DerivedMetrics: Hashable, Sendable, Codable, Identifiable {
             // the honest reading of that is "no breakdown recorded", not a decode failure
             // that would lose every other metric on the run.
             distanceSplits: container.decodeIfPresent(DistanceSplits.self, forKey: .distanceSplits),
+            // A value encoded through this initializer's own `encode(to:)` always carries
+            // this key, so an absent key means data from outside that round trip —
+            // treated the same as the throwing initializer's default (see
+            // `distanceSplitsComputed`'s documentation for why `true` is the safe default
+            // for a hand-assembled or freshly-encoded value).
+            distanceSplitsComputed: container.decodeIfPresent(Bool.self, forKey: .distanceSplitsComputed) ?? true,
             planVersion: container.decode(PlanVersion.self, forKey: .planVersion)
         )
     }
