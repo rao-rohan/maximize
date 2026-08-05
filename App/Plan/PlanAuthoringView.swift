@@ -1,0 +1,419 @@
+import SwiftUI
+import MaximizeCore
+
+/// Authoring and revising the training plan (MAX-080).
+///
+/// ## What this screen is, and what it deliberately is not
+///
+/// It is the only way a `Plan` record comes into existence. Before it, nothing in the
+/// app called `PlanRepository.store(_:)`, so `planCalendar()` answered nil forever and
+/// every run ingested as `.noPlanAuthored` — captured, but with no derived metrics
+/// (they are measured against the plan's cap), therefore no score, therefore no chat.
+///
+/// It is **not** a rubric editor. The ordered band conditions of PRD §10.3 are carried
+/// forward from the version being revised, or seeded on a first plan; what is editable
+/// here is every value an athlete has a number in mind for — the HR cap, the cadence
+/// band, the two score thresholds, the weekly template, and the long-run arc. Editing
+/// band conditions needs a structured rule editor and is its own ticket.
+///
+/// ## Every control here writes a new version
+///
+/// D1: changing a threshold is a new plan version, never an edit. There is no "save
+/// changes" on the current plan, because that operation does not exist — `Plan`'s
+/// properties are `let`, `PlanDraft` cannot address a stored version, and the only door
+/// from draft to plan stamps the next version number. The save button says so, and
+/// after a save the screen is authoring the version after the one just written.
+///
+/// The view holds no plan logic. Every branch below reads a value `PlanAuthoringModel`
+/// already resolved from `PlanAuthoringSession`, which is where the decisions live and
+/// where CI can see them.
+struct PlanAuthoringView: View {
+    @State private var model: PlanAuthoringModel
+
+    /// - Parameters: forwarded to `PlanAuthoringModel`, which defaults them to
+    ///   `PersistenceComposition.store` — never to a stub. See that type's docs.
+    init(
+        planRepository: (any PlanRepository)? = nil,
+        settingsRepository: (any SettingsRepository)? = nil
+    ) {
+        _model = State(
+            initialValue: PlanAuthoringModel(
+                planRepository: planRepository,
+                settingsRepository: settingsRepository
+            )
+        )
+    }
+
+    var body: some View {
+        Form {
+            switch model.state {
+            case .loading:
+                ProgressView()
+            case .failed:
+                Section {
+                    quietText(
+                        "The plan store is unavailable right now, so a plan could not be "
+                            + "loaded and nothing written here would be saved."
+                    )
+                }
+            case let .editing(editing):
+                editingSections(editing)
+            }
+        }
+        .navigationTitle("Training plan")
+        .task { await model.load() }
+    }
+
+    /// Split into two groups only because `ViewBuilder` takes at most ten children and
+    /// this screen has exactly ten sections; nothing else distinguishes the halves.
+    @ViewBuilder
+    private func editingSections(_ editing: PlanAuthoringModel.Editing) -> some View {
+        Group {
+            statusSection(editing)
+            effectiveFromSection(editing)
+            capSection(editing)
+            cadenceSection(editing)
+            thresholdsSection(editing)
+        }
+        Group {
+            weekSection(editing)
+            arcSection(editing)
+            goalsSection(editing)
+            previewSection(editing)
+            saveSection(editing)
+        }
+    }
+
+    // MARK: - Where the plan stands
+
+    @ViewBuilder
+    private func statusSection(_ editing: PlanAuthoringModel.Editing) -> some View {
+        Section("Current plan") {
+            Text(PlanAuthoringFormatting.describe(editing.session.mode))
+            quietText(PlanAuthoringFormatting.explain(editing.session.mode))
+        }
+    }
+
+    // MARK: - When it takes effect
+
+    @ViewBuilder
+    private func effectiveFromSection(_ editing: PlanAuthoringModel.Editing) -> some View {
+        Section("Takes effect") {
+            // Two DatePickers rather than one with an optional bound: SwiftUI's ranged
+            // and unranged initialisers are different overloads, and a first plan is
+            // genuinely unbounded — it is the only version allowed to reach backwards,
+            // and doing so is how runs already on the device come under a plan.
+            if let earliest = model.earliestEffectiveFromDate {
+                DatePicker(
+                    "First day governed",
+                    selection: effectiveFromBinding,
+                    in: earliest...,
+                    displayedComponents: .date
+                )
+            } else {
+                DatePicker(
+                    "First day governed",
+                    selection: effectiveFromBinding,
+                    displayedComponents: .date
+                )
+            }
+
+            if editing.session.earliestEffectiveFrom != nil {
+                quietText(
+                    "A new version has to start after the current one. Earlier dates are not "
+                        + "offered, because a version that reached back would re-govern days "
+                        + "that have already been scored."
+                )
+            }
+        }
+    }
+
+    private var effectiveFromBinding: Binding<Date> {
+        Binding(
+            get: { model.effectiveFromDate ?? Date() },
+            set: { model.setEffectiveFrom(date: $0) }
+        )
+    }
+
+    // MARK: - The tunable numbers
+
+    @ViewBuilder
+    private func capSection(_ editing: PlanAuthoringModel.Editing) -> some View {
+        Section("Easy-run heart-rate cap") {
+            Stepper(
+                value: Binding(
+                    get: { editing.draft.heartRateCapBPM },
+                    set: { value in model.edit { $0.heartRateCapBPM = value } }
+                ),
+                in: 100...220,
+                step: 1
+            ) {
+                row("Cap", "\(Int(editing.draft.heartRateCapBPM)) bpm")
+            }
+
+            quietText(
+                "Drawn on every HR curve, and the anchor the rubric's bands are written "
+                    + "against — moving it moves them with it."
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func cadenceSection(_ editing: PlanAuthoringModel.Editing) -> some View {
+        Section("Cadence target") {
+            Stepper(
+                value: Binding(
+                    get: { editing.draft.cadenceLowStepsPerMinute },
+                    set: { value in model.edit { $0.cadenceLowStepsPerMinute = value } }
+                ),
+                in: 120...220,
+                step: 1
+            ) {
+                row("Lower", "\(Int(editing.draft.cadenceLowStepsPerMinute)) spm")
+            }
+
+            Stepper(
+                value: Binding(
+                    get: { editing.draft.cadenceHighStepsPerMinute },
+                    set: { value in model.edit { $0.cadenceHighStepsPerMinute = value } }
+                ),
+                in: 120...220,
+                step: 1
+            ) {
+                row("Upper", "\(Int(editing.draft.cadenceHighStepsPerMinute)) spm")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func thresholdsSection(_ editing: PlanAuthoringModel.Editing) -> some View {
+        Section("Score thresholds") {
+            Stepper(
+                value: Binding(
+                    get: { editing.draft.effectiveThresholdPoints },
+                    set: { value in model.edit { $0.effectiveThresholdPoints = value } }
+                ),
+                in: ScoreValue.permittedRange,
+                step: 1
+            ) {
+                row("Effective at", "\(editing.draft.effectiveThresholdPoints)")
+            }
+
+            Stepper(
+                value: Binding(
+                    get: { editing.draft.marginalThresholdPoints },
+                    set: { value in model.edit { $0.marginalThresholdPoints = value } }
+                ),
+                in: ScoreValue.permittedRange,
+                step: 1
+            ) {
+                row("Marginal at", "\(editing.draft.marginalThresholdPoints)")
+            }
+
+            quietText("The two cut points behind the calendar's green, amber and red.")
+        }
+    }
+
+    // MARK: - The recurring week
+
+    @ViewBuilder
+    private func weekSection(_ editing: PlanAuthoringModel.Editing) -> some View {
+        Section("Weekly template") {
+            ForEach(editing.draft.week) { day in
+                VStack(alignment: .leading, spacing: Spacing.tight) {
+                    Picker(
+                        PlanAuthoringFormatting.describe(day.weekday),
+                        selection: Binding(
+                            get: { day.kind },
+                            set: { kind in model.edit { $0.setKind(kind, on: day.weekday) } }
+                        )
+                    ) {
+                        ForEach(ScheduledSessionKind.allCases, id: \.self) { kind in
+                            Text(PlanAuthoringFormatting.describe(kind)).tag(kind)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    if day.kind != .rest {
+                        Stepper(
+                            value: distanceBinding(for: day.weekday, meters: day.distanceMeters),
+                            in: distanceRange(editing.distanceUnit, from: 0, to: 60),
+                            step: editing.distanceUnit.meters(fromConverted: 0.5)
+                        ) {
+                            row(
+                                "Distance",
+                                day.distanceMeters.map {
+                                    PlanAuthoringFormatting.distance($0, unit: editing.distanceUnit)
+                                } ?? "None"
+                            )
+                        }
+                    }
+                }
+            }
+
+            quietText(
+                "A long run's distance comes from the arc below for the week it falls in; "
+                    + "the distance set here is only used once the arc has run out."
+            )
+        }
+    }
+
+    /// Steps in the athlete's own unit, stored in metres. Zero reads as "no prescribed
+    /// distance" rather than as a distance of zero, which `ScheduledSession` rejects —
+    /// a hard session described only by a note is a real thing the plan can say.
+    private func distanceBinding(for weekday: Weekday, meters: Double?) -> Binding<Double> {
+        Binding(
+            get: { meters ?? 0 },
+            set: { value in
+                model.edit { $0.setDistanceMeters(value <= 0 ? nil : value, on: weekday) }
+            }
+        )
+    }
+
+    // MARK: - The long-run arc
+
+    @ViewBuilder
+    private func arcSection(_ editing: PlanAuthoringModel.Editing) -> some View {
+        Section("Long-run arc") {
+            ForEach(editing.draft.longRunArc) { week in
+                Stepper(
+                    value: Binding(
+                        get: { week.distanceMeters },
+                        set: { value in
+                            model.edit { $0.setLongRunDistanceMeters(value, forWeek: week.index) }
+                        }
+                    ),
+                    in: distanceRange(editing.distanceUnit, from: 1, to: 60),
+                    step: editing.distanceUnit.meters(fromConverted: 0.5)
+                ) {
+                    row(
+                        "Week \(week.index)",
+                        PlanAuthoringFormatting.distance(
+                            week.distanceMeters,
+                            unit: editing.distanceUnit
+                        )
+                    )
+                }
+            }
+
+            Button("Add a week") { model.edit { $0.appendLongRunWeek() } }
+
+            Button("Remove the last week", role: .destructive) {
+                model.edit { $0.removeLastLongRunWeek() }
+            }
+            .disabled(editing.draft.longRunArc.count <= 1)
+
+            quietText(
+                "Weeks are counted from the Monday on or before the date above. When the arc "
+                    + "runs out, that is the moment to author the next version."
+            )
+        }
+    }
+
+    // MARK: - Goals
+
+    @ViewBuilder
+    private func goalsSection(_ editing: PlanAuthoringModel.Editing) -> some View {
+        Section("Goals") {
+            TextField(
+                "One per line",
+                text: Binding(
+                    get: { editing.draft.goalStatements },
+                    set: { value in model.edit { $0.goalStatements = value } }
+                ),
+                axis: .vertical
+            )
+            .lineLimit(2...5)
+
+            Toggle(
+                "Has a target date",
+                isOn: Binding(
+                    get: { editing.draft.goalTargetDay != nil },
+                    set: { isOn in
+                        model.edit { $0.goalTargetDay = isOn ? editing.effectiveFrom : nil }
+                    }
+                )
+            )
+
+            quietText("Narrative context for the scorer and for chat; nothing branches on it.")
+        }
+    }
+
+    // MARK: - What it would govern
+
+    @ViewBuilder
+    private func previewSection(_ editing: PlanAuthoringModel.Editing) -> some View {
+        Section("The first week this version governs") {
+            if editing.governedDays.isEmpty {
+                quietText("Not available until the values above are valid.")
+            } else {
+                ForEach(editing.governedDays) { planDay in
+                    row(
+                        planDay.date.description,
+                        PlanAuthoringFormatting.describeSession(
+                            planDay.scheduledSession,
+                            unit: editing.distanceUnit
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    // MARK: - Saving
+
+    @ViewBuilder
+    private func saveSection(_ editing: PlanAuthoringModel.Editing) -> some View {
+        Section {
+            Button("Save as plan \(editing.session.version.description)") {
+                Task { await model.save() }
+            }
+            .disabled(!editing.canSave || model.isSaving)
+
+            if let problem = editing.problem {
+                Text(problem)
+                    .font(.metricLabel)
+                    .foregroundStyle(Color.scoreIneffective)
+            }
+
+            if let confirmation = editing.confirmation {
+                quietText(confirmation)
+            }
+        } footer: {
+            Text(
+                "Saving never changes an existing version. Scores already recorded keep the "
+                    + "version they were made under."
+            )
+        }
+    }
+
+    // MARK: - Small shared pieces
+
+    private func row(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label)
+            Spacer()
+            Text(value)
+                .foregroundStyle(Color.textSecondary)
+        }
+    }
+
+    /// A stepper's bounds, expressed in the athlete's unit and converted once.
+    ///
+    /// A local rather than an inline `a...b`: written inline the range operator would
+    /// have to wrap across a line, where a leading `...` parses as the *prefix*
+    /// operator and means something else entirely.
+    private func distanceRange(
+        _ unit: DistanceUnit,
+        from lower: Double,
+        to upper: Double
+    ) -> ClosedRange<Double> {
+        unit.meters(fromConverted: lower)...unit.meters(fromConverted: upper)
+    }
+
+    private func quietText(_ copy: String) -> some View {
+        Text(copy)
+            .font(.metricLabel)
+            .foregroundStyle(Color.textSecondary)
+    }
+}
