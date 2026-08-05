@@ -131,6 +131,15 @@ Two adjustments worth making deliberately:
 Send as many agents as are genuinely independent, in the same turn. Independence means:
 no dependency between them, and no shared file.
 
+**Give every agent its own worktree.** Parallel agents sharing one checkout is not a
+slow-burn problem, it is immediate corruption: each one runs `git checkout -b` on the same
+HEAD, so the second agent's branch switch silently strands the first agent's uncommitted
+work, and commits land on whichever branch happens to be checked out at the time. The
+symptom you notice first is unrelated files reverting under you. If you catch it, stop all
+of them, discard the partial work, and re-dispatch in isolation — a few wasted minutes
+beats untangling four interleaved histories. Verify the isolation on the first dispatch of
+a batch rather than assuming it.
+
 ### The brief
 
 An agent brief is a contract, and every one of these earns its place:
