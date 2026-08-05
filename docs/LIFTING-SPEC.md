@@ -81,7 +81,7 @@ urgent shape of job. Second, **there is a live wrong-answer path with no floor o
 condition, only `averageHeartRateBPM > cap + 8`. A hard lifting session on a day the plan
 scheduled as an easy run therefore matches it and is permanently recorded as **20–45,
 "Well above the easy cap for the whole run."** That is not a hypothetical about a future
-feature; it is a defect in merged code, and §14's MAX-114 fixes the seed while §11.4 raises
+feature; it is a defect in merged code, and §14's MAX-132 fixes the seed while §11.4 raises
 what to do about the scores already written.
 
 ### 1.1 Classification — the brief's reading is wrong, and the truth is better
@@ -279,7 +279,7 @@ makes a missed lift a missed lift rather than a missed something.
 > before and after.
 
 That is the whole D1 argument for this change, and it is worth writing as an acceptance
-criterion rather than an assumption: **MAX-111 must carry a test that a `Plan` encoded
+criterion rather than an assumption: **MAX-129 must carry a test that a `Plan` encoded
 before this change round-trips to a plan whose every lift slot is rest, and that
 `RubricEvaluator` produces the identical band for the identical workout under both.**
 
@@ -292,14 +292,14 @@ switch, which is the point. The switches the compiler will find:
 
 `RestDayBudgeting.costTier` · `ScheduledSessionKind.init(_:)` ·
 `WeeklyTemplate.scheduledRunCount` · `WorkoutClassification.driftIsMeaningful` (a
-`==` chain, so it silently answers `false` for `.lift`, which is correct — but MAX-110
+`==` chain, so it silently answers `false` for `.lift`, which is correct — but MAX-128
 should convert it to a switch so the *next* case is not silently answered) ·
 `ScoreCalendarFormatting`'s glyph tables · `PlanAuthoringFormatting`'s pickers.
 
 **One ordering trap.** `costTier` returns an ordinal, and rest-day conversion outcomes
 depend on the *relative* order. Inserting `.lift` anywhere without reordering the existing
 cases leaves every existing comparison unchanged, so no historical day converts differently.
-Reordering the existing cases would silently rewrite the calendar's past. MAX-110's brief
+Reordering the existing cases would silently rewrite the calendar's past. MAX-128's brief
 must say so.
 
 Recommended tier for `.lift`: **between `.easy` and `.hard`**. A missed lift costs the
@@ -411,7 +411,7 @@ touched):
 | `RubricCondition` += `.discipline(oneOf: [Discipline])` | So a band can say "this is a lift" without going through `WorkoutClassification`. Also the belt-and-braces that would have prevented `easy.wellOverCap` from ever matching a lift |
 | `RubricReference` += `.scheduledDuration(fraction:)`, and `ScheduledSession` gains `durationSeconds` | A lift is prescribed in minutes, not metres. **This closes tracker gap P3** ("`Plan` records no durations at all"), which MAX-013 reported and nobody has picked up |
 
-That P3 closure is a genuine side benefit and MAX-113 should be told to take it
+That P3 closure is a genuine side benefit and MAX-131 should be told to take it
 deliberately rather than half of it.
 
 ---
@@ -546,7 +546,7 @@ And the property that makes this safe to land:
 > **On any day prescribing at most one session, per-obligation counting and per-day counting
 > produce identical numbers.** Every day in the athlete's history prescribes at most one
 > session, because there is only one slot. So **no historical figure moves.** That is an
-> acceptance criterion for MAX-116, not a hope: the ticket must carry a fixture suite of
+> acceptance criterion for MAX-134, not a hope: the ticket must carry a fixture suite of
 > single-discipline days asserting byte-identical tallies before and after.
 
 The type's *name* is now wrong, and renaming it is part of the ticket —
@@ -666,7 +666,7 @@ needs a roll-up. Both are the same fact viewed at two resolutions, and A12's rul
 > `ScoreCalendar` computes "was this day fully met" one way and `TalliesCalculator` computes
 > it another, the calendar and the effective-days tile will disagree about the same Tuesday
 > — which is D2's drift with a colour attached. The shared resolver is an acceptance
-> criterion of MAX-116 and a dependency of MAX-117.
+> criterion of MAX-134 and a dependency of MAX-135.
 
 ### 7.4 The hard collision with MAX-105
 
@@ -674,9 +674,9 @@ MAX-105 is unstarted, Opus, and about to design a cell that draws the day's pres
 substrate. **If it lands assuming one prescription per day, this spec's §2 invalidates its
 central visual.** Two options, and the overseer must pick before dispatching either:
 
-- **(a) MAX-105 waits for MAX-111** and is briefed with the two-slot prescription from the
+- **(a) MAX-105 waits for MAX-129** and is briefed with the two-slot prescription from the
   start. Costs schedule; produces one design.
-- **(b) MAX-105 ships against the single-slot model** and MAX-117 revises it. Costs a
+- **(b) MAX-105 ships against the single-slot model** and MAX-135 revises it. Costs a
   redesign of the hardest visual in the app, twice.
 
 **Recommendation: (a).** It is the difference between one hard design problem and the same
@@ -699,7 +699,7 @@ and **I could not check it against an SDK from this container.**
 active energy burned, the per-sample heart-rate series, and (uselessly) step count. The
 activity types are `.traditionalStrengthTraining` and `.functionalStrengthTraining`; the
 app already maps the first and drops the second into `.other` (a one-line fix, §14's
-MAX-110). No route, no distance.
+MAX-128). No route, no distance.
 
 **High confidence — HealthKit has no representation of sets, repetitions, or external
 load.** There is no `HKQuantityTypeIdentifier` for weight lifted or reps. watchOS's own
@@ -713,7 +713,7 @@ and nothing about what was in them. Whether reading them is worth the adapter is
 question.
 
 **Unknown:** whether iOS 26 added anything here. My knowledge cuts off in May 2026 and this
-container has no SDK to check. **The first thing MAX-112's agent should do is check the
+container has no SDK to check. **The first thing MAX-130's agent should do is check the
 current `HKQuantityTypeIdentifier` list for a strength-relevant addition**, and say in the
 PR what it found. If Apple has shipped one, §8.3's conclusion changes and this section
 should be re-read.
@@ -826,7 +826,7 @@ else that also lands in `other`.
 
 > **Decision: both `ScheduledSessionKind` and `WorkoutClassification` gain `.lift`.**
 > `driftIsMeaningful` stays false for it (it already is, being neither `.easy` nor
-> `.long`, but MAX-110 should make that a switch rather than an `==` chain so the next case
+> `.long`, but MAX-128 should make that a switch rather than an `==` chain so the next case
 > added is not answered silently).
 
 `ScheduledSessionKind.init(_ classification:)` maps `.lift → .lift`, and `.other` keeps
@@ -931,7 +931,7 @@ The options, none of which I am taking:
 
 **My lean is option 2**, and I want to be clear that it is a lean: it is cheap, it changes
 no stored record, and it makes the wrongness legible rather than resolved. But this is the
-owner's or overseer's call, not a ticket's, and §14 files it as MAX-125 with no code in it.
+owner's or overseer's call, not a ticket's, and §14 files it as MAX-143 with no code in it.
 
 ### 11.5 D4 and D9 — refined, and the refinement is on the record
 
@@ -1005,22 +1005,22 @@ marks a file two tickets both touch. 🔒 = `/security-review` before merge, per
 
 | # | Ticket | Scope, one line | Files | Depends on | Tier |
 |---|---|---|---|---|---|
-| **MAX-110** | `Discipline`, and `.lift` on both enums | The closed two-case vocabulary; `.lift` on `ScheduledSessionKind` and `WorkoutClassification`; `ActivityType.discipline`; map `.functionalStrengthTraining`; the compiler-visible switch sweep **without reordering `costTier`** | new `Domain/Discipline.swift`; ⚠️ `Domain/ScheduledSession.swift`, ⚠️ `Domain/Workout.swift`, ⚠️ `Domain/RestDayBudgeting.swift`, `App/HealthKitWorkoutFetcher.swift`, `App/Dashboard/ScoreCalendarFormatting.swift`, `App/Plan/PlanAuthoringFormatting.swift`, tests | — | **Opus** |
-| **MAX-111** | The per-discipline prescription | `WeeklyTemplate` gains the lift slot; `PlanDay.scheduledSession(for:)`; `PlanCalendar` resolution; **the `decodeIfPresent` no-op test is an acceptance criterion** | ⚠️ `Domain/Plan.swift`, `Domain/PlanCalendar.swift`, ⚠️ `Domain/ScheduledSession.swift`, `Persistence/StoredPlanRecords.swift`, tests | 110 | **Opus** |
-| **MAX-112** | Discipline-gated derived metrics | Stop computing cadence / GAP / splits for a lift; decide time-above-cap and zone splits per §3.3; new optional lift fields + schema columns | `Metrics/DerivedMetricsCalculator.swift`, ⚠️ `Domain/DerivedMetrics.swift`, `Persistence/StoredWorkoutRecords.swift`, ⚠️ `App/Persistence/MaximizeSchema.swift` | 110 | **Opus** |
-| **MAX-113** | Rubric vocabulary for lifts | `RubricMetric` += energy; `RubricCondition` += `.discipline`; `RubricReference` += `.scheduledDuration`; `ScheduledSession.durationSeconds` — **closes tracker gap P3** | `Domain/ScoringRubric.swift`, ⚠️ `Domain/ScheduledSession.swift`, ⚠️ `Domain/DerivedMetrics.swift` (`value(for:)`) | 110 | **Opus** |
-| **MAX-114** | Seed bands for lift days, and the `easy.wellOverCap` shadow | Adherence bands for `.lift`; add the missing `.actualClassification` guard to `easy.wellOverCap`. **Must state in the PR that fixing the seed does not fix a stored plan** | `Plan/StandardPlanSeed.swift`, tests | 113 | Sonnet |
-| **MAX-115** | Match a workout to its own discipline's ask | `RubricEvaluator` resolves the session by discipline; `WorkoutScorer`'s guards follow | `Scoring/RubricEvaluation.swift`, `Scoring/WorkoutScorer.swift` | 111, 113 | **Opus** |
-| **MAX-116** | Obligations, not days | Tallies, streak and rest-day budget count obligations; **the shared day-roll-up resolver §7.3 requires**; byte-identical fixtures for single-discipline history | `Tallies/TalliesCalculator.swift`, `Domain/Tallies.swift`, ⚠️ `Domain/RestDayBudgeting.swift` | 111, 115 | **Opus** |
-| **MAX-117** | The calendar's mixed day | `ScoreCalendarDayState` gains the partially-met case; the roll-up reads MAX-116's resolver, never its own | ⚠️ `Dashboard/ScoreCalendar.swift`, `App/Dashboard/ScoreCalendarFormatting.swift`, `App/Dashboard/ScoreCalendarView.swift` | 116, **MAX-105** | **Opus** — needs device |
-| **MAX-118** | Context and fact sheet learn discipline | The lift branch of `factSheet()`; the builder selects the day's lift session; no cap/cadence/pace headings on a lift | `Context/WorkoutFactSheet.swift`, `Context/WorkoutContext.swift`, `Context/WorkoutContextBuilder.swift` | 111, 112 | **Opus** 🔒 |
-| **MAX-119** | Plan authoring for two slots | `PlanDraft` gains the lift week; the authoring screen gets a second row set without becoming unusable | `Plan/PlanDraft.swift`, `Plan/PlanAuthoring.swift`, ⚠️ `App/Plan/PlanAuthoringModel.swift`, ⚠️ `App/Plan/PlanAuthoringView.swift`, `App/Plan/PlanAuthoringFormatting.swift` | 111 | Sonnet — needs device |
-| **MAX-120** | The plan screen shows both | `PlanDisplayData` carries the lift week; the read-only screen renders it; the rest-day budget caption says what it now counts | `Plan/PlanDisplayData.swift`, ⚠️ `App/Plan/PlanView.swift`, `App/Plan/PlanDetailSections.swift`, `App/Plan/PlanFormatting.swift` | 111 | Sonnet |
-| **MAX-121** | Workout detail for a lift | No cadence band, no route, no splits, no cap line — and what stands in their place; verdict header reads the lift ask | `Metrics/SummaryTileData.swift`, `Domain/WorkoutVerdict.swift`, `App/Workouts/WorkoutDetailView.swift`, `App/Workouts/VerdictHeaderView.swift`, `App/Workouts/SummaryTilesView.swift` | 112, 115 | Sonnet — needs device |
-| **MAX-122** | Trend tiles, honestly | Effective-days caption says sessions; "days run" caption fixed; decide whether average score is per-workout or per-obligation | `Metrics/TrendTileData.swift`, `App/Dashboard/TrendTilesView.swift` | 116 | Sonnet |
-| **MAX-123** | `PlanProposal` covers lift days | The proposal type and its generated schema description gain the lift slot; the enum-coverage test catches it automatically | `Plan/PlanProposal.swift` (from MAX-099) | 111, **MAX-099** | Sonnet 🔒 |
-| **MAX-124** | `TrainingContext` is per-session, not per-run | MAX-095's roll-up gains discipline; the plan block carries the lift week; the bound counts sessions | `Context/TrainingContext.swift` (from MAX-095) | 111, **MAX-095** | **Opus** 🔒 |
-| **MAX-125** | **Decide what to do with lifts already scored as runs** | §11.4's escalation. No code until it is decided; my lean is the label | — (then a string + a test) | 110 | Owner / overseer |
+| **MAX-128** | `Discipline`, and `.lift` on both enums | The closed two-case vocabulary; `.lift` on `ScheduledSessionKind` and `WorkoutClassification`; `ActivityType.discipline`; map `.functionalStrengthTraining`; the compiler-visible switch sweep **without reordering `costTier`** | new `Domain/Discipline.swift`; ⚠️ `Domain/ScheduledSession.swift`, ⚠️ `Domain/Workout.swift`, ⚠️ `Domain/RestDayBudgeting.swift`, `App/HealthKitWorkoutFetcher.swift`, `App/Dashboard/ScoreCalendarFormatting.swift`, `App/Plan/PlanAuthoringFormatting.swift`, tests | — | **Opus** |
+| **MAX-129** | The per-discipline prescription | `WeeklyTemplate` gains the lift slot; `PlanDay.scheduledSession(for:)`; `PlanCalendar` resolution; **the `decodeIfPresent` no-op test is an acceptance criterion** | ⚠️ `Domain/Plan.swift`, `Domain/PlanCalendar.swift`, ⚠️ `Domain/ScheduledSession.swift`, `Persistence/StoredPlanRecords.swift`, tests | 110 | **Opus** |
+| **MAX-130** | Discipline-gated derived metrics | Stop computing cadence / GAP / splits for a lift; decide time-above-cap and zone splits per §3.3; new optional lift fields + schema columns | `Metrics/DerivedMetricsCalculator.swift`, ⚠️ `Domain/DerivedMetrics.swift`, `Persistence/StoredWorkoutRecords.swift`, ⚠️ `App/Persistence/MaximizeSchema.swift` | 110 | **Opus** |
+| **MAX-131** | Rubric vocabulary for lifts | `RubricMetric` += energy; `RubricCondition` += `.discipline`; `RubricReference` += `.scheduledDuration`; `ScheduledSession.durationSeconds` — **closes tracker gap P3** | `Domain/ScoringRubric.swift`, ⚠️ `Domain/ScheduledSession.swift`, ⚠️ `Domain/DerivedMetrics.swift` (`value(for:)`) | 110 | **Opus** |
+| **MAX-132** | Seed bands for lift days, and the `easy.wellOverCap` shadow | Adherence bands for `.lift`; add the missing `.actualClassification` guard to `easy.wellOverCap`. **Must state in the PR that fixing the seed does not fix a stored plan** | `Plan/StandardPlanSeed.swift`, tests | 113 | Sonnet |
+| **MAX-133** | Match a workout to its own discipline's ask | `RubricEvaluator` resolves the session by discipline; `WorkoutScorer`'s guards follow | `Scoring/RubricEvaluation.swift`, `Scoring/WorkoutScorer.swift` | 111, 113 | **Opus** |
+| **MAX-134** | Obligations, not days | Tallies, streak and rest-day budget count obligations; **the shared day-roll-up resolver §7.3 requires**; byte-identical fixtures for single-discipline history | `Tallies/TalliesCalculator.swift`, `Domain/Tallies.swift`, ⚠️ `Domain/RestDayBudgeting.swift` | 111, 115 | **Opus** |
+| **MAX-135** | The calendar's mixed day | `ScoreCalendarDayState` gains the partially-met case; the roll-up reads MAX-134's resolver, never its own | ⚠️ `Dashboard/ScoreCalendar.swift`, `App/Dashboard/ScoreCalendarFormatting.swift`, `App/Dashboard/ScoreCalendarView.swift` | 116, **MAX-105** | **Opus** — needs device |
+| **MAX-136** | Context and fact sheet learn discipline | The lift branch of `factSheet()`; the builder selects the day's lift session; no cap/cadence/pace headings on a lift | `Context/WorkoutFactSheet.swift`, `Context/WorkoutContext.swift`, `Context/WorkoutContextBuilder.swift` | 111, 112 | **Opus** 🔒 |
+| **MAX-137** | Plan authoring for two slots | `PlanDraft` gains the lift week; the authoring screen gets a second row set without becoming unusable | `Plan/PlanDraft.swift`, `Plan/PlanAuthoring.swift`, ⚠️ `App/Plan/PlanAuthoringModel.swift`, ⚠️ `App/Plan/PlanAuthoringView.swift`, `App/Plan/PlanAuthoringFormatting.swift` | 111 | Sonnet — needs device |
+| **MAX-138** | The plan screen shows both | `PlanDisplayData` carries the lift week; the read-only screen renders it; the rest-day budget caption says what it now counts | `Plan/PlanDisplayData.swift`, ⚠️ `App/Plan/PlanView.swift`, `App/Plan/PlanDetailSections.swift`, `App/Plan/PlanFormatting.swift` | 111 | Sonnet |
+| **MAX-139** | Workout detail for a lift | No cadence band, no route, no splits, no cap line — and what stands in their place; verdict header reads the lift ask | `Metrics/SummaryTileData.swift`, `Domain/WorkoutVerdict.swift`, `App/Workouts/WorkoutDetailView.swift`, `App/Workouts/VerdictHeaderView.swift`, `App/Workouts/SummaryTilesView.swift` | 112, 115 | Sonnet — needs device |
+| **MAX-140** | Trend tiles, honestly | Effective-days caption says sessions; "days run" caption fixed; decide whether average score is per-workout or per-obligation | `Metrics/TrendTileData.swift`, `App/Dashboard/TrendTilesView.swift` | 116 | Sonnet |
+| **MAX-141** | `PlanProposal` covers lift days | The proposal type and its generated schema description gain the lift slot; the enum-coverage test catches it automatically | `Plan/PlanProposal.swift` (from MAX-099) | 111, **MAX-099** | Sonnet 🔒 |
+| **MAX-142** | `TrainingContext` is per-session, not per-run | MAX-095's roll-up gains discipline; the plan block carries the lift week; the bound counts sessions | `Context/TrainingContext.swift` (from MAX-095) | 111, **MAX-095** | **Opus** 🔒 |
+| **MAX-143** | **Decide what to do with lifts already scored as runs** | §11.4's escalation. No code until it is decided; my lean is the label | — (then a string + a test) | 110 | Owner / overseer |
 
 **110–116 and 118 are core-only and CI-verifiable end to end. 117 and 119–122 are
 App-layer, which CI compiles and never executes** (tracker R13) — every one of those PRs
@@ -1028,13 +1028,13 @@ needs a *Needs device verification* list.
 
 ### Collisions, called out
 
-- **MAX-105 must land before MAX-117, and must be briefed with §2's two-slot prescription
+- **MAX-105 must land before MAX-135, and must be briefed with §2's two-slot prescription
   before it is dispatched at all.** This is the most expensive collision in the set: MAX-105
   is designing the calendar cell's substrate right now, and a one-prescription substrate is
   the wrong design. See §7.4 for the two options and why (a) wins.
 - **MAX-095 must be briefed with §10.2 before it is written.** Its "one line per run"
   roll-up becomes "one line per session". Colliding before it exists costs a paragraph;
-  colliding after costs a rewrite of an Opus 🔒 ticket. MAX-124 exists only if 095 lands
+  colliding after costs a rewrite of an Opus 🔒 ticket. MAX-142 exists only if 095 lands
   first and unbriefed.
 - **`Domain/ScheduledSession.swift` is touched by 110, 111 and 113.** Strictly sequence
   them; they are already in dependency order.
@@ -1046,7 +1046,7 @@ needs a *Needs device verification* list.
   ordering the chat-first spec used for 101/102.
 - **MAX-104 (copy and absence voice, app-wide) must run after 117–122**, or it will do the
   pass twice. Its brief already says it absorbs MAX-086's half; it should absorb the lifting
-  surfaces too rather than a MAX-124-style follow-up existing.
+  surfaces too rather than a MAX-142-style follow-up existing.
 - **Every agent branch rebases onto `main` before its PR opens**, per the tracker's MAX-012
   process note.
 
@@ -1060,7 +1060,7 @@ after 111** (120 first). **121 and 122 are last** and parallelise freely. **123 
 depend on chat-first tickets that are not merged and should be folded into those tickets'
 briefs rather than dispatched separately if they have not started.
 
-**MAX-125 is a conversation, not a ticket**, and it should happen before 117 — because
+**MAX-143 is a conversation, not a ticket**, and it should happen before 117 — because
 whether a historically-mis-scored day is labelled changes what the calendar has to draw.
 
 ---
@@ -1069,15 +1069,15 @@ whether a historically-mis-scored day is labelled changes what the calendar has 
 
 | # | Question | Who should decide | My lean |
 |---|---|---|---|
-| 1 | **Whether iOS 26's HealthKit added any strength-relevant quantity type.** The whole of §8 turns on the answer | Whoever builds MAX-112, against a real SDK | Check it first and say what you found in the PR. If it exists, §8.3 is re-opened, not worked around |
+| 1 | **Whether iOS 26's HealthKit added any strength-relevant quantity type.** The whole of §8 turns on the answer | Whoever builds MAX-130, against a real SDK | Check it first and say what you found in the PR. If it exists, §8.3 is re-opened, not worked around |
 | 2 | **Whether a lift should carry time-above-cap and zone splits at all** (§3.3) | Owner | Zone splits yes, time-above-cap no. Held loosely — "neither" is defensible |
 | 3 | **Where `.lift` sits in `RestDayBudgeting.costTier`** (§2.4) | Owner — it is a training judgement | Between `.easy` and `.hard`. I have no standing here |
 | 4 | **Whether the effective-days tile should split into two** (a run rate and a lift rate) rather than one obligation rate (§6.5) | Owner | One rate. Two tiles answers as two questions what was asked as one — but this is taste and the dashboard has room |
-| 5 | **Whether the mixed calendar cell reads at all**, and what it should look like | MAX-105 / MAX-117, on a device | Not specifiable from here. §7.2 hands over a *state*, not a drawing, on purpose |
+| 5 | **Whether the mixed calendar cell reads at all**, and what it should look like | MAX-105 / MAX-135, on a device | Not specifiable from here. §7.2 hands over a *state*, not a drawing, on purpose |
 | 6 | **What a lifting session's heart-rate curve actually looks like** on this athlete's watch, and whether a set-count heuristic would work | Later, with data | Defer (§9.2). Compute it, show it, ask the athlete, *then* consider a rubric band |
 | 7 | **Whether the scores already written for lifts are labelled, left, or excepted from D8** (§11.4) | **Overseer / owner — this is the escalation** | Label them. But it is a decision about an invariant and a ticket must not make it |
 | 8 | **Whether the whole thing should be scoped to §12's smaller version** (discipline index + metric gating only, no tally change) | Owner | Ship the full version. The smaller one fixes the wrong scoring but leaves lifting costless, which is the half the ask is actually about |
-| 9 | **What the plan screen should say the rest-day budget now counts** (§6.4) | MAX-120, with copy from MAX-104 | One line under the setting. The number's meaning changed for two-discipline weeks and silence about it is the MAX-047 defect in a new place |
+| 9 | **What the plan screen should say the rest-day budget now counts** (§6.4) | MAX-138, with copy from MAX-104 | One line under the setting. The number's meaning changed for two-discipline weeks and silence about it is the MAX-047 defect in a new place |
 
 And one thing explicitly *not* left open: **nothing in this design requires moving D1, D2,
 D3 or D8.** D4 and D9 are refined and recorded (A19). The single escalation is §11.4, and
