@@ -495,9 +495,10 @@ feature was governed by a plan that could not exist).
 | MAX-082 | Design review of the whole app | Device report | **Opus** ✅ |
 | MAX-083 | Week / month / year intervals, each with a fitting representation | Owner | **Opus** ✅ |
 | MAX-084 | Fix score-band and chart contrast; resolve A7 | MAX-082 | Sonnet ✅ |
-| MAX-085 | Surface elevation, `.tint()` adoption, Liquid Glass chrome | MAX-082 | Sonnet |
+| MAX-085 | **The tab bar, once**: Plan becomes a third tab, iOS 26 `Tab` builder, `.tint()`, surface elevation, Liquid Glass chrome | MAX-082, Owner | **Opus** |
 | MAX-086 | Absence-string voice; wire `AppearancePreference` | MAX-082 | Haiku |
 | MAX-087 | A non-hue channel for the year heatmap's 6pt cells | MAX-084 | Sonnet |
+| MAX-105 | **The plan on the dashboard calendar** — scheduled beneath actual | Owner | **Opus** |
 | MAX-090 | Chat-first product spec: plan generation and Q&A through chat | Owner | **Opus** 🔒 ✅ |
 | MAX-091 | Run both Claude clients on the Sonnet tier at `medium` effort | Owner, cost | Sonnet 🔒 ✅ |
 | MAX-092 … MAX-104 | The chat-first build, decomposed from MAX-090 | MAX-090 | see below |
@@ -541,6 +542,51 @@ while streaming, which silently resigned focus and dropped the keyboard on every
 Chat moved to its own sheet with the composer as a bottom `safeAreaInset`. **None of it
 is verified** — CI has no simulator and cannot observe an interaction; see the PR's device
 list.
+
+**MAX-085 is now the tab bar's only owner, and it is re-tiered to Opus.** It was filed off
+the design review as chrome polish — surface elevation, `.tint()`, Liquid Glass. The owner
+then asked for **the plan to become a tab**, and that lands in `App/RootTabView.swift`,
+which design review T2 already wanted (the iOS 26 `Tab` builder, `.tint(.accent)`,
+`.tabBarMinimizeBehavior`) and which MAX-098's persistent chat accessory needs after that.
+Three tickets converging on one 28-line file is three conflicting diffs of it, so the file
+gets one owner and does the work once.
+
+The tier moved because the ticket is no longer polish. A tab bar is the app's claim about
+what its parallel modes *are*, and MAX-081 already spent that reasoning once when it took
+Settings **out** — settings is somewhere you go to change a thing and leave, not a mode. A
+plan is the opposite: it is a place you look at, the reference every score on every other
+screen is measured against, and today it is legible only while you are editing it. It earns
+the slot on the same argument that denied Settings one, which is the sort of decision worth
+making deliberately rather than as a side effect of a `Tab` being easy to add.
+
+MAX-102 delivers the tab's *content* as a tab root and is explicitly barred from
+`RootTabView.swift`; MAX-085 mounts it. Sequence: 102 → 085 → 098.
+
+**MAX-105 — the plan on the dashboard calendar.** The owner's ask, and the most interesting
+design problem currently open, so it is Opus and it should be argued rather than assumed.
+
+Today a calendar cell shows what *happened*: a date, a state glyph, and MAX-084's score-band
+mark. The plan is what was *prescribed*. Putting both in a ~42pt cell without it turning to
+mush is the whole ticket, and the shape most likely to be right is that **the plan is the
+substrate and the actual is the mark on top of it** — you ran *against* a prescription, so
+the prescription is the ground and the result is the figure. A cell then reads in one glance
+as agreement or divergence, which is the question the calendar exists to answer and cannot
+currently answer at all.
+
+Two consequences that make this more than decoration:
+
+- **Future days become meaningful for the first time.** The calendar today shows only the
+  past, because a score is the only thing it draws. A plan tells you what is coming, so the
+  same grid starts answering "what am I doing Thursday" — and the empty-vs-scheduled-vs-rest
+  distinction on a future day is a new state that has to read as *not yet* rather than as
+  *missed*. Getting that wrong turns the whole forward half of the month into failure.
+- **D4 and MAX-084's rule both still bind.** The score still colours the day, and no two
+  bands may be distinguished by hue alone. A plan layer that eats the contrast budget
+  breaks a rule the project already paid to establish — and MAX-087 is spending that budget
+  at the year span right now, so the two must be read together.
+
+D1 and D2 are untouched: the plan layer reads the versioned record in effect on each day
+through `PlanCalendar`, never a literal and never a recomputation.
 
 **MAX-091.** Both Claude clients moved from the Opus tier to the Sonnet tier at `medium`
 effort, on the owner's cost instruction. Three things came with the model that are not
@@ -610,7 +656,10 @@ twelve and is dispatchable immediately.
 | MAX-104 | Copy and absence voice over the new surfaces | 098, 102 | Sonnet |
 
 Three collisions the spec calls out and the overseer must respect: **094 lands before 095**
-(both touch `WorkoutFactSheet.swift`, and 094 is the extraction 095 builds on); **MAX-085
+(both touch `WorkoutFactSheet.swift`, and 094 is the extraction 095 builds on); **MAX-102
+then MAX-085 then MAX-098**, the single owner chain for `RootTabView.swift`; **MAX-087
+before MAX-105**, both being in the calendar's contrast budget; and — the original note —
+**MAX-085
 lands before 098** (both touch `RootTabView.swift`, and the button should be built against
 the migrated tab bar rather than merged into it afterwards); and **102 before 101** (both
 touch `App/Plan/`, and 102 is the smaller, independent one).
