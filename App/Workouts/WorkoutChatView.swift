@@ -118,6 +118,17 @@ struct WorkoutChatView: View {
             centered {
                 secondaryText("This run hasn't been scored yet — chat opens once it has a score.")
             }
+        case .noVerdict:
+            // The same absence, and the opposite tense (MAX-126). The sentence above
+            // would be a promise here: the plan scores runs, so this workout will never
+            // have the score chat is seeded from. Said once, plainly, in the same voice
+            // the verdict header uses on the screen behind this sheet.
+            centered {
+                secondaryText(
+                    "The plan scores runs, so there's no score for this workout — "
+                        + "and chat starts from one."
+                )
+            }
         case .ready:
             transcript
                 .safeAreaInset(edge: .bottom, spacing: 0) { composer }
