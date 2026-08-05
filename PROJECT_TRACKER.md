@@ -3,7 +3,7 @@
 **Last updated:** 2026-08-04
 **Spec:** [docs/PRD.md](./docs/PRD.md) + [docs/PRD-AMENDMENTS.md](./docs/PRD-AMENDMENTS.md) (amendments win)
 **Architecture:** Fully on-device. No backend.
-**Pipeline status:** 🟢 CI green — 411+ tests. **Capture-to-score loop closed (MAX-033).** Core build/test, architecture guard, colour-token guard, unsigned iOS Simulator app build.
+**Pipeline status:** 🟢 CI green — 700+ tests, core suite now on Linux. **Capture-to-score loop closed (MAX-033).** Core build/test, architecture guard, colour-token guard, unsigned iOS Simulator app build.
 
 ---
 
@@ -278,10 +278,10 @@ schema change and therefore its own ticket.
 
 | ID | Ticket | Spec | Tier | Status | Depends on |
 |---|---|---|---|---|---|
-| MAX-060 | Interval selector: week / month / custom | FR-3.1 | Haiku | 🔲 | MAX-020 |
-| MAX-061 | Score-colored calendar, type glyph, auto-converted rest days | FR-3.2, D4, D9, A6 | Sonnet | 🔲 | MAX-017, MAX-060, MAX-040 |
+| MAX-060 | Interval selector: week / month / custom | FR-3.1 | Sonnet | ✅ | MAX-020 |
+| MAX-061 | Score-colored calendar, type glyph, auto-converted rest days | FR-3.2, D4, D9, A6 | Sonnet | ✅ | MAX-017, MAX-060, MAX-040 |
 | MAX-062 | **Cross-run HR-drift overlay** on %-elapsed axis | FR-3.3, D5 | **Opus** | 🔲 | MAX-060, MAX-040, MAX-012 |
-| MAX-063 | Summary tiles: mileage vs arc, effective days, streak, avg score | FR-3.4 | Haiku | 🔲 | MAX-017, MAX-060 |
+| MAX-063 | Summary tiles: mileage vs arc, effective days, streak, avg score | FR-3.4 | Sonnet | ✅ | MAX-017, MAX-060 |
 | MAX-064 | Settings: rest-days-per-week, display/accessibility prefs | §8 | Haiku | ✅ | MAX-020 |
 | MAX-049 | Settings screen writes to a stub, not the store | §8, D9 | Sonnet | 🔲 | MAX-064, MAX-020 |
 
@@ -315,7 +315,7 @@ function, so its branch never renders), and `enteredKey` is not cleared on the
 | ID | Ticket | Spec | Tier | Status | Depends on |
 |---|---|---|---|---|---|
 | MAX-070 | Accessibility: Reduce Transparency / Increase Contrast degrade to solid chrome | FR-4.5 | Sonnet | ✅ | MAX-040 |
-| MAX-071 | Scoring fixture suite: known-good runs → expected score bands | R7 | Sonnet | 🔲 | MAX-015 |
+| MAX-071 | Scoring fixture suite: known-good runs → expected score bands | R7 | Sonnet | ✅ | MAX-015 |
 | MAX-072 | Security review: Keychain handling, data at rest, prompt minimization, distribution tripwire | §11, A5 | **Opus** 🔒 | 🔲 | MAX-023, MAX-024 |
 
 ### Deliberately not built
@@ -423,6 +423,8 @@ and CI selects a 26.x toolchain explicitly rather than trusting the runner defau
 |---|---|---|---|
 | R1 | No Swift toolchain in the dev container; `download.swift.org` blocked | CI is the only gate | Accepted — mitigated by fat-core architecture + macOS CI |
 | R2 | No device/simulator in the loop | HealthKit flows, UI, on-device performance unverified until a human checks | Accepted per direction. PRs must list what needs device verification |
+| R13 | App-layer wiring is compiled but never executed | A defaulted parameter silently selected a no-op store (MAX-049); nothing in CI could see it | Composition roots name their dependencies explicitly; no production call site relies on a default that can resolve to a stub |
+| R14 | CI is a hosted-minutes dependency | The whole merge gate vanished mid-session when the Actions allowance ran out — every job, including Ubuntu, failed in 2s with no runner | Repo is public, so standard runners are free and uncapped. Core suite moved to Linux (1x) so only `xcodebuild` needs macOS |
 | R3 | Anthropic key on-device | Weakens PRD §6 | Accepted for single-user (A5). **Tripwire: blocks any distribution** |
 | R5 | HealthKit background-delivery entitlement key | Wrong key means the wake silently never fires | **Resolved** at MAX-030 — `com.apple.developer.healthkit.background-delivery` confirmed against Apple docs; the PRD's guess was right. Base HealthKit entitlement and `NSHealthShareUsageDescription` also in place; all three fail the same silent way |
 | R6 | Scoring correctness; auto-vs-manual divergence is the quality signal | Loop loses trust fast if scores disagree with judgment | D8 telemetry + MAX-071 fixtures; revisit rubric after real runs |
