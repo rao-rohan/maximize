@@ -548,9 +548,9 @@ feature was governed by a plan that could not exist).
 | MAX-111 | **Stop scoring lifts against the running rubric** — stop-gap ahead of MAX-109 | MAX-109 (spec) | Sonnet ✅ |
 | MAX-090 | Chat-first product spec: plan generation and Q&A through chat | Owner | **Opus** 🔒 ✅ |
 | MAX-091 | Run both Claude clients on the Sonnet tier at `medium` effort | Owner, cost | Sonnet 🔒 ✅ |
-| MAX-092 … MAX-104 | The chat-first build, decomposed from MAX-090 | MAX-090 | see below |
+| MAX-092 … MAX-104 | The chat-first build, decomposed from MAX-090 | MAX-090 | see below ✅ |
 | MAX-109 | Lifting product spec: plans account for lifting and running | Owner | **Opus** ✅ |
-| MAX-128 … MAX-143 | The lifting build, decomposed from MAX-109 | MAX-109 | see below |
+| MAX-128 … MAX-143 | The lifting build, decomposed from MAX-109 | MAX-109 | see below ✅ |
 | MAX-126 | **"No verdict by design" is a state** — a lift stops being drawn and spoken as a run awaiting a score | MAX-111 | **Opus** ✅ |
 
 **MAX-066.** Splits currently need a GPS track, so a treadmill run has none — correctly
@@ -1059,7 +1059,7 @@ twelve and is dispatchable immediately.
 | MAX-097 | Thread list, derived titles, new chat, scope subtitle | 093, 096 | Sonnet ✅ |
 | MAX-098 | The persistent glass button | 097 | Sonnet ✅ |
 | MAX-099 | `PlanProposal` — type, parse, schema derived from core enums | 095 | **Opus** 🔒 ✅ |
-| MAX-100 | The Anthropic client for plan proposals | 099 | Sonnet 🔒 |
+| MAX-100 | The Anthropic client for plan proposals | 099 | Sonnet 🔒 ✅ |
 | MAX-101 | Conversational plan authoring; proposal card; handoff | 098, 100 | **Opus** |
 | MAX-102 | **The read-only plan screen with version history** | — | Sonnet ✅ |
 | MAX-103 | "Runs in this conversation" strip | 098 | Sonnet |
@@ -1350,7 +1350,7 @@ is the overseer's, not a ticket's — flagged here rather than done.
 | ID | Ticket | Depends on | Tier |
 |---|---|---|---|
 | MAX-128 | `Discipline`, and `.lift` on both classification enums (spec's MAX-110) | — | **Opus** ✅ |
-| MAX-129 | The per-discipline prescription; the no-op decode test | 128 | **Opus** |
+| MAX-129 | The per-discipline prescription; the no-op decode test | 128 | **Opus** ✅ |
 | MAX-130 | Discipline-gated derived metrics; stop fabricating cadence | 128 | **Opus** ✅ |
 | MAX-131 | Rubric vocabulary for lifts — **closes gap P3** | 128 | **Opus** ✅ |
 | MAX-132 | Seed bands for lift days; the `easy.wellOverCap` shadow | 131 | Sonnet |
