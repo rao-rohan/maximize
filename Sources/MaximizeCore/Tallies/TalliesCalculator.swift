@@ -31,6 +31,25 @@ public struct TalliesInput: Sendable {
     public let through: CalendarDay
     public let timeZone: TimeZone
 
+    /// The athlete's current day, in `timeZone`. **An input, never a clock read**
+    /// (MAX-110) — the same discipline `ScoreCalendar.resolve`'s own `today` parameter
+    /// is held to, and for the same reason: a calculator that called `Date()` would be
+    /// untestable by construction, and would silently disagree with the calendar cell
+    /// beside it the moment the two read the clock at different instants.
+    ///
+    /// Two things depend on it, both because a day whose outcome is not yet in cannot
+    /// be judged:
+    ///
+    /// - `EffectiveDayTally` never counts a day on or after `today` — see
+    ///   `TalliesCalculator.effectiveDayTally`.
+    /// - `RestDayBudgeting`'s weekly allowance is never spent on a day on or after
+    ///   `today` — see `TalliesCalculator.resolveRestDayConversions`, which threads
+    ///   this through as `outcomesUnknownFrom` (C3).
+    ///
+    /// The boundary is **strict**, matching `ScoreCalendar`: today itself counts as not
+    /// yet decided. A session scheduled for this evening has not been skipped.
+    public let today: CalendarDay
+
     /// See the type's documentation for the range this must cover — it is wider than
     /// `from...through` whenever the interval does not already align to week
     /// boundaries.
@@ -50,6 +69,7 @@ public struct TalliesInput: Sendable {
         from: CalendarDay,
         through: CalendarDay,
         timeZone: TimeZone,
+        today: CalendarDay,
         workouts: [Workout],
         scoreLedgers: [UUID: ScoreLedger] = [:],
         planCalendar: PlanCalendar?,
@@ -71,6 +91,7 @@ public struct TalliesInput: Sendable {
         self.from = from
         self.through = through
         self.timeZone = timeZone
+        self.today = today
         self.workouts = workouts
         self.scoreLedgers = scoreLedgers
         self.planCalendar = planCalendar
@@ -83,7 +104,8 @@ public struct TalliesInput: Sendable {
 ///
 /// ## The streak definition (the PRD leaves this open; this is the decision, and why)
 ///
-/// Walking backward day by day from `through`, each day is one of four things:
+/// Walking backward day by day from the walk's **start day** (defined below, not
+/// always `through`), each day is one of four things:
 ///
 /// 1. **Neutral — no ask.** No plan governs the day, or the plan's ask *was* rest
 ///    (scheduled, or converted from a miss by MAX-016's weekly budget). The streak
@@ -110,6 +132,30 @@ public struct TalliesInput: Sendable {
 /// whole streaks. `Tallies.currentStreak` is a *lower bound* on the true streak when
 /// it is truncated by `from` rather than by an actual break, and there is no way for
 /// this type to tell its caller which of the two happened from the number alone.
+///
+/// ## Where the walk starts (MAX-110)
+///
+/// Walking back from `through` is the rule above, and it silently assumed `through`
+/// itself was decided. It is not, whenever `through` reaches into the future: a day on
+/// or after `today` has no outcome yet (the same strict boundary `ScoreCalendar` uses
+/// — today itself is not yet decided), so starting the walk there and calling its
+/// emptiness a "break" reads a scheduled-but-not-yet-run day as a miss. On the "this
+/// month" interval that is most days of most months, which is why the streak tile
+/// could read 0 for the first three weeks of a month before this fix.
+///
+/// **The walk instead starts at the later of never, and the most recent day whose
+/// outcome is known** — the day before `today`, clamped to `through`:
+///
+/// - `through` is before `today`: the whole interval is in the past, `today` never
+///   enters the walk, and the answer is unchanged from the pre-MAX-110 rule. This is
+///   the invariant the "entirely in the past" test pins.
+/// - `today` falls inside or after the interval (`from...through` reaches `today` or
+///   beyond): the walk starts the day before `today` and never looks at `today` or any
+///   day after it, so a future scheduled day can no longer be reached, let alone break
+///   the walk.
+/// - `today` is on or before `from`: nothing in the interval has a known outcome yet,
+///   and the streak is `0` without the walk running at all — there is no "most recent
+///   decided day" to start from.
 ///
 /// ## Effective days (rule 2: converted rest is excluded, not merely spared)
 ///
@@ -222,7 +268,12 @@ public enum TalliesCalculator {
             planDays: expandedPlanDays,
             workoutDays: Set(workoutsByDay.keys),
             budget: input.restDayBudget,
-            createdAt: restDayBudgetingStamp
+            createdAt: restDayBudgetingStamp,
+            // C3: a day on or after `today` has not happened yet, so it is never a
+            // candidate for forgiveness — the whole expanded week is still handed
+            // over, so the week's shape (and so which misses sit next to a scheduled
+            // rest day) is unaffected. Mirrors `ScoreCalendar.resolveRestDayConversions`.
+            outcomesUnknownFrom: input.today
         )
         return (planDaysInRange, Set(overrides.map(\.date)))
     }
@@ -239,6 +290,11 @@ public enum TalliesCalculator {
         var effectiveCount = 0
         var eligibleCount = 0
         for day in queriedDays {
+            // MAX-110: a day on or after `today` has no outcome yet, so it is neither
+            // effective nor a miss — counting it toward `eligibleCount` would measure
+            // the rate against chances that have not happened. Strict, matching
+            // `ScoreCalendar`: today itself is not yet decided.
+            guard day < input.today else { continue }
             guard let planDay = planDaysInRange[day], planDay.canBeMissed else { continue }
             guard !convertedDates.contains(day) else { continue }
 
@@ -264,8 +320,14 @@ public enum TalliesCalculator {
         convertedDates: Set<CalendarDay>,
         input: TalliesInput
     ) throws -> Int {
+        // MAX-110: see the type's "Where the walk starts" documentation. The walk may
+        // only visit days whose outcome is known — strictly before `today` — so it
+        // starts at the earlier of `through` and the day before `today`, and does not
+        // run at all when even `from` has not happened yet.
+        let latestDecidedDay = try input.today.adding(days: -1)
+        guard latestDecidedDay >= input.from else { return 0 }
         var streak = 0
-        var day = input.through
+        var day = min(input.through, latestDecidedDay)
         while true {
             if let planDay = planDaysInRange[day], planDay.canBeMissed {
                 let dayWorkouts = workoutsByDay[day] ?? []

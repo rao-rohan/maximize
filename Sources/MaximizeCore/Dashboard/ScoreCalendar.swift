@@ -177,18 +177,14 @@ public struct ScoreCalendarDay: Hashable, Sendable, Identifiable {
 /// already assembling a `TalliesInput` for the same interval already has everything
 /// `resolve` below needs.
 ///
-/// **The one place the two now differ, stated plainly (MAX-105).** This type is told
-/// what day it is and `TalliesCalculator` is not, so this type withholds days on or
-/// after `today` from the budget's candidate pool (`RestDayBudgeting`'s
-/// `outcomesUnknownFrom`) while `TalliesCalculator` still offers them. The rule for
-/// *which* miss is forgiven is unchanged and still lives in exactly one place; what
-/// differs is which days are eligible to be forgiven at all. Forgiving a day that has
-/// not happened is not a judgement call — it spends a finite weekly budget on a
-/// non-event, and leaves a genuine miss earlier in the same week showing red because
-/// the allowance was already gone. Fixing the tallies side needs a `today` on
-/// `TalliesInput` and moves `Tallies.currentStreak` (which today breaks on the first
-/// future scheduled day it walks back from), so it is reported as follow-up work
-/// rather than folded into this ticket.
+/// **The two no longer differ (MAX-105 found the gap; MAX-110 closed it).** Both this
+/// type and `TalliesCalculator` are told what day it is now, and both withhold days on
+/// or after `today` from the budget's candidate pool (`RestDayBudgeting`'s
+/// `outcomesUnknownFrom`). The rule for *which* miss is forgiven still lives in exactly
+/// one place; what both callers agree on is which days are eligible to be forgiven at
+/// all. Forgiving a day that has not happened is not a judgement call — it spends a
+/// finite weekly budget on a non-event, and leaves a genuine miss earlier in the same
+/// week showing red because the allowance was already gone.
 ///
 /// ## The C1 obligation this carries forward
 ///
