@@ -544,18 +544,18 @@ final class MiscategorisedScoreLabelTests: XCTestCase {
 
         // `XCTUnwrap` takes a non-async autoclosure, so each `await` is hoisted out of
         // it — see the note at the top of `ChatThreadRepositoryTests`.
-        let labelledLedger = await store.ledger(forWorkout: Fixture.workoutID)
+        let labelledLedger = try await store.ledger(forWorkout: Fixture.workoutID)
         let labelled = try XCTUnwrap(labelledLedger)
         XCTAssertTrue(labelled.isMiscategorised)
         XCTAssertEqual(labelled.miscategorisationLabel?.judgedAgainst, .easy)
         XCTAssertEqual(labelled.miscategorisationLabel?.actualDiscipline, .lift)
         XCTAssertEqual(labelled.miscategorisationLabel?.recordedAt, Fixture.at(100_000))
 
-        let correctlyJudgedLedger = await store.ledger(forWorkout: correctlyJudgedID)
+        let correctlyJudgedLedger = try await store.ledger(forWorkout: correctlyJudgedID)
         let correctlyJudged = try XCTUnwrap(correctlyJudgedLedger)
         XCTAssertFalse(correctlyJudged.isMiscategorised)
 
-        let runLedger = await store.ledger(forWorkout: runID)
+        let runLedger = try await store.ledger(forWorkout: runID)
         let run = try XCTUnwrap(runLedger)
         XCTAssertFalse(run.isMiscategorised)
     }
@@ -588,7 +588,7 @@ final class MiscategorisedScoreLabelTests: XCTestCase {
         let before = try PersistencePayload.encode(score, field: "test.score")
         _ = try await Self.labeller(over: store, ids: [Self.labelID]).run()
 
-        let afterLedger = await store.ledger(forWorkout: Fixture.workoutID)
+        let afterLedger = try await store.ledger(forWorkout: Fixture.workoutID)
         let after = try XCTUnwrap(afterLedger)
         XCTAssertEqual(
             try PersistencePayload.encode(after.automatic, field: "test.score"),
