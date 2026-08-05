@@ -164,6 +164,51 @@ final class LiftRubricVocabularyTests: XCTestCase {
         }
     }
 
+    /// `.scheduledDistance` is the reference MAX-131 came closest to disturbing, so it
+    /// gets its own assertion rather than riding on the band-identity test above.
+    ///
+    /// The ticket removed `Plan.resolve`'s `scheduledDistanceMeters:` **parameter** — a
+    /// Swift argument label, which has never appeared on the wire — and left the stored
+    /// `RubricReference.scheduledDistance(fraction:)` and its multiplication untouched.
+    /// This pins the consequence that matters: a band decoded from a **pre-change
+    /// payload** resolves to the identical concrete threshold, so a fractional
+    /// prescription still means the metres it always meant and no historical score moves
+    /// (D1).
+    ///
+    /// It also pins the arc case, which is where a fraction is least obviously
+    /// replaceable by a stored absolute: the distance resolved for the day comes from
+    /// `PlanCalendar`'s arc substitution, and 0.8 of it is what the band tests.
+    func testAStoredFractionalDistanceStillResolvesToTheSameMetres() throws {
+        let data = try XCTUnwrap(Self.preLiftingRubricJSON.data(using: .utf8))
+        let reloaded = try PersistencePayload.decode(
+            ScoringRubric.self,
+            from: data,
+            field: "test.rubric"
+        )
+        let band = try XCTUnwrap(reloaded.band(identifiedBy: "long.completedTheDistance"))
+        guard case let .metric(_, _, reference) = try XCTUnwrap(band.conditions.first) else {
+            return XCTFail("the stored long-run band no longer carries a metric condition")
+        }
+        XCTAssertEqual(reference, .scheduledDistance(fraction: 0.8), "the stored reference itself")
+
+        // Resolved against the day's ask as the evaluator resolves it. Deliberately the
+        // week-1 Sunday: the arc prescribes 16 km there while the template's own
+        // fallback says 18 km, so this asserts the *arc-derived* distance rather than a
+        // number that would look right either way.
+        let plan = try ScoringFixture.plan(rubric: reloaded)
+        let sunday = try XCTUnwrap(
+            try PlanCalendar([plan]).planDay(on: try CalendarDay(iso8601: "2026-01-04"))
+        )
+        XCTAssertEqual(sunday.scheduledSession.kind, .long)
+        XCTAssertEqual(sunday.scheduledSession.distanceMeters, 16_000, "the arc's week 1, not 18 km")
+        XCTAssertEqual(
+            try XCTUnwrap(plan.resolve(reference, against: sunday.scheduledSession)),
+            12_800,
+            accuracy: 0.000_001,
+            "0.8 of the arc-derived 16 km, exactly as before MAX-131"
+        )
+    }
+
     /// The other half of "nothing stored moves": a `ScheduledSession` written before
     /// this ticket decodes to a session prescribing no duration — which is what it
     /// always meant — and one carrying no duration writes no key for it, so the bytes of
