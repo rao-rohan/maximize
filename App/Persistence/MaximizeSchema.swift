@@ -73,6 +73,7 @@ enum MaximizeSchemaV1: VersionedSchema {
             DerivedMetricsRecord.self,
             ScoreRecord.self,
             ScoreAnnotationRecord.self,
+            MuscleGroupEntryRecord.self,
             ChatThreadRecord.self,
             PlanRecord.self,
             RestDayOverrideRecord.self,
@@ -366,6 +367,51 @@ enum MaximizeSchemaV1: VersionedSchema {
         }
     }
 
+    /// What the athlete said a strength session worked (A22).
+    ///
+    /// A sibling of `ScoreAnnotationRecord` in every respect that matters here: its own
+    /// identifier rather than the workout's, because a workout accumulates entries; no
+    /// update path in the store, because entries are additive; and `recordedAt` is what
+    /// "the answer in force" resolves by.
+    ///
+    /// **Why this needs no migration.** It is a *new record type*, not a change to an
+    /// existing one — SwiftData creates its table on first load and no row of any other
+    /// model is read, rewritten or re-typed. Every property is non-optional with a
+    /// default, per this file's CloudKit rule; there is no `@Attribute(.unique)` and no
+    /// relationship, for the reasons at the top of this file. `MaximizeSchemaV1`'s
+    /// version number does not move, on the same grounds as
+    /// `DerivedMetricsRecord.distanceSplitsJSON`: mirroring is off (A8), this schema has
+    /// never been promoted to a CloudKit production schema, so the additive-only
+    /// immutability rule quoted above has not started applying — and adding a record
+    /// type is the one shape change that rule permits even after it has.
+    @Model
+    final class MuscleGroupEntryRecord {
+        var entryUUID: UUID = UUID()
+        var workoutUUID: UUID = UUID()
+
+        /// A JSON array of `MuscleGroup` raw values, canonically ordered — see
+        /// `StoredMuscleGroupEntry` for why the set is a blob rather than six columns.
+        var groupsJSON: Data = Data()
+
+        var recordedAt: Date = Date.distantPast
+
+        init(_ stored: StoredMuscleGroupEntry) {
+            entryUUID = stored.entryUUID
+            workoutUUID = stored.workoutUUID
+            groupsJSON = stored.groupsJSON
+            recordedAt = stored.recordedAt
+        }
+
+        var stored: StoredMuscleGroupEntry {
+            StoredMuscleGroupEntry(
+                entryUUID: entryUUID,
+                workoutUUID: workoutUUID,
+                groupsJSON: groupsJSON,
+                recordedAt: recordedAt
+            )
+        }
+    }
+
     /// See `StoredChatThread`'s doc comment for why `createdAt` exists and what it is
     /// not: a duplicate-resolution tiebreak (MAX-048), not domain data.
     ///
@@ -587,6 +633,7 @@ typealias RouteRecord = MaximizeSchemaV1.RouteRecord
 typealias DerivedMetricsRecord = MaximizeSchemaV1.DerivedMetricsRecord
 typealias ScoreRecord = MaximizeSchemaV1.ScoreRecord
 typealias ScoreAnnotationRecord = MaximizeSchemaV1.ScoreAnnotationRecord
+typealias MuscleGroupEntryRecord = MaximizeSchemaV1.MuscleGroupEntryRecord
 typealias ChatThreadRecord = MaximizeSchemaV1.ChatThreadRecord
 typealias PlanRecord = MaximizeSchemaV1.PlanRecord
 typealias RestDayOverrideRecord = MaximizeSchemaV1.RestDayOverrideRecord

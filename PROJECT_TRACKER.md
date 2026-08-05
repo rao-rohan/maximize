@@ -1397,7 +1397,7 @@ is the overseer's, not a ticket's — flagged here rather than done.
 | MAX-142 | `TrainingContext` is per-session, not per-run | 129, **095** | **Opus** 🔒 |
 | MAX-143 | **Decide what to do with lifts already scored as runs** | 128 | Owner / overseer |
 | MAX-144 | ~~How adherence to a muscle-group prescription is judged~~ — **decided (A22)** | 129 | Owner ✅ |
-| MAX-145 | **Enter muscle groups on a strength workout's detail screen** (A22) | 129, 144 | **Opus** |
+| MAX-145 | **Enter muscle groups on a strength workout's detail screen** (A22) | 129, 144 | **Opus** ✅ |
 
 **Four collisions the overseer must respect.**
 
@@ -1692,6 +1692,44 @@ The two that were not are now `RubricCondition.actualDiscipline(oneOf:)` and
   tests distance only, so an HR-only treadmill fragment still reaches the scorer.
   LIFTING-SPEC §9.2 wants a duration floor there; the plan can now express one, and
   changing the classifier is a behaviour change this ticket's brief forbade.
+
+**MAX-145 — the athlete says what a lift worked, and the app learns to wait for it.**
+A22 built. The picker is the small half; the two consequences the amendment named are the
+change:
+
+- **A lift's absent score has a third name now.** `WorkoutVerdict.Scoring
+  .awaitingMuscleGroups` sits beside `.awaitingScore` (awaiting a *model*) and MAX-126's
+  `.noVerdict` (no verdict is coming). The verdict header renders it with no spinner and no
+  future tense — a spinner would announce the app as busy with something it has not been
+  given — and with the same question the section below it asks, in the same words, from one
+  core copy type. **Nothing scores a lift yet either way** (that is MAX-131/132); what
+  changed is that the app now knows *what it is waiting for*, and says so.
+- **The entry is a record beside the workout, not a field on it.** `MuscleGroupEntry` is
+  `ScoreAnnotation`'s shape applied to an input: its own identifier, timestamped, additive.
+  Changing an answer appends; `MuscleGroupLog` resolves the latest as the one in force and
+  keeps the rest. `Workout` was not touched, which is what stops A22's narrow manual-entry
+  permission leaking into "the app can edit a captured session."
+- **"I have not told you yet" is unrepresentable as "I trained nothing."** An entry with an
+  empty group set throws at the initializer, at decode, and at the picker's Save button —
+  absence is the *absence of an entry*, and only that prompts.
+- **A run is untouched, and no stored score moved (D8).** No run is ever asked the
+  question; a ride, hike or walk still lands on `.noVerdict`; and a lift already carrying an
+  auto-score from the running rubric (A21/MAX-143) still reports it, because the ledger
+  branch is read before any of this. `WorkoutVerdictTests` pins all four.
+- **`WorkoutVerdict`'s new parameter distinguishes "not looked" from "not told".** It takes
+  a `MuscleGroupLog?`, where nil means the caller did not read one — so `ContextBuilder`,
+  which does not, resolves byte-identically to before A22 rather than asserting a state it
+  never read. The single compiler-forced line in `Context/TrainingFactSheet` is the new
+  case's switch arm, unreachable today.
+- **No migration.** `MuscleGroupEntryRecord` is a *new* record type: SwiftData creates its
+  table and no existing row is read, rewritten or re-typed. Every property is non-optional
+  with a default, no `@Attribute(.unique)`, no relationship (A8's rules kept), and
+  `MaximizeSchemaV1`'s version does not move — `distanceSplitsJSON`'s reasoning. Deletion
+  cascades via a new `WorkoutAttachedRecord.muscleGroupEntries`, which is how the compiler
+  made this ticket decide.
+- **Not verified by CI beyond compilation.** The picker, the sheet and the persistence are
+  App-layer (tracker R2, R13). See the PR's **Needs device verification** section — set
+  groups, force-quit, reopen.
 
 **MAX-093 landed the stored record.** `StoredChatThread` is columnar —
 `subjectKindRawValue`, `workoutUUID` (a fixed sentinel for a training row),

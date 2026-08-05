@@ -138,6 +138,13 @@ extension MaximizeStore: WorkoutRepository {
                     model: ScoreAnnotationRecord.self,
                     where: #Predicate<ScoreAnnotationRecord> { $0.workoutUUID == id }
                 )
+            case .muscleGroupEntries:
+                // A22: the athlete's answers describe this session and nothing else, so
+                // they go with it — the same cascade a score annotation takes.
+                try modelContext.delete(
+                    model: MuscleGroupEntryRecord.self,
+                    where: #Predicate<MuscleGroupEntryRecord> { $0.workoutUUID == id }
+                )
             case .chatThread:
                 // Scoped to the workout kind as well as the identifier: a training
                 // thread's `workoutUUID` column carries `StoredChatThread
@@ -279,6 +286,34 @@ extension MaximizeStore: ScoreRepository {
                 sortBy: [SortDescriptor<ScoreAnnotationRecord>(\.createdAt, order: .forward)]
             )
         )
+    }
+}
+
+// MARK: - Muscle groups (A22)
+
+extension MaximizeStore: MuscleGroupEntryRepository {
+
+    /// Ascending by `recordedAt`, which is the order `MuscleGroupLog` requires — the
+    /// last entry is the answer in force.
+    func muscleGroupLog(forWorkout id: UUID) async throws -> MuscleGroupLog {
+        let records = try modelContext.fetch(
+            FetchDescriptor<MuscleGroupEntryRecord>(
+                predicate: #Predicate<MuscleGroupEntryRecord> { $0.workoutUUID == id },
+                sortBy: [SortDescriptor<MuscleGroupEntryRecord>(\.recordedAt, order: .forward)]
+            )
+        )
+        return try MuscleGroupLog(
+            workoutID: id,
+            entries: try records.map { try $0.stored.toDomain() }
+        )
+    }
+
+    /// Additive by construction, exactly as `annotate(_:)` is: a new record keyed by its
+    /// own identifier, and no path here that can reach an earlier one. Changing what the
+    /// athlete said appends; it never overwrites.
+    func record(_ entry: MuscleGroupEntry) async throws {
+        modelContext.insert(MuscleGroupEntryRecord(try StoredMuscleGroupEntry(entry)))
+        try modelContext.save()
     }
 }
 
