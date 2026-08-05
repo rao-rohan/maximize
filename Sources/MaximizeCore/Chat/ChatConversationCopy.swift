@@ -91,4 +91,72 @@ public enum ChatConversationCopy {
     /// `DisplayMessage.wasInterruptedByFailure` — a partial reply survived a dropped
     /// connection (constraint #4). See `truncatedCaption`'s own note.
     public static let interruptedByFailureCaption = "Connection dropped before this reply finished."
+
+    // MARK: - MAX-152: the rungs of `ChatReplyPhase`
+
+    /// What the transcript says *in place of* a reply that has not arrived yet, and the
+    /// text the waiting animation is drawn over.
+    ///
+    /// Its existence is the point. CLAUDE.md's "no information carried by hue alone"
+    /// generalises: a state carried only by an animation is a state that vanishes under
+    /// Reduce Motion, and a shimmer with nothing underneath it is exactly that. The words
+    /// are the channel; the sweep is decoration on top of the words, which is also how
+    /// Claude's own interface does it.
+    ///
+    /// Not worded from the subject, unlike the three strings at the top of this file:
+    /// "waiting for a reply" is the same fact on a run thread and a training thread, and
+    /// two sentences that differ in no useful way are two sentences to keep in step for
+    /// nothing.
+    public static let awaitingFirstReply = "Thinking…"
+
+    /// `ChatReplyPhase.stalled` — the reply started, stopped, and the connection is still
+    /// open.
+    ///
+    /// Worded to say the two things a person actually wants at that moment: nothing is
+    /// broken, and nothing is being asked of them. It deliberately does not offer an
+    /// action — there is nothing useful to do while a stream is quiet, and a button that
+    /// abandons a reply that is about to resume would be a worse outcome than waiting.
+    public static let replyStalled = "Still connected — nothing new for a moment."
+
+    /// The line shown beneath or in place of the pending reply, or nil where the reply
+    /// itself is the statement.
+    ///
+    /// `.streaming` is the nil that matters: once the first token lands, the words on
+    /// screen say everything a status line could, and leaving an indicator beside them
+    /// would be the app talking over its own answer. That is the ladder's second rung
+    /// stated as copy — waiting ends when text begins.
+    public static func pendingStatus(for phase: ChatReplyPhase) -> String? {
+        switch phase {
+        case .awaitingFirstToken: return awaitingFirstReply
+        case .stalled: return replyStalled
+        case .streaming, .idle, .complete, .truncated, .emptyReply, .failed: return nil
+        }
+    }
+
+    /// What VoiceOver reads for the pending-reply row, for each of the three live rungs.
+    ///
+    /// Separate from `pendingStatus(for:)` because the two differ for `.streaming`: there
+    /// is no visible status while text arrives, but a person who cannot see the text
+    /// arriving still needs to be told that it is. Terminal rungs are absent on purpose —
+    /// each has already produced a row that says what happened (a reply bubble, its
+    /// truncated caption, or a `ChatFailureNotice`), and announcing a second sentence
+    /// about a row already on screen is the "never restate a fact the surface already
+    /// stated" rule from MAX-150's voice.
+    public static func pendingAccessibilityLabel(for phase: ChatReplyPhase) -> String? {
+        switch phase {
+        case .awaitingFirstToken: return "Waiting for Claude's reply."
+        case .streaming: return "Claude is replying."
+        case .stalled: return "Still connected. Waiting for more of the reply."
+        case .idle, .complete, .truncated, .emptyReply, .failed: return nil
+        }
+    }
+
+    /// The action offered on a failure that is worth asking again
+    /// (`ChatReplyPhase.offersRetry`). One tap, one call — see `ChatFailureNotice`'s
+    /// retry note for why nothing here is automatic.
+    public static let retryAction = "Try again"
+
+    /// What that action does, for VoiceOver — said as a fact about cost, because a
+    /// person cannot see that this is the app's only path to spending another call.
+    public static let retryActionHint = "Asks Claude the same question again."
 }

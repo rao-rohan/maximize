@@ -194,7 +194,7 @@ struct ScoreCalendarView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, Spacing.roomy)
             case .failed:
-                Text("Couldn't load the calendar.")
+                Text(FailureCopy.couldNotLoad(.scoreCalendar))
                     .font(.metricLabel)
                     .foregroundStyle(Color.textSecondary)
             case .loaded(.dayGrid(let grid)):

@@ -301,7 +301,13 @@ final class ChatStreamDecoderTests: XCTestCase {
             #"data: {"type":"message_stop"}"#,
         ])
 
-        XCTAssertEqual(events, [.text("Hello there"), .text(", how are you?"), .completed(.endTurn)])
+        // The `ping` is a `.heartbeat` since MAX-152 — see
+        // `testAPingIsForwardedAsAHeartbeat`. Everything this test was written to pin
+        // (the text survives, the turn completes) is unchanged.
+        XCTAssertEqual(
+            events,
+            [.heartbeat, .text("Hello there"), .text(", how are you?"), .completed(.endTurn)]
+        )
     }
 
     /// The same stream *with* its blank lines, so the fix is pinned as working either
@@ -318,7 +324,42 @@ final class ChatStreamDecoderTests: XCTestCase {
                 + messageStop
         )
 
-        XCTAssertEqual(events, [.text("Hello there"), .text(", how are you?"), .completed(.endTurn)])
+        XCTAssertEqual(
+            events,
+            [.heartbeat, .text("Hello there"), .text(", how are you?"), .completed(.endTurn)]
+        )
+    }
+
+    // MARK: - MAX-152: the heartbeat
+
+    /// A `ping` is forwarded rather than dropped. It is the only frame that means "the
+    /// connection is open and nothing is being said", which is the fact that separates a
+    /// stalled reply from a working one — `ChatReplyProgress` is what decides how many of
+    /// them amount to a stall, and this decoder only reports what arrived.
+    func testAPingIsForwardedAsAHeartbeat() {
+        let events = decode(
+            frame(#"{"type": "ping"}"#)
+                + textDelta("Answer.")
+                + frame(#"{"type": "ping"}"#)
+                + messageStop
+        )
+
+        XCTAssertEqual(events, [.heartbeat, .text("Answer."), .heartbeat, .completed(.endTurn)])
+    }
+
+    /// A heartbeat does not end anything. A decoder that treated it as terminal would
+    /// close the socket on the API's own keep-alive.
+    func testAHeartbeatIsNotTerminal() {
+        XCTAssertFalse(ChatStreamEvent.heartbeat.isTerminal)
+    }
+
+    /// Comment lines stay ignored. SSE's `:` comment is a proxy-level keep-alive that
+    /// anything between here and Anthropic may send at any rate it likes, so it is not
+    /// evidence about *this* reply — only the API's own `ping` frame is.
+    func testACommentLineIsStillNotAHeartbeat() {
+        let events = decode([": keep-alive"] + textDelta("Answer.") + messageStop)
+
+        XCTAssertEqual(events, [.text("Answer."), .completed(.endTurn)])
     }
 
     /// The API pads its payloads with trailing whitespace inside the closing brace —

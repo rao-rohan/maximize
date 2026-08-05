@@ -59,7 +59,7 @@ struct TrendTilesView: View {
                 }
             }
         case .failed:
-            Text("Couldn't load the summary for this interval.")
+            Text(FailureCopy.couldNotLoad(.trendTiles))
                 .font(.metricLabel)
                 .foregroundStyle(Color.textSecondary)
         }
