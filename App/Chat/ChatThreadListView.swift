@@ -129,7 +129,7 @@ private struct ChatThreadRow: View {
                     // says so, rather than leaving the second line blank — the same
                     // register `ChatConversationCopy.emptyTranscriptInvitation` uses on
                     // the screen this row opens.
-                    Text(summary.preview ?? "No messages yet")
+                    Text(summary.preview ?? ChatThreadListCopy.noMessagesYetPreview)
                         .font(.metricLabel)
                         .foregroundStyle(summary.preview == nil ? Color.textTertiary : Color.textSecondary)
                         .lineLimit(1)
@@ -147,7 +147,7 @@ private struct ChatThreadRow: View {
 
     private var accessibilityLabel: String {
         let relative = RelativeTimestampFormatting.spoken(summary.lastActivityAt)
-        let preview = summary.preview ?? "No messages yet"
+        let preview = summary.preview ?? ChatThreadListCopy.noMessagesYetPreview
         return "\(summary.subject.kind.accessibilityKindLabel). \(summary.title). \(relative). \(preview)"
     }
 }

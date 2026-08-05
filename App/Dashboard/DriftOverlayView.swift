@@ -103,28 +103,20 @@ struct DriftOverlayView: View {
     @ViewBuilder
     private func trendlineOnly(_ selection: DriftFigureSelection) -> some View {
         if selection.isEmpty {
-            Text(
-                selection.candidateCount == 0
-                    ? "No runs in this interval."
-                    : "No run in this interval carries a stored drift figure."
-            )
-            .font(.bodyCopy)
-            .foregroundStyle(Color.textSecondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentSurface(.inset)
+            Text(selection.emptyStateText)
+                .font(.bodyCopy)
+                .foregroundStyle(Color.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentSurface(.inset)
         } else {
             trendlineChart(selection.trendline)
             Text(selection.summary)
                 .font(.metricLabel)
                 .foregroundStyle(Color.textSecondary)
-            if selection.trendline.fit == nil {
-                Text(
-                    selection.trendline.points.count == 1
-                        ? "One run with a stored drift figure — not enough yet for a trend line."
-                        : "These runs share one date, so there's no spread to fit a trend line to."
-                )
-                .font(.microLabel)
-                .foregroundStyle(Color.textTertiary)
+            if let explanation = selection.trendline.noFitExplanation {
+                Text(explanation)
+                    .font(.microLabel)
+                    .foregroundStyle(Color.textTertiary)
             }
         }
         notes(selection.exclusionNotes)
@@ -154,15 +146,11 @@ struct DriftOverlayView: View {
     /// why).
     @ViewBuilder
     private func emptyState(_ data: HeartRateDriftOverlayData) -> some View {
-        Text(
-            data.candidateCount == 0
-                ? "No runs in this interval."
-                : "No run in this interval has a heart-rate curve to normalise."
-        )
-        .font(.bodyCopy)
-        .foregroundStyle(Color.textSecondary)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentSurface(.inset)
+        Text(data.emptyStateText)
+            .font(.bodyCopy)
+            .foregroundStyle(Color.textSecondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentSurface(.inset)
     }
 
     // MARK: - Chart
@@ -211,7 +199,7 @@ struct DriftOverlayView: View {
         }
         .frame(minHeight: LayoutMetrics.minimumChartHeight)
         .contentSurface(.inset)
-        .accessibilityLabel("Heart-rate curves for \(data.curves.count) runs, on a shared percent-elapsed axis")
+        .accessibilityLabel(data.chartAccessibilityLabel)
     }
 
     /// The most recent run is the foreground series; everything older recedes behind it by
@@ -326,14 +314,10 @@ struct DriftOverlayView: View {
                 // Fewer than two points, or points that share one exact date, is not a
                 // trend — an absence stated in a sentence, never a flat line drawn
                 // through a single dot (MAX-042's "absent, not empty" discipline).
-                if trendline.fit == nil {
-                    Text(
-                        trendline.points.count == 1
-                            ? "One run with a stored drift figure — not enough yet for a trend line."
-                            : "These runs share one date, so there's no spread to fit a trend line to."
-                    )
-                    .font(.microLabel)
-                    .foregroundStyle(Color.textTertiary)
+                if let explanation = trendline.noFitExplanation {
+                    Text(explanation)
+                        .font(.microLabel)
+                        .foregroundStyle(Color.textTertiary)
                 }
             }
         }
@@ -400,7 +384,7 @@ struct DriftOverlayView: View {
         }
         .frame(minHeight: LayoutMetrics.minimumChartHeight)
         .contentSurface(.inset)
-        .accessibilityLabel("Drift trend across \(trendline.points.count) runs, by date")
+        .accessibilityLabel(trendline.chartAccessibilityLabel)
     }
 
     /// `HeartRateDriftTrendlineData.driftFractionAxisDomain` is in fraction units;

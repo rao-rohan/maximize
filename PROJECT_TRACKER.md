@@ -552,6 +552,7 @@ feature was governed by a plan that could not exist).
 | MAX-109 | Lifting product spec: plans account for lifting and running | Owner | **Opus** ✅ |
 | MAX-128 … MAX-143 | The lifting build, decomposed from MAX-109 | MAX-109 | see below ✅ |
 | MAX-126 | **"No verdict by design" is a state** — a lift stops being drawn and spoken as a run awaiting a score | MAX-111 | **Opus** ✅ |
+| MAX-150 | **Copy and absence voice: the chat and dashboard surfaces** — split from MAX-104 so the finished half does not wait behind the lifting build | MAX-104, split | Sonnet ✅ |
 
 **MAX-066.** Splits currently need a GPS track, so a treadmill run has none — correctly
 rendered as an absence rather than fabricated. `distanceWalkingRunning` is already
@@ -1064,6 +1065,7 @@ twelve and is dispatchable immediately.
 | MAX-102 | **The read-only plan screen with version history** | — | Sonnet ✅ |
 | MAX-103 | "Runs in this conversation" strip | 098 | Sonnet ✅ |
 | MAX-104 | Copy and absence voice, **app-wide** — absorbs MAX-086's other half | 098, 102 | Sonnet |
+| MAX-150 | **Split from MAX-104**: the chat and dashboard half, taken now because those two surfaces are finished and drifting while lifting is still being built | 098, 102, 103 | Sonnet ✅ |
 
 Three collisions the spec calls out and the overseer must respect: **094 lands before 095**
 (both touch `WorkoutFactSheet.swift`, and 094 is the extraction 095 builds on); **MAX-102
@@ -1389,6 +1391,141 @@ copy pass over that naming, if wanted, belongs to MAX-104, not this ticket. And 
 does not verify tap-target comfort or how the strip reads against Dynamic Type on a
 device — see its **Needs device verification** heading.
 
+**MAX-150 took that copy pass, over the chat and dashboard surfaces only.** MAX-104 was
+sequenced after the lifting build (135–140) so one pass could cover the lifting surfaces
+alongside everything else, but chat and dashboard are finished and were drifting *now* —
+the "Runs in this conversation" strip naming lift sessions with a header and an absence
+sentence that both still said "runs" (the MAX-103 note above names it directly) is one
+instance of several the inventory below turned up. MAX-104 keeps the lifting surfaces,
+`App/Workouts/*` and `App/Plan/*`.
+
+**The voice, stated once so MAX-104 can follow it rather than re-derive it:**
+
+> Say what's true, in one plain sentence, using the noun the underlying data actually
+> counts — "session" when a lift could be one of them, "run" only where the surface is
+> run-only by construction (the drift charts, a workout thread scoped to a run). Absence
+> gets a real sentence naming what's missing and why, never a blank or a generic
+> placeholder, and two facts that are actually different — "nothing in this window" versus
+> "too many to list", "not yet scored" versus "will never be scored" — stay two sentences.
+> Never restate a fact the surface already stated in different words a few lines away.
+
+**What the inventory found, and what moved.** Every string was traced to whether its
+content depends on data — which case a state is in, or what it names — following
+`RunsStripCopy`/`ChatConversationCopy`/`PlanCopy`'s own split, established as an actual
+rule this ticket writes down for the first time: a string whose selection is driven by a
+case of a **core-declared** type (`ChatModel.LoadState`, `RunsStripData.EmptyReason`,
+`PlanProposalReview`'s own fields) belongs beside that type; a string tied only to an
+App-layer load-state enum with no core type behind it (`ChatThreadListModel.LoadState`,
+`ScoreCalendarModel`/`TrendTilesModel`/`DriftOverlayModel`/`TrendIntervalSelectionModel`'s
+own `.failed` cases) is left as a view literal, because there is no core fact for CI to
+pin it against — moving it would be relocating chrome, not closing a drift risk. Six
+findings moved on that basis:
+
+1. **`RunsStripCopy.text(for: .noSessionsInWindow)`** — "No runs recorded in this window
+   yet." → "No sessions recorded in this window yet." The concrete instance named in this
+   ticket's brief. `RunsStripView`'s own header ("Runs in this conversation" → "Sessions
+   in this conversation") and its chip's accessibility hint ("Opens this run" → "Opens
+   this session") are the same drift; the header stays a view literal per MAX-103's own
+   rule (no data dependency), but its wording was wrong regardless of which layer it
+   lives in. The omitted-count accessibility label *does* carry a data dependency
+   (`omittedCount`'s pluralisation) and moved into `RunsStripCopy` alongside it.
+2. **`TrendTileData.workoutDays`'s caption**, "days run" → "days trained".
+   `Tallies.workoutDays` counts "at least one recorded workout, scored or not" — no
+   discipline filter — so a lift-only day was already silently counted as a "day run"
+   before this ticket. Same class of bug as (1), found by tracing every core string that
+   interpolates or is chosen from a `Tallies`/`TrainingContext` fact against what that
+   fact actually counts now, not what it counted when the sentence was written.
+3. **`ChatModel.LoadState.notYetScored`/`.noVerdict`** and **`DisplayMessage
+   .wasTruncated`/`.wasInterruptedByFailure`**'s captions — four strings in
+   `ChatConversationView` chosen by a core-declared state, sitting beside two sibling
+   cases of that same switch (`.failed`, `.threadNotFound`) that were already in
+   `ChatConversationCopy`. Moved the remaining four in, closing the inconsistency rather
+   than leaving half a state machine's copy in each layer.
+4. **`PlanProposalCardView`'s "This proposal matches the plan already in force, field for
+   field."** and its disclosure toggle's title (which interpolates `review.rowCount`) —
+   the one and only literal on a card whose own doc comment says "this view decides
+   nothing"; every other string it draws already reads off `PlanProposalReview`. Moved
+   both in as `PlanProposalReview.noChangesInDiffText` and
+   `.disclosureTitle(showingEveryRow:rowCount:)`.
+5. **`DriftOverlayView` had the same sentence typed out twice, twice.** The "no runs /
+   no curve" empty-state text and the "not enough points for a trend line" text were each
+   hand-copied into two call sites reading the same core state
+   (`HeartRateDriftOverlayData`/`DriftFigureSelection`'s `candidateCount`,
+   `HeartRateDriftTrendlineData`'s `fit`/`points`) — a duplication risk regardless of the
+   core/view question, and CLAUDE.md's "one consistent voice" is exactly what a
+   hand-copied literal breaks first. Consolidated into one computed property per core
+   type (`emptyStateText` ×2, `noFitExplanation`) plus the two accessibility labels that
+   were interpolating a count inline (`chartAccessibilityLabel` ×2), so each sentence has
+   exactly one place it is spelled.
+6. **`ChatThreadListView`'s "No messages yet"** was hand-typed twice in one file — the
+   row's visible caption and its VoiceOver label — for the same `preview == nil` fact.
+   Consolidated into `ChatThreadListCopy.noMessagesYetPreview` (core), the smallest of
+   the six findings but the same shape: two spellings of one absence that had no way to
+   notice they had drifted apart, because nothing compared them.
+
+**Reviewed and left alone, on purpose:**
+
+- **`ChatEntryPoint`'s "Ask about this run"** and **`ChatThreadSubtitle.text(for:
+  .workout)`'s "This run"** — checked against whether a lift can ever reach a workout
+  thread. It cannot: `ContextBuilder.workoutContext(for:from:)` requires a stored
+  `ledger` (a score), MAX-111 stopped lifts being scored, and `ChatModel` resolves to
+  `.noVerdict` before a workout thread ever reaches `.ready`. "This run" is true for
+  every workout subject a thread can actually reach today. Not a finding — verified and
+  recorded so the next ticket does not re-open it.
+- **Every screen's own `.failed` literal** ("Couldn't load the calendar.", "Couldn't load
+  the summary for this interval.", "Couldn't load the runs in this interval.",
+  "Couldn't resolve today's date.", "Conversations could not be loaded.") — each tied to
+  an App-layer model's own load-state enum with no core type behind the case, the same
+  shape `ChatThreadListModel.LoadState` already was. Left as view literals per the rule
+  stated above; moving them would not close a drift risk CI could otherwise catch.
+- **`ScoreCalendarFormatting.swift` (`App/Dashboard/`)** is a large, heavily
+  data-dependent VoiceOver-sentence builder living in the App layer — every branch reads
+  a `ScoreCalendarDayState`/`ScoreCalendarDay` (core types) and would, by this ticket's
+  own stated rule, belong in `MaximizeCore`. **Not moved.** It predates this ticket, is
+  extensively tested by device-adjacent review already (MAX-084, MAX-087, MAX-108's own
+  notes), and relocating it is an architecture change touching a file this size, not a
+  copy pass — flagged here as a real, pre-existing exception to the thin-shell rule
+  rather than silently left for the next reader to rediscover.
+- **The MAX-126 drift-overlay bug** — a lift counted as `DriftFigureSelection
+  .ExclusionReason.notYetScored` and narrated as "1 run isn't scored yet, so nothing has
+  decided whether it was an easy or long run" — is a **logic** bug (the exclusion
+  category is wrong for a lift, not merely its wording), already reported and explicitly
+  deferred to its own ticket by the report that found it. Read, confirmed still present,
+  not touched.
+
+**Strings not touched because another ticket owns their file — MAX-104's accurate
+remainder:**
+
+- **`App/Workouts/*`** in full (`WorkoutChatSectionView.swift`'s "Chat"/"Open chat" card
+  copy, `WorkoutDetailView.swift`, `VerdictHeaderView.swift`, `HRCurveView.swift`,
+  `CadenceBandView.swift`, `RouteMapView.swift`, `SplitsView.swift`,
+  `SummaryTilesView.swift`, `MuscleGroupEntryView.swift`, `WorkoutDisplayFormatting.swift`)
+  — explicitly out of this ticket's scope, and the lifting build still landing inside it.
+- **`App/Plan/*`** in full (`PlanAuthoringView` and its formatting) — same reasoning,
+  explicitly out of scope.
+- **`ChatEntryPoint`'s workout-subject strings**, reviewed above and left alone on their
+  merits rather than out of scope, but worth MAX-104 knowing they were checked: the
+  moment a lift can open a workout thread (a lifting-build decision, not this ticket's),
+  "this run" needs re-checking against that new fact.
+- **`Domain/Tallies.swift`, `Domain/RestDayBudgeting.swift`, `Tallies/`** — MAX-134's.
+  Not read for copy beyond confirming `workoutDays`'s counting rule for finding 2 above.
+- **`Metrics/SummaryTileData.swift`, `Domain/WorkoutVerdict.swift`** — MAX-139's. Not
+  opened.
+- **`Plan/StandardPlanSeed.swift`, `Plan/PlanDraft.swift`, `Plan/PlanProposal.swift`,
+  `Plan/PlanAuthoring.swift`** — MAX-146/MAX-148's. Not opened; `Plan/PlanProposalReview.swift`
+  (this ticket's finding 4) is a different, unowned file.
+- **`Scoring/WorkoutScorer.swift`, `Domain/WorkoutClassifier.swift`** — MAX-147/MAX-149's.
+  Not opened.
+
+**Done means, stated honestly.** `swift build`/`swift test` were not run — there is no
+Swift toolchain in this container, and CI is the actual compiler. Every change here is a
+string relocation or a wording fix with no branch or control-flow change, each new
+core-side string carries a test, and every touched view still compiles to the same calls
+it made before (a rename of the argument, not the call site's shape) as far as a
+line-by-line read can confirm. **This is "it compiles and its tests pass, as far as
+reading the diff can tell" — not a claim CI has confirmed**, per CLAUDE.md's own
+distinction between the two sentences.
+
 ### Phase 9 — Lifting (MAX-109)
 
 **MAX-144 is decided, by the owner: A22.** *"You can set the muscle group in the detail view
@@ -1536,6 +1673,9 @@ is the overseer's, not a ticket's — flagged here rather than done.
    131 and they are in dependency order.
 4. **MAX-104 runs after 135–140.** It already absorbs MAX-086's absence-voice half; it
    should absorb the lifting surfaces in the same pass rather than spawning a follow-up.
+   **Split, since: MAX-150 took the chat-and-dashboard half of that pass early** (those
+   two surfaces were finished and drifting while lifting was still mid-build), leaving
+   MAX-104 the lifting surfaces plus `App/Workouts/*` and `App/Plan/*`.
 
 Suggested order: **105 (briefed) → 128 → 129 → (130 ‖ 131) → 132 → 133 → 134 → 135**, with
 136 parallel after 130, 138 then 137 parallel after 129, and 139/140 last.

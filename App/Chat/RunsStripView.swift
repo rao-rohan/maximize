@@ -1,11 +1,18 @@
 import SwiftUI
 import MaximizeCore
 
-/// §2.2, §6.2: the "Runs in this conversation" strip — a training thread's sheet, below
+/// §2.2, §6.2: the runs-in-this-conversation strip — a training thread's sheet, below
 /// the transcript, naming every session `RunsStripData` says is in this thread's own
 /// `TrainingContext`. Tapping a chip forwards `onSelectRun`, which `ChatSheet` turns into
-/// a push to that run's own detail screen (§6.2: "no model involvement, nothing to
+/// a push to that session's own detail screen (§6.2: "no model involvement, nothing to
 /// parse").
+///
+/// **The header reads "Sessions in this conversation", not §6.2's literal "Runs in this
+/// conversation" (MAX-150).** The spec predates LIFTING-SPEC §10.2, which put lift
+/// sessions in `TrainingContext.sessions` alongside runs; the header is the same drift
+/// `RunsStripCopy`'s own MAX-150 note describes for the strip's absence sentence. The
+/// type's name is left unchanged — renaming it is a bigger, unrelated diff for no
+/// behavioural gain.
 ///
 /// Nothing here decides what to show. `RunsStripData` (MaximizeCore) already resolved
 /// each chip's label, their order, how many are shown and what the strip says when the
@@ -29,7 +36,9 @@ struct RunsStripView: View {
             VStack(alignment: .leading, spacing: Spacing.tight) {
                 // A fixed caption with no data dependency, so it stays here rather than
                 // in `MaximizeCore` — see `RunsStripCopy`'s own note on the split.
-                Text("Runs in this conversation")
+                // "Sessions", not "Runs" (MAX-150): the strip has named lift sessions
+                // too since MAX-136, and the header used to say otherwise.
+                Text("Sessions in this conversation")
                     .font(.metricLabel)
                     .foregroundStyle(Color.textSecondary)
 
@@ -65,11 +74,7 @@ struct RunsStripView: View {
                             .foregroundStyle(Color.textTertiary)
                             .lineLimit(1)
                             .padding(.horizontal, Spacing.snug)
-                            .accessibilityLabel(
-                                omittedCount == 1
-                                    ? "1 more run in this conversation, not shown"
-                                    : "\(omittedCount) more runs in this conversation, not shown"
-                            )
+                            .accessibilityLabel(RunsStripCopy.omittedCountAccessibilityLabel(omittedCount))
                     }
                 }
             }
@@ -87,6 +92,9 @@ struct RunsStripView: View {
                 .contentSurface(.inset)
         }
         .buttonStyle(.plain)
-        .accessibilityHint("Opens this run")
+        // "This session" (MAX-150), not "this run" — a chip can name a lift
+        // (`RunsStripData.label(for:)` already reads it by its own activity type), and
+        // a hint that only ever said "run" would be wrong on exactly that chip.
+        .accessibilityHint("Opens this session")
     }
 }

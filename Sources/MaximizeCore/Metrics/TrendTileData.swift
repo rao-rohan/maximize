@@ -13,7 +13,7 @@ import Foundation
 /// |---|---|---|---|
 /// | distance | actual / arc target | actual / arc target | total, no target |
 /// | effective days | `4/5` | `18/22` | `68%`, denominator in the caption |
-/// | days run | — | `18` | `212` |
+/// | days trained | — | `18` | `212` |
 /// | streak | ✓ | ✓ | ✓ |
 /// | avg score | ✓ | ✓ | ✓ |
 ///
@@ -88,6 +88,12 @@ public struct TrendTileData: Hashable, Sendable {
     /// `Tallies.workoutDays` — distinct days with at least one recorded workout, scored
     /// or not. Present at `.monthly` and `.annual` only, and deliberately without a
     /// denominator.
+    ///
+    /// **Captioned "days trained", not "days run" (MAX-150).** The count includes a day
+    /// whose only workout was a lift — `TalliesCalculator`'s own `workoutDays` counts
+    /// "at least one recorded workout" with no discipline filter — so "days run" quietly
+    /// became wrong the day a lift-only day could exist. Found in review as the same
+    /// class of drift `RunsStripCopy`'s own MAX-150 note fixes.
     public let workoutDays: Tile?
 
     /// `Tallies.currentStreak`. Always present — see the type's own documentation for
@@ -196,7 +202,7 @@ public struct TrendTileData: Hashable, Sendable {
         case .weekly:
             workoutDays = nil
         case .monthly, .annual:
-            workoutDays = Tile(value: "\(tallies.workoutDays)", caption: "days run")
+            workoutDays = Tile(value: "\(tallies.workoutDays)", caption: "days trained")
         }
 
         streak = Tile(value: "\(tallies.currentStreak)", caption: "day streak")

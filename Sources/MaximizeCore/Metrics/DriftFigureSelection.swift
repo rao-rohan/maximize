@@ -155,6 +155,20 @@ public struct DriftFigureSelection: Hashable, Sendable {
         return "\(plotted) of \(candidateCount) \(candidateCount == 1 ? "run" : "runs") plotted"
     }
 
+    /// What the view prints in place of a chart when nothing qualified — the year span's
+    /// own version of `HeartRateDriftOverlayData.emptyStateText`, worded for what this
+    /// type actually withholds (a stored figure, not a curve to normalise).
+    ///
+    /// Moved here from `DriftOverlayView` (MAX-150) for the same reason
+    /// `HeartRateDriftOverlayData.emptyStateText` was: a data-dependent branch that used
+    /// to be hand-typed in the view, beside an identical-looking sentence for a
+    /// different type a few lines away.
+    public var emptyStateText: String {
+        candidateCount == 0
+            ? "No runs in this interval."
+            : "No run in this interval carries a stored drift figure."
+    }
+
     /// One sentence per kind of omission, for a view to print under the chart. Mirrors
     /// `HeartRateDriftOverlayData.exclusionNotes`, minus the reasons that only exist
     /// because a shape is being drawn.

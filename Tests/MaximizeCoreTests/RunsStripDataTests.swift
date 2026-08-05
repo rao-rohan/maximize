@@ -162,7 +162,7 @@ final class RunsStripDataTests: XCTestCase {
         XCTAssertEqual(RunsStripData.build(from: context), .empty(.noSessionsInWindow))
         XCTAssertEqual(
             RunsStripCopy.text(for: .noSessionsInWindow),
-            "No runs recorded in this window yet."
+            "No sessions recorded in this window yet."
         )
     }
 
@@ -215,6 +215,20 @@ final class RunsStripDataTests: XCTestCase {
         XCTAssertEqual(chips.count, RunsStripData.maximumChips)
         XCTAssertEqual(omittedCount, 1)
         XCTAssertEqual(RunsStripCopy.omittedCountLabel(omittedCount), "+1 more")
+        XCTAssertEqual(
+            RunsStripCopy.omittedCountAccessibilityLabel(omittedCount),
+            "1 more session in this conversation, not shown"
+        )
+    }
+
+    /// The plural form, and "session" rather than "run" — a chip can name a lift
+    /// (`testLabelNamesALiftByItsOwnActivityType` above), so the sentence naming however
+    /// many were left off must not claim they are all runs.
+    func testOmittedCountAccessibilityLabelPluralises() {
+        XCTAssertEqual(
+            RunsStripCopy.omittedCountAccessibilityLabel(3),
+            "3 more sessions in this conversation, not shown"
+        )
     }
 
     /// One workout a day on consecutive days from Monday 2026-01-05, exactly as

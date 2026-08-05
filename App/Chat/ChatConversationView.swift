@@ -275,7 +275,7 @@ struct ChatConversationView: View {
             // existing score." Workout subjects only — `ChatModel` never reaches this
             // state for a training thread.
             centered {
-                secondaryText("This run hasn't been scored yet — chat opens once it has a score.")
+                secondaryText(ChatConversationCopy.notYetScored)
             }
         case .noVerdict:
             // The same absence, and the opposite tense (MAX-126). The sentence above
@@ -283,10 +283,7 @@ struct ChatConversationView: View {
             // have the score chat is seeded from. Said once, plainly, in the same voice
             // the verdict header uses on the screen behind this sheet.
             centered {
-                secondaryText(
-                    "The plan scores runs, so there's no score for this workout — "
-                        + "and chat starts from one."
-                )
+                secondaryText(ChatConversationCopy.noVerdict)
             }
         case .ready:
             VStack(spacing: 0) {
@@ -548,11 +545,11 @@ private struct WorkoutChatBubble: View {
                     // simply ran out of room — `ChatTurnCompletion`'s own documentation
                     // says the UI is what should say so.
                     if message.wasTruncated {
-                        caption("Cut short — hit the reply length limit.")
+                        caption(ChatConversationCopy.truncatedCaption)
                     }
                     // Constraint #4: partial text survives a failure, on screen.
                     if message.wasInterruptedByFailure {
-                        caption("Connection dropped before this reply finished.")
+                        caption(ChatConversationCopy.interruptedByFailureCaption)
                     }
                 }
             }

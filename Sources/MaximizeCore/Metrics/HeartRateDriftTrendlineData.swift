@@ -193,6 +193,31 @@ public struct HeartRateDriftTrendlineData: Hashable, Sendable {
         )
     }
 
+    /// The sentence explaining why `fit` is nil, for a view to print in its place —
+    /// never a blank space, and never a flat line implying a trend that is not there
+    /// (see `fit`'s own documentation). Nil once `fit` exists, and nil when there are no
+    /// points at all — a view reaches this only once it already knows there is
+    /// something to explain.
+    ///
+    /// Moved here from `DriftOverlayView` (MAX-150), which built this exact two-way
+    /// sentence twice by hand — once for the overlay-led spans' own trendline section,
+    /// once for the year span's — both reading `fit` and `points.count` off this same
+    /// type. One computed property is what keeps the two from ever reading two
+    /// different sentences for the same absence.
+    public var noFitExplanation: String? {
+        guard fit == nil, !points.isEmpty else { return nil }
+        return points.count == 1
+            ? "One run with a stored drift figure — not enough yet for a trend line."
+            : "These runs share one date, so there's no spread to fit a trend line to."
+    }
+
+    /// The chart's VoiceOver label. `points.count` is data, so it belongs here rather
+    /// than interpolated inline in the view that draws the chart — the same reasoning
+    /// `noFitExplanation` above follows.
+    public var chartAccessibilityLabel: String {
+        "Drift trend across \(points.count) runs, by date"
+    }
+
     /// The y-axis a chart should use, in drift-*fraction* units (a view multiplies by
     /// 100 to display percent, matching `SummaryTileData`'s convention) — the plotted
     /// points' own range, padded so no point or line sits flush against the frame edge.

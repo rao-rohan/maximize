@@ -266,6 +266,15 @@ final class ChatThreadSummaryTests: XCTestCase {
     /// The direction is not arbitrary: it matches `mostRecentThread(for:)`, which takes
     /// the maximum, so the list's top row is the thread the Ask button opens.
     /// `ChatThreadRepositoryTests` pins the two against each other.
+    // MARK: - MAX-150: the row's absence copy
+
+    /// `ChatThreadListCopy.noMessagesYetPreview` is what a nil `preview` stands for on
+    /// the row — both the row's visible caption and its VoiceOver label read this one
+    /// constant, so the two cannot state the absence two different ways.
+    func testNoMessagesYetPreviewIsNotEmpty() {
+        XCTAssertFalse(ChatThreadListCopy.noMessagesYetPreview.isEmpty)
+    }
+
     func testTiesAreBrokenByIdentifierSoTheOrderIsTotal() throws {
         let low = ChatThreadSummary(try Fixture.thread(
             id: UUID(uuidString: "00000000-0000-0000-0000-000000000001") ?? UUID(),

@@ -499,4 +499,33 @@ final class HeartRateDriftOverlayDataTests: XCTestCase {
         XCTAssertEqual(overlay.candidateCount, 0)
         XCTAssertTrue(overlay.exclusionNotes.isEmpty)
     }
+
+    // MARK: - MAX-150: copy moved here from `DriftOverlayView`
+
+    /// An empty interval and an interval whose runs all failed the shape filter are two
+    /// different facts, and `emptyStateText` must not collapse them into one sentence.
+    func testEmptyStateTextDistinguishesAnEmptyIntervalFromNoQualifyingCurve() throws {
+        let noCandidates = HeartRateDriftOverlayData(candidates: [])
+        XCTAssertEqual(noCandidates.emptyStateText, "No runs in this interval.")
+
+        let noSeries = try makeCandidate(samples: nil)
+        let excluded = HeartRateDriftOverlayData(candidates: [noSeries])
+        XCTAssertEqual(excluded.candidateCount, 1)
+        XCTAssertTrue(excluded.isEmpty)
+        XCTAssertEqual(
+            excluded.emptyStateText,
+            "No run in this interval has a heart-rate curve to normalise."
+        )
+    }
+
+    func testChartAccessibilityLabelNamesHowManyCurvesAreStacked() throws {
+        let one = try makeCandidate(id: Fixture.workoutID, daysBeforeEpoch: 1)
+        let two = try makeCandidate(id: Fixture.otherWorkoutID, daysBeforeEpoch: 2)
+        let overlay = HeartRateDriftOverlayData(candidates: [one, two])
+
+        XCTAssertEqual(
+            overlay.chartAccessibilityLabel,
+            "Heart-rate curves for 2 runs, on a shared percent-elapsed axis"
+        )
+    }
 }

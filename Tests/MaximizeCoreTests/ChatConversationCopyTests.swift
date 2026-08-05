@@ -69,4 +69,28 @@ final class ChatConversationCopyTests: XCTestCase {
     func testThreadNotFoundIsNotEmpty() {
         XCTAssertFalse(ChatConversationCopy.threadNotFound.isEmpty)
     }
+
+    // MARK: - MAX-150: the other two `ChatModel.LoadState` cases
+
+    /// Ordinary, not a failure — worded as "not yet" rather than "cannot", the same
+    /// register `failedToLoad`/`threadNotFound` keep for their own ordinary states.
+    func testNotYetScoredIsNotEmptyAndDoesNotReadAsAFailure() {
+        XCTAssertFalse(ChatConversationCopy.notYetScored.isEmpty)
+        XCTAssertFalse(ChatConversationCopy.notYetScored.lowercased().contains("error"))
+    }
+
+    /// The opposite tense of `notYetScored` (MAX-126): a lift will never be scored, so
+    /// the sentence must not promise one is coming.
+    func testNoVerdictDoesNotPromiseAScoreIsComing() {
+        XCTAssertFalse(ChatConversationCopy.noVerdict.isEmpty)
+        XCTAssertNotEqual(ChatConversationCopy.noVerdict, ChatConversationCopy.notYetScored)
+    }
+
+    // MARK: - MAX-150: `ChatModel.DisplayMessage`'s two flags
+
+    func testTruncatedAndInterruptedCaptionsAreDistinctAndNonEmpty() {
+        XCTAssertFalse(ChatConversationCopy.truncatedCaption.isEmpty)
+        XCTAssertFalse(ChatConversationCopy.interruptedByFailureCaption.isEmpty)
+        XCTAssertNotEqual(ChatConversationCopy.truncatedCaption, ChatConversationCopy.interruptedByFailureCaption)
+    }
 }

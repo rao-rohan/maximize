@@ -227,4 +227,20 @@ final class DriftFigureSelectionTests: XCTestCase {
         XCTAssertEqual(selection.trendline.points.count, 1)
         XCTAssertNil(selection.trendline.fit)
     }
+
+    // MARK: - MAX-150: copy moved here from `DriftOverlayView`
+
+    /// An empty interval and an interval whose runs all failed eligibility are two
+    /// different facts — the wording differs (a curve to normalise versus a stored
+    /// figure), which is `emptyStateText`'s own reason for existing separately from
+    /// `HeartRateDriftOverlayData.emptyStateText`.
+    func testEmptyStateTextDistinguishesAnEmptyIntervalFromNothingEligible() {
+        let noCandidates = DriftFigureSelection(candidates: [])
+        XCTAssertEqual(noCandidates.emptyStateText, "No runs in this interval.")
+
+        let allExcluded = DriftFigureSelection(candidates: [candidate(dayOffset: 0, classification: .hard)])
+        XCTAssertTrue(allExcluded.isEmpty)
+        XCTAssertEqual(allExcluded.candidateCount, 1)
+        XCTAssertEqual(allExcluded.emptyStateText, "No run in this interval carries a stored drift figure.")
+    }
 }

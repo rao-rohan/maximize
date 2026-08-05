@@ -223,6 +223,19 @@ public struct ChatThreadSummary: Hashable, Sendable, Identifiable {
     }
 }
 
+/// The one string `ChatThreadSummary.preview` being nil stands for (§2.3) — a thread
+/// nobody has spoken in yet.
+///
+/// MAX-150: `ChatThreadListView`'s row wrote this sentence twice, by hand, in two
+/// places that must always agree — the visible caption and the VoiceOver label built
+/// beside it — which is exactly the kind of duplication CLAUDE.md's "one consistent
+/// voice" exists to close: the two could not previously drift, because they were never
+/// checked against each other, only against luck. One constant, read twice, closes it
+/// for good rather than by convention.
+public enum ChatThreadListCopy {
+    public static let noMessagesYetPreview = "No messages yet"
+}
+
 /// Turning a turn of a conversation into one line of a list row.
 ///
 /// Internal: this is how `ChatThreadTitle` and `ChatThreadSummary` shorten text, not a

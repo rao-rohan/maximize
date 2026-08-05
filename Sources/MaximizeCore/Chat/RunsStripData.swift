@@ -134,17 +134,27 @@ public enum RunsStripData: Hashable, Sendable {
 }
 
 /// Copy for the strip itself — the header a training thread's sheet always shows is a
-/// fixed string with no data dependency (`RunsStripView`'s own "Runs in this conversation"),
-/// so it stays in the view exactly as `WorkoutChatSectionView`'s "Chat" heading does; what
-/// belongs here is the copy that *depends on `RunsStripData`*, mirroring
-/// `ChatConversationCopy`'s own split between fixed and subject-dependent strings.
+/// fixed string with no data dependency (`RunsStripView`'s own "Sessions in this
+/// conversation"), so it stays in the view exactly as `WorkoutChatSectionView`'s "Chat"
+/// heading does; what belongs here is the copy that *depends on `RunsStripData`*,
+/// mirroring `ChatConversationCopy`'s own split between fixed and subject-dependent
+/// strings.
+///
+/// ## MAX-150: "runs" was never the right noun once a lift could be in scope
+///
+/// `TrainingContext.sessions` has carried both disciplines since MAX-136 (LIFTING-SPEC
+/// §10.2), so every sentence here says "session" — the same noun `TrainingContext` and
+/// `PlanCopy` already use for the same set — never "run". Found in review as a concrete
+/// instance of CLAUDE.md's "absence is a designed state" going stale: a sentence that was
+/// true when a training thread could only ever roll up runs became false the day a lift
+/// joined the roll-up, and nothing here re-asserted it.
 public enum RunsStripCopy {
 
     /// The strip's one line of prose for `RunsStripData.EmptyReason`.
     public static func text(for reason: RunsStripData.EmptyReason) -> String {
         switch reason {
         case .noSessionsInWindow:
-            return "No runs recorded in this window yet."
+            return "No sessions recorded in this window yet."
         case let .withheldByCap(sessionCount):
             return "This window holds \(sessionCount) sessions — too many to list individually."
         }
@@ -154,5 +164,15 @@ public enum RunsStripCopy {
     /// the end of an otherwise-listed strip.
     public static func omittedCountLabel(_ omittedCount: Int) -> String {
         "+\(omittedCount) more"
+    }
+
+    /// VoiceOver's reading of that same trailing label — a sentence, not a "+N" glyph, and
+    /// carrying a data dependency (`omittedCount`'s pluralisation) that belongs here rather
+    /// than in `RunsStripView`, the same reasoning every other function on this type
+    /// follows.
+    public static func omittedCountAccessibilityLabel(_ omittedCount: Int) -> String {
+        omittedCount == 1
+            ? "1 more session in this conversation, not shown"
+            : "\(omittedCount) more sessions in this conversation, not shown"
     }
 }
