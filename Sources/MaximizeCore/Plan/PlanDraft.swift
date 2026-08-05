@@ -76,13 +76,15 @@ public struct PlanDraft: Hashable, Sendable {
         public private(set) var liftNote: String?
 
         /// The lift's prescribed duration in **seconds**, carried but not editable here
-        /// — the same shape as `liftNote`, and for the same reason.
+        /// — the same shape as `liftNote`, and for the same reason (MAX-137 gave the
+        /// lift slot's kind and muscle groups an editor; its duration still has none).
         ///
-        /// **Carried is the operative word.** Without it, revising a plan rebuilt every
+        /// **Carried is the operative word.** Without this, revising a plan rebuilt every
         /// lift ask from kind, note and groups alone, so a prescribed "45 minutes, lower
         /// body" came back as "lower body" with the duration silently gone. A revision
-        /// must not lose a field it never offered to edit, and the run slot has always
-        /// carried `durationSeconds` for exactly this reason.
+        /// must not lose a field it never offered to edit — that is data loss wearing a
+        /// no-op's clothes, and `durationSeconds` on the run slot has always been carried
+        /// for exactly this reason.
         public private(set) var liftDurationSeconds: Double?
         /// What the lift is for. Empty while `.lift` is a real, distinct state — "a
         /// lift with no groups named" — from `liftKind == .rest`, "no lift". See
@@ -145,10 +147,10 @@ public struct PlanDraft: Hashable, Sendable {
             liftKind = kind
             if kind != .lift {
                 liftMuscleGroups = []
-                // Cleared for the same reason the groups are, and not optional:
-                // `ScheduledSession` rejects a rest day carrying a duration, so a value
-                // left behind would make `liftSession()` throw on a draft the athlete
-                // reached through this type's own setters.
+                // Cleared for the same reason the groups are, and it is not optional:
+                // `ScheduledSession` rejects a rest day carrying a duration outright, so
+                // a value left behind here would make `liftSession()` throw on a draft
+                // the athlete reached through this type's own setters.
                 liftDurationSeconds = nil
             }
         }
@@ -199,9 +201,11 @@ public struct PlanDraft: Hashable, Sendable {
         /// Whether the weekday carries a run ask, a lift ask, both, or neither — the
         /// fact a scannable week view leads with, before either slot's own detail
         /// (MAX-137: "a person checking seven days of two slots wants to see the week
-        /// at once"). `ObligationSummary` is shared with `PlanDisplayData.WeekdayRow`
-        /// (MAX-138) rather than declared here a second time — see that type's own
-        /// documentation for why.
+        /// at once").
+        ///
+        /// The shared `ObligationSummary`, not a nested twin: a week mid-edit and a
+        /// stored governing week answer the same question, and MAX-138 unified the two
+        /// so they cannot drift.
         public var obligationSummary: ObligationSummary {
             ObligationSummary(runKind: kind, liftKind: liftKind)
         }
