@@ -366,6 +366,36 @@ function, so its branch never renders), and `enteredKey` is not cleared on the
 | MAX-071 | Scoring fixture suite: known-good runs → expected score bands | R7 | Sonnet | ✅ | MAX-015 |
 | MAX-072 | Security review: Keychain handling, data at rest, prompt minimization, distribution tripwire | §11, A5 | **Opus** 🔒 | ✅ | MAX-023, MAX-024 |
 
+### Phase 8 — Chat-first pivot (MAX-090, in flight)
+
+MAX-090's product spec and amendments A9–A15 are drafted (`docs/CHAT-FIRST-SPEC.md`,
+tracker branch `claude/max-090-chat-first-spec`) but **not yet merged to `main`** as of
+this entry — this ticket's own branch could not see them and worked from the spec
+content directly. Whoever merges MAX-090 should reconcile this row into that phase's
+own table rather than leaving two entries for MAX-102.
+
+| ID | Ticket | Spec | Tier | Status | Depends on |
+|---|---|---|---|---|---|
+| MAX-102 | Read-only plan screen, with version history, as its own tab | A15, CHAT-FIRST-SPEC §5 | Sonnet | ✅ | — |
+
+**MAX-102 shipped as a tab, not a Dashboard push.** The spec's §5.3 recommended pushing
+from the Dashboard's navigation bar; the owner changed this mid-ticket to a top-level
+tab so the plan sits beside Workouts and Dashboard rather than a level under either.
+`RootTabView.swift` is deliberately untouched — mounting the tab (suggested label
+"Plan", SF Symbol `list.bullet.clipboard`) is left to whichever ticket owns the tab bar,
+to avoid three tickets converging on that one file. The spec also described the screen
+as read-only with no path to editing; the owner added one mid-ticket — an "Author a
+revision" affordance that hands off to the existing `PlanAuthoringView` (MAX-080) rather
+than editing in place, keeping D1's single door intact. See the PR for the full
+rationale on both changes.
+
+`PlanDisplayData` (new, `Sources/MaximizeCore/Plan/PlanDisplayData.swift`) is the
+prepared value: version labelling, current-vs-historical, the arc's current week, and
+the no-plan-authored case, all under test (`PlanDisplayDataTests.swift`). The app layer
+(`App/Plan/PlanView.swift`, `PlanVersionDetailView.swift`, `PlanViewModel.swift`,
+`PlanFormatting.swift`, `PlanDetailSections.swift`) only lays those values out — CI
+compiles it but does not run it; see the PR's **Needs device verification** section.
+
 ### Deliberately not built
 
 Live coaching · manual entry/editing · strength analysis · HealthKit writes · multi-user ·
