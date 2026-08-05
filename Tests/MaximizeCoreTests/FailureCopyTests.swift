@@ -18,15 +18,16 @@ final class FailureCopyTests: XCTestCase {
 
     // MARK: - Every case, enumerated
 
-    /// Every string this type can produce, in one place, so the whole-set properties
-    /// below cannot silently miss a mapping added later. Each entry pairs the sentence
-    /// with a label naming where it came from, so a failure says which case broke the
-    /// rule rather than only quoting the string.
+    /// One sentence, paired with a label naming where it came from — so a failing
+    /// whole-set assertion says which case broke the rule rather than only quoting the
+    /// string it produced.
     private struct Entry {
         let label: String
         let text: String
     }
 
+    /// Every string `FailureCopy` can produce, in one place, so the whole-set properties
+    /// below cannot silently miss a mapping added later.
     private var allCopy: [Entry] {
         var entries: [Entry] = []
         for surface in LoadFailureSurface.allCases {
