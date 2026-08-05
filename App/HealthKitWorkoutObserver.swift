@@ -138,8 +138,19 @@ final class HealthKitWorkoutObserver {
             // fails with HKError.Code.errorAuthorizationDenied and the app is never
             // woken again — no crash, no user-visible symptom, just a capture pipeline
             // that captures nothing (PRD §13, tracker R5).
-            let reason = error.map { String(describing: $0) } ?? "no error reported"
-            ingestionLog.error("HealthKit background delivery NOT enabled: \(reason, privacy: .public)")
+            //
+            // MAX-072: split into two fields, on the same rule `IngestionComposition`
+            // states for `reportFailure`. The `HKError` code is a payload-free enum
+            // value — it names *which* failure, carries no measurement, date or
+            // identifier, and is what someone diagnosing R5 actually reads — so it is
+            // `.public` and survives into a sysdiagnose. The `Error` itself is
+            // arbitrary: an `NSError`'s `userInfo` is not something this call site can
+            // bound, and CLAUDE.md rules health data out of logs without a
+            // "probably fine" exception. `.private` still shows it in full to a
+            // debugger attached in Xcode, which is where it gets read.
+            let code = error.map { "\(($0 as NSError).domain) \(($0 as NSError).code)" } ?? "no error reported"
+            ingestionLog.error("HealthKit background delivery NOT enabled (\(code, privacy: .public)).")
+            ingestionLog.error("Underlying error: \(String(describing: error), privacy: .private)")
             ingestionLog.error("Zero-touch capture is inert. Verify the com.apple.developer.healthkit.background-delivery entitlement is present in the signed build, and that Health access was granted.")
         }
     }

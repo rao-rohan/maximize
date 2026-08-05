@@ -5,6 +5,30 @@ credentials, and this repo holds none. This is the local path instead.
 
 It takes about five minutes the first time and one command after that.
 
+> ## ⛔ Before you give this build to anybody else
+>
+> **This app may be installed on your own device. It must not be distributed** — not to
+> TestFlight, not to the App Store, not sideloaded onto a friend's phone — **until the
+> Anthropic API key is moved off the device and behind a server.**
+>
+> The key lives in Keychain on the phone ([A5](./PRD-AMENDMENTS.md#a5--the-anthropic-api-key-lives-in-keychain-on-device)),
+> which supersedes PRD §6's "the key never touches the device". That was accepted on
+> exactly one condition: the app is single-user and is never shipped. Anyone holding the
+> binary can extract the key from it and spend against the account it belongs to. **This
+> is a release blocker, not a follow-up**, and it is recorded as R3 in
+> [`PROJECT_TRACKER.md`](../PROJECT_TRACKER.md).
+>
+> A second, quieter one travels with it: CloudKit backup is deferred
+> ([A8](./PRD-AMENDMENTS.md#a8--cloudkit-backup-is-deferred-d6-is-downgraded-to-on-device-durability)),
+> so history does not survive a reinstall and a second device starts empty. That is a
+> tolerable trade for one person who knows it. It is not something to ship to someone
+> who does not.
+>
+> This notice is here rather than only in `CLAUDE.md` and `docs/PRD-AMENDMENTS.md`
+> because this is the file someone reaches for when they set a real bundle identifier
+> and start paying Apple $99 — which is the last moment before the tripwire matters and
+> the first moment anybody reads about signing at all. Added by MAX-072.
+
 ## What you need
 
 - **A Mac with Xcode 26.** The app targets iOS 26 for Liquid Glass (PRD §7.4), so
@@ -74,13 +98,22 @@ This is why the local build matters rather than a CI simulator artifact.
 | **HealthKit background delivery** | **no — unsupported by Apple** | yes |
 | Watch → iPhone sync timing | no | yes |
 | Whether zero-touch capture works at all | no | **yes** |
-| **CloudKit sync between two devices** | no — needs a second real device | yes |
+| **CloudKit sync between two devices** | n/a — deferred, see A8 | n/a — deferred, see A8 |
 
 Background delivery not working in the Simulator is Apple's documented behaviour, not a
 limitation of this project's setup. It is the single reason a simulator build cannot
 verify the product's central claim.
 
-## Verifying CloudKit sync (MAX-021)
+## Verifying CloudKit sync (MAX-021) — deferred, nothing to verify today
+
+**Skip this section.** [A8](./PRD-AMENDMENTS.md#a8--cloudkit-backup-is-deferred-d6-is-downgraded-to-on-device-durability)
+removed the iCloud entitlements from `project.yml` and flipped `makeOnDisk`'s
+`cloudKitDatabase` default to `.none`, so the store is local-only: no workout, curve,
+route, score or chat message leaves the phone through iCloud. Nothing below will
+happen, and step 3 or 4 appearing to fail is the expected result rather than a bug to
+chase. The steps are kept because re-enabling mirroring is a two-line change and this
+is the checklist for the day it happens. Flagged at MAX-072, which found this section
+still describing sync as live.
 
 Same story as background delivery: nothing in CI touches this, and there is no
 simulator substitute — CloudKit sync needs two real endpoints signed into the same
