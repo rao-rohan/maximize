@@ -95,13 +95,14 @@ public enum PlanProposalError: Error, Hashable, Sendable, CustomStringConvertibl
     /// would be this parser deciding which one it meant.
     case restDayIsNotEmpty(weekday: Weekday)
 
-    /// A lift slot of `"rest"` carried muscle groups (MAX-141).
+    /// A lift slot of `"rest"` carried muscle groups, a duration, or a note (MAX-141,
+    /// widened by MAX-148 to the two fields it added).
     ///
     /// The lift-slot analogue of `restDayIsNotEmpty`, and a distinct case rather than a
     /// reuse of it: that one's sentence names a distance and a note, which would be a
     /// false description of what this day actually carried. `PlanDraft.DayDraft`'s own
-    /// `setLiftKind` clears the groups the moment the kind leaves `.lift` for the same
-    /// reason — this is the wire-boundary side of that rule.
+    /// `setLiftKind` clears all three fields the moment the kind leaves `.lift` for the
+    /// same reason — this is the wire-boundary side of that rule.
     case liftRestDayIsNotEmpty(weekday: Weekday)
 
     /// The goal's target day was not `YYYY-MM-DD`.
@@ -165,7 +166,8 @@ public enum PlanProposalError: Error, Hashable, Sendable, CustomStringConvertibl
                 + "carry a distance or a note. Give it a session kind, or leave it empty."
         case let .liftRestDayIsNotEmpty(weekday):
             return "\(PlanProposal.wireName(for: weekday).capitalized)'s lift slot is rest, so it "
-                + "cannot name muscle groups. Set \"liftKind\" to \"lift\", or leave "
+                + "cannot carry a duration, a note, or muscle groups. Set \"liftKind\" to "
+                + "\"lift\", or leave \"liftDurationSeconds\", \"liftNote\" and "
                 + "\"liftMuscleGroups\" out."
         case let .malformedGoalTargetDay(value):
             return "\"\(value)\" is not a date. Give the goal's target day as YYYY-MM-DD, "
@@ -258,12 +260,13 @@ public struct PlanProposal: Hashable, Sendable, Codable {
     /// treat both slots the same way it always has, through `ScheduledSession`'s own
     /// construction.
     ///
-    /// `liftSession.note` and `.durationSeconds` are always nil here: neither is
-    /// proposable, matching exactly what `PlanDraft.DayDraft`'s own setters expose for
-    /// the lift slot (`setLiftKind`, `setLiftMuscleGroups` — no `setLiftNote`, no
-    /// duration setter). `PlanDraft.applying(_:)` carries the athlete's existing note
-    /// and duration forward when the lift kind is unchanged, the same rule it already
-    /// applies to the run slot's `durationSeconds`.
+    /// `liftSession.note` and `.durationSeconds` are proposable as of MAX-148, matching
+    /// exactly what `PlanDraft.DayDraft`'s own setters expose for the lift slot
+    /// (`setLiftKind`, `setLiftMuscleGroups`, `setLiftDurationSeconds`, `setLiftNote`).
+    /// `PlanDraft.applying(_:)` takes both directly from the proposal now, the same way
+    /// it has always taken `distanceMeters` and `note` for the run slot — a weekday the
+    /// reply does not restate a value for gets none, rather than the value it already
+    /// had.
     public struct Day: Hashable, Sendable, Codable, Identifiable {
         public var id: Weekday { weekday }
 
@@ -282,13 +285,18 @@ public struct PlanProposal: Hashable, Sendable, Codable {
 
         public var liftKind: ScheduledSessionKind { liftSession.kind }
         public var liftMuscleGroups: Set<MuscleGroup> { liftSession.muscleGroups }
+        /// The lift's prescribed duration in seconds, proposable as of MAX-148.
+        public var liftDurationSeconds: Double? { liftSession.durationSeconds }
+        /// The lift's free-text note, proposable as of MAX-148.
+        public var liftNote: String? { liftSession.note }
 
         /// - Throws: `PlanProposalError.restDayIsNotEmpty` when the run slot's rest day
         ///   carries work. `ScheduledSession` permits a rest day with a note; a *draft*
         ///   cannot express one, so accepting it here would mean the note vanished
         ///   somewhere between the card the athlete approved and the plan they saved.
         ///   `PlanProposalError.liftRestDayIsNotEmpty` for the equivalent rule on the
-        ///   lift slot — a rest lift asking nothing cannot also name muscle groups.
+        ///   lift slot — a rest lift asking nothing cannot also carry a duration, a
+        ///   note, or muscle groups.
         public init(
             weekday: Weekday,
             session: ScheduledSession,
@@ -297,7 +305,12 @@ public struct PlanProposal: Hashable, Sendable, Codable {
             guard !(session.isRest && (session.distanceMeters != nil || session.note != nil)) else {
                 throw PlanProposalError.restDayIsNotEmpty(weekday: weekday)
             }
-            guard !(liftSession.isRest && !liftSession.muscleGroups.isEmpty) else {
+            guard !(
+                liftSession.isRest
+                    && (liftSession.durationSeconds != nil
+                        || liftSession.note != nil
+                        || !liftSession.muscleGroups.isEmpty)
+            ) else {
                 throw PlanProposalError.liftRestDayIsNotEmpty(weekday: weekday)
             }
             self.weekday = weekday
@@ -312,14 +325,21 @@ public struct PlanProposal: Hashable, Sendable, Codable {
             distanceMeters: Double? = nil,
             note: String? = nil,
             liftKind: ScheduledSessionKind = .rest,
-            liftMuscleGroups: Set<MuscleGroup> = []
+            liftMuscleGroups: Set<MuscleGroup> = [],
+            liftDurationSeconds: Double? = nil,
+            liftNote: String? = nil
         ) throws {
             let trimmed = note?.trimmingCharacters(in: .whitespacesAndNewlines)
             let cleaned = (trimmed?.isEmpty ?? true) ? nil : trimmed
             guard !(kind == .rest && (distanceMeters != nil || cleaned != nil)) else {
                 throw PlanProposalError.restDayIsNotEmpty(weekday: weekday)
             }
-            guard !(liftKind == .rest && !liftMuscleGroups.isEmpty) else {
+            let trimmedLiftNote = liftNote?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let cleanedLiftNote = (trimmedLiftNote?.isEmpty ?? true) ? nil : trimmedLiftNote
+            guard !(
+                liftKind == .rest
+                    && (liftDurationSeconds != nil || cleanedLiftNote != nil || !liftMuscleGroups.isEmpty)
+            ) else {
                 throw PlanProposalError.liftRestDayIsNotEmpty(weekday: weekday)
             }
             let session: ScheduledSession
@@ -339,19 +359,27 @@ public struct PlanProposal: Hashable, Sendable, Codable {
             }
             let liftSession: ScheduledSession
             do {
-                liftSession = try ScheduledSession(kind: liftKind, muscleGroups: liftMuscleGroups)
+                liftSession = try ScheduledSession(
+                    kind: liftKind,
+                    durationSeconds: liftDurationSeconds,
+                    note: cleanedLiftNote,
+                    muscleGroups: liftMuscleGroups
+                )
             } catch {
-                // Unreachable given the guard above — `ScheduledSession` refuses
-                // muscle groups only on a non-lift kind, and the only non-lift kind
+                // Reachable as of MAX-148: a non-positive `liftDurationSeconds` reaches
+                // `ScheduledSession` unvalidated and is refused here. The muscle-group
+                // combination stays unreachable given the guard above — `ScheduledSession`
+                // refuses groups only on a non-lift kind, and the only non-lift kind
                 // `liftKind` can hold here is `.rest`, already caught. Reported in the
-                // door's vocabulary anyway, belt-and-braces, rather than a `try!`.
+                // door's vocabulary either way, belt-and-braces, rather than a `try!`.
                 throw PlanProposalError.rejectedByAuthoring(.liftSessionInvalid(weekday: weekday))
             }
             try self.init(weekday: weekday, session: session, liftSession: liftSession)
         }
 
         private enum CodingKeys: String, CodingKey {
-            case weekday, kind, distanceMeters, note, liftKind, liftMuscleGroups
+            case weekday, kind, distanceMeters, note
+            case liftKind, liftMuscleGroups, liftDurationSeconds, liftNote
         }
 
         public func encode(to encoder: any Encoder) throws {
@@ -364,6 +392,8 @@ public struct PlanProposal: Hashable, Sendable, Codable {
             if !liftMuscleGroups.isEmpty {
                 try container.encode(liftMuscleGroups.ordered.map(\.rawValue), forKey: .liftMuscleGroups)
             }
+            try container.encodeIfPresent(liftDurationSeconds, forKey: .liftDurationSeconds)
+            try container.encodeIfPresent(liftNote, forKey: .liftNote)
         }
 
         public init(from decoder: any Decoder) throws {
@@ -398,7 +428,12 @@ public struct PlanProposal: Hashable, Sendable, Codable {
                 distanceMeters: try container.decodeIfPresent(Double.self, forKey: .distanceMeters),
                 note: try container.decodeIfPresent(String.self, forKey: .note),
                 liftKind: liftKind,
-                liftMuscleGroups: liftMuscleGroups
+                liftMuscleGroups: liftMuscleGroups,
+                liftDurationSeconds: try container.decodeIfPresent(
+                    Double.self,
+                    forKey: .liftDurationSeconds
+                ),
+                liftNote: try container.decodeIfPresent(String.self, forKey: .liftNote)
             )
         }
     }
@@ -681,7 +716,8 @@ public struct PlanProposal: Hashable, Sendable, Codable {
                 {
                   "weekday": "<weekday>",
                   "kind": "<kind>", "distanceMeters": <number>, "note": "<text>",
-                  "liftKind": "<liftKind>", "liftMuscleGroups": ["<muscle group>"]
+                  "liftKind": "<liftKind>", "liftMuscleGroups": ["<muscle group>"],
+                  "liftDurationSeconds": <number>, "liftNote": "<text>"
                 }
               ],
               "longRunArc": [{"index": <integer>, "distanceMeters": <number>}],
@@ -689,7 +725,7 @@ public struct PlanProposal: Hashable, Sendable, Codable {
               "goalTargetDay": "<YYYY-MM-DD>"
             }
 
-            Every distance is in metres.
+            Every distance is in metres. Every duration is in seconds.
 
             - "heartRateCapBPM" is the easy-run heart-rate ceiling, in beats per minute, \
             between \(Int(heartRate.lowerBound)) and \(Int(heartRate.upperBound)).
@@ -717,8 +753,12 @@ public struct PlanProposal: Hashable, Sendable, Codable {
             \(muscleGroupLines)
               Omit it, or send an empty list, when the lift's muscle groups are not \
             stated — that is a real answer ("lift on Tuesday, groups unstated"), not a \
-            gap, and different from no lift at all ("liftKind": "rest"). A rest lift \
-            carries no muscle groups.
+            gap, and different from no lift at all ("liftKind": "rest").
+              - "liftDurationSeconds" is the lift's prescribed length, in seconds, above \
+            zero. Omit it when the lift's length is not stated.
+              - "liftNote" is free text shown alongside the lift. Omit it when there is \
+            nothing to add.
+              - A rest lift carries no duration, no note, and no muscle groups.
             - "longRunArc" is the long run's progression: at least one entry, "index" \
             counting weeks from 1 and strictly ascending, "distanceMeters" above zero. \
             Week 1 is the week the plan takes effect. The arc supplies the long day's \

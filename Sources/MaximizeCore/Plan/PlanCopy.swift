@@ -88,6 +88,18 @@ public enum PlanCopy {
         "\(Int(lowStepsPerMinute))–\(Int(highStepsPerMinute)) spm"
     }
 
+    /// "45 min", or "1h 15m" past an hour — the lift slot's prescribed length (MAX-148),
+    /// rounded to the nearest minute since that is the resolution its editor offers.
+    public static func duration(_ seconds: Double) -> String {
+        let totalMinutes = Int((seconds / 60).rounded())
+        let hours = totalMinutes / 60
+        let minutes = totalMinutes % 60
+        if hours > 0 {
+            return minutes > 0 ? "\(hours)h \(minutes)m" : "\(hours)h"
+        }
+        return "\(minutes) min"
+    }
+
     /// A score threshold, as points. Bare rather than "82 points" because the two
     /// threshold rows the card draws already say which threshold they are, and the unit
     /// repeated on every row is noise on a dense surface.
@@ -111,12 +123,26 @@ public enum PlanCopy {
 
     /// The lift slot's one-line rendering, which reads through
     /// `LiftPrescriptionSummary` so a governed day and the draft that produced it never
-    /// say the lift slot two different things.
+    /// say the lift slot two different things. Duration and note (MAX-148) follow the
+    /// groups, through `liftDetail(durationSeconds:note:)`.
     public static func liftSession(_ session: ScheduledSession) -> String {
-        var text = liftSummary(session.liftPrescriptionSummary)
-        if let note = session.note, !note.isEmpty {
-            text += " · " + note
+        let summary = liftSummary(session.liftPrescriptionSummary)
+        guard let detail = liftDetail(durationSeconds: session.durationSeconds, note: session.note) else {
+            return summary
         }
-        return text
+        return summary + " · " + detail
+    }
+
+    /// The lift's duration and note, rendered together — "45 min · lower body focus",
+    /// "45 min" alone, "lower body focus" alone, or nil when neither is prescribed
+    /// (MAX-148). Nil rather than an empty string, so `liftSession(_:)` can tell
+    /// "nothing to add" from "add an empty clause", and a caller that wants a
+    /// standalone label (the authoring screen's collapsed control) supplies its own
+    /// designed-absence text for the nil case.
+    public static func liftDetail(durationSeconds: Double?, note: String?) -> String? {
+        var parts: [String] = []
+        if let durationSeconds { parts.append(duration(durationSeconds)) }
+        if let note, !note.isEmpty { parts.append(note) }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 }

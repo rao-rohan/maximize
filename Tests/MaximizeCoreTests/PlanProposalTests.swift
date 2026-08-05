@@ -376,6 +376,72 @@ final class PlanProposalTests: XCTestCase {
         XCTAssertEqual(proposal.liftSession(for: .tuesday).muscleGroups, [.legs, .core])
     }
 
+    // MARK: - The lift's duration and note (MAX-148)
+
+    /// The ticket's own acceptance criterion: a lift's duration and note round-trip
+    /// through the wire the same way its kind and muscle groups already do.
+    func testADayPrescribingALiftDurationAndNoteRoundTrips() throws {
+        var week = PlanProposalTests.weekEntries
+        week[1] =
+            #"{"weekday": "tuesday", "kind": "easy", "distanceMeters": 8000, "liftKind": "lift", "liftMuscleGroups": ["legs", "core"], "liftDurationSeconds": 2700, "liftNote": "Lower body"}"#
+        let proposal = try PlanProposal.parse(reply(week: week))
+
+        XCTAssertEqual(proposal.liftSession(for: .tuesday).durationSeconds, 2_700)
+        XCTAssertEqual(proposal.liftSession(for: .tuesday).note, "Lower body")
+
+        let data = try JSONEncoder().encode(proposal)
+        let text = try XCTUnwrap(String(data: data, encoding: .utf8))
+        XCTAssertEqual(try PlanProposal.parse(text), proposal)
+    }
+
+    /// A lift with no duration or note named is a real, legal statement — length and
+    /// focus unstated — the same reading `testALiftWithNoMuscleGroupsNamedIsAccepted`
+    /// gives the groups.
+    func testALiftWithNoDurationOrNoteIsAccepted() throws {
+        var week = PlanProposalTests.weekEntries
+        week[1] = #"{"weekday": "tuesday", "kind": "easy", "distanceMeters": 8000, "liftKind": "lift"}"#
+        let proposal = try PlanProposal.parse(reply(week: week))
+
+        XCTAssertNil(proposal.liftSession(for: .tuesday).durationSeconds)
+        XCTAssertNil(proposal.liftSession(for: .tuesday).note)
+    }
+
+    /// The rule `ScheduledSession` itself enforces — a rest day carries no length —
+    /// reaching the lift slot's own vocabulary the same way it already does for
+    /// muscle groups.
+    func testARestLiftCarryingADurationIsRefused() {
+        var week = PlanProposalTests.weekEntries
+        week[1] =
+            #"{"weekday": "tuesday", "kind": "easy", "distanceMeters": 8000, "liftKind": "rest", "liftDurationSeconds": 1800}"#
+        assertParseFails(reply(week: week), .liftRestDayIsNotEmpty(weekday: .tuesday))
+    }
+
+    /// And the same for a note.
+    func testARestLiftCarryingANoteIsRefused() {
+        var week = PlanProposalTests.weekEntries
+        week[1] =
+            #"{"weekday": "tuesday", "kind": "easy", "distanceMeters": 8000, "liftKind": "rest", "liftNote": "Lower body"}"#
+        assertParseFails(reply(week: week), .liftRestDayIsNotEmpty(weekday: .tuesday))
+    }
+
+    /// The door's own rule reaching this boundary in its own vocabulary — the lift
+    /// slot's twin of `testAZeroDistanceOnAScheduledDayIsRejectedInTheDoorsWords`.
+    func testAZeroLiftDurationIsRejectedInTheDoorsWords() {
+        var week = PlanProposalTests.weekEntries
+        week[1] =
+            #"{"weekday": "tuesday", "kind": "easy", "distanceMeters": 8000, "liftKind": "lift", "liftDurationSeconds": 0}"#
+        assertParseFails(reply(week: week), .rejectedByAuthoring(.liftSessionInvalid(weekday: .tuesday)))
+    }
+
+    /// The schema cannot go stale behind the two fields this ticket adds, matching
+    /// `testTheSchemaNamesEveryLiftKindAndMuscleGroup`'s coverage of the lift's other
+    /// two fields.
+    func testTheSchemaNamesTheLiftsDurationAndNote() {
+        let schema = PlanProposal.schemaDescription
+        XCTAssertTrue(schema.contains("liftDurationSeconds"))
+        XCTAssertTrue(schema.contains("liftNote"))
+    }
+
     // MARK: - The long-run arc
 
     func testAnEmptyArcIsRefused() {

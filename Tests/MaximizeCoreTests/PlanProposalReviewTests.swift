@@ -308,6 +308,32 @@ final class PlanProposalReviewTests: XCTestCase {
         XCTAssertEqual(try field("lift.friday", in: review).value, "Lift · Chest, Back")
     }
 
+    /// The ticket's own requirement (MAX-148): a duration or note change is not a
+    /// separate row, it is part of the same per-weekday lift ask, so it shows up the
+    /// same way a muscle-group change does — a `.changed` row in the lift section.
+    func testAChangedLiftDurationIsAChangedRowInTheLiftSection() throws {
+        let review = try card(reply(
+            friday: #"{"weekday": "friday", "kind": "rest", "liftKind": "lift", "liftMuscleGroups": ["chest", "back"], "liftDurationSeconds": 2700}"#
+        ))
+
+        let friday = try field("lift.friday", in: review)
+        XCTAssertEqual(friday.value, "Lift · Chest, Back · 45 min")
+        XCTAssertEqual(friday.change, .changed(from: "Lift · Chest, Back"))
+        XCTAssertEqual(review.changedRowCount, 1)
+    }
+
+    /// The note's twin of the same property.
+    func testAChangedLiftNoteIsAChangedRowInTheLiftSection() throws {
+        let review = try card(reply(
+            friday: #"{"weekday": "friday", "kind": "rest", "liftKind": "lift", "liftMuscleGroups": ["chest", "back"], "liftNote": "Focus on form"}"#
+        ))
+
+        let friday = try field("lift.friday", in: review)
+        XCTAssertEqual(friday.value, "Lift · Chest, Back · Focus on form")
+        XCTAssertEqual(friday.change, .changed(from: "Lift · Chest, Back"))
+        XCTAssertEqual(review.changedRowCount, 1)
+    }
+
     /// A first plan states the lift section the same way it states every other one —
     /// there is nothing to diff against, so every row is `.stated`.
     func testALiftSectionOnAFirstPlanStatesRatherThanDiffs() throws {

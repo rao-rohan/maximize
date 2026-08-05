@@ -1646,6 +1646,7 @@ is the overseer's, not a ticket's — flagged here rather than done.
 | MAX-144 | ~~How adherence to a muscle-group prescription is judged~~ — **decided (A22)** | 129 | Owner ✅ |
 | MAX-145 | **Enter muscle groups on a strength workout's detail screen** (A22) | 129, 144 | **Opus** ✅ |
 | MAX-147 | The scorer's task text learns discipline (source: MAX-133) | 133, 136 | Sonnet ✅ |
+| MAX-148 | A lift's duration and note become editable, proposable, and type-safe | 137, 141 | Sonnet ✅ |
 | MAX-149 | Duration floor for fragments — **the classifier half of gap P3**; not yet wired to any author | 013, 131 | Sonnet ✅ |
 | MAX-151 | **Author the duration floor** — `StandardPlanSeed` states one, the authoring screen edits it, `PlanProposal` can propose it. Without this MAX-149 never fires | 149, 146, 148 | Sonnet |
 
@@ -1805,7 +1806,9 @@ was not widened to accept either. Decisions, and what each cost:
   hands the athlete a form that would silently ignore the field the model just set. This
   is real remaining scope (the duration half of LIFTING-SPEC §4.3's example), not
   finished here — it wants the ticket that gives `PlanDraft.DayDraft` those two setters
-  first, so chat and the screen gain the ability together.
+  first, so chat and the screen gain the ability together. **Superseded by MAX-148**,
+  which gives `PlanDraft.DayDraft` both setters and `PlanProposal` both wire fields
+  together, exactly as this note asked for.
 - **`unknownMuscleGroup` and `liftRestDayIsNotEmpty` are new error cases**, not reuses of
   `unknownSessionKind`/`restDayIsNotEmpty` — each names a different field with a
   different vocabulary, and reusing the run-slot case would have pointed a retry at the
@@ -1814,6 +1817,59 @@ was not widened to accept either. Decisions, and what each cost:
   distinct from rest (A17), so the brief's suggested example of an invalid case was
   wrong — the actual invalid case pinned under test is a **rest** lift slot naming
   muscle groups (`liftRestDayIsNotEmpty`).
+
+**MAX-148 closes the gap the paragraph above left open, plus a second one MAX-141 found
+but did not fix: `setKind`/`PlanAuthoringSession` refusing `.lift` in the run slot at
+the type level, not only in the picker.** Source: MAX-131 (which carried the fields with
+no setter) and MAX-141 (which named both gaps explicitly and left them for "the ticket
+that gives `PlanDraft.DayDraft` those two setters first").
+
+- **`PlanDraft.DayDraft` gains `setLiftDurationSeconds` and `setLiftNote`.** Same shape
+  as the existing lift setters: ignored while the slot is not `.lift` (nowhere legal for
+  the value to go), and `setLiftKind` now clears both — alongside the groups it already
+  cleared — the moment the kind leaves `.lift`, so a draft reached through this type's own
+  setters can never make `liftSession()` throw.
+- **`PlanProposal.Day` gains `liftDurationSeconds` and `liftNote` as real wire fields**,
+  exactly the pattern MAX-141 set for `liftKind`/`liftMuscleGroups`: their own keys in
+  `CodingKeys`, their own line in the rendered schema, `liftRestDayIsNotEmpty` widened to
+  refuse a rest lift carrying either (not only muscle groups), and a non-positive duration
+  refused through `liftSessionInvalid` — the same "reachable now" note the case's own doc
+  carries.
+- **The consequence worth stating plainly, mirroring MAX-141's own callout**: because both
+  fields are now wire fields, `PlanDraft.applying(_:)` takes them directly from the
+  proposal rather than carrying the athlete's existing value forward when the kind is
+  unchanged. `carriedLiftDurationSeconds`/`carriedLiftNote` — the two carry-forward helpers
+  MAX-141 wrote because there was nothing else to do — are deleted; the run slot's own
+  `durationSeconds` keeps its carry-forward helper, because that field still has no wire
+  representation (nothing prescribes a run's length yet). A model that wants to keep a
+  lift's duration or note now has to restate it, the same as it already had to restate the
+  muscle groups — `PlanProposalTests`' `testARestatedLiftIsAppliedFaithfully` was updated
+  to send `liftNote` explicitly rather than relying on a carry.
+- **The picker-only `prescribable` hole is closed at both layers named in the ticket.**
+  `PlanDraft.DayDraft.setKind` now ignores `.lift` outright (a no-op, matching how a rest
+  day already ignores a distance set on it), and `PlanAuthoringSession.weeklyTemplate(from:)`
+  independently refuses a `.lift` run slot with a new `PlanAuthoringError.scheduledKindNotPrescribable`
+  case — belt-and-braces, because `WeeklyTemplate` itself still does not forbid one, so a
+  `PlanDraft` built from a stored `Plan` whose run slot already held a lift (however that
+  happened) is refused at the door rather than saved as a plan judged against the wrong
+  slot.
+- **Authoring-screen density decision: a collapsed `DisclosureGroup`, not two more
+  permanent controls.** Seven weekdays × two slots was already the screen's own stated
+  concern (MAX-137); adding a duration Stepper and a note TextField as always-visible rows
+  under every lift day would have added fourteen more controls to a screen that already has
+  that many. Instead the two fields sit behind a `DisclosureGroup` beside the existing
+  "Groups" menu, labelled with the pair rendered together (`PlanCopy.liftDetail`, "45 min ·
+  lower body focus", or "Not set") so the row is scannable closed and only expands when an
+  athlete actually wants to set a duration or note. **Rejected**: a sheet or separate
+  per-day detail screen (too much navigation for two fields already inline for muscle
+  groups) and a permanently visible Stepper + TextField pair (the density this ticket
+  exists to avoid).
+- **`PlanCopy.duration(_:)` and `PlanCopy.liftSession(_:)` learn to render the duration**,
+  which is also what makes the diff work for free: `PlanProposalReview`'s existing
+  per-weekday lift row already diffs the *rendered* string, so once that string includes
+  the duration and note, a changed one is a `.changed` row with no new section or row-id
+  needed — the ticket's "diff row for a changed duration/note" requirement is met by the
+  rendering change alone, not by new diff logic.
 
 **Scope taken mid-ticket: the lift slot names its muscle groups.** Owner's ask. `MuscleGroup`
 is a closed six-case core vocabulary — chest, back, shoulders, arms, legs, core — chosen so
