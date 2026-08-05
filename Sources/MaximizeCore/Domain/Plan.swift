@@ -329,6 +329,37 @@ public struct Plan: Hashable, Sendable, Codable, Identifiable {
     public let rubric: ScoringRubric
     public let goals: PlanGoals
 
+    /// The shortest a **recorded run may last** before `WorkoutClassifier` reads it as a
+    /// fragment rather than a session, in **seconds**. Nil where this plan version states
+    /// no opinion.
+    ///
+    /// **Closes the classifier half of tracker gap P3** (MAX-149; the rubric half closed
+    /// in MAX-131). `WorkoutClassifier.isFragment` already tests distance, but a
+    /// mis-started or accidentally split treadmill run can carry heart-rate data and no
+    /// distance at all — LIFTING-SPEC §9.2 names exactly this as the case the distance
+    /// test can never see, and asks for a duration floor to close it.
+    ///
+    /// **A plan-level absolute, not a policy fraction (D1).** `heartRateCapBPM` sits right
+    /// above this doc comment as the precedent: an absolute figure a plan version states,
+    /// resolved the same way for every workout that version governs, reproducible for a
+    /// historical score because it travels with the version rather than living in code.
+    /// This field is the same shape of thing. It is deliberately **not** added to
+    /// `WorkoutClassificationPolicy` alongside `fragmentDistanceFraction` — that type's own
+    /// doc already flags its fractions as a known, temporary gap against D1 ("a modelling
+    /// choice living in code... until a `classification` block on a future plan version").
+    /// Filing a brand-new threshold into a struct that already says "this shouldn't really
+    /// be here" would grow the gap D1 asks to keep shrinking, not close it. A plan-relative
+    /// fraction of "the shortest run this plan ever asks for" was considered and rejected
+    /// too: `ScheduledSession.durationSeconds` is still carried-but-uneditable on the run
+    /// slot (`PlanDraft.carriedDurationSeconds`) — nothing in this codebase authors one for
+    /// a run — so a plan-relative floor would silently never fire for any plan on disk
+    /// today, the opposite of what this ticket is for.
+    ///
+    /// Optional, defaulting to nil, for the same reason every field MAX-129/MAX-131 added
+    /// was optional: nothing already stored states an opinion here, and nil reads as "no
+    /// floor" rather than as a guessed one.
+    public let minimumSessionDurationSeconds: Double?
+
     public init(
         version: PlanVersion,
         effectiveFrom: CalendarDay,
@@ -337,9 +368,14 @@ public struct Plan: Hashable, Sendable, Codable, Identifiable {
         heartRateCapBPM: Double,
         cadenceTarget: CadenceBand,
         rubric: ScoringRubric,
-        goals: PlanGoals = PlanGoals()
+        goals: PlanGoals = PlanGoals(),
+        minimumSessionDurationSeconds: Double? = nil
     ) throws {
         try Validate.within(heartRateCapBPM, HeartRateSample.plausibleBPM, "Plan.heartRateCapBPM")
+        try Validate.optionalPositive(
+            minimumSessionDurationSeconds,
+            "Plan.minimumSessionDurationSeconds"
+        )
         self.version = version
         self.effectiveFrom = effectiveFrom
         self.weeklyTemplate = weeklyTemplate
@@ -348,6 +384,7 @@ public struct Plan: Hashable, Sendable, Codable, Identifiable {
         self.cadenceTarget = cadenceTarget
         self.rubric = rubric
         self.goals = goals
+        self.minimumSessionDurationSeconds = minimumSessionDurationSeconds
     }
 
     /// Resolves a rubric reference against this plan. Kept here rather than in the
@@ -390,8 +427,17 @@ public struct Plan: Hashable, Sendable, Codable, Identifiable {
     private enum CodingKeys: String, CodingKey {
         case version, effectiveFrom, weeklyTemplate, longRunArc
         case heartRateCapBPM, cadenceTarget, rubric, goals
+        case minimumSessionDurationSeconds
     }
 
+    /// `minimumSessionDurationSeconds` decodes with `decodeIfPresent`, absent-key-is-nil,
+    /// so a `Plan` payload written before this ticket — every stored plan and every
+    /// stored `Score`'s immutable prescription (D8) — decodes to a plan that states no
+    /// floor, which is exactly what it meant. Encoding is the compiler's synthesized
+    /// `Encodable` conformance (there is no custom `encode(to:)` on this type, matching
+    /// every other optional field here): a `Double?` property is written with
+    /// `encodeIfPresent` automatically, so a plan that carries no floor writes no key for
+    /// it and re-encodes to the bytes it already wrote.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         try self.init(
@@ -402,7 +448,11 @@ public struct Plan: Hashable, Sendable, Codable, Identifiable {
             heartRateCapBPM: container.decode(Double.self, forKey: .heartRateCapBPM),
             cadenceTarget: container.decode(CadenceBand.self, forKey: .cadenceTarget),
             rubric: container.decode(ScoringRubric.self, forKey: .rubric),
-            goals: container.decode(PlanGoals.self, forKey: .goals)
+            goals: container.decode(PlanGoals.self, forKey: .goals),
+            minimumSessionDurationSeconds: container.decodeIfPresent(
+                Double.self,
+                forKey: .minimumSessionDurationSeconds
+            )
         )
     }
 }
