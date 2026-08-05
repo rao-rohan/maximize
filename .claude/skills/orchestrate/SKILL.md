@@ -185,7 +185,22 @@ comment — editing it is one turn; a round trip is many. Re-dispatch only when 
 requires re-deciding something.
 
 **Green CI is the merge gate, and it means what it says.** A conflicted PR receives *zero*
-check runs, not failing ones — an empty check list is not a pass. Confirm the checks ran.
+check runs, not failing ones — an empty check list is not a pass. Confirm the checks ran,
+and confirm they ran against *the current head* — a stale check list showing the previous
+commit's result is how a red branch gets merged as green.
+
+**Two PRs that each pass CI can still break the main branch together.** They touch the same
+type from different sides; each was tested against a base that did not contain the other;
+the merge is textually clean and semantically broken. Nothing in either PR is at fault and
+no review catches it, because neither diff is wrong on its own. **After a wave where two
+merges touch overlapping types, re-check that the base branch still builds** — and know the
+signature: every open branch suddenly fails, including ones whose diff touches nothing near
+the error, because one bad file fails a whole test module.
+
+**A ticket is done when it is merged, not when you decide it is.** Ticking the board from
+memory is how a ticket ends up marked shipped with its PR still open — and the board is the
+one thing later work trusts. Verify against the repository before you tick: the merge
+commit exists, or it does not.
 
 **Merge on green, promptly.** Long-lived branches collide with each other. The board
 moves when things merge, not when they are approved.

@@ -50,6 +50,17 @@ public struct PlanDraft: Hashable, Sendable {
         /// Prescribed distance in **metres**, or nil where the plan prescribes a
         /// session without one (a hard session described only by its `note`).
         public private(set) var distanceMeters: Double?
+
+        /// Prescribed duration in **seconds** (MAX-131), carried but not editable.
+        ///
+        /// Carried for the reason `liftSession` is: `PlanDraft.init(_:)` is documented as
+        /// lossless, and the run slot is the half that gets decomposed into parts and
+        /// reassembled, so any field left out of the decomposition is a field a revision
+        /// silently deletes. Nothing authors a duration on a run today, which makes this
+        /// carry-forward cheap now and correct later. **MAX-137 gives the screen its
+        /// editor**, and with it the setter and the loose-input validation.
+        public private(set) var durationSeconds: Double?
+
         public private(set) var note: String?
 
         /// The **lift** slot's kind — `.rest` or `.lift`. Nothing else is offered; see
@@ -72,6 +83,7 @@ public struct PlanDraft: Hashable, Sendable {
             self.weekday = weekday
             self.kind = session.kind
             self.distanceMeters = session.distanceMeters
+            self.durationSeconds = session.durationSeconds
             self.note = session.note
             self.liftKind = liftSession.kind
             self.liftNote = liftSession.note
@@ -82,6 +94,7 @@ public struct PlanDraft: Hashable, Sendable {
             self.kind = kind
             if kind == .rest {
                 distanceMeters = nil
+                durationSeconds = nil
                 note = nil
             }
         }
@@ -104,7 +117,12 @@ public struct PlanDraft: Hashable, Sendable {
         ///   session — a non-positive distance, essentially, since `setKind` already
         ///   rules out rest-with-distance.
         public func session() throws -> ScheduledSession {
-            try ScheduledSession(kind: kind, distanceMeters: distanceMeters, note: note)
+            try ScheduledSession(
+                kind: kind,
+                distanceMeters: distanceMeters,
+                durationSeconds: durationSeconds,
+                note: note
+            )
         }
 
         /// Sets the lift slot's kind. Choosing anything but `.lift` clears the groups

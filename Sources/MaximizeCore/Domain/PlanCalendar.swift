@@ -167,9 +167,14 @@ public struct PlanCalendar: Hashable, Sendable {
         else {
             return template
         }
+        // Everything but the distance is the template's, verbatim. The arc substitutes a
+        // distance and nothing else, so any other field the template carried has to be
+        // carried across rather than defaulted — `durationSeconds` is the first field
+        // this rebuild could have silently dropped.
         return try ScheduledSession(
             kind: .long,
             distanceMeters: distanceMeters,
+            durationSeconds: template.durationSeconds,
             note: template.note
         )
     }

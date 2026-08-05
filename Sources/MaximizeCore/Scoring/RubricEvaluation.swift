@@ -136,12 +136,10 @@ public enum RubricEvaluator {
             //
             // A missing *reference* means the plan could not resolve the right-hand
             // side — in practice `.scheduledDistance` on a day with no prescribed
-            // distance. Same reasoning: unresolvable comparison, no match.
+            // distance, or `.scheduledDuration` on a day with no prescribed duration.
+            // Same reasoning: unresolvable comparison, no match.
             guard let measured = context.metrics.value(for: metric, workout: context.workout),
-                  let threshold = plan.resolve(
-                      reference,
-                      scheduledDistanceMeters: planDay.scheduledSession.distanceMeters
-                  )
+                  let threshold = plan.resolve(reference, against: planDay.scheduledSession)
             else {
                 return false
             }
@@ -152,6 +150,15 @@ public enum RubricEvaluator {
             // statement any classification satisfies, and a band meant to apply
             // unconditionally says so by carrying no conditions at all.
             return kinds.contains(context.classification)
+
+        case let .actualDiscipline(disciplines):
+            // Read off the workout's activity type, not off the classification: the
+            // discipline is a fact HealthKit recorded and the classification is a
+            // judgement made from a heart-rate curve, and `WorkoutClassifier` does not
+            // answer `.lift` at all today. See `RubricCondition.actualDiscipline`.
+            //
+            // Empty matches nothing, for the same reason the case above does.
+            return disciplines.contains(context.workout.activityType.discipline)
 
         case let .metricUnavailable(metric):
             return context.metrics.value(for: metric, workout: context.workout) == nil

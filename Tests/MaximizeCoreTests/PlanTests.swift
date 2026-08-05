@@ -200,8 +200,17 @@ final class PlanTests: XCTestCase {
         XCTAssertEqual(plan.resolve(.constant(0.05)), 0.05)
         XCTAssertEqual(plan.resolve(.cadenceTargetLow(offsetStepsPerMinute: 0)), 165)
         XCTAssertEqual(plan.resolve(.cadenceTargetHigh(offsetStepsPerMinute: -2)), 168)
+        // The ask-relative reference is unchanged; MAX-131 changed only how the ask
+        // reaches the resolver — the whole `ScheduledSession` rather than one loose
+        // figure per reference, so a second ask-relative reference cannot be added
+        // without its value. "A day prescribing 10 km" is what the loose 10_000 always
+        // meant, and it is now the only way to say it: a distance detached from a legal
+        // session is no longer expressible here.
         XCTAssertEqual(
-            plan.resolve(.scheduledDistance(fraction: 0.8), scheduledDistanceMeters: 10_000),
+            plan.resolve(
+                .scheduledDistance(fraction: 0.8),
+                against: try ScheduledSession(kind: .long, distanceMeters: 10_000)
+            ),
             8_000
         )
         XCTAssertNil(
