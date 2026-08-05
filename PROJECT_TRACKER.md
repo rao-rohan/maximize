@@ -2568,11 +2568,11 @@ an assumption.
   `ChatConversationCopy.failedToLoad` had already established at MAX-150. Fixed: one verb,
   asserted against chat's by test, so the app has a single failure voice rather than a
   chat one and a not-chat one.
-- **Nine `catch` blocks and `switch` arms were composing athlete-facing sentences in
-  `App/`.** CLAUDE.md is explicit that this is the defect and not the fix: the layer is
+- **Two dozen athlete-facing string literals, across eleven files, were being chosen in
+  `App/` — in `catch` blocks and `switch` arms CI compiles and never runs.** CLAUDE.md is explicit that this is the defect and not the fix: the layer is
   compiled by CI and never executed (R2, R13), so nothing but a reader could tell whether
-  an edit kept the care the comments described. All nine now read a value from
-  `MaximizeCore.FailureCopy`.
+  an edit kept the care the comments described. All of them now read a value from
+  `MaximizeCore.FailureCopy`, which has tests.
 
 ### 4. Acceptable with reason — inspected, left alone
 

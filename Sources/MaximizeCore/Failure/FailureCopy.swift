@@ -130,8 +130,8 @@ public enum HealthAccessState: Hashable, Sendable, CaseIterable {
 /// ## Why this is in the core
 ///
 /// CLAUDE.md: "All logic lives in `MaximizeCore`." Deciding what a person is told when
-/// something fails is a decision, and before MAX-154 it was made in nine different
-/// `catch` blocks and `switch` arms across `App/`, none of which CI can execute. The
+/// something fails is a decision, and before MAX-154 it was made in two dozen string
+/// literals spread over eleven files in `App/`, none of which CI can execute. The
 /// audit that opened this ticket found the predictable result — four different verbs
 /// for the same event ("Could not load workouts.", "Couldn't load the plan.",
 /// "Couldn't load the calendar.", "Couldn't load this plan version."), a dashboard that
