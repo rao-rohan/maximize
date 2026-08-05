@@ -106,11 +106,11 @@ struct ChatSheet: View {
                 .navigationDestination(for: Route.self) { route in
                     switch route {
                     case .threadList:
-                        ChatThreadListView(chatThreadRepository: PersistenceComposition.store) { summary in
+                        ChatThreadListView(chatThreadRepository: PersistenceComposition.store) { threadID in
                             // The tapped row's own id, not its subject — see this
                             // type's "Two ways to open something" for why resolving by
                             // subject here would be the defect, not a simplification.
-                            opening = .threadID(summary.id)
+                            opening = .threadID(threadID)
                             // Selecting a thread opens it — it does not leave the list
                             // on screen underneath it.
                             path = NavigationPath()
@@ -126,6 +126,17 @@ struct ChatSheet: View {
                     }
                 }
         }
+        // MAX-153. A full-height sheet dismisses on a downward drag, and by default that
+        // gesture wins over a scroll view already at its top. In a chat that is the
+        // wrong precedence: scrolling up to re-read an earlier answer and then flicking
+        // back down is the ordinary way to use this screen, and one over-shoot of that
+        // flick would throw the conversation away. `.scrolls` gives the transcript the
+        // drag; **Done** and the sheet's own grabber area still dismiss.
+        //
+        // Nothing here touches the sheet's material. The system glasses a sheet itself —
+        // `SettingsToolbar.swift` carries the argument for why we do not reapply it, and
+        // this ticket did not find a reason to depart from it.
+        .presentationContentInteraction(.scrolls)
     }
 
     @ViewBuilder

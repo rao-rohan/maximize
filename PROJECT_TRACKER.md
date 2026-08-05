@@ -557,6 +557,7 @@ feature was governed by a plan that could not exist).
 | MAX-154 | **Error handling, audited app-wide** — every failure path outside chat swept as a set, the failure-to-copy mapping moved into the core, and the inventory recorded below | Owner | **Opus** |
 | MAX-155 | **An HTTP status code reaches the athlete's screen** — `PlanProposalDrafting.description` renders `ScoringModelError.description` verbatim on the plan proposal card. Chat surface, so it waits for MAX-152 | MAX-154 | Sonnet |
 | MAX-156 | **`ScoringError.description` interpolates a workout identifier and a date** — latent, not leaking today, and one `.public` log line away from being a real one | MAX-154 | Sonnet |
+| MAX-153 | **The chat shell** — composer, thread list, sheet chrome. The design pass the chat's *shell* never had | Owner | **Opus** |
 
 **MAX-066.** Splits currently need a GPS track, so a treadmill run has none — correctly
 rendered as an absence rather than fabricated. `distanceWalkingRunning` is already
@@ -1763,6 +1764,90 @@ is the overseer's, not a ticket's — flagged here rather than done.
 | MAX-148 | A lift's duration and note become editable, proposable, and type-safe | 137, 141 | Sonnet ✅ |
 | MAX-149 | Duration floor for fragments — **the classifier half of gap P3**; not yet wired to any author | 013, 131 | Sonnet ✅ |
 | MAX-151 | **Author the duration floor** — `StandardPlanSeed` states one, the authoring screen edits it, `PlanProposal` can propose it. Without this MAX-149 never fires | 149, 146, 148 | Sonnet |
+| MAX-153 | **The chat shell: composer, thread list, sheet chrome** — the design pass MAX-092–103 never had over the shell its features sit in | Owner, 092–103 | **Opus** |
+
+**MAX-153 — what was decided, what was rejected, and what it is blocked on.**
+
+The owner's ask was "ensure our chat interface is top shelf; look online for examples",
+plus, mid-ticket, "make sure the input is a Liquid Glass input with good button sizing"
+and "the app should be good to use."
+
+**Decided, and in the core where CI can see it.**
+
+- **`ChatComposerSendControl`** — four states for one 44pt box (`.send`, `.unavailable`,
+  `.awaitingReply`, `.stop`), resolved from `canSend`/`isStreaming` plus a
+  `ChatComposerCancellation` parameter. Streaming outranks `canSend` unconditionally.
+  Enabled and disabled send draw the **same glyph** so the target never changes shape
+  under a keystroke; every state is spoken distinguishably, because the visual difference
+  between two of them is a tint and `CLAUDE.md`'s hue rule applies to controls as much as
+  to charts.
+- **`ChatTranscriptFollow`** — follow-or-hold. Your own message always scrolls; incoming
+  content scrolls only if you were already at the bottom; **focusing the composer no
+  longer drags a scrolled-up reader down**, which is a deliberate departure from the
+  pre-153 behaviour and the ticket's most user-visible change. Unseen activity is a
+  **flag, not a count**, because the unit of arrival in a stream is a token — a counter
+  would read "New (417)".
+- **`ChatThreadListPresentation`** — recency banding (Today / Yesterday / Previous 7 days
+  / Previous 30 days / Earlier), newest band first, empty bands never emitted; a
+  Messages-style compact timestamp ladder (`now`, `12m`, `5h`, `Yesterday`, `Tue`,
+  `3 Aug`, `3 Aug 2025`) built from `CalendarDay` arithmetic rather than `DateFormatter`
+  so it is assertable on Linux CI; the row's scope line; and the whole VoiceOver sentence.
+- **Copy moved to `ChatThreadListCopy`** — the empty and failed sentences the view held as
+  literals, following MAX-150's precedent rather than opening a second voice.
+
+**Rejected, with reasons.**
+
+- **A tinted badge for "something arrived while you were away."** Information by hue
+  alone. The label carries it: "Jump to latest" against "New reply".
+- **A stop button during a stream, today.** `ChatModel` has no cancellation, and a stop
+  that does not stop is worse than none. `.awaitingReply` shows progress; the `.stop`
+  state exists, is tested, and turns on when one call site passes
+  `cancellation: .available`.
+- **`Text(_:style:.relative)` on a list row.** Wider than the title it competes with above
+  default Dynamic Type, re-lays-out every minute, and says "0 seconds ago". Kept for
+  VoiceOver, where width is free.
+- **A counter of unread messages.** See above.
+- **Scope on every row.** Nil for a workout thread (the title is already the run's date)
+  and for a training thread still titled by its own window — otherwise the row prints one
+  string twice.
+
+**Research citations** (all in the PR, all read for this ticket): Apple's HIG 44×44pt
+minimum tap target with the visible control permitted to be smaller than the region;
+`GlassEffectContainer` + `glassEffect` as the iOS 26 way to let the system merge and morph
+adjacent glass rather than hand-rolling a blur; `ScrollPosition` /
+`defaultScrollAnchor(.bottom)` and the jump-to-latest pattern for transcripts;
+Messages/Mail/Notes for the recency bands and the compact timestamp ladder; the
+grow-to-a-ceiling-then-scroll composer behaviour common to iMessage, WhatsApp and
+Telegram.
+
+**Installed, after MAX-152 merged.** The composer and the transcript's `onChange` handlers
+live in `App/Chat/ChatConversationView.swift`, which MAX-152 held while it was in flight;
+MAX-153 wrote the views against a documented seam and installed them once that file was
+free. What landed in the file:
+
+- The hand-rolled `TextField` + `Image` row and the `.glassChrome(.toolbar)` wrapped round
+  it are gone, replaced by `ChatComposerView`. **The outer glass went with them** —
+  `ChatComposerView` carries its own `GlassEffectContainer`, and a second glass modifier
+  round a view that glasses itself is chrome over chrome.
+- The send control resolves from **MAX-152's `replyPhase`**, not from a boolean:
+  `ChatComposerSendControl.resolve(canSend:replyPhase:)`. `ChatModel.isStreaming` is
+  itself `replyPhase.isLive`, so there is one authority on "a reply is in flight". The
+  composer does not distinguish waiting / streaming / stalled — those are three things to
+  say in the transcript, and `ChatPendingReplyView` says them there.
+- Every unconditional `scrollToBottom` became a `ChatTranscriptFollow` directive, including
+  the focus handler that used to drag a scrolled-up reader to the end.
+- **A third change kind, `.reflow`,** was added for MAX-152's shimmer. The waiting
+  indicator appearing and a stall caption growing both move the content, so a reader at
+  the bottom stays pinned — but neither is a reply, so neither may badge somebody who
+  scrolled away. Telling them "New reply" because a placeholder resized is the app crying
+  wolf about its own layout.
+- `.defaultScrollAnchor(.bottom, for: .initialOffset)` so a thread with history opens at
+  its newest turn. `for: .initialOffset` deliberately: where the scroll view *starts* is
+  the platform's question; what it does when content grows is `ChatTranscriptFollow`'s,
+  and two mechanisms answering one behaviour is how they drift.
+- **Retry is MAX-152's and stays in the transcript**, beside the failure notice that
+  explains what went wrong. The composer offers none — two retry affordances in two
+  registers is worse than either alone.
 
 **Four collisions the overseer must respect.**
 
