@@ -60,4 +60,35 @@ public enum ChatConversationCopy {
     /// the lookup that would have supplied it is the lookup that just failed — so,
     /// unlike the three strings above, this one does not vary by kind.
     public static let threadNotFound = "This conversation no longer exists."
+
+    // MARK: - MAX-150: the other two `ChatModel.LoadState` cases
+
+    /// `ChatModel.LoadState.notYetScored` — a workout thread opened before its run has a
+    /// score (FR-2.1 seeds chat from one). Ordinary, not a failure, and reached for a
+    /// workout subject only.
+    ///
+    /// Moved here from `ChatConversationView` (MAX-150): it is chosen by the same
+    /// `model.loadState` switch as `failedToLoad` and `threadNotFound` above, and having
+    /// two of that switch's four cases in `MaximizeCore` and two as view literals was the
+    /// inconsistency — one state machine, one voice, one place.
+    public static let notYetScored =
+        "This run hasn't been scored yet — chat opens once it has a score."
+
+    /// `ChatModel.LoadState.noVerdict` (MAX-126) — the opposite tense of `notYetScored`:
+    /// a lift is never scored (MAX-111), so there is no score coming for chat to wait on.
+    public static let noVerdict =
+        "The plan scores runs, so there's no score for this workout — and chat starts from one."
+
+    // MARK: - MAX-150: `ChatModel.DisplayMessage`'s two flags
+
+    /// `DisplayMessage.wasTruncated` — the reply ran out of the model's usable reply
+    /// budget. Moved here for the same reason `notYetScored`/`noVerdict` were: the flag
+    /// is a fact `ChatModel` already decided, and the sentence stating it belongs beside
+    /// every other string that reads off that decision rather than inline in the bubble
+    /// that draws it.
+    public static let truncatedCaption = "Cut short — hit the reply length limit."
+
+    /// `DisplayMessage.wasInterruptedByFailure` — a partial reply survived a dropped
+    /// connection (constraint #4). See `truncatedCaption`'s own note.
+    public static let interruptedByFailureCaption = "Connection dropped before this reply finished."
 }

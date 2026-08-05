@@ -12,7 +12,7 @@ import Foundation
 /// |---|---|---|---|
 /// | calendar (FR-3.2) | dated day grid | dated day grid | weekday × week heatmap |
 /// | HR drift (FR-3.3) | curve overlay, trendline beneath | curve overlay, trendline beneath | trendline alone |
-/// | tiles (FR-3.4) | mileage vs arc, effective days, streak, avg | + days run | totals and rates, no arc |
+/// | tiles (FR-3.4) | mileage vs arc, effective days, streak, avg | + days trained | totals and rates, no arc |
 ///
 /// The reasoning for each row sits on the enum it produces. Two properties are shared
 /// by all three and worth stating once here:
@@ -215,19 +215,19 @@ public enum TrendTileSet: Hashable, Sendable, CaseIterable {
     /// week's execution.
     case weekly
 
-    /// The weekly set plus **days run**.
+    /// The weekly set plus **days trained**.
     ///
     /// Mileage vs. arc survives: summing the month's plan days against the month's
     /// workouts is four or five weekly asks against four or five weeks of execution,
     /// which is still a comparison the athlete can act on.
     ///
-    /// Days run is added because consistency is the figure a month answers and a week
-    /// cannot: 18 days out of a month is a fact about a training block, whereas 4 days
-    /// out of a week is already legible in the calendar row directly above it.
+    /// Days trained is added because consistency is the figure a month answers and a
+    /// week cannot: 18 days out of a month is a fact about a training block, whereas 4
+    /// days out of a week is already legible in the calendar row directly above it.
     case monthly
 
     /// **Totals and rates, with the arc comparison dropped:** total distance,
-    /// effective-day *rate*, days run, streak, average score.
+    /// effective-day *rate*, days trained, streak, average score.
     ///
     /// Two changes, each for a stated reason:
     ///

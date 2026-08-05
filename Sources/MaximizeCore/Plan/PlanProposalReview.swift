@@ -189,6 +189,26 @@ public struct PlanProposalReview: Hashable, Sendable {
     public static let acceptTitle = "Open in the plan editor"
     public static let discardTitle = "Discard"
 
+    /// What the row area says while the diff is showing and there is nothing in it
+    /// (`isRevision && changedRowCount == 0`) — the disclosure toggle's own
+    /// `!showsEveryRow` is a view-only fact this type does not need to know, so a caller
+    /// gates on that itself; this states the plan fact underneath it.
+    ///
+    /// Moved here from `PlanProposalCardView` (MAX-150): every other string this card
+    /// shows — `headline`, `summary`, every row's label and value — already reads off
+    /// this type, and this sentence was the one exception, a literal sitting beside a
+    /// view whose own doc comment says "this view decides nothing."
+    public static let noChangesInDiffText = "This proposal matches the plan already in force, field for field."
+
+    /// The disclosure toggle's title. `rowCount` is data (`PlanProposalReview.rowCount`),
+    /// so — the same reasoning `noChangesInDiffText` above follows — it belongs beside
+    /// the count it names rather than interpolated inline in the view.
+    public static func disclosureTitle(showingEveryRow: Bool, rowCount: Int) -> String {
+        showingEveryRow
+            ? "Show only what changed"
+            : "Show the whole plan (\(rowCount) fields)"
+    }
+
     // MARK: - Building it
 
     /// Prepares the card for a proposal, against the session the handoff will use.

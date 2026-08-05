@@ -112,7 +112,7 @@ struct PlanProposalCardView: View {
             // model was asked and proposed the plan already in force. Said plainly rather
             // than rendered as an empty list.
             if review.isRevision, !showsEveryRow, review.changedRowCount == 0 {
-                Text("This proposal matches the plan already in force, field for field.")
+                Text(PlanProposalReview.noChangesInDiffText)
                     .font(.metricLabel)
                     .foregroundStyle(Color.textSecondary)
             }
@@ -135,9 +135,10 @@ struct PlanProposalCardView: View {
         // Bound to a `String` before it reaches `Label`, so the `StringProtocol`
         // initializer is chosen rather than the `LocalizedStringKey` one — this app has
         // no localization tables, and an interpolated key would look for one.
-        let title: String = showsEveryRow
-            ? "Show only what changed"
-            : "Show the whole plan (\(review.rowCount) fields)"
+        let title: String = PlanProposalReview.disclosureTitle(
+            showingEveryRow: showsEveryRow,
+            rowCount: review.rowCount
+        )
         return Button {
             showsEveryRow.toggle()
         } label: {

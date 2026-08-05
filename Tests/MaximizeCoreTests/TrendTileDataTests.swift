@@ -294,7 +294,7 @@ final class TrendTileDataTests: XCTestCase {
     }
 
     /// A month keeps the arc comparison and gains a consistency figure.
-    func testAMonthAddsDaysRunAndKeepsTheArcComparison() throws {
+    func testAMonthAddsDaysTrainedAndKeepsTheArcComparison() throws {
         let calendar = try PlanCalendar([try Fixture.plan()])
         let tallies = try tallies(
             from: "2026-01-01",
@@ -316,16 +316,18 @@ final class TrendTileDataTests: XCTestCase {
         XCTAssertNil(data.totalDistance)
         XCTAssertEqual(data.effectiveDays?.value, "12/20")
         XCTAssertEqual(data.workoutDays?.value, "18")
-        XCTAssertEqual(data.workoutDays?.caption, "days run")
+        // "days trained", not "days run" (MAX-150): `Tallies.workoutDays` counts a day
+        // whose only workout was a lift too, and the caption must not claim otherwise.
+        XCTAssertEqual(data.workoutDays?.caption, "days trained")
         XCTAssertEqual(
             data.tiles.map(\.caption),
-            ["km vs. arc", "effective days", "days run", "day streak", "avg score"]
+            ["km vs. arc", "effective days", "days trained", "day streak", "avg score"]
         )
     }
 
-    /// A week does **not** get the days-run tile: four days out of seven is already
+    /// A week does **not** get the days-trained tile: four days out of seven is already
     /// legible in the calendar row directly above the tiles.
-    func testAWeekDoesNotCarryTheDaysRunTile() throws {
+    func testAWeekDoesNotCarryTheDaysTrainedTile() throws {
         let tallies = try tallies(from: "2026-01-05", through: "2026-01-11", workoutDays: 4)
 
         let data = try TrendTileData(
@@ -370,7 +372,7 @@ final class TrendTileDataTests: XCTestCase {
         XCTAssertEqual(data.workoutDays?.value, "212")
         XCTAssertEqual(
             data.tiles.map(\.caption),
-            ["km total", "effective, of 310 eligible days", "days run", "day streak", "avg score"]
+            ["km total", "effective, of 310 eligible days", "days trained", "day streak", "avg score"]
         )
     }
 

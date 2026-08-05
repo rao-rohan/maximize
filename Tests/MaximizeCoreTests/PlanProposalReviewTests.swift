@@ -353,4 +353,26 @@ final class PlanProposalReviewTests: XCTestCase {
             second.sections.flatMap(\.rows).map(\.id)
         )
     }
+
+    // MARK: - MAX-150: copy moved here from `PlanProposalCardView`
+
+    /// The row area's own statement of "nothing changed" — distinct wording from
+    /// `summary`'s "Nothing changes against plan v3…" (the header already gives the
+    /// count and the plan number), but the same fact, and now the same type.
+    func testNoChangesInDiffTextIsNotEmptyAndNotTheSameSentenceAsSummary() throws {
+        let review = try card(reply())
+        XCTAssertFalse(PlanProposalReview.noChangesInDiffText.isEmpty)
+        XCTAssertNotEqual(PlanProposalReview.noChangesInDiffText, review.summary)
+    }
+
+    func testDisclosureTitleNamesTheRowCountOnlyWhenCollapsed() {
+        XCTAssertEqual(
+            PlanProposalReview.disclosureTitle(showingEveryRow: true, rowCount: 25),
+            "Show only what changed"
+        )
+        XCTAssertEqual(
+            PlanProposalReview.disclosureTitle(showingEveryRow: false, rowCount: 25),
+            "Show the whole plan (25 fields)"
+        )
+    }
 }
