@@ -71,7 +71,11 @@ struct HRCurveView: View {
                     yEnd: .value("Heart rate", point.beatsPerMinute)
                 )
             }
-            .foregroundStyle(Color.chartThreshold.opacity(0.2))
+            // MAX-084: was `Color.chartThreshold.opacity(0.2)`, which composited to
+            // 1.62:1 over `surfaceInset` — the faintest deliberate mark on the chart
+            // whose subject it is. `chartExcursion` is the same idea as a measurable,
+            // opaque token; the value and its reasoning live in `DesignPalette`.
+            .foregroundStyle(Color.chartExcursion)
             .interpolationMethod(.linear)
 
             ForEach(data.points, id: \.offsetSeconds) { point in

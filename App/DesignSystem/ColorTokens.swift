@@ -140,8 +140,15 @@ extension Color {
     // from translucency because a blurred cap line is a wrong cap line. Kept neutral
     // on purpose — the saturated budget is already spent on the accent and the bands.
 
-    /// Gridlines behind a plot. Should be visible and never compete with the series.
+    /// Gridlines behind a plot. Should be visible and never compete with the series —
+    /// MAX-084 raised these values, which cleared only the second half of that.
     static let chartGridline = DesignPalette.chartGridline.color
+
+    /// The filled region where a run left the plan — the time above the HR cap
+    /// (FR-1.2). Opaque, and never drawn with a call-site `.opacity()`: the whole
+    /// reason this token exists is that the shading used to be a translucent literal
+    /// nothing could measure. See `DesignPalette.chartExcursion`.
+    static let chartExcursion = DesignPalette.chartExcursion.color
 
     /// A plan threshold drawn across a chart — the HR cap line (FR-1.2), the cadence
     /// target band edges (FR-1.3). Reads as "the rule", distinct from the data.

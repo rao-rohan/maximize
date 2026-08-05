@@ -195,6 +195,7 @@ struct DesignSystemGallery: View {
                 swatch("chartThreshold", .chartThreshold)
                 swatch("chartSeriesPrimary", .chartSeriesPrimary)
                 swatch("chartSeriesMuted", .chartSeriesMuted)
+                swatch("chartExcursion", .chartExcursion)
                 swatch("chartGridline", .chartGridline)
                 swatch("chromeOpaque", .chromeOpaque)
             }

@@ -242,6 +242,138 @@ final class DesignPaletteContrastTests: XCTestCase {
         }
     }
 
+    // MARK: Chart marks — the other half of MAX-084
+
+    /// Every chart in the app plots inside `.contentSurface(.inset)`, so this is the
+    /// ground every mark below is measured against.
+    private let plotSurface = DesignPalette.surfaceInset
+
+    /// WCAG has no criterion for a gridline, so this asserts the bar the design system
+    /// set for itself: `ColorTokens` says a gridline "should be visible and never
+    /// compete with the series". 1.4:1 is the floor for the first half. The second half
+    /// is asserted by the ladder test below, not by a ceiling here.
+    func testChartGridlinesAreVisibleOnThePlotSurface() {
+        assertAtLeast(1.4, DesignPalette.chartGridline, on: plotSurface, "chartGridline")
+    }
+
+    /// The time-above-cap shading (FR-1.2). A large filled region, so it does not need
+    /// 3:1 — the review that found this put the right range at 2.0–2.5:1, loud enough to
+    /// read as a mark rather than as background, quiet enough not to shout over a whole
+    /// region of the plot.
+    func testTimeAboveCapShadingReadsAsAMarkNotABackground() {
+        assertAtLeast(2.0, DesignPalette.chartExcursion, on: plotSurface, "chartExcursion")
+    }
+
+    /// The constraint from the other direction, and the one that stops a future edit
+    /// from simply making the shading darker until it wins: `HRCurveView` annotates the
+    /// cap rule with "Cap N bpm" in `chartThreshold`, positioned directly above the cap
+    /// line — which is inside the shaded region. That label is normal text and has to
+    /// stay at AA where it crosses the fill.
+    func testTheCapLabelStaysLegibleOverTheShading() {
+        for appearance in Appearance.allCases {
+            assertAA(
+                appearance.token(DesignPalette.chartThreshold),
+                appearance.token(DesignPalette.chartExcursion),
+                .normalText,
+                "cap label over the time-above-cap shading [\(appearance.rawValue)]"
+            )
+        }
+    }
+
+    /// A drift context curve is a graphical object conveying information, so WCAG
+    /// 1.4.11's 3:1 is the right bar for it at full strength.
+    func testContextCurvesClearTheGraphicalObjectMinimum() {
+        assertAtLeast(3.0, DesignPalette.chartSeriesMuted, on: plotSurface, "chartSeriesMuted")
+    }
+
+    /// The value MAX-084 was pointed at: the *faded* end of the recency ramp, which is
+    /// where the palette's worst number was hiding because nothing composited it.
+    ///
+    /// 1.5:1 rather than 3:1, deliberately. The ramp exists to make recency the visual
+    /// axis (`HeartRateDriftOverlayData.contextOpacity`), and a floor high enough to
+    /// satisfy 1.4.11 would flatten it into twelve identical lines — trading one
+    /// legibility problem for a worse one. This asserts the curve is present, and the
+    /// constant's own documentation records that the residual problem is its 1pt
+    /// stroke, which no colour value can fix.
+    func testTheOldestDriftCurveClearsTheVisibilityFloor() {
+        for appearance in Appearance.allCases {
+            let surface = appearance.token(plotSurface)
+            let composited = appearance.token(DesignPalette.chartSeriesMuted)
+                .composited(over: surface, opacity: HeartRateDriftOverlayData.oldestContextOpacity)
+            let ratio = WCAGContrast.contrastRatio(composited, surface)
+            XCTAssertGreaterThanOrEqual(
+                ratio, 1.5,
+                """
+                the oldest stacked drift curve measures \(String(format: "%.2f", ratio)):1 \
+                on the plot surface [\(appearance.rawValue)] — below the floor its own \
+                documentation claims for it
+                """
+            )
+        }
+    }
+
+    /// The hierarchy the chart tokens are supposed to encode, asserted as an ordering
+    /// rather than as five separate numbers: background structure, then the region
+    /// marks, then the context series, then the rule, then the run being looked at.
+    ///
+    /// This is what "never compete with the series" means operationally, and it is the
+    /// check that would have caught the time-above-cap shading being drawn more faintly
+    /// than the gridlines' near neighbours. Non-strict at the top because under
+    /// Increase Contrast `chartThreshold` and `chartSeriesPrimary` both resolve to pure
+    /// black or pure white — at that point the appearance has run out of headroom, and
+    /// that is the correct behaviour rather than a violation.
+    func testTheChartTokensFormAHierarchyInEveryAppearance() {
+        let ladder: [(name: String, ink: DesignPalette.Ink)] = [
+            ("chartGridline", DesignPalette.chartGridline),
+            ("chartExcursion", DesignPalette.chartExcursion),
+            ("chartSeriesMuted", DesignPalette.chartSeriesMuted),
+            ("chartThreshold", DesignPalette.chartThreshold),
+            ("chartSeriesPrimary", DesignPalette.chartSeriesPrimary),
+        ]
+        for appearance in Appearance.allCases {
+            let surface = appearance.token(plotSurface)
+            let ratios = ladder.map {
+                WCAGContrast.contrastRatio(appearance.token($0.ink), surface)
+            }
+            for index in 1..<ratios.count {
+                XCTAssertGreaterThanOrEqual(
+                    ratios[index], ratios[index - 1],
+                    """
+                    \(ladder[index].name) (\(String(format: "%.2f", ratios[index])):1) is \
+                    quieter than \(ladder[index - 1].name) \
+                    (\(String(format: "%.2f", ratios[index - 1])):1) on the plot surface \
+                    [\(appearance.rawValue)]
+                    """
+                )
+            }
+        }
+    }
+
+    /// Increase Contrast must never *reduce* contrast. Cheap to assert, and it is the
+    /// invariant most easily broken by editing one variant of a token and not the
+    /// other three.
+    func testIncreaseContrastNeverLowersAChartMarksContrast() {
+        let marks: [(name: String, ink: DesignPalette.Ink)] = [
+            ("chartGridline", DesignPalette.chartGridline),
+            ("chartExcursion", DesignPalette.chartExcursion),
+            ("chartSeriesMuted", DesignPalette.chartSeriesMuted),
+            ("chartThreshold", DesignPalette.chartThreshold),
+            ("chartSeriesPrimary", DesignPalette.chartSeriesPrimary),
+        ]
+        for mark in marks {
+            assertRaised(
+                mark.ink.darkHighContrast, on: plotSurface.darkHighContrast,
+                isAtLeast: mark.ink.dark, on: plotSurface.dark,
+                "\(mark.name) [dark]"
+            )
+            assertRaised(
+                mark.ink.lightHighContrast, on: plotSurface.lightHighContrast,
+                isAtLeast: mark.ink.light, on: plotSurface.light,
+                "\(mark.name) [light]"
+            )
+        }
+    }
+
     private func ink(for band: ScoreBand) -> DesignPalette.Ink {
         switch band {
         case .effective: return DesignPalette.scoreEffective
@@ -283,6 +415,59 @@ final class DesignPaletteContrastTests: XCTestCase {
         XCTAssertTrue(
             WCAGContrast.meetsAA(ratio, threshold),
             "\(label) measures \(String(format: "%.2f", ratio)):1, below the \(threshold.rawValue):1 AA minimum",
+            file: file,
+            line: line
+        )
+    }
+
+    /// A floor that is this design system's own, not WCAG's — gridlines and large
+    /// filled regions have no criterion in the spec, and pretending 3:1 or 4.5:1 is the
+    /// bar for them would mean either an unmeetable test or a very loud chart. Asserted
+    /// in all four appearances at once, since the failure mode being guarded against is
+    /// a token edited in one variant only.
+    private func assertAtLeast(
+        _ floor: Double,
+        _ ink: DesignPalette.Ink,
+        on background: DesignPalette.Ink,
+        _ label: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        for appearance in Appearance.allCases {
+            let ratio = WCAGContrast.contrastRatio(
+                appearance.token(ink),
+                appearance.token(background)
+            )
+            XCTAssertGreaterThanOrEqual(
+                ratio, floor,
+                """
+                \(label) measures \(String(format: "%.2f", ratio)):1 \
+                [\(appearance.rawValue)], below the \(floor):1 this design system \
+                requires of it
+                """,
+                file: file,
+                line: line
+            )
+        }
+    }
+
+    private func assertRaised(
+        _ highContrast: ColorToken,
+        on highContrastBackground: ColorToken,
+        isAtLeast standard: ColorToken,
+        on standardBackground: ColorToken,
+        _ label: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let raised = WCAGContrast.contrastRatio(highContrast, highContrastBackground)
+        let base = WCAGContrast.contrastRatio(standard, standardBackground)
+        XCTAssertGreaterThanOrEqual(
+            raised, base,
+            """
+            \(label) drops from \(String(format: "%.2f", base)):1 to \
+            \(String(format: "%.2f", raised)):1 under Increase Contrast
+            """,
             file: file,
             line: line
         )
