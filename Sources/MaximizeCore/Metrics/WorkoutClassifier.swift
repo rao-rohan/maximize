@@ -171,6 +171,13 @@ public enum WorkoutClassifier {
 
         // The plan scores runs. Strength work and cross-training are out of scope for HR
         // scoring (§3), and `other` is the truthful label for them rather than a failure.
+        //
+        // `WorkoutClassification.lift` now exists and this line still does not use it,
+        // deliberately. Answering `.lift` here would change what the classifier reports
+        // for a session already in the store, and it would only half-fix the collapse
+        // MAX-126 reported: a ride and a run whose heart-rate curve could not be read
+        // would still share `.other` below. Separating those is a rework of what this
+        // function's residual means, not a case added to its vocabulary.
         guard workout.activityType.isRun else { return .other }
 
         // Not a threshold — a degenerate value. There is no effort profile of an

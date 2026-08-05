@@ -193,13 +193,28 @@ public enum RestDayBudgeting {
     /// .canBeMissed` excludes it before a day ever reaches this function); it is
     /// ranked last only so the switch stays exhaustive without a `default`, which
     /// would silently swallow a future `ScheduledSessionKind` case.
+    ///
+    /// **Only the order matters, never the numbers.** The tiers are compared, never
+    /// summed or thresholded, so inserting a case renumbers the ones after it without
+    /// changing a single conversion. What would rewrite the calendar's past is
+    /// *reordering* the existing cases — A19 names that trap explicitly, and this
+    /// function has not been reordered.
+    ///
+    /// `.lift` sits between `.easy` and `.hard`: a missed lift costs the week more than
+    /// a missed easy run, because it is a non-fungible stimulus rather than one of
+    /// several interchangeable aerobic hours — the same argument the ranking already
+    /// makes for `.hard` — and less than a missed quality session or long run. It is a
+    /// training judgement, LIFTING-SPEC §15 files it as the owner's to overrule, and it
+    /// is unreachable today: nothing can prescribe a `.lift` until the weekly template
+    /// grows a second slot (MAX-111), so no existing week's conversions move.
     private static func costTier(_ kind: ScheduledSessionKind) -> Int {
         switch kind {
         case .other: return 0
         case .easy: return 1
-        case .hard: return 2
-        case .long: return 3
-        case .rest: return 4
+        case .lift: return 2
+        case .hard: return 3
+        case .long: return 4
+        case .rest: return 5
         }
     }
 }

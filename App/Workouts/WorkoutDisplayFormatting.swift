@@ -29,6 +29,9 @@ enum WorkoutDisplayFormatting {
         case .long: return "Long run"
         case .hard: return "Hard session"
         case .other: return "Other"
+        // Unreachable today: `WorkoutClassifier` answers `.other` for every non-run, so
+        // no stored `Score` carries `.lift` and this string cannot be drawn yet.
+        case .lift: return "Lift"
         }
     }
 
@@ -49,6 +52,11 @@ enum WorkoutDisplayFormatting {
             return session.note.map { "Hard: \($0)" } ?? "Hard session"
         case .other:
             return session.note ?? "Other"
+        case .lift:
+            // The note is where a lift's ask lives ("45 min, lower body") until
+            // `ScheduledSession` learns durations — MAX-113 closes tracker gap P3. Same
+            // shape as `.other` above, and unreachable until a template can prescribe one.
+            return session.note ?? "Lift"
         }
     }
 
