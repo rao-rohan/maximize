@@ -152,10 +152,14 @@ private struct ChatThreadRow: View {
     }
 }
 
-/// VoiceOver's wording for a row's timestamp — independent of `Text(_:style:.relative)`'s
-/// own (undocumented, and locale-driven) visual phrasing, so the accessibility label is
-/// something this file controls rather than inherits.
-private enum RelativeTimestampFormatting {
+/// VoiceOver's wording for a timestamp — independent of `Text(_:style:.relative)`'s own
+/// (undocumented, and locale-driven) visual phrasing, so the accessibility label is
+/// something the app layer controls rather than inherits.
+///
+/// Not `private`: MAX-098's workout-detail chat card shows the same relative timestamp
+/// against the same thread, and two spellings of "3 hours ago" for one instant is the
+/// kind of difference only a VoiceOver user ever hears.
+enum RelativeTimestampFormatting {
     static func spoken(_ date: Date) -> String {
         formatter.localizedString(for: date, relativeTo: Date())
     }
