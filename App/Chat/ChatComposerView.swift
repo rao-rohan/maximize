@@ -40,10 +40,10 @@ import MaximizeCore
 /// force. A composer floating over a scrolling transcript is chrome by every definition in
 /// `Surfaces.swift`; the transcript underneath stays flat.
 ///
-/// **The shapes are the platform's, not ours.** A capsule for the field and
-/// `.floatingControl`'s own capsule for the button — no `CornerRadius` constant appears in
-/// this file, because `CornerRadius`'s own doc comment says chrome radii do not come from
-/// there.
+/// **The shapes are the platform's, not ours.** Both the field and the button take
+/// `.floatingControl`, whose own capsule is the system's — no shape and no `CornerRadius`
+/// constant appears in this file, because `CornerRadius`'s own doc comment says chrome
+/// radii do not come from there.
 ///
 /// ## A deliberate departure: no `onSubmit`
 ///
@@ -161,7 +161,12 @@ struct ChatComposerView<Accessory: View>: View {
             .padding(.horizontal, Spacing.compact)
             .padding(.vertical, Spacing.snug)
             .frame(minHeight: controlSize)
-            .glassChrome(.toolbar, in: Capsule(style: .continuous))
+            // `.floatingControl`, not `.toolbar`: this is a control floating over
+            // scrolling content, and the role brings the system's own capsule with it —
+            // so no shape is named here at all. `CornerRadius`'s doc comment says chrome
+            // radii do not come from the design system, and this is what that looks like
+            // at a call site.
+            .glassChrome(.floatingControl)
     }
 
     /// The trailing control, in all four of its states.
