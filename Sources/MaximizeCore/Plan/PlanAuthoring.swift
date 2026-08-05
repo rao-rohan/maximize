@@ -379,13 +379,24 @@ public enum PlanAuthoring {
         )
     }
 
-    /// The highest stored version.
+    /// The highest stored version — "the plan in force".
     ///
     /// `PlanCalendar` orders by `effectiveFrom` and guarantees the version number
     /// ascends with it, so the last element is also the highest version — but this asks
     /// for the highest version explicitly rather than relying on that coupling, since
     /// the successor version is the one thing that must never come out low.
-    private static func currentVersion(of calendar: PlanCalendar) -> Plan? {
+    ///
+    /// Public since MAX-101, because a third reader appeared. `PlanDisplayData` already
+    /// answered the same question with the same `max(by:)` and a comment pointing here,
+    /// and the proposal card needs it too — "what does this proposal change against" has
+    /// to be the *same* version the authoring screen is superseding, or the diff
+    /// describes a comparison the handoff will not make. Two notions of "current" is
+    /// exactly the drift D2/D3 exist to prevent.
+    ///
+    /// Note what this is **not**: "the version governing today". A version saved this
+    /// morning to take effect next Monday is the current one from the moment it is
+    /// stored. See `PlanDisplayData`'s own note for why that is the right reading.
+    public static func currentVersion(of calendar: PlanCalendar) -> Plan? {
         calendar.versions.max { $0.version < $1.version }
     }
 }

@@ -328,6 +328,73 @@ public struct PlanDraft: Hashable, Sendable {
         )
     }
 
+    // MARK: - Applying a model's proposal (MAX-101)
+
+    /// The draft this one becomes once a model's proposal is applied to it
+    /// (CHAT-FIRST-SPEC.md §4.1, A13).
+    ///
+    /// ## It applies. It does not store. That is the whole of A13.
+    ///
+    /// A13 names the near-miss in this exact place: *"a helper that applies a proposal
+    /// to a draft **and also stores it**. Applying is fine. Storing is D1's door, and it
+    /// opens by hand."* So this returns a value and nothing else. It touches no
+    /// repository, produces no `Plan`, and cannot: a `PlanDraft` still has no
+    /// `plan()` of its own, and `PlanAuthoringSession.plan(from:effectiveFrom:)` is
+    /// still the only door — reached only after the athlete has reviewed the card and
+    /// tapped through the authoring screen.
+    ///
+    /// ## Why it is an instance method rather than an initializer
+    ///
+    /// Because of the lift slot. `PlanProposal`'s vocabulary derives from
+    /// `ScheduledSessionKind.prescribable`, which excludes `.lift` until MAX-141, so a
+    /// proposal describes the **run** slot and says nothing at all about lifts. An
+    /// initializer taking only a proposal would have to invent an answer for the lift
+    /// slot, and the only answers available are "rest everywhere" — silently deleting
+    /// the lift days the athlete already has, on a revision — or a second seed. Applying
+    /// *onto* the draft the athlete is revising carries their lift days through
+    /// untouched, which is both the honest answer and the one the card is required to
+    /// state out loud (`PlanProposalReview.liftNote`, so that an athlete who asked for
+    /// "and lift on Tuesdays" is not told yes by omission).
+    ///
+    /// Everything else is replaced outright rather than merged: the proposal is a whole
+    /// plan, not a patch, and `PlanProposalInstruction` tells the model exactly that —
+    /// "prescribe the whole week, every time". A field-by-field merge here would be a
+    /// second opinion about what the model meant to change.
+    ///
+    /// - Throws: `DomainError` only for the shapes `PlanDraft.init` itself refuses; a
+    ///   parsed `PlanProposal` cannot express one (its arc is non-empty and strictly
+    ///   ascending by construction), so this is belt-and-braces rather than a case a
+    ///   caller has to design around — see `PlanProposalTests`' "a proposal that parses
+    ///   is one the storage door accepts."
+    public func applying(_ proposal: PlanProposal) throws -> PlanDraft {
+        var sessions: [Weekday: ScheduledSession] = [:]
+        var liftSessions: [Weekday: ScheduledSession] = [:]
+        for day in week {
+            sessions[day.weekday] = proposal[day.weekday]
+            // Carried, not re-derived: `liftSession()` is the draft's own accessor, so
+            // the note MAX-137 deliberately keeps uneditable survives this too.
+            liftSessions[day.weekday] = try day.liftSession()
+        }
+        return try PlanDraft(
+            heartRateCapBPM: proposal.heartRateCapBPM,
+            cadenceLowStepsPerMinute: proposal.cadenceLowStepsPerMinute,
+            cadenceHighStepsPerMinute: proposal.cadenceHighStepsPerMinute,
+            effectiveThresholdPoints: proposal.effectiveThresholdPoints,
+            marginalThresholdPoints: proposal.marginalThresholdPoints,
+            weeklySessions: sessions,
+            longRunArcWeeks: proposal.longRunArc.map {
+                ArcWeekDraft(index: $0.index, distanceMeters: $0.distanceMeters)
+            },
+            liftSessions: liftSessions,
+            // `PlanProposal` has already applied the same normalisation
+            // `PlanAuthoringSession.goals(from:)` performs, so joining and re-splitting
+            // is a round trip through the draft's own newline-joined shape rather than a
+            // second opinion about what a goal statement is.
+            goalStatements: proposal.goalStatements.joined(separator: "\n"),
+            goalTargetDay: proposal.goalTargetDay
+        )
+    }
+
     // MARK: - Editing the week
 
     /// Total by construction: the initializer fills every weekday.
