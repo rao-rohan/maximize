@@ -86,10 +86,74 @@ is a judgment the system cannot reliably infer. If the calendar starts reading a
 generous, the fix is to revisit the selection heuristic — or fall back to manual — not
 to widen the budget.
 
-## A7 — §14.2 (accent color) still open.
+## A7 — §14.2 resolved: the accent is the violet **`#8E7CFF`** (dark) / **`#5B3FE8`** (light).
 
-Non-blocking, as the PRD notes. MAX-040 (design system) will define it as a single
-token so changing it later is a one-line edit.
+**Resolves:** the open sub-decision in §14.2, which the PRD left to the owner and
+marked non-blocking.
+
+**Decision (2026-08-05, MAX-084):** ratify the values MAX-040 committed as a working
+default. In full, all four appearances:
+
+| | Standard | Increase Contrast |
+|---|---|---|
+| Dark | `#8E7CFF` | `#B3A6FF` |
+| Light | `#5B3FE8` | `#3B22C4` |
+
+No code changes: the values are already in
+`Sources/MaximizeCore/Accessibility/DesignPalette.swift`. What changes is their
+status — they were "a defensible default, not a decision" (`ColorTokens.swift`), and
+they are now the decision. Re-theming stays a one-line edit if the owner disagrees.
+
+**Why this one.** The accent has to survive three collisions the PRD sets up, and
+violet is the only region of the wheel far from all three at once: it is not
+Robinhood's green (`#00C805`, named in the PRD), it is not any of the three score
+bands, and it is not the untinted iOS system blue that users read as "no design was
+applied here".
+
+**It measures well in every appearance**, which matters more than it might sound,
+because the accent is about to move from two call sites to every tab label, picker
+segment and button title in the app (design review §3.1). Those are *text*, so 4.5:1
+is the bar, not 3:1:
+
+| Pair | Dark | Light | Dark, IC | Light, IC |
+|---|---|---|---|---|
+| accent on `surface` | 6.06:1 | 6.32:1 | 9.82:1 | 9.49:1 |
+| accent on `surfaceElevated` | 5.56:1 | 5.81:1 | 7.90:1 | 8.14:1 |
+| accent on `surfaceInset` | 5.05:1 | 5.32:1 | 7.01:1 | 7.22:1 |
+| `textOnSaturatedFill` on accent | 6.06:1 | 6.32:1 | 9.18:1 | 9.49:1 |
+
+Every figure clears AA for normal text against every surface level in both
+appearances, and clears AAA (7:1) under Increase Contrast. `WCAGContrastTests` pins
+the 6.06:1 figure and asserts the AA floor for the rest, so this table is checked on
+every commit rather than trusted.
+
+(The design review's appendix records 9.18:1 for dark Increase Contrast. That figure
+pairs the Increase Contrast accent with the *standard* dark surface; against the
+Increase Contrast surface — pure black — it is 9.82:1. Both clear AAA; the row above
+is the pairing that actually renders.)
+
+**Alternatives measured and rejected**, dark value against `surface`:
+
+| Candidate | On `surface` | Against `scoreEffective` | Why not |
+|---|---|---|---|
+| Cyan `#32D6E0` | 11.07:1 | **1.14:1** | Sits at the same luminance as "this run went well", on screens that show both |
+| Teal `#2FD4C4` | 10.60:1 | **1.09:1** | Same collision, worse |
+| Electric blue `#4D9BFF` | 6.97:1 | 1.39:1 | Reads as system blue at a glance — the failure mode the brief names |
+| Magenta `#FF4FD8` | 6.89:1 | 1.41:1 | Clears the bands, but is louder than a colour used "sparingly" (FR-4.3) should be |
+| Lime `#C6F24E` | 15.17:1 | 1.56:1 | Same hue family as `scoreEffective`; also very loud |
+
+The cyan and teal numbers are the interesting ones: both have excellent contrast
+against the background and would still have been wrong, because contrast against the
+*surface* is not the only constraint an accent has to meet.
+
+**The one real argument against violet-on-near-black** is that it is a recognisable
+current palette and a discerning viewer may find it familiar rather than distinctive.
+Against that: this app is single-user and is never distributed (A5, A8), so "reads as
+someone else's brand" costs nothing.
+
+**What this does not settle.** The accent still reaches almost nothing the system
+draws — `.tint()` is called nowhere in `App/` — so ratifying the value does not by
+itself make the app look accented. That is a separate ticket (design review §3.1).
 
 ## A8 — CloudKit backup is deferred. D6 is downgraded to on-device durability.
 

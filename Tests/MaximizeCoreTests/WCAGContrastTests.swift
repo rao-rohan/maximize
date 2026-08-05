@@ -104,8 +104,11 @@ final class DesignPaletteContrastTests: XCTestCase {
         XCTAssertTrue(WCAGContrast.meetsAA(ratio, .normalText))
     }
 
+    /// All three surface levels, not two: MAX-084 resolved A7 by publishing a contrast
+    /// table for the accent that includes `surfaceInset`, and a table in a document is
+    /// worth what the test under it is worth.
     func testAccentAsTextMeetsNormalTextAA() {
-        for surface in [DesignPalette.surface, DesignPalette.surfaceElevated] {
+        for surface in [DesignPalette.surface, DesignPalette.surfaceElevated, DesignPalette.surfaceInset] {
             assertAA(DesignPalette.accent.dark, surface.dark, .normalText, "accent on surface [dark]")
             assertAA(DesignPalette.accent.light, surface.light, .normalText, "accent on surface [light]")
             assertAA(
