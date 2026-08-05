@@ -500,16 +500,26 @@ public actor WorkoutIngestionPipeline: WorkoutIngestionSink {
 
         // MAX-111: the plan scores runs, so a workout that is not a run gets no verdict.
         //
-        // `RubricEvaluator` filters bands by the **scheduled** session kind and then tests
-        // their conditions against what actually happened. That split is deliberate and it
-        // is what makes "ran hard on an easy day" expressible — but it also means a
-        // non-run inherits whichever bands the day's prescription selected. On an easy
-        // day, `StandardPlanSeed`'s `easy.wellOverCap` has exactly one condition (average
-        // HR above the cap + 8) and none on what was performed, so a strength session
-        // clears it on heart rate alone and is scored 20–45 with the rationale "Well above
-        // the easy cap for the whole run." On a day with no matching band it lands on
-        // `fallback.recorded` at 40–69 instead. Either way it is a confident number about
-        // a session the plan has no opinion on, and D8 makes it permanent.
+        // **The reason has changed, and the gate has not** (MAX-133). A lift no longer
+        // inherits the run day's bands: `RubricEvaluator` resolves the ask for the
+        // workout's own discipline, so `StandardPlanSeed`'s `easy.wellOverCap` can no
+        // longer fire on a strength session and the A21 defect is structurally closed.
+        // MAX-132 has given the seed three bands a lift day can match.
+        //
+        // What is still true is the case those bands do not cover: they apply to a day
+        // whose **lift slot is prescribed**, and no seeded weekday prescribes one — nor
+        // does any plan already on disk, all of whose lift slots decode to rest. A lift
+        // let through today therefore resolves to `.rest`, correctly, and matches
+        // `rest.ranAnyway` — which carries no conditions and reads "Ran on a scheduled
+        // rest day." That is running language on a session that was not a run, and D8
+        // makes it permanent.
+        //
+        // **So removing this is its own ticket, not a line in a routing one.** It needs
+        // the seed to say something true about lifting on a day that asked for none —
+        // `.actualDiscipline(oneOf: [.run])` on `rest.ranAnyway`, or a band for the case
+        // — and it is a behaviour change beyond scoring: a lift that scores acquires a
+        // calendar colour and enters the tallies, which is MAX-134's and MAX-135's
+        // arithmetic.
         //
         // Returning — rather than throwing — is what keeps this inside R11's guarantee:
         // the workout is already durable, its samples are stored, `enrich` completes
