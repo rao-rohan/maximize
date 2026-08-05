@@ -456,7 +456,17 @@ final class StoredRecordRoundTripTests: XCTestCase {
         let restored = try StoredPlan(plan).toDomain()
         XCTAssertEqual(restored.resolve(.heartRateCap(offsetBPM: 8)), 160)
         XCTAssertEqual(restored.resolve(.cadenceTargetLow(offsetStepsPerMinute: 0)), 165)
-        XCTAssertEqual(restored.resolve(.scheduledDistance(fraction: 0.8), scheduledDistanceMeters: 10_000), 8_000)
+        // Unchanged in meaning across MAX-131: `.scheduledDistance(fraction:)` is the
+        // same stored reference, resolved by the same multiplication. Only the way the
+        // day's ask is handed to `resolve` moved, from a loose `Double?` to the session
+        // that carries it.
+        XCTAssertEqual(
+            restored.resolve(
+                .scheduledDistance(fraction: 0.8),
+                against: try ScheduledSession(kind: .long, distanceMeters: 10_000)
+            ),
+            8_000
+        )
     }
 
     /// The lifted columns are duplicated data, and duplicated data can disagree. A plan

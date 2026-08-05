@@ -448,7 +448,7 @@ change rather than four.
 |---|---|---|---|
 | P1 | `Plan` cannot express the *shape* of classification rules, so four dimensionless ratios live in `WorkoutClassificationPolicy` | MAX-013 | Real D1 leak, but bounded: they are ratios, never a bpm, metre or minute, so changing the cap or arc still moves the thresholds. A `classification` block on a future plan version fixes it |
 | P2 | Same, for the cap-anchored zone multipliers in `HeartRateZoneModel` | MAX-012 | As P1 |
-| P3 | `Plan` records **no durations at all**, so the "too short to classify" floor can only be distance-based | MAX-013 | A mis-started treadmill run with HR but no distance is not caught and reaches the scorer. Wants `minimumSessionDuration`. **MAX-113 closes this** — a lifting session is prescribed in minutes, so the plan has to learn durations either way |
+| P3 | ~~`Plan` records **no durations at all**~~ **Closed by MAX-131**: `ScheduledSession.durationSeconds` is the plan's first duration, and `RubricReference.scheduledDuration(fraction:)` is how a band names it | MAX-013 | The rubric half is closed. **The classifier half is not**: `WorkoutClassifier.isFragment` still tests distance only, so a mis-started treadmill run with HR but no distance still reaches the scorer. The plan can now express the floor it wants — a `minimumSessionDuration`, or the ask's own duration — and the ticket that changes the classifier is a behaviour change nobody has picked up |
 | P4 | `ScheduledSession` cannot express interval structure (e.g. 6×800m) | MAX-013 | The scorer sees "hard" but not the prescribed shape, so it cannot judge whether the session was executed as written |
 
 Separately, `CalendarDay` lacks day/week arithmetic — MAX-013 carried a private day
@@ -548,9 +548,9 @@ feature was governed by a plan that could not exist).
 | MAX-111 | **Stop scoring lifts against the running rubric** — stop-gap ahead of MAX-109 | MAX-109 (spec) | Sonnet ✅ |
 | MAX-090 | Chat-first product spec: plan generation and Q&A through chat | Owner | **Opus** 🔒 ✅ |
 | MAX-091 | Run both Claude clients on the Sonnet tier at `medium` effort | Owner, cost | Sonnet 🔒 ✅ |
-| MAX-092 … MAX-104 | The chat-first build, decomposed from MAX-090 | MAX-090 | see below |
+| MAX-092 … MAX-104 | The chat-first build, decomposed from MAX-090 | MAX-090 | see below ✅ |
 | MAX-109 | Lifting product spec: plans account for lifting and running | Owner | **Opus** ✅ |
-| MAX-128 … MAX-143 | The lifting build, decomposed from MAX-109 | MAX-109 | see below |
+| MAX-128 … MAX-143 | The lifting build, decomposed from MAX-109 | MAX-109 | see below ✅ |
 | MAX-126 | **"No verdict by design" is a state** — a lift stops being drawn and spoken as a run awaiting a score | MAX-111 | **Opus** ✅ |
 
 **MAX-066.** Splits currently need a GPS track, so a treadmill run has none — correctly
@@ -1059,7 +1059,7 @@ twelve and is dispatchable immediately.
 | MAX-097 | Thread list, derived titles, new chat, scope subtitle | 093, 096 | Sonnet ✅ |
 | MAX-098 | The persistent glass button | 097 | Sonnet ✅ |
 | MAX-099 | `PlanProposal` — type, parse, schema derived from core enums | 095 | **Opus** 🔒 ✅ |
-| MAX-100 | The Anthropic client for plan proposals | 099 | Sonnet 🔒 |
+| MAX-100 | The Anthropic client for plan proposals | 099 | Sonnet 🔒 ✅ |
 | MAX-101 | Conversational plan authoring; proposal card; handoff | 098, 100 | **Opus** |
 | MAX-102 | **The read-only plan screen with version history** | — | Sonnet ✅ |
 | MAX-103 | "Runs in this conversation" strip | 098 | Sonnet |
@@ -1281,6 +1281,37 @@ carrying forward:
 
 ### Phase 9 — Lifting (MAX-109)
 
+**MAX-144 is decided, by the owner: A22.** *"You can set the muscle group in the detail view
+of the workout if it is strength training."* That is the first of the three costed options —
+the athlete confirms afterwards — and the only one that makes a lift's prescription a
+**standard** rather than documentation. The manual-entry non-goal is spent deliberately and
+narrowly, the way A10 was: one field, one kind of workout, on the screen where you are
+already looking at that session.
+
+**MAX-145 builds it, and the interesting part is not the picker.** Two consequences fall out
+that a ticket written as "add a muscle-group control" would miss:
+
+- **A lift cannot be scored at ingestion any more.** D2 computes metrics once when a workout
+  arrives and D8 makes an auto-score immutable — but the groups arrive *later*, whenever the
+  athlete opens the screen. A lift scored at ingestion would have been judged against
+  information nobody had yet, and revising it afterwards is exactly what D8 forbids. So a
+  lift waits: not awaiting a model, not permanently unscoreable, but **awaiting the athlete**.
+  A third state beside MAX-126's `noVerdict`, and a better one, because it is the app asking
+  a question rather than guessing an answer. It is also the feature's own onboarding — a lift
+  on the calendar saying *"tell me what you trained"* is how the field gets discovered.
+- **The entry does not belong on `Workout`.** That record mirrors what HealthKit reported and
+  nothing else writes to it. This is athlete-supplied truth *about* a session, which is the
+  shape `ScoreAnnotation` already has: additive, timestamped, never overwriting what was
+  captured. And "I have not told you yet" must stay distinct from "I trained nothing" — only
+  the first should prompt.
+
+It also unblocks the rubric half. MAX-131 was told its vocabulary must not *require* muscle
+groups, because nothing could supply them; that still holds, since a lift the athlete never
+annotates has to score somehow. But MAX-132's seed bands can now judge
+prescribed-versus-actual, which is what A20's adherence was always reaching for.
+
+
+
 **MAX-109 is the lifting product spec, and it is delivered:**
 [`docs/LIFTING-SPEC.md`](./docs/LIFTING-SPEC.md) plus amendments **A16–A21**. Nothing in it
 is built. It came from one sentence from the owner — *"Plans should account for both
@@ -1350,9 +1381,9 @@ is the overseer's, not a ticket's — flagged here rather than done.
 | ID | Ticket | Depends on | Tier |
 |---|---|---|---|
 | MAX-128 | `Discipline`, and `.lift` on both classification enums (spec's MAX-110) | — | **Opus** ✅ |
-| MAX-129 | The per-discipline prescription; the no-op decode test | 128 | **Opus** |
+| MAX-129 | The per-discipline prescription; the no-op decode test | 128 | **Opus** ✅ |
 | MAX-130 | Discipline-gated derived metrics; stop fabricating cadence | 128 | **Opus** ✅ |
-| MAX-131 | Rubric vocabulary for lifts — **closes gap P3** | 128 | **Opus** |
+| MAX-131 | Rubric vocabulary for lifts — **closes gap P3** | 128 | **Opus** ✅ |
 | MAX-132 | Seed bands for lift days; the `easy.wellOverCap` shadow | 131 | Sonnet |
 | MAX-133 | Match a workout to its own discipline's ask | 129, 131 | **Opus** |
 | MAX-134 | Obligations, not days: tallies, streak, rest-day budget | 129, 133 | **Opus** |
@@ -1365,6 +1396,8 @@ is the overseer's, not a ticket's — flagged here rather than done.
 | MAX-141 | `PlanProposal` covers lift days | 129, **099** | Sonnet 🔒 |
 | MAX-142 | `TrainingContext` is per-session, not per-run | 129, **095** | **Opus** 🔒 |
 | MAX-143 | **Decide what to do with lifts already scored as runs** | 128 | Owner / overseer |
+| MAX-144 | ~~How adherence to a muscle-group prescription is judged~~ — **decided (A22)** | 129 | Owner ✅ |
+| MAX-145 | **Enter muscle groups on a strength workout's detail screen** (A22) | 129, 144 | **Opus** |
 
 **Four collisions the overseer must respect.**
 
@@ -1610,6 +1643,55 @@ A new metric cannot now reach a discipline it says nothing about by default.
   the App layer, and it is the closest thing to an intensity signal a lift can carry — see
   §8.3's stated cost ("adherence scoring cannot tell a hard session from a token one").
   Worth its own ticket; deliberately not taken here.
+
+**MAX-131 — two words, and the argument for not adding a third.** A20 scores a lift on
+adherence, not volume: whether the session the plan asked for happened, on the day, for
+roughly the prescribed length. Two thirds of that were already expressible — the day is
+the day the band is evaluated on, and "it happened" is a band with no metric condition.
+The two that were not are now `RubricCondition.actualDiscipline(oneOf:)` and
+`RubricReference.scheduledDuration(fraction:)`, the latter resting on
+`ScheduledSession.durationSeconds`, **which closes the rubric half of gap P3**.
+
+- **`activeEnergyKilocalories` was considered and declined**, against LIFTING-SPEC §3.5's
+  three-item list. A20's own sentence is "no rubric band references a load or a volume",
+  and energy burned is the one number in a lift's record that answers *how much work* —
+  the question A20 says the app cannot honestly ask. It also has no plan-relative anchor,
+  so a band using it would carry a `.constant`: a per-athlete physiological threshold
+  frozen into the rubric, which is the shape `RubricReference` exists to avoid. Under D1 a
+  case is permanent, so it should be added by the band that needs it, not in advance.
+- **`.actualDiscipline`, not `.discipline`, and it reads the workout rather than the
+  classification.** Named for the split it sits on: `RubricBand.appliesTo` is the
+  *scheduled* side, and this is the *actual* side alongside `.actualClassification`. It
+  reads `workout.activityType.discipline` — a fact HealthKit recorded — because the
+  classifier is a judgement, and because it short-circuits every non-run to `.other`, so a
+  band conditioned on `.actualClassification(oneOf: [.lift])` would silently never fire.
+- **The `easy.wellOverCap` shadow is now avoidable, and is not yet avoided.** A test pins
+  both halves: the seed's band as written matches a lift on an easy-run day (the defect
+  A21 records), and the identical band plus `.actualDiscipline(oneOf: [.run])` cannot.
+  **Writing that condition into `StandardPlanSeed` is MAX-132** — the vocabulary is a
+  type-level decision the whole rubric inherits, the seed is one plan's opinion.
+- **No behaviour change, and a lift is still left unscored** by MAX-111's ingestion gate.
+  Nothing added here is reachable until MAX-133 matches a workout to its own discipline's
+  ask; `RubricEvaluator` still reads `planDay.scheduledSession` for every workout.
+- **Nothing stored moves, pinned in MAX-129's shape.** A hand-written pre-change rubric
+  payload decodes to identical bands with identical conditions, six §10.3 rows match the
+  identical band under it and under the in-code fixture, and a `ScheduledSession` with no
+  duration writes no key — so every stored plan and every stored `Score`'s prescription
+  (immutable under D8) keeps its bytes.
+- **Muscle groups are deliberately not a condition** (MAX-144 is the owner's open call).
+  A plan may prescribe them and nothing can verify one, so no band can require one; adding
+  the case later is additive on the wire and costs no stored rubric anything.
+- **Two carry-forwards taken because the new field would otherwise be silently dropped.**
+  `PlanDraft.DayDraft` carries `durationSeconds` on the run slot — `PlanDraft.init(_:)` is
+  documented as lossless and the run slot is the half that decomposes — and
+  `PlanCalendar`'s arc substitution rebuilds a long-run session, so it carries it too.
+  Neither is editable: **MAX-137 gives the screen its editor**, and **MAX-141** is what
+  lets a chat-authored proposal state one. Until then nothing authors a duration, which is
+  why this ticket adds none to `StandardPlanSeed`.
+- **Reported, not done: the classifier half of P3.** `WorkoutClassifier.isFragment` still
+  tests distance only, so an HR-only treadmill fragment still reaches the scorer.
+  LIFTING-SPEC §9.2 wants a duration floor there; the plan can now express one, and
+  changing the classifier is a behaviour change this ticket's brief forbade.
 
 **MAX-093 landed the stored record.** `StoredChatThread` is columnar —
 `subjectKindRawValue`, `workoutUUID` (a fixed sentinel for a training row),
