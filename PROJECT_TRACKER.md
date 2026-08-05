@@ -243,7 +243,27 @@ thin, and the brief carries that instruction explicitly.
 |---|---|---|---|---|---|
 | MAX-048 | Deterministic duplicate resolution for `ChatThreadRecord` | D6, A1 | Sonnet | ✅ | MAX-020 |
 | MAX-050 | Per-workout thread persistence | D6, FR-2.3 | Sonnet | ✅ | MAX-020 |
-| MAX-051 | Chat UI with token-streaming reveal | FR-2.1–2.4, D10 | Sonnet | 🔲 | MAX-024, MAX-041, MAX-050 |
+| MAX-051 | Chat UI with token-streaming reveal | FR-2.1–2.4, D10 | Sonnet | ✅ | MAX-024, MAX-041, MAX-050 |
+
+**Chat is unavailable until a workout is scored, and that is a decision, not a gap.**
+`WorkoutContextBuilder` needs a `WorkoutClassification`, which exists only as a stored
+decision on `Score.actualClassification` (D2 — computed once by the scorer, never
+re-derived). Re-classifying inside the chat model would be a second place that judgement
+is made, which is exactly the drift D2 and D3 exist to prevent. An unscored run therefore
+renders `.notYetScored` — an ordinary state with its own copy, not a failure and not a
+disabled composer. In practice the wait is short: `WorkoutDetailView` already triggers
+R8's lazy scoring before the chat section renders.
+
+**The seed context is not stored as a `.system` thread message**, though `ChatRole` and
+`ChatThread.visibleMessages` would allow it. `factSheet()` is re-rendered fresh on every
+turn from the context built once per load — a pure function of immutable inputs — rather
+than persisted as a second copy that could drift from the builder's output.
+
+**`@Observable` compiles in the core.** MAX-051 is the first file in `MaximizeCore` to
+`import Observation`, and the core job now builds on Linux rather than macOS, so this was
+genuinely unverified when the PR opened — the agent flagged it as the first place to look
+if CI went red. It went green. `Observation` is available cross-platform in `swift:6.0`,
+and a core-resident view model is now a proven pattern rather than an assumed one.
 
 **MAX-050 was already built when it was dispatched, and that is a tracker failure, not
 an agent one.** `ChatThread`/`ChatMessage` shipped with MAX-010, the
