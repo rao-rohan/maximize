@@ -107,6 +107,19 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(DistanceUnit.miles.converted(fromMeters: 1_609.344), 1, accuracy: 0.0001)
     }
 
+    /// MAX-080 drives a plan's distances from controls the athlete steps in their own
+    /// unit, so the conversion has to round-trip exactly.
+    func testDistanceUnitConvertsBackToMetres() {
+        for unit in DistanceUnit.allCases {
+            XCTAssertEqual(unit.meters(fromConverted: 5), 5 * unit.metersPerUnit, accuracy: 0.0001)
+            XCTAssertEqual(
+                unit.converted(fromMeters: unit.meters(fromConverted: 13.5)),
+                13.5,
+                accuracy: 0.0001
+            )
+        }
+    }
+
     func testDefaultsFollowTheDesignDirection() {
         let settings = AppSettings.standard
         XCTAssertEqual(settings.appearance, .dark, "FR-4.3 is dark-first")

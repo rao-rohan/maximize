@@ -88,6 +88,18 @@ public enum DistanceUnit: String, Hashable, Sendable, Codable, CaseIterable {
         meters / metersPerUnit
     }
 
+    /// The inverse: metres for a figure already in this unit.
+    ///
+    /// Storage is always metres, so this exists for the one direction that runs the
+    /// other way — a control the athlete drives in their own unit whose value has to be
+    /// stored (MAX-080's plan editor, where a long run is stepped in whole miles or
+    /// kilometres). Written here rather than as `value * unit.metersPerUnit` at the
+    /// call site so the round trip through `converted(fromMeters:)` is one type's
+    /// responsibility and cannot drift.
+    public func meters(fromConverted value: Double) -> Double {
+        value * metersPerUnit
+    }
+
     /// The short label a tile or row prints next to a converted figure — "km" or "mi".
     /// Centralized here so every display site that shows a distance or a pace uses the
     /// same word for the same unit (`SummaryTileData`, `TrendTileData`,

@@ -44,6 +44,11 @@ struct SettingsView: View {
     /// all put the keyboard away, which nothing here could do before.
     @FocusState private var isKeyFieldFocused: Bool
 
+    /// MAX-080. Presented rather than pushed: this screen is itself already presented
+    /// (MAX-081 moved it behind a toolbar button), and pushing onto a host stack this
+    /// view does not own would put the plan editor's title in someone else's bar.
+    @State private var isAuthoringPlan = false
+
     /// - Parameters:
     ///   - keyStore: where the Anthropic API key lives. Defaults to the real Keychain
     ///     store; a test or preview passes a fake.
@@ -67,6 +72,12 @@ struct SettingsView: View {
             // action; only the permission sheet needs a foreground, which is why it
             // is here and not on the launch path.
             HealthAccessSettingsSection()
+
+            // MAX-080. The entry point to the only screen that writes a `Plan` record.
+            // Not gated on `model.state`: the plan lives in a different repository from
+            // settings, and a settings read that failed says nothing about whether a
+            // plan can be authored. `PlanAuthoringView` reports its own store's health.
+            planSection
 
             // MAX-064: Rest days per week (D9/A6)
             trainingPlanSection
@@ -120,6 +131,33 @@ struct SettingsView: View {
         .task {
             await model.load()
             refreshStoredKeyStatus()
+        }
+        .sheet(isPresented: $isAuthoringPlan) {
+            NavigationStack {
+                PlanAuthoringView()
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { isAuthoringPlan = false }
+                        }
+                    }
+            }
+        }
+    }
+
+    // MARK: - Plan section (MAX-080)
+
+    @ViewBuilder
+    private var planSection: some View {
+        Section("Plan") {
+            Button("Training plan…") { isAuthoringPlan = true }
+
+            Text(
+                "Heart-rate cap, cadence target, weekly template, long-run arc and score "
+                    + "thresholds. Saving any change writes a new plan version rather than "
+                    + "editing the current one, so scores already recorded stay reproducible."
+            )
+            .font(.metricLabel)
+            .foregroundStyle(Color.textSecondary)
         }
     }
 
