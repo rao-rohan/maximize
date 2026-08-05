@@ -494,6 +494,133 @@ final class WorkoutIngestionPipelineTests: XCTestCase {
         XCTAssertNotNil(harness.store.storedScore(forWorkout: harness.workout.id), "a missing route does not stop a run being scored")
     }
 
+    // MARK: - MAX-067: backfilling distance splits for pre-MAX-046 history
+
+    func testABackfillPassRecomputesLegacyMetricsAndGainsSplitsWithoutTouchingTheScore() async throws {
+        // Stands in for the athlete's actual device: a workout, scored, with metrics on
+        // file that predate MAX-046 — `distanceSplitsComputed == false` is exactly what
+        // `DerivedMetricsRecord`'s migration default produces for every existing row.
+        let harness = try Harness()
+        // A route exactly as long as `Fixture.workout()`'s recorded 10 km — the same
+        // shape `DerivedMetricsCalculatorTests.matchingRoute()` uses — so the backfill
+        // actually has something to cut up, rather than a track too short to trust.
+        harness.samples.setRoute(RouteFetchResult(points: (0..<10).map { index in
+            RawRoutePoint(
+                date: Fixture.epoch.addingTimeInterval(Double(index) * 10),
+                latitudeDegrees: Double(index) * (10_000.0 / 9) / MetricsFixture.metersPerLatitudeDegree,
+                longitudeDegrees: 0,
+                altitudeMeters: 50
+            )
+        }))
+        try await harness.store.store(harness.workout)
+        let legacyMetrics = try DerivedMetrics(
+            workoutID: harness.workout.id,
+            averageHeartRateBPM: 140,
+            distanceSplitsComputed: false,
+            planVersion: PlanVersion(1)
+        )
+        try await harness.store.store(legacyMetrics)
+        let originalScore = try Fixture.score(points: 77, workoutID: harness.workout.id)
+        harness.store.seedScore(originalScore)
+
+        let outcome = await harness.pipeline.backfillDistanceSplits()
+
+        XCTAssertEqual(outcome.workoutsProcessed, 1)
+        XCTAssertEqual(outcome.workoutsRemaining, 0)
+        let metrics = try XCTUnwrap(harness.store.storedMetrics(forWorkout: harness.workout.id))
+        XCTAssertTrue(metrics.distanceSplitsComputed)
+        XCTAssertNotNil(metrics.distanceSplits, "a routed run should gain a real breakdown")
+        // D8: the auto-score is untouched, and the model is never asked again — the
+        // enforcement point is `applyScore`'s existing ledger check, unmodified by this
+        // ticket.
+        XCTAssertEqual(harness.store.storedScore(forWorkout: harness.workout.id), originalScore)
+        XCTAssertEqual(harness.model.callCount, 0)
+    }
+
+    func testABackfillPassDoesNotRetryARouteLessWorkoutForever() async throws {
+        // The crux: a workout with no route (indoor, or pre-MAX-034) will produce nil
+        // splits on every attempt, genuinely. One re-enrichment must be enough to stop it
+        // being offered again — otherwise every launch re-fetches its HealthKit samples
+        // for nothing, forever.
+        let harness = try Harness() // no route
+        try await harness.store.store(harness.workout)
+        let legacyMetrics = try DerivedMetrics(
+            workoutID: harness.workout.id,
+            averageHeartRateBPM: 140,
+            distanceSplitsComputed: false,
+            planVersion: PlanVersion(1)
+        )
+        try await harness.store.store(legacyMetrics)
+
+        let firstPass = await harness.pipeline.backfillDistanceSplits()
+        XCTAssertEqual(firstPass.workoutsProcessed, 1)
+        XCTAssertEqual(firstPass.workoutsRemaining, 0)
+        let requestsAfterFirstPass = harness.samples.receivedHeartRateRequests.count
+
+        let secondPass = await harness.pipeline.backfillDistanceSplits()
+
+        XCTAssertEqual(secondPass.workoutsProcessed, 0, "already attempted, and the answer is still no splits")
+        XCTAssertEqual(
+            harness.samples.receivedHeartRateRequests.count,
+            requestsAfterFirstPass,
+            "a workout already marked distanceSplitsComputed must not be re-enriched"
+        )
+        let metrics = try XCTUnwrap(harness.store.storedMetrics(forWorkout: harness.workout.id))
+        XCTAssertTrue(metrics.distanceSplitsComputed)
+        XCTAssertNil(metrics.distanceSplits)
+    }
+
+    func testABackfillPassLeavesAlreadyBackfilledWorkoutsAlone() async throws {
+        // The ordinary steady state once the backlog is drained: nothing is a candidate,
+        // so nothing is touched.
+        let harness = try Harness()
+        try await harness.pipeline.ingest(harness.workout)
+        let requestsBeforeBackfill = harness.samples.receivedHeartRateRequests.count
+
+        let outcome = await harness.pipeline.backfillDistanceSplits()
+
+        XCTAssertEqual(outcome, .nothingToDo)
+        XCTAssertEqual(harness.samples.receivedHeartRateRequests.count, requestsBeforeBackfill)
+    }
+
+    func testABackfillPassIsBoundedByItsPolicyAndResumesOnTheNextPass() async throws {
+        // Route-less on purpose: this test is about the cap and the carry-over, not about
+        // what a split ends up containing.
+        let harness = try Harness()
+        let second = try Fixture.workout(id: Fixture.otherWorkoutID)
+        try await harness.store.store(harness.workout)
+        try await harness.store.store(second)
+        for id in [harness.workout.id, second.id] {
+            let legacy = try DerivedMetrics(workoutID: id, distanceSplitsComputed: false, planVersion: PlanVersion(1))
+            try await harness.store.store(legacy)
+        }
+        let onePerPass = try DistanceSplitsBackfillPolicy(maxWorkoutsPerPass: 1)
+
+        let firstPass = await harness.pipeline.backfillDistanceSplits(policy: onePerPass)
+        XCTAssertEqual(firstPass.workoutsProcessed, 1)
+        XCTAssertEqual(firstPass.workoutsRemaining, 1, "the wake budget must not do more than the policy allows")
+
+        let secondPass = await harness.pipeline.backfillDistanceSplits(policy: onePerPass)
+        XCTAssertEqual(secondPass.workoutsProcessed, 1, "the remainder is picked up by the next pass")
+        XCTAssertEqual(secondPass.workoutsRemaining, 0)
+
+        XCTAssertTrue(harness.store.allMetrics.allSatisfy(\.distanceSplitsComputed))
+    }
+
+    func testABackfillPassSkipsAWorkoutWithNoDerivedMetricsAtAll() async throws {
+        // A workout stored without metrics (no plan governed its day, MAX-034) is not a
+        // candidate: `DerivedMetricsCalculator` has nothing to compute against, backfilled
+        // or not, and this is `storedWithoutPlan`'s territory, not MAX-067's.
+        let harness = try Harness()
+        harness.store.setPlanCalendar(nil)
+        try await harness.pipeline.ingest(harness.workout)
+        XCTAssertNil(harness.store.storedMetrics(forWorkout: harness.workout.id))
+
+        let outcome = await harness.pipeline.backfillDistanceSplits()
+
+        XCTAssertEqual(outcome, .nothingToDo)
+    }
+
     // MARK: - Harness
 
     /// Everything wired the way the app wires it, with the health store, the model and

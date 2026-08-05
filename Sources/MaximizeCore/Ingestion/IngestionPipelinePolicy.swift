@@ -149,6 +149,12 @@ public enum IngestionPipelineDiagnostic: Hashable, Sendable {
     /// and why it is narrow.
     case workoutAbandoned(step: AbandonedStep)
 
+    /// MAX-067: a `backfillDistanceSplits(policy:)` pass could not even enumerate
+    /// candidates — the initial `WorkoutRepository.workouts(startingIn:)` read failed.
+    /// No workout identifier to report, because none was reached; the next pass, on the
+    /// next launch, tries again from scratch.
+    case distanceSplitsBackfillEnumerationFailed
+
     public enum MissingPlanReason: Hashable, Sendable {
         /// No plan version has been authored yet — the state of a fresh install.
         ///
