@@ -498,6 +498,32 @@ public actor WorkoutIngestionPipeline: WorkoutIngestionSink {
         let existingLedger = try? await scores.ledger(forWorkout: workout.id)
         if existingLedger != nil { return }
 
+        // MAX-111: the plan scores runs, so a workout that is not a run gets no verdict.
+        //
+        // `RubricEvaluator` filters bands by the **scheduled** session kind and then tests
+        // their conditions against what actually happened. That split is deliberate and it
+        // is what makes "ran hard on an easy day" expressible — but it also means a
+        // non-run inherits whichever bands the day's prescription selected. On an easy
+        // day, `StandardPlanSeed`'s `easy.wellOverCap` has exactly one condition (average
+        // HR above the cap + 8) and none on what was performed, so a strength session
+        // clears it on heart rate alone and is scored 20–45 with the rationale "Well above
+        // the easy cap for the whole run." On a day with no matching band it lands on
+        // `fallback.recorded` at 40–69 instead. Either way it is a confident number about
+        // a session the plan has no opinion on, and D8 makes it permanent.
+        //
+        // Returning — rather than throwing — is what keeps this inside R11's guarantee:
+        // the workout is already durable, its samples are stored, `enrich` completes
+        // normally, and the anchor moves on. The workout is captured; it simply carries no
+        // score.
+        //
+        // `activityType.isRun` is the same predicate `WorkoutClassifier` short-circuits
+        // on, on purpose: one notion of "is this a run" in the core, not two that can
+        // drift apart.
+        guard workout.activityType.isRun else {
+            report(.leftUnscored(reason: .workoutIsNotARun))
+            return
+        }
+
         let context: WorkoutContext
         let evaluation: RubricEvaluation
         let instruction: ScoringInstruction

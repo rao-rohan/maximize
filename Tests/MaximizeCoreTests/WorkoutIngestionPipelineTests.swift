@@ -228,6 +228,140 @@ final class WorkoutIngestionPipelineTests: XCTestCase {
         XCTAssertEqual(harness.samples.stepCountRequestCount, 1, "a deduped workout is not extracted again")
     }
 
+    // MARK: - MAX-111: the plan scores runs, and only runs
+
+    /// The defect, end to end.
+    ///
+    /// `Fixture.epoch` is a Thursday, which the fixture week prescribes as an easy 8 km.
+    /// A lift on that day selected the `.easy` rubric bands — `RubricEvaluator` filters by
+    /// the **scheduled** kind — and then cleared `easy.wellOverCap`, whose only condition
+    /// is an average heart rate above the cap + 8 and which says nothing about what was
+    /// actually performed. 170 bpm against the fixture's 150 cap clears it comfortably, so
+    /// the session was scored 20–45 with the rationale "Well above the easy cap for the
+    /// whole run", and D8 made that permanent.
+    func testAStrengthSessionOnAnEasyDayIsCapturedAndLeftUnscored() async throws {
+        let harness = try Harness(
+            activityType: .traditionalStrengthTraining,
+            hasRoute: false,
+            beatsPerMinute: 170
+        )
+
+        try await harness.pipeline.ingest(harness.workout)
+
+        // Capture is untouched: the workout, its heart-rate curve and its metrics are all
+        // durable. "Not scored" is not "not kept".
+        XCTAssertEqual(harness.store.storedWorkouts.map(\.id), [harness.workout.id])
+        XCTAssertEqual(harness.store.allSeries.count, 1)
+        XCTAssertNotNil(harness.store.storedMetrics(forWorkout: harness.workout.id))
+
+        XCTAssertNil(harness.store.storedScore(forWorkout: harness.workout.id))
+        XCTAssertEqual(harness.diagnostics.reported, [.leftUnscored(reason: .workoutIsNotARun)])
+
+        // The model is never asked, so nothing about a lift is assembled into a prompt —
+        // the gate sits before `WorkoutContextBuilder` runs at all.
+        XCTAssertEqual(harness.model.callCount, 0)
+    }
+
+    /// R11, restated for this gate: "skip scoring" must not become "throw". A thrown error
+    /// here would reach `WorkoutIngestionSink.ingest`, pin the anchor, and stop capture for
+    /// every workout recorded after the lift.
+    ///
+    /// It doubles as the "a run on the same day still scores exactly as before" check:
+    /// both workouts land on the same prescribed easy Thursday, and the run behind the lift
+    /// comes out with the band and the number the happy path has always produced.
+    func testANonRunDoesNotWedgeTheQueueBehindIt() async throws {
+        let harness = try Harness(activityType: .traditionalStrengthTraining, hasRoute: false)
+        let laterRun = try Fixture.workout(id: Fixture.otherWorkoutID)
+
+        let fetcher = FakeWorkoutFetcher()
+        let anchorStore = InMemoryWorkoutQueryAnchorStore()
+        let batchAnchor = WorkoutQueryAnchor(opaqueData: Data([11]))
+        fetcher.enqueue(try WorkoutFetchBatch(workouts: [harness.workout, laterRun], anchor: batchAnchor))
+
+        let ingester = AnchoredWorkoutIngester(
+            fetcher: fetcher,
+            anchorStore: anchorStore,
+            sink: harness.pipeline
+        )
+
+        try await ingester.ingestPendingWorkouts()
+
+        XCTAssertEqual(
+            Set(harness.store.storedWorkouts.map(\.id)),
+            [harness.workout.id, laterRun.id],
+            "a lift must not stop the workouts behind it being captured"
+        )
+        XCTAssertEqual(anchorStore.savedAnchors, [batchAnchor])
+
+        // The run behind it still gets its verdict, on the same day, from the same rubric,
+        // unchanged by this ticket.
+        let score = try XCTUnwrap(harness.store.storedScore(forWorkout: laterRun.id))
+        XCTAssertEqual(score.value.points, 92)
+        XCTAssertEqual(score.rubricBandIdentifier, "easy.onCap.lowDrift")
+        XCTAssertEqual(score.actualClassification, .easy)
+
+        XCTAssertNil(harness.store.storedScore(forWorkout: harness.workout.id))
+        XCTAssertEqual(harness.diagnostics.reported, [.leftUnscored(reason: .workoutIsNotARun)])
+    }
+
+    func testANonRunIsNotGivenAFabricatedCadence() async throws {
+        // The fixture workout reports 10 000 steps over an hour, so an ungated calculator
+        // would store a confident 166.7 spm for a session spent under a barbell — and
+        // `WorkoutFactSheet` would send it to Claude as a measured fact about the workout.
+        let harness = try Harness(
+            activityType: .traditionalStrengthTraining,
+            hasRoute: false
+        )
+
+        try await harness.pipeline.ingest(harness.workout)
+
+        let metrics = try XCTUnwrap(harness.store.storedMetrics(forWorkout: harness.workout.id))
+        XCTAssertNil(metrics.averageCadenceStepsPerMinute)
+        XCTAssertNil(metrics.gradeAdjustedPaceSecondsPerKilometer)
+        XCTAssertNil(metrics.distanceSplits)
+        // The heart rate it genuinely recorded is still measured and still stored.
+        XCTAssertEqual(metrics.averageHeartRateBPM, 140)
+    }
+
+    /// The lazy path reaches the same conclusion, and reaches it without a score appearing
+    /// on a later view of the same workout. `completeIngestion` is what a detail screen
+    /// calls on appear.
+    func testTheLazyPathAlsoLeavesANonRunUnscored() async throws {
+        let harness = try Harness(
+            activityType: .traditionalStrengthTraining,
+            hasRoute: false,
+            beatsPerMinute: 170
+        )
+        try await harness.pipeline.ingest(harness.workout)
+
+        await harness.pipeline.completeIngestion(forWorkout: harness.workout.id)
+
+        XCTAssertNil(harness.store.storedScore(forWorkout: harness.workout.id))
+        XCTAssertEqual(
+            harness.diagnostics.reported,
+            [.leftUnscored(reason: .workoutIsNotARun), .leftUnscored(reason: .workoutIsNotARun)]
+        )
+    }
+
+    /// D8: a score already on file for a lift — every one written before this gate existed
+    /// — is left exactly where it is. This ticket stops new ones; it does not correct old
+    /// ones, and correcting them is MAX-109's A21 to decide.
+    func testAnExistingScoreOnANonRunIsNotTouched() async throws {
+        let harness = try Harness(
+            activityType: .traditionalStrengthTraining,
+            hasRoute: false,
+            beatsPerMinute: 170
+        )
+        let alreadyRecorded = try Fixture.score(points: 32, workoutID: harness.workout.id)
+        harness.store.seedScore(alreadyRecorded)
+
+        try await harness.pipeline.ingest(harness.workout)
+        await harness.pipeline.completeIngestion(forWorkout: harness.workout.id)
+
+        XCTAssertEqual(harness.store.storedScore(forWorkout: harness.workout.id), alreadyRecorded)
+        XCTAssertTrue(harness.diagnostics.reported.isEmpty, "an already-scored replay is silent, not a gap")
+    }
+
     // MARK: - Scoring failure is not ingestion failure
 
     func testAWorkoutRecordedBeforeAnAPIKeyExistsIsStoredComplete() async throws {
@@ -657,6 +791,10 @@ final class WorkoutIngestionPipelineTests: XCTestCase {
         /// the ordinary case §10.3's worked example is written around.
         init(
             policy: IngestionPipelinePolicy = .standard,
+            // MAX-111: nil keeps the run the rest of this file is written around. Pass a
+            // non-run to drive the discipline gate.
+            activityType: ActivityType? = nil,
+            hasRoute: Bool? = nil,
             beatsPerMinute: Double = 140,
             routePoints: Int = 0,
             // MAX-066: a treadmill run has no route, so this and `routePoints` are
@@ -664,8 +802,9 @@ final class WorkoutIngestionPipelineTests: XCTestCase {
             treadmillDistanceSamples: Int = 0
         ) throws {
             let capturedWorkout = try Fixture.workout(
-                activityType: treadmillDistanceSamples > 0 ? .treadmillRunning : .running,
-                hasRoute: treadmillDistanceSamples == 0
+                activityType: activityType
+                    ?? (treadmillDistanceSamples > 0 ? .treadmillRunning : .running),
+                hasRoute: hasRoute ?? (treadmillDistanceSamples == 0)
             )
             let workoutStore = InMemoryWorkoutStore(planCalendar: try PlanCalendar([ScoringFixture.plan()]))
             let sampleFetcher = FakeWorkoutSampleFetcher()
