@@ -12,7 +12,14 @@ import MaximizeCore
 struct WorkoutDetailView: View {
     @State private var model: WorkoutDetailModel
 
+    /// Kept alongside `model` (rather than read back out of it) purely so `content`
+    /// below can hand it to `WorkoutChatView`, which owns its own `WorkoutChatModel`
+    /// (MAX-051) and is loaded independently of `WorkoutDetailModel`'s read-only
+    /// snapshot — chat is live and bidirectional, not another `WorkoutDetailData` field.
+    private let workoutID: UUID
+
     init(workoutID: UUID) {
+        self.workoutID = workoutID
         _model = State(initialValue: WorkoutDetailModel(workoutID: workoutID))
     }
 
@@ -55,7 +62,7 @@ struct WorkoutDetailView: View {
                 CadenceBandView(data: data.cadence)
                 RouteMapView(data: data.routeMap)
                 SummaryTilesView(data: data.summaryTiles)
-                // MAX-051 (chat entry point) lands here.
+                WorkoutChatView(workoutID: workoutID)
             }
         }
     }
