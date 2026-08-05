@@ -74,8 +74,19 @@ final class PlanAuthoringModel {
         today: CalendarDay? = nil,
         timeZone: TimeZone = .current
     ) {
-        self.planRepository = planRepository ?? PersistenceComposition.store
-        self.settingsRepository = settingsRepository ?? PersistenceComposition.store
+        // Written as `if let` rather than `??` for the reason `SettingsModel` is: the
+        // fallback is a concrete `MaximizeStore?` and the property is an existential,
+        // and spelling the coercion out leaves nothing for inference to get wrong.
+        if let planRepository {
+            self.planRepository = planRepository
+        } else {
+            self.planRepository = PersistenceComposition.store
+        }
+        if let settingsRepository {
+            self.settingsRepository = settingsRepository
+        } else {
+            self.settingsRepository = PersistenceComposition.store
+        }
         self.timeZone = timeZone
         self.todayOverride = today
     }
