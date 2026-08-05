@@ -36,6 +36,15 @@ import MaximizeCore
 /// saturated-colour budget on the accent and the three score bands, and those three are
 /// reserved for the calendar and the verdict header (`ScoreBandColors.swift`); recency,
 /// not hue, is the axis that separates these lines.
+///
+/// ## The trendline (MAX-065)
+///
+/// Below the overlay and its legend sits a second chart: one point per run at
+/// `DerivedMetrics.heartRateDriftFraction`, plotted against date, with a fitted line
+/// when there are enough runs to fit one. It is not a line through the curves above —
+/// see `HeartRateDriftTrendlineData` for why those are different questions — and it is
+/// built from the exact same `data.curves` this view already draws, so the two halves
+/// of this screen can never disagree about which runs are in the picture.
 struct DriftOverlayView: View {
     let interval: TrendInterval
 
@@ -78,6 +87,7 @@ struct DriftOverlayView: View {
                 .font(.metricLabel)
                 .foregroundStyle(Color.textSecondary)
             legend(data)
+            trendlineSection(data)
         } else {
             emptyState(data)
         }
@@ -231,6 +241,120 @@ struct DriftOverlayView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Stack this run")
+    }
+
+    // MARK: - Trendline (MAX-065)
+
+    /// FR-3.3 / D5's remaining half: `DerivedMetrics.heartRateDriftFraction`, one point
+    /// per run, plotted against the run's date. **Not** a line fit through the curves
+    /// above — `HeartRateDriftTrendlineData`'s documentation explains why those answer
+    /// two different questions. This view draws only what `MaximizeCore` already
+    /// worked out; the fit itself is arithmetic and lives, and is tested, there.
+    ///
+    /// Built from `data.curves` — the same stacked, filtered runs the overlay chart
+    /// draws above — so this section can never cover a different set of runs than the
+    /// chart it sits beneath.
+    @ViewBuilder
+    private func trendlineSection(_ data: HeartRateDriftOverlayData) -> some View {
+        let trendline = HeartRateDriftTrendlineData(curves: data.curves)
+        VStack(alignment: .leading, spacing: Spacing.compact) {
+            Text("Drift trend")
+                .font(.sectionHeading)
+                .foregroundStyle(Color.textPrimary)
+
+            if trendline.points.isEmpty {
+                Text("None of the stacked runs carries a stored drift figure yet.")
+                    .font(.metricLabel)
+                    .foregroundStyle(Color.textSecondary)
+            } else {
+                trendlineChart(trendline)
+                // Fewer than two points, or points that share one exact date, is not a
+                // trend — an absence stated in a sentence, never a flat line drawn
+                // through a single dot (MAX-042's "absent, not empty" discipline).
+                if trendline.fit == nil {
+                    Text(
+                        trendline.points.count == 1
+                            ? "One run with a stored drift figure — not enough yet for a trend line."
+                            : "These runs share one date, so there's no spread to fit a trend line to."
+                    )
+                    .font(.microLabel)
+                    .foregroundStyle(Color.textTertiary)
+                }
+            }
+        }
+    }
+
+    /// Drift points, plus the fitted line when there is one. The line is drawn as two
+    /// endpoints spanning the plotted dates rather than one per run — `Fit.value(at:)`
+    /// is defined everywhere, but only the run dates themselves are real data.
+    ///
+    /// Deliberately one color, one weight, no slope-based tint: D5 draws a description,
+    /// not a verdict, the same restraint `CadenceBandView` applies to the cadence band
+    /// (MAX-043). The dashed stroke separates "fitted" from "measured" without judging
+    /// which direction is good.
+    @ViewBuilder
+    private func trendlineChart(_ trendline: HeartRateDriftTrendlineData) -> some View {
+        Chart {
+            ForEach(trendline.points) { point in
+                PointMark(
+                    x: .value("Date", point.date),
+                    y: .value("Drift", point.driftFraction * 100)
+                )
+            }
+            .foregroundStyle(Color.chartSeriesPrimary)
+
+            if let fit = trendline.fit,
+                let first = trendline.points.first?.date,
+                let last = trendline.points.last?.date {
+                ForEach([first, last], id: \.self) { date in
+                    LineMark(
+                        x: .value("Date", date),
+                        y: .value("Drift", fit.value(at: date) * 100),
+                        series: .value("Series", "trend")
+                    )
+                }
+                .foregroundStyle(Color.chartSeriesPrimary.opacity(0.5))
+                .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                .interpolationMethod(.linear)
+            }
+        }
+        .chartYScale(domain: percentAxisDomain(trendline.driftFractionAxisDomain))
+        .chartXAxis {
+            AxisMarks(values: .automatic) { value in
+                AxisGridLine().foregroundStyle(Color.chartGridline)
+                AxisValueLabel {
+                    if let date = value.as(Date.self) {
+                        Text(date, format: .dateTime.month(.abbreviated).day())
+                            .font(.microLabel)
+                            .foregroundStyle(Color.textTertiary)
+                    }
+                }
+            }
+        }
+        .chartYAxis {
+            AxisMarks(values: .automatic) { value in
+                AxisGridLine().foregroundStyle(Color.chartGridline)
+                AxisValueLabel {
+                    if let percent = value.as(Double.self) {
+                        Text("\(Int(percent.rounded()))%")
+                            .font(.microLabel)
+                            .foregroundStyle(Color.textTertiary)
+                    }
+                }
+            }
+        }
+        .frame(minHeight: LayoutMetrics.minimumChartHeight)
+        .contentSurface(.inset)
+        .accessibilityLabel("Drift trend across \(trendline.points.count) runs, by date")
+    }
+
+    /// `HeartRateDriftTrendlineData.driftFractionAxisDomain` is in fraction units;
+    /// this chart plots percent (×100), matching every point and line mark above. The
+    /// fallback only matters when `trendlineChart` is somehow called with no points —
+    /// it never is, since `trendlineSection` only calls it once `points` is non-empty.
+    private func percentAxisDomain(_ fractionDomain: ClosedRange<Double>?) -> ClosedRange<Double> {
+        guard let fractionDomain else { return -5...5 }
+        return (fractionDomain.lowerBound * 100)...(fractionDomain.upperBound * 100)
     }
 
     // MARK: - What is not on the chart, and why
