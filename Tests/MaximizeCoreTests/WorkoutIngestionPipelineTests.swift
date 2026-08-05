@@ -321,6 +321,14 @@ final class WorkoutIngestionPipelineTests: XCTestCase {
         XCTAssertNil(metrics.distanceSplits)
         // The heart rate it genuinely recorded is still measured and still stored.
         XCTAssertEqual(metrics.averageHeartRateBPM, 140)
+
+        // MAX-130, and D2's half of it: the shape `DerivedMetricKind` decides is the
+        // shape that reaches the store, once, at ingestion. Stated as the invariant
+        // rather than as a list, so a figure added later is covered here without anyone
+        // remembering to come back.
+        for kind in DerivedMetricKind.allCases where !kind.applies(to: .traditionalStrengthTraining) {
+            XCTAssertFalse(metrics.isRecorded(kind), kind.rawValue)
+        }
     }
 
     /// The lazy path reaches the same conclusion, and reaches it without a score appearing

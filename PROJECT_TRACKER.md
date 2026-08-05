@@ -1235,8 +1235,8 @@ is the overseer's, not a ticket's — flagged here rather than done.
 | ID | Ticket | Depends on | Tier |
 |---|---|---|---|
 | MAX-128 | `Discipline`, and `.lift` on both classification enums (spec's MAX-110) | — | **Opus** ✅ |
-| MAX-129 | The per-discipline prescription; the no-op decode test | 128 | **Opus** ✅ |
-| MAX-130 | Discipline-gated derived metrics; stop fabricating cadence | 128 | **Opus** |
+| MAX-129 | The per-discipline prescription; the no-op decode test | 128 | **Opus** |
+| MAX-130 | Discipline-gated derived metrics; stop fabricating cadence | 128 | **Opus** ✅ |
 | MAX-131 | Rubric vocabulary for lifts — **closes gap P3** | 128 | **Opus** |
 | MAX-132 | Seed bands for lift days; the `easy.wellOverCap` shadow | 131 | Sonnet |
 | MAX-133 | Match a workout to its own discipline's ask | 129, 131 | **Opus** |
@@ -1375,6 +1375,48 @@ is what keeps the lift slot's totality meaningful.
 >
 > Recommended lean: **2 now, 3 as it costs nothing extra, and 1 only if the owner decides the
 > signal is worth the non-goal.** Recorded, not taken — flagged for the overseer to dispatch.
+
+**MAX-130 — a lift's metrics are decided, not merely withheld.** MAX-111 put `if isRun` in
+front of three expressions in `DerivedMetricsCalculator`. That fixed the three metrics that
+existed and did nothing about the fourth, so the decision moved into `DerivedMetricKind` —
+one case per figure `DerivedMetrics` carries, one exhaustive `switch` answering what a
+workout must be before that figure describes anything, and `DerivedMetricKindTests` walking
+the record's stored properties by reflection so a *field* added without a case fails CI too.
+A new metric cannot now reach a discipline it says nothing about by default.
+
+- **A lift's stored record is: average and maximum heart rate, and zone splits.** Nothing
+  else. Cadence, grade-adjusted pace and distance splits stay absent (MAX-111, unchanged);
+  drift stays absent; and **`timeAboveCapSeconds` is now absent too** — LIFTING-SPEC §3.3(a),
+  the one behaviour change. `Plan.heartRateCapBPM` is the easy-run ceiling, so on a lift the
+  figure keeps its name and heading while changing meaning from "did you hold the plan's
+  discipline" to "how hard did you work". §15 q2 records this as the owner's to overrule;
+  the lean it implements is the spec's own.
+- **No new stored figure, and no schema change.** §8's honest list of what HealthKit gives
+  for a strength session is duration, active energy and the heart-rate series — and
+  `Workout` already stores the first two. Adding a derived copy of either would be a second
+  source of truth for a number the record already holds, which is exactly what D2 forbids.
+  So `StoredWorkoutRecords` and `MaximizeSchema` were not touched, against the spec's ticket
+  table, which anticipated new columns.
+- **The gate reads `Discipline`, and `isRun` survives where it is the narrower question.**
+  Three requirement cases, not two: `.anyDiscipline`, `.runDiscipline` (the figure is
+  anchored to a *run field of the plan*), and `.runningActivity` (the figure models running
+  gait or the metabolic cost of running a grade). A ride and a hike are `.run` by slot and
+  have no running form, so a gate written as `discipline == .run` would hand cadence and
+  Minetti pace straight back to them — the second half of what MAX-111 actually fixed. The
+  containment `isRun ⇒ .run` is already pinned by `DisciplineTests`.
+- **No backfill, and no stored score touched** (D2, D8). Metrics are still computed once, at
+  ingestion, at the same moment as before; already-ingested lifts keep the metrics they
+  have, including the cap figure. Re-deriving them is a separate ticket with MAX-067's
+  question attached, and the scores those figures fed are A21/MAX-143's.
+- **Reported, not done: `HKQuantityTypeIdentifier.workoutEffortScore`.** §15 q1 asks the
+  implementer to check whether a strength-relevant quantity type has appeared. As far as can
+  be established without an SDK in this container: **no sets, reps or external load** — the
+  finding §8.1 rests on holds. The one lift-relevant quantity HealthKit does have and this
+  app does not request is the iOS 18-era `workoutEffortScore` / `estimatedWorkoutEffortScore`
+  pair, a 1–10 session-effort rating. It is a fetcher change plus an authorisation change in
+  the App layer, and it is the closest thing to an intensity signal a lift can carry — see
+  §8.3's stated cost ("adherence scoring cannot tell a hard session from a token one").
+  Worth its own ticket; deliberately not taken here.
 
 **MAX-093 landed the stored record.** `StoredChatThread` is columnar —
 `subjectKindRawValue`, `workoutUUID` (a fixed sentinel for a training row),
