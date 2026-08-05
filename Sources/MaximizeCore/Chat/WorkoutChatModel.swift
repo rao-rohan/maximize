@@ -238,6 +238,10 @@ public final class WorkoutChatModel {
                 metrics: metrics,
                 classification: ledger.automatic.actualClassification,
                 planCalendar: planCalendar,
+                // The only place in the app that asks for the wider payload (MAX-068):
+                // a thread the athlete opened, to answer a question they typed. The
+                // scoring path leaves this defaulted and is shown strictly less.
+                audience: .chat,
                 heartRateSeries: heartRateSeries,
                 // FR-2.1: chat is seeded with the score already assigned. Never nil
                 // here, unlike the scorer's own build — see `WorkoutContext.existingScore`.

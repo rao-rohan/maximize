@@ -217,6 +217,18 @@ public enum WorkoutScorer {
         if context.existingScore != nil {
             throw ScoringError.contextAlreadyScored(workoutID: context.workout.id)
         }
+        // Unreachable through any real flow — chat only builds a context for a run that
+        // already has a score, and the check above rejects those. Kept because it is the
+        // difference between "the scorer is shown less by convention" and "the scorer
+        // cannot be shown more" (MAX-068): a chat context carries the pace breakdown, and
+        // scoring it would put that in an automatic, unattended prompt.
+        guard context.audience == .scoring else {
+            throw DomainError.inconsistent(
+                reason: "WorkoutScorer: this context was assembled for \(context.audience.rawValue) "
+                    + "and carries more of the record than a scoring prompt may. Build it with "
+                    + "audience: .scoring."
+            )
+        }
         guard evaluation.planDay.date == context.day,
               evaluation.plan.version == context.plan?.version
         else {

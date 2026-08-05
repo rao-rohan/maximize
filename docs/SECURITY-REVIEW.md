@@ -299,6 +299,34 @@ chat and absent for scoring, which is a correctness property but also means the 
 sends strictly less. This is a deliberate, documented, minimal payload and it matches
 what `CLAUDE.md` asks for. **No defects found.**
 
+> **Amended by MAX-068 (2026-08-05).** The exclusion list above was accurate at the time
+> of the review and is no longer complete: **the per-kilometre pace breakdown is now sent,
+> to chat only.** What changed, so this record stays the one place the payload is stated:
+>
+> - **Added, chat only:** `WorkoutContext.paceBreakdown` — `DerivedMetrics.distanceSplits`
+>   read at ingestion-time values (D2), rendered as one `## Pace by kilometre` section of
+>   ordered per-split paces. FR-2's worked example is *"why did my HR drift at mile 3"*,
+>   and before this the prompt had no distance index to locate "mile 3" on the
+>   elapsed-time heart-rate curve it was already sending.
+> - **Still excluded from every prompt:** route coordinates, raw heart-rate samples, the
+>   workout UUID, source device and ingestion timestamp. Unchanged.
+> - **Still excluded from the scoring prompt:** `existingScore` **and now the pace
+>   breakdown**. The scorer's call is automatic and unattended — one per ingested run,
+>   with nobody asking — and the rubric (§10, D1) reads no split. `WorkoutScorer` refuses
+>   a context assembled for chat rather than trusting the convention.
+> - **The mile cut is stored and not sent.** The prompt is fixed to kilometres, matching
+>   every other distance in the fact sheet, so content cannot vary with
+>   `AppSettings.distanceUnit`.
+> - **Bounded:** `WorkoutContext.maximumRenderedSplits` (200) caps what is listed, so a
+>   corrupted `distanceMeters` cannot size a prompt full of health data. Above the cap the
+>   section states the count and lists nothing.
+>
+> Net effect on egress: a chat prompt now carries a bounded, ordered list of per-kilometre
+> elapsed times for a run whose distance, duration and heart-rate shape it already
+> carried. It carries no new *kind* of identifier — no location, no timestamps — but it is
+> a finer-grained record of one person's movement than anything previously sent, and it is
+> sent only when the athlete has opened a thread and typed a question.
+
 **Both Anthropic endpoints are hardcoded constants** — `endpointURLString` in each client
 is a `private static let` never derived from user input, plan data, settings or a server
 response, so there is no surface for redirecting a request carrying health data. HTTPS,

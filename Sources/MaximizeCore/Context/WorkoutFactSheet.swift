@@ -9,6 +9,14 @@ extension WorkoutContext {
     /// the scorer ever sees a differently-worded fact sheet from the one chat sees, the
     /// two have started to disagree about the run and nothing on screen will say so.
     ///
+    /// ## One renderer, two payloads
+    ///
+    /// `audience` selects how much of the record is here, and this is the only thing it
+    /// selects (MAX-068). Every section the two share is rendered by the same code from
+    /// the same stored numbers, so the scorer and chat still cannot describe the same
+    /// measurement differently — a chat prompt is a superset of a scoring one, never a
+    /// second wording of it.
+    ///
     /// ## Absent metrics are stated, never omitted
     ///
     /// MAX-012 models "not applicable" distinctly from zero, and that distinction has to
@@ -75,6 +83,17 @@ extension WorkoutContext {
             lines.append(heartRateShape.buckets
                 .map { "\(Self.percent($0.startFraction)) \(Self.number($0.averageBeatsPerMinute))" }
                 .joined(separator: " · "))
+        }
+
+        // Chat only (MAX-068). The section is absent from a scoring prompt entirely —
+        // not stated-as-absent — because for the scorer this is not a metric that
+        // happens to be missing, it is a part of the record the scorer is never shown,
+        // like the route coordinates. Within a chat prompt the usual rule applies and
+        // the section always appears, saying why it is empty when it is.
+        if audience == .chat {
+            lines.append("")
+            lines.append("## Pace by \(Self.unitName)")
+            lines.append(contentsOf: paceBreakdownLines)
         }
 
         if let existingScore {
@@ -146,6 +165,73 @@ extension WorkoutContext {
             return "zone \(zone.rawValue) \(Self.duration(seconds))"
         }
         return present.isEmpty ? "not applicable — no heart-rate data" : present.joined(separator: ", ")
+    }
+
+    // MARK: - Pace breakdown (MAX-068)
+
+    /// The splits, or a sentence saying which kind of nothing this is.
+    ///
+    /// Three absences, deliberately worded apart. "There was never a track to cut up"
+    /// is a fact about the run; "we hold no breakdown for it" is a fact about our
+    /// records, and a run captured before the app computed splits is the common case
+    /// today. Collapsing them would tell Claude that a run had no per-kilometre
+    /// variation when what we mean is that we did not measure it — and Claude would
+    /// then reason confidently from a gap.
+    private var paceBreakdownLines: [String] {
+        guard let paceBreakdown else {
+            guard workout.hasRoute else {
+                return ["Not applicable — indoor run, so nothing recorded when each "
+                    + "\(Self.unitName) fell. The distance and duration above are still real."]
+            }
+            return ["Not recorded for this run: either its GPS track could not be cut into "
+                + "splits, or the run was captured before this app computed them. This is a "
+                + "gap in what was stored, not a run that had no \(Self.unitName) splits — "
+                + "do not read it as an even pace."]
+        }
+
+        let splits = paceBreakdown.splits
+        guard splits.count <= WorkoutContext.maximumRenderedSplits else {
+            // A count this high means the stored distance is wrong, not that somebody ran
+            // an ultra. Say what is on file and list none of it.
+            return ["\(splits.count) splits are on file for this run, which is beyond what a "
+                + "plausible run produces and beyond what this summary carries, so none are "
+                + "listed. Treat the distance above with suspicion."]
+        }
+
+        var lines = ["Pace over each \(Self.unitName) of the run, in order, as "
+            + "minutes:seconds per \(Self.unitName). This is what relates a distance to a "
+            + "point on the heart-rate shape above, which is on an elapsed-time axis."]
+        // Both caveats are properties of how `DistanceSplitCalculator` measures, and both
+        // change how a split should be read. Unstated, the first invites Claude to line
+        // the splits up against the run's duration and the second to call a pause a fade.
+        lines.append("Timed between GPS fixes, so they exclude any lead-in before the first "
+            + "fix and can total less than the duration above; a pause falls inside whichever "
+            + "split straddles it and makes that one read slow.")
+        if splits.contains(where: { !$0.isComplete }) {
+            lines.append("The final entry covers less than a full \(Self.unitName). Its pace is "
+                + "extrapolated from that short stretch and is not comparable with the others.")
+        }
+        lines.append(splits.map(Self.splitEntry).joined(separator: " · "))
+        return lines
+    }
+
+    private static func splitEntry(_ split: DistanceSplit) -> String {
+        // The same stopwatch formatter grade-adjusted pace uses. Two paces in one prompt
+        // rounded two different ways would be MAX-045's drift, in prose.
+        let paceText = Self.pace(split.paceSeconds(per: WorkoutContext.paceBreakdownUnit))
+        guard split.isComplete else {
+            return "final \(Self.distance(split.distanceMeters)) \(paceText)"
+        }
+        return "\(split.ordinal) \(paceText)"
+    }
+
+    /// The prose name of `WorkoutContext.paceBreakdownUnit`, spelled once. Not the
+    /// athlete's display unit — see that constant for why the prompt is unit-fixed.
+    private static var unitName: String {
+        switch WorkoutContext.paceBreakdownUnit {
+        case .kilometers: return "kilometre"
+        case .miles: return "mile"
+        }
     }
 
     // MARK: - Formatting

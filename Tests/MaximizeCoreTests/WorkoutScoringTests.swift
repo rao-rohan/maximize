@@ -228,6 +228,24 @@ final class WorkoutScoringTests: XCTestCase {
         )
     }
 
+    /// MAX-068: a chat context carries more of the athlete's record than a scoring
+    /// prompt may — the pace breakdown — and scoring one would put that in the automatic,
+    /// unattended call every ingested run makes. Unreachable through the real flows, and
+    /// asserted anyway, because the point of the guard is that the narrower payload is
+    /// enforced rather than merely conventional.
+    func testAContextAssembledForChatIsRefusedForScoring() throws {
+        let forChat = try ScoringFixture.context(audience: .chat)
+
+        assertThrows(
+            .inconsistent,
+            try WorkoutScorer.score(
+                context: forChat,
+                modelResponse: #"{"score": 92, "rationale": "Held the cap."}"#,
+                scoredAt: ScoringFixture.scoredAt
+            )
+        )
+    }
+
     /// An evaluation from another day paired with this context would produce a
     /// confident, permanently stored score for the wrong ask.
     func testAnEvaluationFromADifferentDayIsRefused() throws {
