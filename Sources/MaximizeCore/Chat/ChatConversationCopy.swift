@@ -13,31 +13,51 @@ import Foundation
 /// **The workout strings are pinned exactly as `WorkoutChatView` wrote them before this
 /// ticket** — MAX-097 generalises the surface, not its wording for the path that already
 /// shipped.
+///
+/// ## Why every function below takes an optional kind (MAX-097 review)
+///
+/// A model opened by thread id (`ChatModel.init(threadID:...)`, §2.3) can be `.failed`
+/// or mid-`.loading` before its subject has ever been read off the stored thread —
+/// `ChatModel.subject` is `nil` in exactly that window. These three strings are the only
+/// copy in this type that a nil subject can actually reach, so each one degrades to a
+/// generic-but-honest fallback rather than forcing every call site to unwrap a value
+/// that, in the one state each is actually shown for, is unreachable in practice but not
+/// unreachable in the type.
 public enum ChatConversationCopy {
 
     /// `ChatModel.LoadState.failed` — a repository was unavailable, the subject's
     /// records could not be read, or a context could not be assembled from them.
-    public static func failedToLoad(for kind: ChatSubjectKind) -> String {
+    public static func failedToLoad(for kind: ChatSubjectKind?) -> String {
         switch kind {
         case .workout: return "Chat could not be loaded for this workout."
         case .training: return "Chat could not be loaded for this training window."
+        case nil: return "Chat could not be loaded."
         }
     }
 
     /// Shown in place of the transcript before the first message — never blank, per
     /// CLAUDE.md's "absence is a designed state."
-    public static func emptyTranscriptInvitation(for kind: ChatSubjectKind) -> String {
+    public static func emptyTranscriptInvitation(for kind: ChatSubjectKind?) -> String {
         switch kind {
         case .workout: return "Ask about this run — pacing, drift, whether it matched the plan."
         case .training: return "Ask about your training — volume, drift, whether the block is on plan."
+        case nil: return "Ask a question to get started."
         }
     }
 
     /// The composer's placeholder text.
-    public static func composerPlaceholder(for kind: ChatSubjectKind) -> String {
+    public static func composerPlaceholder(for kind: ChatSubjectKind?) -> String {
         switch kind {
         case .workout: return "Ask about this run…"
         case .training: return "Ask about your training…"
+        case nil: return "Ask a question…"
         }
     }
+
+    /// `ChatModel.LoadState.threadNotFound` (§2.3) — a thread reached by id that no
+    /// longer resolves to a stored thread, most often because it (or the workout it
+    /// belonged to) was deleted from another screen. The subject is never known here —
+    /// the lookup that would have supplied it is the lookup that just failed — so,
+    /// unlike the three strings above, this one does not vary by kind.
+    public static let threadNotFound = "This conversation no longer exists."
 }

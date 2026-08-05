@@ -40,6 +40,25 @@ import Observation
 /// `WorkoutContextBuilder` byte for byte, so the fact sheet a workout thread sends is
 /// the same string it sent yesterday.
 ///
+/// ## Two ways in: a subject, or an exact thread (MAX-097)
+///
+/// `init(subject:...)` is "open the thread for this subject" — the Ask button and
+/// **New chat** both already know the subject, because it is what they are asking for,
+/// and `load()` resolves "the" thread for it (`ChatThreadRepository.thread(for:...)`,
+/// newest activity wins). `init(threadID:...)` is "open exactly this thread" — the
+/// thread list (§2.3) knows a specific conversation, not a subject, and the subject is
+/// read off the stored thread once `load()` fetches it by id, never supplied by the
+/// caller. The distinction matters because subjects are not unique: two training
+/// threads can legitimately share an identical frozen window (`ChatThreadRepository`'s
+/// own contract does not deduplicate them), so resolving "the" thread for a subject
+/// after a specific row was tapped could silently open a different one than the
+/// athlete chose. `Opening` (below) is the closed, private choice between the two —
+/// `load()` is exhaustive over it the same way it is exhaustive over `ChatSubject`.
+///
+/// The two paths converge before `.ready`: whichever way the thread was found, `subject`
+/// ends up holding the same value, and every subject-driven read `load()`/`send()` do
+/// afterward is subject-driven once more.
+///
 /// ## D3 — the fact sheet is never re-assembled
 ///
 /// `load()` builds exactly one `PromptContext` (`ContextBuilder.build(for:from:)`, the
@@ -124,6 +143,11 @@ public final class ChatModel {
         /// tell the athlete to wait for something that is not coming. **Workout subjects
         /// only.**
         case noVerdict
+        /// Opened by a specific thread id (`init(threadID:...)`, §2.3's thread list)
+        /// that no longer resolves to a stored thread. The state a delete on another
+        /// screen leaves behind, not a failure — nothing is broken, the conversation
+        /// this id named is simply gone. **Only reachable when opened by thread id.**
+        case threadNotFound
         case ready
     }
 
@@ -189,25 +213,53 @@ public final class ChatModel {
             && !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    /// How this model was asked to open (MAX-097, §2.2 vs §2.3).
+    ///
+    /// Two entry points, one loader. A caller either already knows the subject — the
+    /// Ask button and **New chat** both do, because the subject *is* what they are
+    /// asking for — or already knows which thread — the thread list does, because the
+    /// athlete tapped a specific row. The two must never be conflatable: a caller that
+    /// could supply both a thread id and a subject could hand this type a context for
+    /// the wrong window, which is §3.6's disagreement in its most direct form. So
+    /// opening by id never takes a subject from the caller at all — see `subject`'s own
+    /// documentation for where it comes from instead.
+    private enum Opening {
+        case subject(ChatSubject)
+        case threadID(UUID)
+    }
+
+    private let opening: Opening
+
     /// What this conversation is about, and therefore which pile of stored data `load()`
-    /// gathers and which `task` `send()` uses. Immutable: re-subjecting a live model
-    /// would leave a transcript answered from something it no longer describes.
-    public let subject: ChatSubject
+    /// gathers and which `task` `send()` uses.
+    ///
+    /// Known immediately when constructed with a subject (`init(subject:...)`) — the
+    /// caller already knows it, because the subject is what it asked for. `nil` until
+    /// `load()` resolves it when constructed with a thread id instead
+    /// (`init(threadID:...)`, §2.3): the thread list knows a specific conversation, not
+    /// what it is about, and reading the subject off the *stored thread* rather than a
+    /// caller-supplied one is what keeps this type from ever building a context for the
+    /// wrong window. Immutable once resolved: re-subjecting a live model would leave a
+    /// transcript answered from something it no longer describes.
+    public private(set) var subject: ChatSubject?
 
     /// The sheet's title (§2.2, §2.4) — this thread's derived title, calling
     /// `ChatThreadTitle.derive(for:workoutFacts:)`, the one place titling is decided
     /// (MAX-092). "Chat" is a neutral placeholder for every state before `thread` is
-    /// set — loading, `.failed`, `.notYetScored`, `.noVerdict` — matching what this
-    /// screen's navigation title always read before this ticket generalised it.
+    /// set — loading, `.failed`, `.notYetScored`, `.noVerdict`, `.threadNotFound` —
+    /// matching what this screen's navigation title always read before this ticket
+    /// generalised it.
     public var title: String {
         guard let thread else { return "Chat" }
         return ChatThreadTitle.derive(for: thread, workoutFacts: workoutFacts)
     }
 
-    /// The sheet's subtitle (§2.2, §3.6(b)) — this thread's scope, stated. Known from
-    /// `subject` alone, so unlike `title` it does not wait on `load()`.
+    /// The sheet's subtitle (§2.2, §3.6(b)) — this thread's scope, stated. Known the
+    /// instant `subject` is, so for a subject-opened model it does not wait on `load()`
+    /// at all; for a thread-id-opened model it is empty until the lookup resolves one.
     public var subtitle: String {
-        ChatThreadSubtitle.text(for: subject)
+        guard let subject else { return "" }
+        return ChatThreadSubtitle.text(for: subject)
     }
 
     private let workoutRepository: (any WorkoutRepository)?
@@ -268,7 +320,42 @@ public final class ChatModel {
         timeZone: TimeZone = .current,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
+        self.opening = .subject(subject)
         self.subject = subject
+        self.workoutRepository = workoutRepository
+        self.scoreRepository = scoreRepository
+        self.planRepository = planRepository
+        self.settingsRepository = settingsRepository
+        self.chatThreadRepository = chatThreadRepository
+        self.chatClient = chatClient
+        self.timeZone = timeZone
+        self.now = now
+    }
+
+    /// Opens a specific, already-existing thread by identity rather than resolving
+    /// "the" thread for a subject (§2.3: the thread list). `subject` starts `nil` and
+    /// is set only once `load()` has read it off the stored thread — see `subject`'s
+    /// own documentation for why a caller cannot supply one alongside a thread id.
+    ///
+    /// A thread id that no longer resolves to a stored thread is a real, ordinary
+    /// state (`LoadState.threadNotFound`) — the shape a delete on another screen
+    /// leaves behind — never a crash and never silently reinterpreted as some other
+    /// thread.
+    ///
+    /// - Parameters and everything else: identical in meaning to `init(subject:...)`.
+    public init(
+        threadID: UUID,
+        workoutRepository: (any WorkoutRepository)?,
+        scoreRepository: (any ScoreRepository)?,
+        planRepository: (any PlanRepository)?,
+        settingsRepository: (any SettingsRepository)?,
+        chatThreadRepository: (any ChatThreadRepository)?,
+        chatClient: any StreamingChatModelInvoking,
+        timeZone: TimeZone = .current,
+        now: @escaping @Sendable () -> Date = { Date() }
+    ) {
+        self.opening = .threadID(threadID)
+        self.subject = nil
         self.workoutRepository = workoutRepository
         self.scoreRepository = scoreRepository
         self.planRepository = planRepository
@@ -287,6 +374,13 @@ public final class ChatModel {
         context = nil
         thread = nil
         workoutFacts = nil
+        if case .threadID = opening {
+            // A subject-opened model's `subject` never changes (set once, at init).
+            // A thread-id-opened one clears it here so a second `load()` — after the
+            // thread this id named was deleted elsewhere, say — does not keep showing
+            // the previous subject while this attempt resolves.
+            subject = nil
+        }
 
         guard let workoutRepository, let scoreRepository, let planRepository,
               let settingsRepository, let chatThreadRepository
@@ -295,47 +389,98 @@ public final class ChatModel {
             return
         }
         do {
-            // Exhaustive over `ChatSubject`. Each branch gathers the stored records its
-            // subject needs and hands them to the one assembler; neither composes prompt
-            // text of its own (A12 rule 1).
-            let resolved: PromptContext?
-            switch subject {
-            case let .workout(workoutID):
-                resolved = try await workoutContext(
-                    for: workoutID,
-                    workoutRepository: workoutRepository,
-                    scoreRepository: scoreRepository,
-                    planRepository: planRepository
-                )
-            case let .training(scope):
-                resolved = try await trainingContext(
-                    for: scope,
+            let resolvedSubject: ChatSubject
+            let resolvedThread: ChatThread
+
+            switch opening {
+            case let .subject(openingSubject):
+                resolvedSubject = openingSubject
+                guard let resolvedContext = try await buildContext(
+                    for: resolvedSubject,
                     workoutRepository: workoutRepository,
                     scoreRepository: scoreRepository,
                     planRepository: planRepository,
                     settingsRepository: settingsRepository
+                ) else { return }
+                self.context = resolvedContext
+                // MAX-092: the thread is resolved from its subject rather than looked
+                // up by workout. A minted thread is not written here — it reaches disk
+                // on the first completed turn, per this type's "Only completed turns
+                // are persisted".
+                resolvedThread = try await chatThreadRepository.thread(
+                    for: resolvedSubject,
+                    newThreadID: UUID(),
+                    at: now()
                 )
+
+            case let .threadID(threadID):
+                // §2.3: the thread list knows a specific conversation, not a subject.
+                // Reading `resolvedSubject` off the *stored thread* — never supplying
+                // one — is what keeps this model from ever building a context for a
+                // window that disagrees with the thread it actually opened (§3.6). A
+                // thread that no longer resolves is what a delete on another screen
+                // leaves behind: an ordinary state, not a failure.
+                guard let existing = try await chatThreadRepository.thread(id: threadID) else {
+                    loadState = .threadNotFound
+                    return
+                }
+                resolvedSubject = existing.subject
+                resolvedThread = existing
+                // Set before `buildContext`, not after, so a state that returns early
+                // from inside it — `.notYetScored`, `.noVerdict`, `.failed` — still
+                // knows what this thread is about; `title`/`subtitle` read `subject`
+                // regardless of `loadState`.
+                self.subject = resolvedSubject
+                guard let resolvedContext = try await buildContext(
+                    for: resolvedSubject,
+                    workoutRepository: workoutRepository,
+                    scoreRepository: scoreRepository,
+                    planRepository: planRepository,
+                    settingsRepository: settingsRepository
+                ) else { return }
+                self.context = resolvedContext
             }
-            // Nil means the branch already set a terminal state of its own — an unscored
-            // run is not a failure and must not be overwritten by one.
-            guard let resolved else { return }
 
-            // MAX-092: the thread is resolved from its subject rather than looked up by
-            // workout. A minted thread is not written here — it reaches disk on the
-            // first completed turn, per this type's "Only completed turns are
-            // persisted".
-            let thread = try await chatThreadRepository.thread(
-                for: subject,
-                newThreadID: UUID(),
-                at: now()
-            )
-
-            self.context = resolved
-            self.thread = thread
-            self.messages = thread.visibleMessages.map(Self.displayMessage)
+            self.subject = resolvedSubject
+            self.thread = resolvedThread
+            self.messages = resolvedThread.visibleMessages.map(Self.displayMessage)
             self.loadState = .ready
         } catch {
             loadState = .failed
+        }
+    }
+
+    /// Exhaustive over `ChatSubject`. Each branch gathers the stored records its
+    /// subject needs and hands them to the one assembler; neither composes prompt text
+    /// of its own (A12 rule 1).
+    ///
+    /// - Returns: nil when a terminal state other than `.ready` has already been set —
+    ///   an unscored run is not a failure and must not be overwritten by one.
+    private func buildContext(
+        for subject: ChatSubject,
+        workoutRepository: any WorkoutRepository,
+        scoreRepository: any ScoreRepository,
+        planRepository: any PlanRepository,
+        settingsRepository: any SettingsRepository
+    ) async throws -> PromptContext? {
+        switch subject {
+        case let .workout(workoutID):
+            return try await workoutContext(
+                for: workoutID,
+                subject: subject,
+                workoutRepository: workoutRepository,
+                scoreRepository: scoreRepository,
+                planRepository: planRepository
+            )
+        case let .training(scope):
+            return try await trainingContext(
+                for: scope,
+                subject: subject,
+                workoutRepository: workoutRepository,
+                scoreRepository: scoreRepository,
+                planRepository: planRepository,
+                settingsRepository: settingsRepository
+            )
         }
     }
 
@@ -350,6 +495,7 @@ public final class ChatModel {
     /// - Returns: nil when a terminal state other than `.ready` has already been set.
     private func workoutContext(
         for workoutID: UUID,
+        subject: ChatSubject,
         workoutRepository: any WorkoutRepository,
         scoreRepository: any ScoreRepository,
         planRepository: any PlanRepository
@@ -419,6 +565,7 @@ public final class ChatModel {
     /// `ContextBuilder` narrows the extra days back out of the session list itself.
     private func trainingContext(
         for scope: TrainingScope,
+        subject: ChatSubject,
         workoutRepository: any WorkoutRepository,
         scoreRepository: any ScoreRepository,
         planRepository: any PlanRepository,
@@ -614,11 +761,18 @@ public final class ChatModel {
             // Worded from the subject, because "this workout" is a lie on a thread about
             // a month. The two strings differ only in their last few words, and saying
             // the right one is the whole reason they are two.
-            switch subject.kind {
+            switch subject?.kind {
             case .workout:
                 return "Add an Anthropic API key in Settings to chat about this workout."
             case .training:
                 return "Add an Anthropic API key in Settings to chat about your training."
+            case nil:
+                // Unreachable in practice: `send()` only runs once `canSend` is true,
+                // which requires `.ready`, which requires `subject` to already be
+                // resolved. Handled rather than force-unwrapped so a genuinely
+                // surprising order of operations produces a correct-but-generic
+                // notice instead of a crash.
+                return "Add an Anthropic API key in Settings to chat."
             }
         default:
             return error.description

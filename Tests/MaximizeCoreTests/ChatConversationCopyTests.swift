@@ -48,4 +48,25 @@ final class ChatConversationCopyTests: XCTestCase {
             ChatConversationCopy.composerPlaceholder(for: .training)
         )
     }
+
+    /// MAX-097 review: a model opened by thread id has no subject until `load()`
+    /// resolves one off the stored thread, so these three have to degrade rather than
+    /// force a caller to unwrap a value that is genuinely absent in that window.
+    func testANilKindDegradesToAGenericButNonEmptyString() {
+        for text in [
+            ChatConversationCopy.failedToLoad(for: nil),
+            ChatConversationCopy.emptyTranscriptInvitation(for: nil),
+            ChatConversationCopy.composerPlaceholder(for: nil),
+        ] {
+            XCTAssertFalse(text.isEmpty)
+            XCTAssertFalse(text.contains("workout"))
+            XCTAssertFalse(text.contains("training"))
+        }
+    }
+
+    /// §2.3: what a deleted-elsewhere thread reached by id says. Not worded by subject —
+    /// the lookup that would have supplied one is the lookup that failed.
+    func testThreadNotFoundIsNotEmpty() {
+        XCTAssertFalse(ChatConversationCopy.threadNotFound.isEmpty)
+    }
 }
