@@ -1062,7 +1062,7 @@ twelve and is dispatchable immediately.
 | MAX-100 | The Anthropic client for plan proposals | 099 | Sonnet 🔒 ✅ |
 | MAX-101 | Conversational plan authoring; proposal card; handoff | 098, 100 | **Opus** ✅ |
 | MAX-102 | **The read-only plan screen with version history** | — | Sonnet ✅ |
-| MAX-103 | "Runs in this conversation" strip | 098 | Sonnet |
+| MAX-103 | "Runs in this conversation" strip | 098 | Sonnet ✅ |
 | MAX-104 | Copy and absence voice, **app-wide** — absorbs MAX-086's other half | 098, 102 | Sonnet |
 
 Three collisions the spec calls out and the overseer must respect: **094 lands before 095**
@@ -1335,6 +1335,56 @@ spell "Long run · 18.0 km" two ways. No call site changed.
 deferred; this is Phase A, a separate one-shot call behind a button. `PlanProposal` still
 cannot prescribe a lift (MAX-141). And the card's copy is not yet through MAX-104's
 app-wide absence-voice pass.
+
+**MAX-103 filled the gap MAX-097 named — "the sheet has no runs strip yet."** A training
+thread's sheet now renders §2.2's runs strip, below the transcript and above the
+composer: one chip per session in *this exact thread's* `TrainingContext`, tapping one
+pushes that session's own detail screen. Four things worth carrying forward:
+
+- **The chip's content is core, under test — `RunsStripData`
+  (`Sources/MaximizeCore/Chat/RunsStripData.swift`), `RunsStripDataTests.swift`.** Label,
+  ordering, the empty case and the cap are all decided there, the same split
+  `PlanDisplayData` draws: a chip carries a `workoutID` to push with and a label —
+  `"3 Aug 2026 · Running"`, the same date form and separator
+  `ChatThreadTitle.workout` already names a run's own thread by — and nothing measured
+  (no distance, no score, no band). **The band omission is deliberate, not an oversight**:
+  `Color.scoreBand(_:)`'s own documentation confines the three saturated score colours to
+  the calendar and the verdict header (FR-4.3), and §6.3 already forbids a chat surface
+  from rendering a metric; a coloured pip on a chip would have broken both rules at once
+  for a fact the destination screen already states in full.
+- **Built from the thread's own context, never a second read.** `ChatModel.runsStripData`
+  is a computed property reading the `PromptContext` `load()` already assembled — nil for
+  a workout subject (`ChatSubject.workout`, where the sheet already sits on the run's own
+  screen, §6.1) and nil before a context exists. No repository is opened a second time,
+  so the strip cannot show a session the prompt did not.
+- **Two caps, kept distinct.** `TrainingContext.sessionsWereWithheldByTheCap` (its own
+  200-session bound) reports as `RunsStripData.EmptyReason.withheldByCap` — the strip
+  must not list what the fact sheet itself withheld. `RunsStripData.maximumChips` (62,
+  sized at `TrainingContext`'s own "a month is at most ~62" figure) is a second, smaller
+  bound of the strip's own, for a horizontal scroll rather than a prompt; beyond it the
+  remainder folds into a trailing, non-interactive "+N more".
+- **The navigation is one more `ChatSheet.Route` case**, pushed on top of the
+  conversation exactly as the plan-proposal handoff already is — `WorkoutDetailView` gets
+  a third caller, reachable from inside the sheet's own `NavigationStack` for the first
+  time. `App/Chat/RunsStripView.swift` only lays out `RunsStripData` and forwards a tap;
+  it decides nothing CI cannot see.
+
+**Rejected: colouring a chip by score band, and reordering newest-first.** Both were
+considered and both would have been a second, silently different notion of "the runs in
+this conversation" from the one the fact sheet states — colour for the FR-4.3 reason
+above, and order because `TrainingContext.sessions` (and therefore the fact sheet) is
+already chronological, oldest first; a strip that read the other way would disagree with
+its own prompt about what "the runs in this conversation" means.
+
+**What this ticket did not do.** The strip's header ("Runs in this conversation") is a
+fixed string with no data dependency, so — like `WorkoutChatSectionView`'s "Chat"
+heading — it stays a literal in the view rather than moving to `MaximizeCore`; only the
+copy that varies with `RunsStripData` (`RunsStripCopy`) is core. The name is the spec's
+own (§6.2), unchanged even though the strip now names lift sessions too, since
+`TrainingContext.sessions` already carries both disciplines (LIFTING-SPEC §10.2) — a
+copy pass over that naming, if wanted, belongs to MAX-104, not this ticket. And this PR
+does not verify tap-target comfort or how the strip reads against Dynamic Type on a
+device — see its **Needs device verification** heading.
 
 ### Phase 9 — Lifting (MAX-109)
 

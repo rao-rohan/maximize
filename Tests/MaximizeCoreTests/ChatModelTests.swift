@@ -534,6 +534,44 @@ final class ChatModelTests: XCTestCase {
         XCTAssertTrue(chatModel.messages.isEmpty)
     }
 
+    // MARK: - The runs strip (§2.2, §6.2, MAX-103)
+
+    /// A workout thread's sheet already sits on top of that run's own screen (§6.1), so
+    /// there is nothing to strip — `runsStripData` is nil unconditionally, not merely
+    /// empty.
+    func testRunsStripDataIsNilForAWorkoutSubject() async throws {
+        let (chatModel, _) = try await model()
+        await chatModel.load()
+
+        XCTAssertEqual(chatModel.loadState, .ready)
+        XCTAssertNil(chatModel.runsStripData)
+    }
+
+    /// `runsStripData` reads the exact `TrainingContext` `load()` built for this thread's
+    /// prompt — `Fixture.workout()` (1 Jan 2026, running) is the one session `readyStore()`
+    /// seeds inside `scope()`'s window, so the strip must name exactly that run.
+    func testRunsStripDataNamesTheSessionInThisThreadsContext() async throws {
+        let (chatModel, _) = try await model(subject: .training(try scope()))
+        await chatModel.load()
+
+        guard case let .chips(chips, omittedCount) = try XCTUnwrap(chatModel.runsStripData) else {
+            return XCTFail("expected chips")
+        }
+        XCTAssertEqual(omittedCount, 0)
+        XCTAssertEqual(chips.map(\.workoutID), [Fixture.workoutID])
+        XCTAssertEqual(chips.map(\.label), ["1 Jan 2026 · Running"])
+    }
+
+    /// A training window with nothing recorded is a real, worded absence — not the
+    /// generic "nothing loaded" a nil would leave a view to guess at.
+    func testRunsStripDataIsAWordedAbsenceForAnEmptyWindow() async throws {
+        let empty = InMemoryWorkoutStore(planCalendar: try PlanCalendar([Fixture.plan()]))
+        let (chatModel, _) = try await model(subject: .training(try scope()), store: empty)
+        await chatModel.load()
+
+        XCTAssertEqual(chatModel.runsStripData, .empty(.noSessionsInWindow))
+    }
+
     /// A training window with nothing in it is not a failure and not a missing verdict —
     /// it is a window the roll-up describes as empty. The two workout-only states must
     /// stay unreachable here, or a view will offer to wait for a score on a month.

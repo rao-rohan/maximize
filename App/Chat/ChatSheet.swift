@@ -67,6 +67,12 @@ struct ChatSheet: View {
         /// against storage, exactly as it does when opened by hand. Nothing about this
         /// route writes anything (A13).
         case planAuthoring(PlanProposal)
+
+        /// §6.2, MAX-103: a chip tapped in the "Runs in this conversation" strip. Pushed
+        /// rather than dismissing the sheet — the athlete came from a conversation and
+        /// Back should return to it, the same reasoning `.planAuthoring`'s doc comment
+        /// gives for its own push.
+        case workout(UUID)
     }
 
     /// See this type's "Two ways to open something." Hashable so `.id(opening)` can key
@@ -115,6 +121,8 @@ struct ChatSheet: View {
                         // Back button that returns to the card is the right way out of a
                         // form they have not saved.
                         PlanAuthoringView(proposal: proposal)
+                    case let .workout(workoutID):
+                        WorkoutDetailView(workoutID: workoutID)
                     }
                 }
         }
@@ -130,6 +138,7 @@ struct ChatSheet: View {
                 onOpenThreadList: { path.append(Route.threadList) },
                 onStartNewChatForCurrentWindow: startNewTrainingChat,
                 onAcceptProposal: openAuthoring(with:),
+                onSelectRun: openWorkout(_:),
                 onDone: { dismiss() }
             )
         case let .threadID(threadID):
@@ -139,6 +148,7 @@ struct ChatSheet: View {
                 onOpenThreadList: { path.append(Route.threadList) },
                 onStartNewChatForCurrentWindow: startNewTrainingChat,
                 onAcceptProposal: openAuthoring(with:),
+                onSelectRun: openWorkout(_:),
                 onDone: { dismiss() }
             )
         }
@@ -155,6 +165,13 @@ struct ChatSheet: View {
     /// until the athlete taps Save on the screen this opens (A13).
     private func openAuthoring(with proposal: PlanProposal) {
         path.append(Route.planAuthoring(proposal))
+    }
+
+    // MARK: - The runs strip (§6.2, MAX-103)
+
+    /// A chip tapped: pushes that run's own detail screen on top of the conversation.
+    private func openWorkout(_ workoutID: UUID) {
+        path.append(Route.workout(workoutID))
     }
 
     // MARK: - New chat
