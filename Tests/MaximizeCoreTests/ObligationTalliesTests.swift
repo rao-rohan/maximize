@@ -750,8 +750,9 @@ final class ObligationTalliesTests: XCTestCase {
         _ input: TalliesInput
     ) throws -> (eligibleCount: Int, effectiveCount: Int, streak: Int) {
         var workoutsByDay: [CalendarDay: [Workout]] = [:]
-        for workout in input.workouts {
-            workoutsByDay[try workout.calendarDay(in: input.timeZone), default: []].append(workout)
+        for recorded in input.workouts {
+            let onDay = try recorded.calendarDay(in: input.timeZone)
+            workoutsByDay[onDay, default: []].append(recorded)
         }
 
         var planDaysInRange: [CalendarDay: PlanDay] = [:]
@@ -843,7 +844,8 @@ final class ObligationTalliesTests: XCTestCase {
 
         var byWeek: [CalendarDay: [PlanDay]] = [:]
         for planDay in planDays {
-            byWeek[try planDay.date.startOfTrainingWeek(), default: []].append(planDay)
+            let week = try planDay.date.startOfTrainingWeek()
+            byWeek[week, default: []].append(planDay)
         }
 
         var converted: [CalendarDay] = []
