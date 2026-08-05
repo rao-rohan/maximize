@@ -154,6 +154,16 @@ final class PlanAuthoringLiftSlotTests: XCTestCase {
 
     // MARK: - ObligationSummary: how a weekday's two asks are summarised
 
+    /// `ObligationSummary` is shared with `PlanDisplayData.WeekdayRow` (MAX-138) —
+    /// tested here directly off its own initializer, independent of `PlanDraft`, so a
+    /// change to the draft's plumbing can never silently stop exercising it.
+    func testObligationSummaryInitializerCoversAllFourCombinations() {
+        XCTAssertEqual(ObligationSummary(runKind: .rest, liftKind: .rest), .rest)
+        XCTAssertEqual(ObligationSummary(runKind: .easy, liftKind: .rest), .runOnly)
+        XCTAssertEqual(ObligationSummary(runKind: .rest, liftKind: .lift), .liftOnly)
+        XCTAssertEqual(ObligationSummary(runKind: .long, liftKind: .lift), .both)
+    }
+
     func testObligationSummaryCoversAllFourCombinations() throws {
         var draft = try seededDraft()
         // Tuesday is prescribed a run by the seed; force it to rest to control the case.

@@ -160,21 +160,11 @@ public struct PlanDraft: Hashable, Sendable {
         /// Whether the weekday carries a run ask, a lift ask, both, or neither — the
         /// fact a scannable week view leads with, before either slot's own detail
         /// (MAX-137: "a person checking seven days of two slots wants to see the week
-        /// at once").
-        public enum ObligationSummary: Hashable, Sendable {
-            case rest
-            case runOnly
-            case liftOnly
-            case both
-        }
-
+        /// at once"). `ObligationSummary` is shared with `PlanDisplayData.WeekdayRow`
+        /// (MAX-138) rather than declared here a second time — see that type's own
+        /// documentation for why.
         public var obligationSummary: ObligationSummary {
-            switch (kind != .rest, liftKind != .rest) {
-            case (false, false): return .rest
-            case (true, false): return .runOnly
-            case (false, true): return .liftOnly
-            case (true, true): return .both
-            }
+            ObligationSummary(runKind: kind, liftKind: liftKind)
         }
     }
 

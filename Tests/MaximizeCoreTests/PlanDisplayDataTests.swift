@@ -19,11 +19,15 @@ final class PlanDisplayDataTests: XCTestCase {
         get throws { try day("2026-08-05") }
     }
 
-    private func plan(version: Int, effectiveFrom: String) throws -> Plan {
+    private func plan(
+        version: Int,
+        effectiveFrom: String,
+        lift: [Weekday: ScheduledSession] = [:]
+    ) throws -> Plan {
         try Plan(
             version: PlanVersion(version),
             effectiveFrom: day(effectiveFrom),
-            weeklyTemplate: Fixture.weeklyTemplate(),
+            weeklyTemplate: Fixture.weeklyTemplate(lift: lift),
             longRunArc: LongRunArc(weeks: [
                 LongRunArc.Week(index: 1, distanceMeters: 16_000),
                 LongRunArc.Week(index: 2, distanceMeters: 18_000),
@@ -209,5 +213,98 @@ final class PlanDisplayDataTests: XCTestCase {
         XCTAssertEqual(authored.history.count, 1)
         XCTAssertTrue(authored.history[0].isCurrent)
         XCTAssertNil(authored.viewing.effectiveThrough)
+    }
+
+    // MARK: - The lift slot, both slots on one row (MAX-138, A17)
+
+    /// The regression this ticket must not cause: a run-only plan — no lift
+    /// prescribed anywhere, which is every plan authored before MAX-129 and every
+    /// plan an athlete simply never asked to lift in — carries `liftSession.isRest`
+    /// on every one of the seven rows, and `obligationSummary` never reports
+    /// `.liftOnly` or `.both`. `PlanFormatting.weekdayLines` reads exactly this fact
+    /// to omit the lift line entirely, which is what makes the screen read
+    /// byte-for-byte as it did before this ticket.
+    func testRunOnlyPlanCarriesRestOnEveryLiftSlot() throws {
+        let calendar = try PlanCalendar([plan(version: 1, effectiveFrom: "2026-01-05")])
+        let display = try PlanDisplayData.build(from: calendar, today: try today)
+        guard case let .authored(authored) = display else {
+            return XCTFail("expected .authored")
+        }
+
+        XCTAssertEqual(authored.viewing.week.count, 7)
+        for day in authored.viewing.week {
+            XCTAssertTrue(day.liftSession.isRest, "\(day.weekday) should have no lift asked")
+            XCTAssertNotEqual(day.obligationSummary, .liftOnly)
+            XCTAssertNotEqual(day.obligationSummary, .both)
+        }
+    }
+
+    /// A day prescribing both a run and a lift carries both slots, and
+    /// `obligationSummary` reports `.both` for it — while a weekday untouched by the
+    /// lift map stays exactly what it always was.
+    func testWeekCarriesBothSlotsAlongsideTheRunSlot() throws {
+        let calendar = try PlanCalendar([
+            plan(
+                version: 1,
+                effectiveFrom: "2026-01-05",
+                lift: [
+                    // Monday is rest on the run side (Fixture.weeklyTemplate) — this
+                    // makes it a lift-only day.
+                    .monday: try ScheduledSession(kind: .lift, muscleGroups: [.legs]),
+                    // Tuesday already prescribes an easy run — this makes it a
+                    // both-obligation day.
+                    .tuesday: try ScheduledSession(kind: .lift, muscleGroups: [.chest, .shoulders]),
+                ]
+            )
+        ])
+        let display = try PlanDisplayData.build(from: calendar, today: try today)
+        guard case let .authored(authored) = display else {
+            return XCTFail("expected .authored")
+        }
+        let week = authored.viewing.week
+
+        let monday = try XCTUnwrap(week.first { $0.weekday == .monday })
+        XCTAssertEqual(monday.kind, .rest)
+        XCTAssertEqual(monday.liftSession.kind, .lift)
+        XCTAssertEqual(monday.liftSession.muscleGroups, [.legs])
+        XCTAssertEqual(monday.obligationSummary, .liftOnly)
+
+        let tuesday = try XCTUnwrap(week.first { $0.weekday == .tuesday })
+        XCTAssertEqual(tuesday.kind, .easy)
+        XCTAssertEqual(tuesday.distanceMeters, 8_000)
+        XCTAssertEqual(tuesday.liftSession.muscleGroups, [.chest, .shoulders])
+        XCTAssertEqual(tuesday.obligationSummary, .both)
+
+        // Untouched by the lift map — reads exactly as a run-only day always has.
+        let wednesday = try XCTUnwrap(week.first { $0.weekday == .wednesday })
+        XCTAssertTrue(wednesday.liftSession.isRest)
+        XCTAssertEqual(wednesday.obligationSummary, .runOnly)
+
+        let friday = try XCTUnwrap(week.first { $0.weekday == .friday })
+        XCTAssertEqual(friday.kind, .rest)
+        XCTAssertTrue(friday.liftSession.isRest)
+        XCTAssertEqual(friday.obligationSummary, .rest)
+    }
+
+    /// The lift slot's second empty state: a lift is asked for, but the plan has not
+    /// said which muscle groups — a real, distinct fact from "no lift asked"
+    /// (`LiftPrescriptionSummary.unstatedGroups`), reachable straight off the carried
+    /// `liftSession` without this type re-deriving it.
+    func testLiftSlotWithNoStatedGroupsReadsAsUnstatedRatherThanRest() throws {
+        let calendar = try PlanCalendar([
+            plan(
+                version: 1,
+                effectiveFrom: "2026-01-05",
+                lift: [.wednesday: try ScheduledSession(kind: .lift)]
+            )
+        ])
+        let display = try PlanDisplayData.build(from: calendar, today: try today)
+        guard case let .authored(authored) = display else {
+            return XCTFail("expected .authored")
+        }
+        let wednesday = try XCTUnwrap(authored.viewing.week.first { $0.weekday == .wednesday })
+
+        XCTAssertEqual(wednesday.liftSession.liftPrescriptionSummary, .unstatedGroups)
+        XCTAssertEqual(wednesday.obligationSummary, .both, "Wednesday already prescribes a hard run")
     }
 }
