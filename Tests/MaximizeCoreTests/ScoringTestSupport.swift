@@ -239,6 +239,7 @@ enum ScoringFixture {
         metrics overrideMetrics: DerivedMetrics? = nil,
         distanceMeters: Double? = 10_000,
         rubric: ScoringRubric? = nil,
+        audience: WorkoutContext.Audience = .scoring,
         existingScore: Score? = nil
     ) throws -> WorkoutContext {
         try WorkoutContextBuilder.build(
@@ -247,6 +248,7 @@ enum ScoringFixture {
             metrics: overrideMetrics ?? metrics(),
             classification: classification,
             planCalendar: PlanCalendar([plan(rubric: rubric)]),
+            audience: audience,
             existingScore: existingScore
         )
     }

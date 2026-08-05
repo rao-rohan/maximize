@@ -22,7 +22,8 @@ final class WorkoutContextTests: XCTestCase {
         timeAboveCapSeconds: Double? = 250,
         heartRateDriftFraction: Double? = 0.032,
         averageCadenceStepsPerMinute: Double? = 167,
-        gradeAdjustedPaceSecondsPerKilometer: Double? = 308
+        gradeAdjustedPaceSecondsPerKilometer: Double? = 308,
+        distanceSplits: DistanceSplits? = nil
     ) throws -> DerivedMetrics {
         try DerivedMetrics(
             workoutID: workoutID,
@@ -36,23 +37,69 @@ final class WorkoutContextTests: XCTestCase {
                 ZoneSplits.Split(zone: .two, seconds: 3_000),
                 ZoneSplits.Split(zone: .three, seconds: 900),
             ]),
+            distanceSplits: distanceSplits,
             planVersion: PlanVersion(planVersion)
         )
+    }
+
+    /// Splits written by hand rather than cut by `DistanceSplitCalculator`: these tests
+    /// are about what reaches the prompt, and a calculator in the fixture would make a
+    /// failure ambiguous between the two.
+    private func splits(
+        kilometreSeconds: [Double] = [300, 312, 347, 331],
+        trailingMeters: Double? = nil,
+        trailingSeconds: Double = 150,
+        milePaceSeconds: Double = 500
+    ) throws -> DistanceSplits {
+        var kilometreSplits = try kilometreSeconds.enumerated().map { index, seconds in
+            try DistanceSplit(
+                ordinal: index + 1,
+                distanceMeters: 1_000,
+                elapsedSeconds: seconds,
+                isComplete: true
+            )
+        }
+        if let trailingMeters {
+            kilometreSplits.append(
+                try DistanceSplit(
+                    ordinal: kilometreSplits.count + 1,
+                    distanceMeters: trailingMeters,
+                    elapsedSeconds: trailingSeconds,
+                    isComplete: false
+                )
+            )
+        }
+        return try DistanceSplits(series: [
+            DistanceSplitSeries(unit: .kilometers, splits: kilometreSplits),
+            // A mile cut that is deliberately nothing like the kilometre one, so a test
+            // can tell which series reached the prompt.
+            DistanceSplitSeries(unit: .miles, splits: [
+                DistanceSplit(
+                    ordinal: 1,
+                    distanceMeters: DistanceUnit.miles.metersPerUnit,
+                    elapsedSeconds: milePaceSeconds,
+                    isComplete: true
+                ),
+            ]),
+        ])
     }
 
     private func build(
         metrics overrideMetrics: DerivedMetrics? = nil,
         classification: WorkoutClassification = .easy,
         on subject: String = "2026-01-06",
+        workout: Workout? = nil,
+        audience: WorkoutContext.Audience = .scoring,
         heartRateSeries: HeartRateSeries? = nil,
         existingScore: Score? = nil
     ) throws -> WorkoutContext {
         try WorkoutContextBuilder.build(
-            workout: Fixture.workout(),
+            workout: workout ?? Fixture.workout(),
             on: day(subject),
             metrics: overrideMetrics ?? metrics(),
             classification: classification,
             planCalendar: planCalendar(),
+            audience: audience,
             heartRateSeries: heartRateSeries,
             existingScore: existingScore
         )
@@ -209,6 +256,115 @@ final class WorkoutContextTests: XCTestCase {
         XCTAssertNil(try build(heartRateSeries: series).heartRateShape)
     }
 
+    // MARK: - Pace breakdown (MAX-068)
+
+    /// The decision this ticket made, asserted from both sides. The scorer's prompt is
+    /// the automatic one — it is sent for every ingested run whether or not anybody asked
+    /// a question — so it gets a rubric's worth of facts and no more.
+    func testThePaceBreakdownIsWithheldFromTheScorer() throws {
+        let withSplits = try metrics(distanceSplits: splits())
+
+        let forScoring = try build(metrics: withSplits, audience: .scoring)
+        XCTAssertNil(forScoring.paceBreakdown)
+        XCTAssertFalse(forScoring.factSheet().contains("Pace by kilometre"))
+        XCTAssertFalse(forScoring.factSheet().contains("5:12"), "no split pace may reach a scoring prompt")
+
+        let forChat = try build(metrics: withSplits, audience: .chat)
+        XCTAssertNotNil(forChat.paceBreakdown)
+        XCTAssertTrue(forChat.factSheet().contains("## Pace by kilometre"))
+    }
+
+    /// FR-2's worked example is "why did my HR drift at mile 3", and answering it needs
+    /// the *position* of each split, not a summary of the set. A fastest/slowest/variance
+    /// reduction would be smaller and would answer nothing.
+    func testChatIsGivenEveryKilometreInOrderRatherThanASummary() throws {
+        let sheet = try build(
+            metrics: metrics(distanceSplits: splits()),
+            audience: .chat
+        ).factSheet()
+
+        // 300 s, 312 s, 347 s and 331 s over a kilometre each.
+        XCTAssertTrue(sheet.contains("1 5:00 · 2 5:12 · 3 5:47 · 4 5:31"), sheet)
+        XCTAssertFalse(sheet.lowercased().contains("fastest"), "not a reduction")
+        XCTAssertFalse(sheet.lowercased().contains("variance"), "not a reduction")
+    }
+
+    /// The record stores a kilometre cut and a mile cut. Only one may reach the prompt,
+    /// and which one may not depend on `AppSettings.distanceUnit` — the same stored run
+    /// must render the same prompt on a day the athlete prefers miles.
+    func testOnlyTheKilometreCutIsSentWhicheverUnitTheAthleteReads() throws {
+        let context = try build(
+            // A mile split of 500 s renders as 8:20 in its own unit; nothing like the
+            // kilometre paces, so its appearance would be unmistakable.
+            metrics: metrics(distanceSplits: splits(milePaceSeconds: 500)),
+            audience: .chat
+        )
+
+        XCTAssertEqual(context.paceBreakdown?.unit, .kilometers)
+        let sheet = context.factSheet()
+        XCTAssertFalse(sheet.contains("8:20"), "the mile cut must not be sent as well")
+        XCTAssertFalse(sheet.contains("/mi"), sheet)
+    }
+
+    /// An incomplete trailing split's pace is an extrapolation from a short stretch. On
+    /// screen `SplitsListData` marks it "partial"; in the prompt it has to say as much in
+    /// words, or Claude reads a finishing kick as the fastest kilometre of the run.
+    func testTheTrailingPartialSplitIsMarkedAsExtrapolated() throws {
+        let sheet = try build(
+            // 420 m in 150 s — a 5:57 per-kilometre pace nobody held for a kilometre.
+            metrics: metrics(distanceSplits: splits(trailingMeters: 420, trailingSeconds: 150)),
+            audience: .chat
+        ).factSheet()
+
+        XCTAssertTrue(sheet.contains("final 0.42 km 5:57"), sheet)
+        XCTAssertTrue(sheet.contains("extrapolated"), sheet)
+    }
+
+    /// Constraint from the ticket, and the common case today: every run already on the
+    /// device predates MAX-046. "No splits are recorded" must read as a gap in what was
+    /// stored, never as a run that had no per-kilometre variation.
+    func testAMissingBreakdownReadsAsAGapInOurRecordsNotAnEvenRun() throws {
+        let sheet = try build(audience: .chat).factSheet()
+
+        XCTAssertTrue(sheet.contains("## Pace by kilometre"), "stated, not omitted")
+        XCTAssertTrue(sheet.contains("gap in what was stored"), sheet)
+        XCTAssertTrue(sheet.contains("do not read it as an even pace"), sheet)
+    }
+
+    /// A treadmill run never had a track to cut up (FR-0.6). That is a fact about the
+    /// run, and it must not be worded like the missing-record case above.
+    func testAnIndoorRunSaysThereWasNeverATrackToCut() throws {
+        let sheet = try build(
+            workout: Fixture.workout(hasRoute: false),
+            audience: .chat
+        ).factSheet()
+
+        XCTAssertTrue(sheet.contains("Not applicable — indoor run"), sheet)
+        XCTAssertFalse(sheet.contains("gap in what was stored"), "a different absence")
+    }
+
+    /// The bound. Not a budget for running long — a marathon is 43 entries — but the
+    /// guard that stops a corrupted distance from sizing a prompt full of health data.
+    func testAPathologicalSplitCountIsNotListed() throws {
+        let tooMany = try (1...(WorkoutContext.maximumRenderedSplits + 1)).map { ordinal in
+            try DistanceSplit(
+                ordinal: ordinal,
+                distanceMeters: 1_000,
+                elapsedSeconds: 300,
+                isComplete: true
+            )
+        }
+        let sheet = try build(
+            metrics: metrics(distanceSplits: DistanceSplits(series: [
+                DistanceSplitSeries(unit: .kilometers, splits: tooMany),
+            ])),
+            audience: .chat
+        ).factSheet()
+
+        XCTAssertTrue(sheet.contains("\(tooMany.count) splits are on file"), sheet)
+        XCTAssertFalse(sheet.contains("1 5:00 · 2 5:00"), "none of them are listed")
+    }
+
     // MARK: - Determinism
 
     /// D3's actual requirement. If two builds of the same context can render differently,
@@ -218,5 +374,14 @@ final class WorkoutContextTests: XCTestCase {
         let first = try build().factSheet()
         let second = try build().factSheet()
         XCTAssertEqual(first, second)
+
+        // And with the widest payload, which is the one worth pinning: the splits are
+        // rendered from stored scalars with a fixed unit and a pinned locale, so nothing
+        // about the device may move them.
+        let withSplits = try metrics(distanceSplits: splits(trailingMeters: 420))
+        XCTAssertEqual(
+            try build(metrics: withSplits, audience: .chat).factSheet(),
+            try build(metrics: withSplits, audience: .chat).factSheet()
+        )
     }
 }

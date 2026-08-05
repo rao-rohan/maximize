@@ -13,8 +13,15 @@ public enum WorkoutContextBuilder {
     ///     Required rather than derived: `Workout.calendarDay(in:)` needs a zone, and
     ///     guessing one here would silently move late-evening runs onto the next day.
     ///   - planCalendar: resolves which plan version governs `day` (MAX-011, D1).
+    ///   - audience: who this context will be shown to, and therefore how much of the
+    ///     record it may carry (MAX-068). Defaults to `.scoring`, the smaller payload,
+    ///     so a caller that has not thought about it does not widen what leaves the
+    ///     device by omission. See `WorkoutContext.Audience`.
     ///   - existingScore: pass the assigned score when building context **for chat**;
     ///     pass nil when building it **for scoring**. See `WorkoutContext.existingScore`.
+    ///     Kept as its own parameter rather than folded into `audience`: its absence is
+    ///     also a real data state — an unscored run has no score to show anybody — so
+    ///     it is a value the caller supplies, not a policy this builder applies.
     ///
     /// - Throws: when the pieces do not describe the same workout under the same plan.
     ///   These are assembly errors, not data errors, and they are worth failing on:
@@ -26,6 +33,7 @@ public enum WorkoutContextBuilder {
         metrics: DerivedMetrics,
         classification: WorkoutClassification,
         planCalendar: PlanCalendar,
+        audience: WorkoutContext.Audience = .scoring,
         heartRateSeries: HeartRateSeries? = nil,
         existingScore: Score? = nil
     ) throws -> WorkoutContext {
@@ -61,6 +69,7 @@ public enum WorkoutContextBuilder {
         }
 
         return WorkoutContext(
+            audience: audience,
             day: day,
             workout: workout,
             metrics: metrics,
@@ -68,6 +77,13 @@ public enum WorkoutContextBuilder {
             plan: plan,
             planDay: planDay,
             heartRateShape: heartRateSeries.flatMap(HeartRateShape.init(downsampling:)),
+            // MAX-068's whole decision, in one expression and in one place. The splits
+            // are *selected* here rather than reached for by the renderer, so "does this
+            // health data leave the device" is answered by the single assembler D3 names
+            // and not by a branch somewhere downstream.
+            paceBreakdown: audience == .chat
+                ? metrics.distanceSplits?.series(in: WorkoutContext.paceBreakdownUnit)
+                : nil,
             existingScore: existingScore
         )
     }
