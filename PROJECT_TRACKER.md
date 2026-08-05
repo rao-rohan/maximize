@@ -959,7 +959,7 @@ twelve and is dispatchable immediately.
 | MAX-092 | `ChatSubject` and thread identity | — | **Opus** ✅ |
 | MAX-093 | The stored record: additive fields, no migration | 092 | Sonnet ✅ |
 | MAX-094 | Shared fact-sheet formatting — pure extraction | — | Sonnet ✅ |
-| MAX-095 | `TrainingContext` + one context entry point | 092, 094 | **Opus** 🔒 |
+| MAX-095 | `TrainingContext` + one context entry point | 092, 094 | **Opus** 🔒 ✅ |
 | MAX-096 | `ChatModel` generalised; transcript cap; training task text | 095 | **Opus** 🔒 |
 | MAX-097 | Thread list, derived titles, new chat, scope subtitle | 093, 096 | Sonnet |
 | MAX-098 | The persistent glass button | 097 | Sonnet |
@@ -1003,6 +1003,54 @@ a `ChatSubject` — `.workout(UUID)` or `.training(TrainingScope)` — plus a
   migration — and MAX-093 replaces the two derivations it leans on. **The lesson for
   future decomposition: a ticket that grows a protocol owns every conformer of it, and
   the brief should say so.**
+
+**MAX-095 landed the one context entry point, and with it the privacy boundary.**
+`ContextBuilder.build(for:from:)` is now the only assembler of prompt context, returning a
+`PromptContext` that is either the existing `WorkoutContext` or a new `TrainingContext`,
+both rendered by `factSheet()`. `WorkoutContextBuilder` is untouched and is called *by* it,
+so the scorer keeps receiving byte-identical context — pinned by a test that renders both
+paths and compares the strings. Six things are worth carrying forward:
+
+- **What now leaves the device that did not before.** A training turn sends the plan in
+  effect, the tallies for the window, and one line per session: day, weekday, discipline,
+  classification, the plan's ask for that day, distance, duration, average heart rate,
+  drift, score and band. It sends **no** splits, **no** heart-rate curve, **no**
+  coordinates, **no** scoring rationales and **no** workout identifiers, and
+  `ContextBuilderTests.testTheRollUpCarriesNoSplitsNoCurveNoRouteAndNoRationale` asserts
+  each of those rather than trusting them. That is a real widening of the privacy posture
+  and is recorded as one (A12, §3.3).
+- **§3.6(a)'s agreement property is a test, not a claim.** `TrainingContextAgreementTests`
+  builds a `TrainingContext` and a `TrendTileData` from **one** set of stored records and
+  asserts the tallies are identical and the rendered figures are the tiles' own strings —
+  including the cases where both must agree about *absence* (nothing scored, nothing
+  eligible) and about MAX-110's not-yet-known days. `TrainingContext` contains no
+  arithmetic over more than one workout; the only number it derives is how many lines it
+  holds.
+- **One line per session, not per day** (LIFTING-SPEC §10.2), so a Tuesday holding a run
+  and a lift produces two lines. A session with no score reads *"no verdict"* in words, and
+  the wording distinguishes a run scoring has not reached from a non-run MAX-111 leaves
+  unscored **by design**.
+- **`maximumRenderedSessions = 200`, and it is reachable.** A week (~14) and a month (~62)
+  cannot reach it; a year of running and lifting (~400) does. So an annual thread answers
+  from the plan and the tallies, and the "state the count, list none" branch is a real
+  product state rather than dead code. See the constant's own documentation for the
+  argument.
+- **The shared renderer grew two more formatters.** `weekdayName` and the scheduled-session
+  formatter moved from `WorkoutFactSheet` into `FactSheetFormatting` the moment the roll-up
+  became their second caller, and `FactSheetFormattingAgreementTests` gained the training
+  renderer as one entry in its array. The scheduled-session formatter kept its `%.1f`
+  deliberately: it is what the scorer's prompt has always printed, and D3 forbids changing
+  that as a side effect.
+- **`ContextInputs` inherits C1.** For a training subject its `records` must cover the whole
+  Monday-first weeks touching the scope, because `TalliesCalculator` cannot widen the
+  workouts it is handed. Supplying more is harmless — the session list filters to the scope
+  itself rather than trusting the caller.
+
+**Two things MAX-095 could not do, and neither is a defect in it.** The plan block renders
+the whole stored `WeeklyTemplate`, so LIFTING-SPEC §10.2's requirement that it carry the
+**lift slot** arrives for free the moment the template grows one (MAX-113/114) — there is
+nothing to carry today. And the training thread's `ChatInstruction.task` text (§3.5) is
+**MAX-096's**, not this ticket's; nothing here touches `Chat/`.
 
 ### Phase 9 — Lifting (MAX-109)
 
@@ -1088,10 +1136,12 @@ recorded lean is to label them; the decision is the owner's, tracked as MAX-125.
 
 1. **MAX-105 before MAX-117, and MAX-105's brief must carry A17** — see the MAX-105 note
    above. Sequence 111 → 105 → 117.
-2. **MAX-095's brief must carry LIFTING-SPEC §10.2 before it is written.** Its specified
-   roll-up is "one line per run" and it must be "one line per session", discipline-tagged,
-   with the plan block carrying the lift week. Briefing it now costs a paragraph; MAX-124
-   exists only if 095 lands unbriefed, and it would be a rewrite of an Opus 🔒 ticket.
+2. ~~**MAX-095's brief must carry LIFTING-SPEC §10.2 before it is written.**~~ **Done —
+   MAX-095 landed briefed, so MAX-124 is not needed.** Its roll-up is one line per
+   *session*, discipline-tagged, with fields that do not apply omitted rather than
+   nil-rendered, and the cap counts sessions. The plan block renders the whole stored
+   `WeeklyTemplate`, so the lift slot appears there the moment MAX-113/114 adds one — no
+   further edit to `Context/` is required for it.
 3. **MAX-110 adds `.lift` to `RestDayBudgeting.costTier` without reordering the existing
    cases.** The tiers are ordinal and conversion outcomes depend on relative order — a
    reorder silently rewrites the calendar's past. `Domain/ScheduledSession.swift` is touched
