@@ -576,8 +576,8 @@ final class ContextBuilderTests: XCTestCase {
             planCalendar: try calendar([try Fixture.plan(), revised])
         )
 
-        XCTAssertEqual(context.planCoverage, .revisedWithinTheWindow(earlier: PlanVersion(1)))
-        XCTAssertEqual(context.plan?.version, PlanVersion(2))
+        XCTAssertEqual(context.planCoverage, .revisedWithinTheWindow(earlier: try PlanVersion(1)))
+        XCTAssertEqual(context.plan?.version, try PlanVersion(2))
         let sheet = context.factSheet()
         XCTAssertTrue(sheet.contains("Plan version v1 governed the opening days of this window"), sheet)
         XCTAssertTrue(sheet.contains("version v2 took effect on 2026-01-08"), sheet)
