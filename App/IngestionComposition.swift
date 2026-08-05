@@ -92,6 +92,10 @@ enum IngestionComposition {
                     // R11's escape actually firing. Loud, because it is the one place the
                     // pipeline gives up on a workout permanently.
                     ingestionLog.error("Gave up on a workout at \(String(describing: step), privacy: .public) so the anchor could advance past it.")
+                case .distanceSplitsBackfillEnumerationFailed:
+                    // MAX-067: the backfill pass could not even read candidates this
+                    // launch. No workout identifier exists to lose — nothing was reached.
+                    ingestionLog.notice("Distance-splits backfill pass could not enumerate candidates; retried on next launch.")
                 }
             }
         )
@@ -178,6 +182,37 @@ enum IngestionComposition {
         guard let pipeline else { return }
         await pipeline.completeIngestion(forWorkout: id)
     }
+
+    /// MAX-067: advances the distance-splits backfill by one bounded pass.
+    ///
+    /// **Trigger: every launch, alongside `ingestPendingWorkouts()`** — not lazily on a
+    /// detail view, and not a separate Settings action. The trade, stated plainly: this
+    /// does real work on the main actor's store on every foreground for as long as any
+    /// history remains un-backfilled (see `DistanceSplitsBackfillPolicy` for why that
+    /// work is bounded per pass rather than unbounded), in exchange for the trends
+    /// surface becoming consistent without the athlete having to open every run's detail
+    /// screen by hand — which, for a phone with years of history and MAX-065's drift
+    /// trendline already reading across it, could otherwise mean months before every run
+    /// contributes a split. Once every workout's `distanceSplitsComputed` is true, this
+    /// call costs one store read that finds nothing to do.
+    ///
+    /// Fire-and-forget like `ingestPendingWorkouts()`, and for the same reason: nothing
+    /// on screen is waiting for this specific pass to land, and a view that wants fresh
+    /// splits for the run it is showing already calls `completeIngestion(forWorkout:)` on
+    /// appear, which reads whatever is on file at that moment.
+    static func backfillDistanceSplits() {
+        guard let pipeline else { return }
+        Task {
+            let outcome = await pipeline.backfillDistanceSplits()
+            // A count, never an identifier or a date (CLAUDE.md) — and only logged when
+            // there was something to say, so a fully backfilled history is silent.
+            if outcome.workoutsProcessed > 0 {
+                ingestionLog.info(
+                    "Distance-splits backfill pass: \(outcome.workoutsProcessed, privacy: .public) processed, \(outcome.workoutsRemaining, privacy: .public) remaining."
+                )
+            }
+        }
+    }
 }
 
 /// Exists for one reason: HealthKit observer queries must be registered from
@@ -204,13 +239,18 @@ final class MaximizeAppDelegate: NSObject, UIApplicationDelegate {
         return true
     }
 
-    /// A second, non-wake trigger for the anchored fetch.
+    /// A second, non-wake trigger for the anchored fetch — and, since MAX-067, for the
+    /// distance-splits backfill too.
     ///
     /// Recovery from a failed wake is "the next pass picks it up", and a wake only happens
     /// when HealthKit has something new. Opening the app is the other moment a pass can
     /// run, and it is what keeps "delayed" from meaning "delayed until the next workout".
     /// Cheap when there is nothing pending: one anchored query returning nothing.
+    ///
+    /// The backfill call alongside it is the same shape for the same reason — see
+    /// `IngestionComposition.backfillDistanceSplits()` for the trade it makes.
     func applicationDidBecomeActive(_ application: UIApplication) {
         IngestionComposition.ingestPendingWorkouts()
+        IngestionComposition.backfillDistanceSplits()
     }
 }

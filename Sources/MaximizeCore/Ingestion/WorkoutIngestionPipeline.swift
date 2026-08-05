@@ -247,6 +247,103 @@ public actor WorkoutIngestionPipeline: WorkoutIngestionSink {
         await enrich(workout, scoringBudgetSeconds: nil)
     }
 
+    // MARK: - MAX-067: backfilling distance splits for pre-MAX-046 history
+
+    /// Advances the distance-splits backfill by one bounded pass.
+    ///
+    /// ## Why this cannot be `completeIngestion(forWorkout:)`
+    ///
+    /// `completeIngestion` returns immediately for any workout that already has a score
+    /// — by design (see its documentation) — and every workout on the athlete's device
+    /// predates MAX-046, so every one of them already has a score. That early return is
+    /// exactly what stopped a backfill falling out for free, and it must not be weakened:
+    /// it is what lets a detail screen call `completeIngestion` unconditionally on appear
+    /// without re-deriving metrics (and re-fetching HealthKit samples) on every view of
+    /// every already-scored run. So this is a sibling, not a modification — a second,
+    /// deliberately rarer door into the same `enrich` that `completeIngestion` already
+    /// uses, opened only by a launch-triggered sweep rather than by a screen appearing.
+    ///
+    /// ## D8 is enforced exactly where it always was
+    ///
+    /// `enrich` recomputes the *whole* of `DerivedMetrics` — through
+    /// `DerivedMetricsCalculator`, the one calculator D2 allows — and stores it, which is
+    /// what makes a backfilled run's metrics identical to a freshly ingested one's. It
+    /// then calls `applyScore`, which is untouched by this ticket: its very first line
+    /// reads the existing ledger and returns *before the model is ever asked* when one is
+    /// already on file. That check is D8's enforcement point, and it fires exactly the
+    /// same way for a workout reached from here as for a replayed `ingest` or a repeated
+    /// `completeIngestion` call. Nothing in this method — or in `enrich` — reads or writes
+    /// a score directly; the auto-score is never in scope here at all.
+    ///
+    /// ## Distinguishing "not yet computed" from "computed, and the answer is none"
+    ///
+    /// `DerivedMetrics.distanceSplitsComputed` is what makes this safe to call on every
+    /// launch forever. A route-less workout (indoor, or pre-MAX-034) will re-enrich to a
+    /// `distanceSplits` of nil on every attempt — genuinely, permanently — but after the
+    /// *first* attempt its `distanceSplitsComputed` is `true`, and this method's own
+    /// candidate filter (`distanceSplitsComputed == false`) never selects it again. A
+    /// workout is offered here exactly once per pass and, ordinarily, exactly once ever.
+    ///
+    /// ## Idempotent and interruptible
+    ///
+    /// Idempotent because `enrich` already is (see its documentation): running it twice
+    /// on the same stored inputs produces the same stored metrics. Interruptible because
+    /// every workout this method touches is re-enriched and its
+    /// `distanceSplitsComputed = true` made durable — via the same store write `enrich`
+    /// already performs — before the next one is even read; a phone locked mid-pass loses
+    /// no ground; the next pass's candidate read simply excludes everything already done.
+    ///
+    /// ## Cost, and why enumeration and re-enrichment are bounded differently
+    ///
+    /// Candidates are found by reading every stored workout and, for each, its metrics —
+    /// scalar fields and the small `zoneSplits`/`distanceSplits` blob, not the heart-rate
+    /// or route curves. That read is proportional to the whole history, on every pass,
+    /// forever, including once nothing is left to do — an accepted, stated cost, and cheap
+    /// by the same reasoning the trends dashboard already reads full history for. What
+    /// *cannot* run unbounded is re-enrichment itself: each candidate costs a HealthKit
+    /// sample re-fetch and a store write, so only `policy.maxWorkoutsPerPass` of them are
+    /// actually processed per call — see `DistanceSplitsBackfillPolicy` for the number and
+    /// the reasoning behind it.
+    ///
+    /// - Returns: how many workouts were re-enriched and how many remain, so the caller
+    ///   can log a count (never an identifier — CLAUDE.md) and so a test can assert
+    ///   progress without reaching into the store.
+    public func backfillDistanceSplits(
+        policy: DistanceSplitsBackfillPolicy = .standard
+    ) async -> DistanceSplitsBackfillOutcome {
+        let candidates: [Workout]
+        do {
+            candidates = try await workouts.workouts(
+                startingIn: DateInterval(start: .distantPast, end: now())
+            )
+        } catch {
+            report(.distanceSplitsBackfillEnumerationFailed)
+            return .nothingToDo
+        }
+
+        var pending: [Workout] = []
+        pending.reserveCapacity(candidates.count)
+        for workout in candidates {
+            // `try?`: a metrics read that fails is not evidence the workout needs
+            // backfilling, only that this attempt to check could not tell. Skipping it
+            // costs nothing durable — it is read again, fresh, on the next pass.
+            guard let metrics = try? await workouts.derivedMetrics(forWorkout: workout.id),
+                  metrics.distanceSplitsComputed == false
+            else { continue }
+            pending.append(workout)
+        }
+
+        let toProcess = pending.prefix(policy.maxWorkoutsPerPass)
+        for workout in toProcess {
+            await enrich(workout, scoringBudgetSeconds: nil)
+        }
+
+        return DistanceSplitsBackfillOutcome(
+            workoutsProcessed: toProcess.count,
+            workoutsRemaining: pending.count - toProcess.count
+        )
+    }
+
     /// Everything derived from a workout that is already durable.
     ///
     /// **Cannot throw**, and that is the R11 escape rather than a convenience: a thrown

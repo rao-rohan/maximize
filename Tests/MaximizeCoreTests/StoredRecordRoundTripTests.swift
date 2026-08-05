@@ -291,6 +291,41 @@ final class StoredRecordRoundTripTests: XCTestCase {
         XCTAssertEqual(try StoredDerivedMetrics(metrics).toDomain().planVersion, try PlanVersion(7))
     }
 
+    // MARK: - MAX-067: the backfill marker
+
+    /// The load-bearing case: a `StoredDerivedMetrics` whose `distanceSplitsComputed` is
+    /// `false` — what `DerivedMetricsRecord`'s migration default produces for every row
+    /// written before this column existed — must read back as `false`, not silently
+    /// upgrade to `true` on the trip through `toDomain()`. If it did, the backfill sweep
+    /// would never find these rows as candidates and every run on the athlete's device
+    /// today would stay unbackfilled forever.
+    func testALegacyRowWithDistanceSplitsNotYetComputedRoundTripsAsNotComputed() throws {
+        var stored = try StoredDerivedMetrics(
+            DerivedMetrics(workoutID: Fixture.workoutID, planVersion: PlanVersion(1))
+        )
+        stored.distanceSplitsComputed = false
+
+        let restored = try stored.toDomain()
+
+        XCTAssertFalse(restored.distanceSplitsComputed)
+        XCTAssertNil(restored.distanceSplits)
+    }
+
+    /// The ordinary, post-MAX-067 case: a freshly computed record — routed or not —
+    /// carries `distanceSplitsComputed == true` through storage regardless of whether a
+    /// breakdown was actually found.
+    func testAFreshlyComputedRecordRoundTripsAsComputedEvenWithNoBreakdown() throws {
+        let metrics = try DerivedMetrics(
+            workoutID: Fixture.workoutID,
+            distanceSplitsComputed: true,
+            planVersion: PlanVersion(1)
+        )
+        let restored = try StoredDerivedMetrics(metrics).toDomain()
+
+        XCTAssertTrue(restored.distanceSplitsComputed)
+        XCTAssertNil(restored.distanceSplits, "an indoor run with no route still has none to store")
+    }
+
     func testStoredDerivedMetricsWithInvalidPlanVersionAreRejected() throws {
         var stored = try StoredDerivedMetrics(
             DerivedMetrics(workoutID: Fixture.workoutID, planVersion: PlanVersion(1))

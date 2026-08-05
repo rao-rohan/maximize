@@ -91,6 +91,37 @@ final class DerivedMetricsTests: XCTestCase {
         ]))
         XCTAssertEqual(try roundTripped(derived), derived)
     }
+
+    // MARK: - MAX-067: distinguishing "not yet computed" from "computed, and it's nil"
+
+    /// Every direct construction of `DerivedMetrics` — the calculator's own output and
+    /// every other test in this file — is already past the question this flag answers.
+    func testDistanceSplitsComputedDefaultsToTrueForADirectlyBuiltValue() throws {
+        let derived = try metrics()
+        XCTAssertTrue(derived.distanceSplitsComputed)
+    }
+
+    /// The one case `false` is reachable from a direct construction: a test (or,
+    /// concretely, `StoredDerivedMetrics.toDomain()`) stating explicitly that this record
+    /// has never been through the split calculator.
+    func testDistanceSplitsComputedCanBeStatedExplicitlyAsFalse() throws {
+        let derived = try DerivedMetrics(
+            workoutID: Fixture.workoutID,
+            distanceSplitsComputed: false,
+            planVersion: PlanVersion(1)
+        )
+        XCTAssertFalse(derived.distanceSplitsComputed)
+        XCTAssertNil(derived.distanceSplits, "unrelated: nil for the ordinary reason too, no route was ever supplied")
+    }
+
+    func testDistanceSplitsComputedRoundTripsThroughJSON() throws {
+        let derived = try DerivedMetrics(
+            workoutID: Fixture.workoutID,
+            distanceSplitsComputed: false,
+            planVersion: PlanVersion(1)
+        )
+        XCTAssertEqual(try roundTripped(derived).distanceSplitsComputed, false)
+    }
 }
 
 final class ZoneSplitsTests: XCTestCase {
