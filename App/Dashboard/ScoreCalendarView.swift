@@ -55,16 +55,20 @@ import MaximizeCore
 /// versus `.marginal` on hue alone, at 1.02:1 — the same square in greyscale, on the exact
 /// hue axis deuteranopia collapses.
 ///
-/// **The year heatmap still has that gap, and it is not fixable with a mark.** A heatmap
-/// cell is about six points square; there is no corner to put a pip in, which is the case
-/// MAX-083 predicted would test T6 and it fails it. The shape channel there stays narrowed
-/// to the distinction that survives at that size — a missed day is drawn hollow, a
-/// badly-scored day filled (`ScoreCalendarDayState.isDrawnHollowAtHeatmapDensity`) — and
-/// the VoiceOver sentence, dated with its month since nothing on screen says which day it
-/// is, carries the rest. **So at year density, good and not-quite remain a hue
-/// distinction.** Closing it would take a channel that works at six points: separating the
-/// two fills on the luminance axis, or drawing marginal inset. Both are judgements about
-/// something nobody here can look at, and neither is this ticket's.
+/// **The year heatmap had that same gap, and a corner pip cannot fix it.** A heatmap
+/// mark is about six points square with a ~1.5pt gap to its neighbour; there is no corner
+/// left to put a pip in once the mark itself is that small — the case MAX-083 predicted
+/// would test T6, and it failed it. MAX-087 closes it with a different channel: a
+/// scored day's fill draws smaller than the mark's full footprint, centred, with the
+/// size set by `ScoreBandHeatmapMark` (`ScoreBand.heatmapMark`) — geometry rather than
+/// colour, so it survives greyscale, every kind of colour vision, and Increase Contrast
+/// / Reduce Transparency alike, since there is no colour value in it for either setting
+/// to touch. A missed day keeps drawing hollow
+/// (`ScoreCalendarDayState.isDrawnHollowAtHeatmapDensity`), unrelated and unchanged, and
+/// the VoiceOver sentence — dated with its month since nothing on screen says which day
+/// it is — still carries the rest. **Needs device verification**: whether a ~2.4pt inset
+/// square actually reads as "smaller" rather than as noise is exactly the judgement
+/// nobody building this ticket could make; see the MAX-087 PR.
 ///
 /// `.scheduledRest` and `.convertedRest` sit on the same neutral fill as
 /// `.awaitingScore` and `.unplanned` (`ScoreBandColors.swift`'s own doc comment: a
@@ -272,9 +276,18 @@ private struct ScoreCalendarHeatmapCell: View {
             .accessibilityHidden(day == nil)
     }
 
-    /// A missed day is stroked rather than filled — the one non-hue channel that
-    /// survives at this size, separating "I did not run" from "I ran badly", which share
-    /// a fill by design (D9). See `ScoreCalendarDayState.isDrawnHollowAtHeatmapDensity`.
+    /// Two non-hue channels, for two different distinctions.
+    ///
+    /// A missed day is stroked rather than filled — separating "I did not run" from "I
+    /// ran badly", which share a fill by design (D9). See
+    /// `ScoreCalendarDayState.isDrawnHollowAtHeatmapDensity`. A scored day is filled,
+    /// but not always at the mark's full footprint: `ScoreBandHeatmapMarkView` sizes it
+    /// by `ScoreBand.heatmapMark` (MAX-087), the channel that separates `.effective`
+    /// from `.marginal` from `.ineffective` now that there is no room for a corner pip.
+    /// A day with no band at all — rest, awaiting-score, unplanned — draws unchanged
+    /// from before this ticket: a plain full-footprint fill. The three cases never
+    /// compete for the same cell, so a reader is never asked to read two channels in
+    /// the same glance.
     @ViewBuilder
     private var background: some View {
         if let day, day.state.isDrawnHollowAtHeatmapDensity {
@@ -283,6 +296,8 @@ private struct ScoreCalendarHeatmapCell: View {
                     ScoreCalendarPalette.fill(for: day.state),
                     lineWidth: LayoutMetrics.heatmapMarkStroke
                 )
+        } else if let day, let band = day.state.scoredBand {
+            ScoreBandHeatmapMarkView(band: band, cornerRadius: CornerRadius.heatmapMark)
         } else if let day {
             RoundedRectangle(cornerRadius: CornerRadius.heatmapMark, style: .continuous)
                 .fill(ScoreCalendarPalette.fill(for: day.state))

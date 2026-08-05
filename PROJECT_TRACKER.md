@@ -478,6 +478,7 @@ and none of them is required for the PRD to be complete.
 | MAX-068 | Decide whether splits enter the Claude prompt | MAX-046 | **Opus** 🔒 |
 | MAX-069 | Extend file protection over Core Data's external-storage directory | MAX-072 R1 | Sonnet 🔒 |
 | MAX-081 | Move Settings out of the tab bar; fix keyboard handling | Device report | Sonnet ✅ |
+| MAX-087 | Non-hue channel for score bands in the year heatmap | Design review §8.1, T6 | Sonnet ✅ |
 
 **MAX-066.** Splits currently need a GPS track, so a treadmill run has none — correctly
 rendered as an absence rather than fabricated. `distanceWalkingRunning` is already
@@ -518,6 +519,24 @@ while streaming, which silently resigned focus and dropped the keyboard on every
 Chat moved to its own sheet with the composer as a bottom `safeAreaInset`. **None of it
 is verified** — CI has no simulator and cannot observe an interaction; see the PR's device
 list.
+
+**MAX-087.** The design review's T6, and MAX-084's own doc comments predicted it: the
+corner pip MAX-084 added to close `.effective`/`.marginal` at 1.02:1 needs a cell large
+enough to hold a corner, and the year heatmap's mark is ~6pt with a ~1.5pt gap to its
+neighbour — no corner to spare. `ScoreBand.heatmapMark` (new, beside `ScoreBand.mark` in
+`Sources/MaximizeCore/Accessibility/`) gives each band a size instead of a shape: a
+scored day's fill draws at a fraction of the mark's footprint rather than always edge to
+edge, `.effective` full, `.marginal` and `.ineffective` progressively smaller. Chosen
+over a lightness/saturation channel because that one is a colour value and Increase
+Contrast is specifically the thing this ticket has to survive; chosen over a shape
+channel (rounded square vs. circle) because a corner-radius difference is expected to
+erode faster than an area difference once anti-aliasing gets involved at this size —
+though nobody working the ticket had a device to confirm either judgement.
+`WCAGContrastTests.testNoTwoScoreBandsAreDistinguishedByHueAlone` was extended, not
+duplicated: it now checks both `ScoreBandMark` (day grid) and `ScoreBandHeatmapMark`
+(year heatmap) as two representations of the same rule. **Needs device verification** —
+see the PR: whether a ~2.4pt inset mark actually reads as smaller rather than as noise
+is the one thing here only a phone can answer.
 
 ---
 

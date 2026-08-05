@@ -174,6 +174,33 @@ struct DesignSystemGallery: View {
             )
             .font(.microLabel)
             .foregroundStyle(Color.textTertiary)
+
+            // The year heatmap (MAX-083) has no room for the mark above — a cell there
+            // is ~6pt. MAX-087's channel for that density is shown at 4x scale here so
+            // it can be inspected at all; whether it reads at the true size is a
+            // question only a device can answer. See `ScoreBandHeatmapMarkView`.
+            HStack(spacing: Spacing.snug) {
+                ForEach(ScoreBand.allCases, id: \.self) { band in
+                    VStack(spacing: Spacing.tight) {
+                        ScoreBandHeatmapMarkView(
+                            band: band,
+                            cornerRadius: CornerRadius.heatmapMark
+                        )
+                        .frame(
+                            width: LayoutMetrics.scoreBandMarkSize * 4,
+                            height: LayoutMetrics.scoreBandMarkSize * 4
+                        )
+                        Text(band.rawValue)
+                            .font(.microLabel)
+                            .foregroundStyle(Color.textSecondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+
+            Text("At year density (~6pt, magnified 4x here) — needs device verification.")
+                .font(.microLabel)
+                .foregroundStyle(Color.textTertiary)
         }
     }
 
