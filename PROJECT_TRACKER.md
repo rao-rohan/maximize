@@ -467,17 +467,30 @@ and CI selects a 26.x toolchain explicitly rather than trusting the runner defau
 
 ## Post-PRD backlog
 
-Every ticket tracing to the PRD is merged. These came out of the work itself — reported
-by the agents that found them rather than fixed in place, per the standing instruction —
-and none of them is required for the PRD to be complete.
+Every ticket tracing to the PRD as written is merged. Most of what follows came out of
+the work itself — reported by the agents that found them rather than fixed in place, per
+the standing instruction. Two other sources appear here now that the app runs on a phone:
+**the owner**, reporting from the device or asking for a change of direction, and **the
+overseer**, where decomposition missed something the PRD implied but never spelled out
+(MAX-080 is the clearest case — nothing in the app ever wrote a plan, so every downstream
+feature was governed by a plan that could not exist).
 
 | ID | Ticket | Source | Tier |
 |---|---|---|---|
-| MAX-066 | Treadmill splits from a distance-sample series | MAX-046 | Sonnet |
-| MAX-067 | Backfill splits for runs ingested before MAX-046 | MAX-046 | Sonnet |
-| MAX-068 | Decide whether splits enter the Claude prompt | MAX-046 | **Opus** 🔒 |
-| MAX-069 | Extend file protection over Core Data's external-storage directory | MAX-072 R1 | Sonnet 🔒 |
+| MAX-066 | Treadmill splits from a distance-sample series | MAX-046 | Sonnet ✅ |
+| MAX-067 | Backfill splits for runs ingested before MAX-046 | MAX-046 | Sonnet ✅ |
+| MAX-068 | Decide whether splits enter the Claude prompt | MAX-046 | **Opus** 🔒 ✅ |
+| MAX-069 | Extend file protection over Core Data's external-storage directory | MAX-072 R1 | Sonnet 🔒 ✅ |
+| MAX-080 | Plan authoring — seed a plan, revise as a new version | Overseer, D1 gap | **Opus** ✅ |
 | MAX-081 | Move Settings out of the tab bar; fix keyboard handling | Device report | Sonnet ✅ |
+| MAX-082 | Design review of the whole app | Device report | **Opus** ✅ |
+| MAX-083 | Week / month / year intervals, each with a fitting representation | Owner | **Opus** ✅ |
+| MAX-084 | Fix score-band and chart contrast; resolve A7 | MAX-082 | Sonnet ✅ |
+| MAX-085 | Surface elevation, `.tint()` adoption, Liquid Glass chrome | MAX-082 | Sonnet |
+| MAX-086 | Absence-string voice; wire `AppearancePreference` | MAX-082 | Haiku |
+| MAX-087 | A non-hue channel for the year heatmap's 6pt cells | MAX-084 | Sonnet |
+| MAX-090 | Chat-first product spec: plan generation and Q&A through chat | Owner | **Opus** 🔒 |
+| MAX-091 | Run both Claude clients on the Sonnet tier at `medium` effort | Owner, cost | Sonnet 🔒 ✅ |
 
 **MAX-066.** Splits currently need a GPS track, so a treadmill run has none — correctly
 rendered as an absence rather than fabricated. `distanceWalkingRunning` is already
@@ -518,6 +531,42 @@ while streaming, which silently resigned focus and dropped the keyboard on every
 Chat moved to its own sheet with the composer as a bottom `safeAreaInset`. **None of it
 is verified** — CI has no simulator and cannot observe an interaction; see the PR's device
 list.
+
+**MAX-091.** Both Claude clients moved from the Opus tier to the Sonnet tier at `medium`
+effort, on the owner's cost instruction. Three things came with the model that are not
+optional and are easy to get wrong later, so they are recorded here rather than only in
+the diff:
+
+- **Effort is nested.** It is `output_config: {"effort": "medium"}`, not a top-level
+  request field, and it is an *output* control rather than a thinking budget — which is
+  why both clients can keep `thinking: {"type": "disabled"}` alongside it. Disabling
+  thinking is accepted only at `high` effort or below, so raising either client to
+  `xhigh` or `max` without also deleting its `Thinking` block is a 400. Both files say so
+  at the call site.
+- **The cacheable minimum went up**, from 512 tokens on the previous tier to 1024 on this
+  one. Neither client's system blocks reach it today, so both `cache_control` markers are
+  currently inert — no error, no saving. They stay because a multi-workout context
+  (MAX-090) plausibly crosses the line on its own.
+- **The tokenizer produces roughly 30% more tokens** for the same text. The chat client's
+  `max_tokens` went 2048 → 2560 to buy the same length of answer it was originally sized
+  for; the scoring client's 512 was already far past what an integer and a 140-character
+  rationale need, so it did not move.
+
+**Not verified.** Neither client is exercised by CI — no toolchain, no key, and no network
+request in the suite (see R1 and the files' own doc comments). What CI proves here is that
+the app target still compiles. That the request shape is accepted, and that a Sonnet-tier
+score is as good as an Opus-tier one, are both device checks against a real key.
+
+**MAX-090** is the chat-first product spec: plan generation and data questions through a
+chat surface, with a persistent composer, thread history, and an entry-point-aware
+context. It is a spec ticket, not an implementation one — its deliverable is
+`docs/CHAT-FIRST-SPEC.md`, the amendments it forces (A9 onward), and a ticket breakdown
+for the overseer to decompose. Two constraints are already settled by the owner and are
+not the spec's to re-open: the detailed dashboard and workout-detail screens **stay** —
+chat is additive — and the entry point a chat is opened from must be a structured value
+the core understands, not a free-text hint, because a free-text hint would be a second
+unvalidated way of saying what context to assemble, which D3 forbids. It carries 🔒
+because it decides what enters a Claude prompt.
 
 ---
 
