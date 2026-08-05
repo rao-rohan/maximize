@@ -538,6 +538,7 @@ feature was governed by a plan that could not exist).
 | MAX-085 | **The tab bar, once**: Plan becomes a third tab, iOS 26 `Tab` builder, `.tint()`, surface elevation, Liquid Glass chrome | MAX-082, Owner | **Opus** ✅ |
 | MAX-086 | Wire `AppearancePreference` — a setting that silently does nothing | MAX-082 | Sonnet |
 | MAX-087 | A non-hue channel for the year heatmap's 6pt cells | MAX-084 | Sonnet ✅ |
+| MAX-127 | **Widen the surface fill ramp and re-tune the chart palette against it, together** — the finding MAX-085 left | MAX-085 | Sonnet ✅ |
 | MAX-105 | **The plan on the dashboard calendar** — scheduled beneath actual | Owner | **Opus** ✅ |
 | MAX-106 | The UI standard, written into `CLAUDE.md` | Owner | Sonnet ✅ |
 | MAX-107 | Chat stream framing: close a frame without a blank line | Device report | Sonnet 🔒 ✅ |
@@ -842,6 +843,50 @@ Nothing here is provable by CI, and the PR says so at length. The open device qu
 are whether the bar reads as current-generation iOS, whether the violet looks right in
 place rather than in a swatch, and whether an edged card next to an unedged tile grid
 reads as deliberate or as unfinished.
+
+**MAX-127 — the fill ramp, widened, and the chart palette re-tuned against it.** The
+finding MAX-085 left on purpose: it could not widen `surfaceInset` without re-tuning
+every chart mark plotted on it, and that was ruled out of a chrome ticket. This is the
+ticket that does both together, because MAX-085's own invariant test
+(`testACardSeparatesFromTheScreenBySomething`, "a card separates by its fill step *or*
+its edge") only holds if the two land as one change.
+
+- **The widen is real but smaller than MAX-085's `surfaceBorder` comment guessed.**
+  `surfaceInset` carries `accent` and `textTertiary` at 4.5:1 against it — neither
+  moved, the accent because A7 is settled and `textTertiary` because retuning it is a
+  different ticket's call — and that turned out to bound the ramp much more tightly in
+  **dark** than in light, the opposite of what the design review's §2.1(a) expected.
+  `surfaceElevated` on `surface` moved from **1.09:1 to ~1.16:1** in both appearances;
+  `DesignPalette.surfaceInset`'s doc comment carries the exact window and why it is
+  asymmetric.
+- **`chartGridline`, `chartExcursion` and `chartSeriesMuted` are re-tuned against the
+  wider `surfaceInset`, with real margin above their floors this time** — MAX-084's
+  values cleared 1.4:1 / 2.0:1 / 3.0:1 by hundredths, which is why they broke the
+  moment the plot surface moved. The new values clear by at least 0.14–0.28:1 in every
+  appearance, and a new test (`testChartGridlineAndExcursionClearTheirFloorsWithReal-
+  Margin`) asserts the buffer itself, not just the floor, so a future edit can't
+  quietly walk it back down.
+- **`chartThreshold` moved too, though the ticket only named the other two.** Widening
+  `surfaceInset` shrinks the room between it and the fixed cap-line colour that the
+  "Cap N bpm" label needs 4.5:1 against, drawn directly over `chartExcursion`'s fill —
+  there was no value of `chartExcursion` alone that cleared its own floor with margin
+  *and* kept the label legible against a stationary `chartThreshold`. `DesignPalette.
+  chartExcursion`'s comment carries the algebra.
+- **`surfaceBorder` stays — it is not redundant.** The fill step alone (~1.16:1) is
+  real but still short of Apple's own ~1.23:1 dark step, so the edge is still doing
+  work, not resting on top of a solved problem. Its light value is retuned darker
+  (`0xC9C9D3` → `0xBEBEC8`) because the wider `surfaceElevated` had pulled its margin
+  down to the same "hundredths" problem the ramp itself had; dark is unchanged.
+- **Found, not fixed: `CadenceBandView`'s target-band shading still writes
+  `Color.chartThreshold.opacity(0.2)` at the call site** — the exact anti-pattern
+  MAX-084 eliminated from `HRCurveView` via `chartExcursion`, just at a call site that
+  ticket didn't touch. Unaffected by this ticket's `chartThreshold` retune (still
+  measures better than before, checked by hand), but it remains an unmeasured literal
+  and a candidate for the same treatment.
+
+**Needs device verification**, same as MAX-085: whether cards now read as cards at a
+glance, and — the risk unique to this ticket — whether the chart gridlines still read
+as quiet on a visibly lighter plot surface rather than becoming noise.
 
 **MAX-105 — the plan on the dashboard calendar.** The owner's ask, and the most interesting
 design problem currently open, so it is Opus and it should be argued rather than assumed.

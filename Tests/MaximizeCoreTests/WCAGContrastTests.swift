@@ -344,6 +344,20 @@ final class DesignPaletteContrastTests: XCTestCase {
         assertAtLeast(2.0, DesignPalette.chartExcursion, on: plotSurface, "chartExcursion")
     }
 
+    /// MAX-127: the invariant the two tests above were missing. Both `chartGridline`
+    /// and `chartExcursion` used to clear their floor by hundredths (1.43:1 against
+    /// 1.4, 2.01:1 against 2.0) — a margin indistinguishable, in a diff, from sitting
+    /// exactly on the line, and it took `surfaceInset` moving to prove it. This asserts
+    /// a buffer above each floor, not just the floor, so a future edit that quietly
+    /// walks either token back down cannot pass by accident the way the old ones did.
+    /// 0.15 is chosen below every appearance's actual margin (chartGridline's tightest
+    /// is 0.19:1 in dark; chartExcursion's is 0.25:1 in dark) with room to spare.
+    func testChartGridlineAndExcursionClearTheirFloorsWithRealMargin() {
+        let realMargin = 0.15
+        assertAtLeast(1.4 + realMargin, DesignPalette.chartGridline, on: plotSurface, "chartGridline (margin)")
+        assertAtLeast(2.0 + realMargin, DesignPalette.chartExcursion, on: plotSurface, "chartExcursion (margin)")
+    }
+
     /// The constraint from the other direction, and the one that stops a future edit
     /// from simply making the shading darker until it wins: `HRCurveView` annotates the
     /// cap rule with "Cap N bpm" in `chartThreshold`, positioned directly above the cap
@@ -454,18 +468,20 @@ final class DesignPaletteContrastTests: XCTestCase {
         }
     }
 
-    // MARK: Surface elevation — MAX-085
+    // MARK: Surface elevation — MAX-085, widened by MAX-127
 
     /// The whole of the design review's §2.1 finding, as an invariant that outlives the
     /// particular fix.
     ///
     /// A card has to be *seen* as a card. It can earn that from its fill step, from its
-    /// edge, or from both; what it may not do is neither. Today the fill step is 1.09:1
-    /// — the number the review measured — and the edge carries it, which is why
-    /// `surfaceBorder` exists (see `DesignPalette` for why the fills could not simply be
-    /// widened). If a later ticket re-tunes the chart palette and widens the ramp
-    /// properly, this test keeps passing on the other term rather than having to be
-    /// rewritten.
+    /// edge, or from both; what it may not do is neither. MAX-085 shipped with the fill
+    /// step at 1.09:1 — the number the review measured — carried entirely by the edge.
+    /// MAX-127 widened the fill step to ~1.16:1 in every appearance (see
+    /// `DesignPalette.surfaceInset` for why that is real but not larger) and re-tuned
+    /// `surfaceBorder`'s light value to keep pace, so today both terms clear the floor
+    /// on their own and `max` has slack either way. This test is written as `max`
+    /// rather than as two separate assertions on purpose: it is the invariant, not the
+    /// mechanism, and a future ticket is free to move the mechanism again.
     func testACardSeparatesFromTheScreenBySomething() {
         for appearance in Appearance.allCases {
             let screen = appearance.token(DesignPalette.surface)
@@ -479,6 +495,29 @@ final class DesignPaletteContrastTests: XCTestCase {
                 a card is invisible against the screen [\(appearance.rawValue)]: its fill \
                 steps \(String(format: "%.2f", fillStep)):1 and its edge \
                 \(String(format: "%.2f", edgeStep)):1 — neither reads as a boundary
+                """
+            )
+        }
+    }
+
+    /// MAX-127: pins the fill step's own contribution, so `testACardSeparatesFromThe-
+    /// ScreenBySomething` passing on `max(fillStep, edgeStep)` can't quietly mean the
+    /// fill step drifted back toward MAX-085's 1.09:1 while the edge alone kept the
+    /// invariant afloat — which is exactly the state this ticket was asked to leave
+    /// behind. 1.12 sits below every appearance's actual value (dark and light both
+    /// measure ~1.16:1; Increase Contrast measures higher still) with margin.
+    func testTheFillStepAloneIsMeaningfullyWiderThanMAX085Shipped() {
+        for appearance in Appearance.allCases {
+            let ratio = WCAGContrast.contrastRatio(
+                appearance.token(DesignPalette.surfaceElevated),
+                appearance.token(DesignPalette.surface)
+            )
+            XCTAssertGreaterThanOrEqual(
+                ratio, 1.12,
+                """
+                surfaceElevated on surface measures \(String(format: "%.2f", ratio)):1 \
+                [\(appearance.rawValue)] — back near MAX-085's 1.09:1, leaning on the \
+                edge alone again
                 """
             )
         }
