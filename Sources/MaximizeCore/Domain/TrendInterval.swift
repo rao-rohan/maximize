@@ -13,8 +13,8 @@ import Foundation
 ///
 /// ```swift
 /// let tallies = try TalliesCalculator.compute(TalliesInput(
-///     from: interval.from, through: interval.through, timeZone: ..., workouts: ...,
-///     planCalendar: ..., restDayBudget: ...
+///     from: interval.from, through: interval.through, timeZone: ..., today: ...,
+///     workouts: ..., planCalendar: ..., restDayBudget: ...
 /// ))
 /// let planDays = try planCalendar.planDays(from: interval.from, through: interval.through)
 /// ```

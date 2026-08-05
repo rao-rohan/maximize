@@ -492,7 +492,7 @@ ticket that could not close it, and each fails quietly rather than loudly.
 |---|---|---|
 | C1 | **Always resolve rest-day budgets over whole Monday-first weeks — never split one week across two calls.** | `RestDayBudgeting` (MAX-016) is a pure function over the days it is handed. Ranking is relative to the misses in a week, so the same day can rank differently in two partial slices of that week. A function taking a day-set cannot tell a partial week from a short one |
 | C2 | **A `WorkoutIngestionSink` must not return before its write is durable.** | MAX-031's no-retry guarantee depends on it: acknowledging a wake whose data was not durably stored loses the workout permanently, and only the implementation knows when its write has landed |
-| C3 | **A caller that knows what day it is must tell `RestDayBudgeting`, via `outcomesUnknownFrom`.** | MAX-105. Forgiving a day that has not happened spends a small weekly budget on a non-event and leaves a real miss earlier in the same week unforgiven — but `RestDayBudgeting` is a pure function of the days it is handed, and a day-set carries no clock. `ScoreCalendar` passes it; `TalliesCalculator` cannot yet (→ MAX-110) |
+| C3 | **A caller that knows what day it is must tell `RestDayBudgeting`, via `outcomesUnknownFrom`.** | MAX-105. Forgiving a day that has not happened spends a small weekly budget on a non-event and leaves a real miss earlier in the same week unforgiven — but `RestDayBudgeting` is a pure function of the days it is handed, and a day-set carries no clock. `ScoreCalendar` and `TalliesCalculator` (MAX-110) both pass it now |
 
 ## Open questions
 
@@ -534,7 +534,7 @@ feature was governed by a plan that could not exist).
 | MAX-107 | Chat stream framing: close a frame without a blank line | Device report | Sonnet 🔒 ✅ |
 | MAX-108 | Tap a calendar day → its workouts; swipe between two on one day | Owner | Sonnet ✅ |
 | MAX-109 | **Plans cover lifting as well as running** — spec first | Owner | **Opus** |
-| MAX-110 | **Tallies count future scheduled days as missed** — the streak tile reads 0 for most of every month | MAX-105 | Sonnet |
+| MAX-110 | **Tallies count future scheduled days as missed** — the streak tile reads 0 for most of every month | MAX-105 | Sonnet ✅ |
 | MAX-090 | Chat-first product spec: plan generation and Q&A through chat | Owner | **Opus** 🔒 ✅ |
 | MAX-091 | Run both Claude clients on the Sonnet tier at `medium` effort | Owner, cost | Sonnet 🔒 ✅ |
 | MAX-092 … MAX-104 | The chat-first build, decomposed from MAX-090 | MAX-090 | see below |
@@ -812,6 +812,35 @@ scheduled day it meets — which for the "this month" interval is usually the 31
 streak tile reads 0 for most of every month. The calendar half is closed by passing
 `RestDayBudgeting`'s new `outcomesUnknownFrom` (now **C3**); the tallies half needs
 `today` on `TalliesInput` and changes numbers on a surface MAX-063 owns. → **MAX-110**.
+
+**MAX-110 closed the tallies half.** `TalliesInput` gained a required `today`
+(never a clock read, matching `ScoreCalendar.resolve`'s own parameter), threaded into
+both places that depend on whether a day's outcome is in yet: `effectiveDayTally` now
+withholds any day on or after `today` from `eligibleCount`, and `resolveRestDayConversions`
+passes `today` through as C3's `outcomesUnknownFrom`.
+
+The streak walk's start point needed a real decision, and the first draft got only half
+of it right. Walking back from `through` silently assumed `through` was decided, which
+is false whenever it reaches into the future — but stopping the walk at `today - 1`
+(the first draft's fix) is a *second*, smaller version of the same bug: it treats a
+workout already run and scored *this morning* as absent until tomorrow. Review caught
+it before merge. The asymmetry that was missing — **a miss is unknowable until the day
+ends, but a hit is knowable the instant it happens** — is not new to this ticket;
+`ScoreCalendar.resolve` already embodies it (a workout on `today` resolves to `.scored`,
+checked before the forthcoming guard, never to `.forthcoming`). The walk now matches
+that ordering instead of inventing a second rule: it visits `today` itself, an empty
+`today` is neutral (the day might not be over), but a workout already recorded and
+scored today extends or breaks the streak exactly like any other decided day. Tested at
+all three interval shapes (wholly past, wholly future, spanning `today`) plus the two
+`today`-specific cases (already a hit, already a below-threshold miss) that are the
+direct regression tests for the two drafts' respective bugs. A test derives its
+expected `EffectiveDayTally` from `ScoreCalendar.resolve`'s own output over the same
+interval rather than a second hand-worked number, and a sibling test does the same for
+the streak — both fail if the calendar and the tallies ever drift apart, even if either
+suite's hardcoded numbers still happen to look right.
+
+`TrendTilesModel` resolves `today` once at init, the same way `ScoreCalendarModel` does.
+
 
 *Also noticed, not acted on.* `docs/DESIGN-REVIEW.md` §5.4 proposed "a 1pt accent ring on
 the current day" for the missing today-marker. MAX-105 has spent exactly that device on

@@ -41,9 +41,17 @@ final class TalliesTests: XCTestCase {
         try PlanCalendar([plan ?? Fixture.plan()])
     }
 
+    /// `today` defaults to a day after every date these tests reason about, so the
+    /// whole suite is "the past" unless a test deliberately says otherwise — the same
+    /// convention `ScoreCalendarTests.defaultToday` uses, for the same reason: every
+    /// pre-MAX-110 expectation still reads as written, because a scheduled day with
+    /// nothing recorded has been and gone.
+    private static let defaultToday = "2026-12-31"
+
     private func input(
         from: String,
         through: String,
+        today: String = TalliesTests.defaultToday,
         workouts: [Workout] = [],
         scoreLedgers: [UUID: ScoreLedger] = [:],
         planCalendar: PlanCalendar?,
@@ -53,6 +61,7 @@ final class TalliesTests: XCTestCase {
             from: try day(from),
             through: try day(through),
             timeZone: .gmt,
+            today: try day(today),
             workouts: workouts,
             scoreLedgers: scoreLedgers,
             planCalendar: planCalendar,
@@ -333,6 +342,177 @@ final class TalliesTests: XCTestCase {
         XCTAssertEqual(tallies.currentStreak, 2, "exactly the two visible days — the walk never looks past `from`")
     }
 
+    // MARK: - MAX-110: today
+
+    /// The defect this ticket exists to fix, reproduced directly. Without `today`, the
+    /// walk starts at `through` (Sunday) and meets Sunday's own unrecorded long run
+    /// first — a genuine break under the old rule, since `restDayBudget` here is zero
+    /// and nothing folds it into rest. The streak would read 0 even though Tuesday and
+    /// Wednesday were both run and both cleared the threshold.
+    ///
+    /// Thursday (`today`) is empty here — nobody has trained yet today — so the walk
+    /// visits it, finds nothing, and steps past it neutrally rather than stopping; it
+    /// never reaches Friday/Saturday/Sunday at all, since those are strictly after
+    /// `today`. See `testATodayAlreadyTrainedCountsTowardTheStreakImmediately` for the
+    /// case where `today` itself already has a hit to count.
+    func testAStreakThatSpansTodayIgnoresScheduledDaysNotYetReached() throws {
+        let tuesday = UUID()
+        let wednesday = UUID()
+        let tallies = try TalliesCalculator.compute(
+            input(
+                from: "2026-01-05", through: "2026-01-11", // the full week; Fri-Sun are still ahead
+                today: "2026-01-08", // Thursday: itself empty so far, visited but neutral
+                workouts: [
+                    try workout(id: tuesday, on: "2026-01-06"),
+                    try workout(id: wednesday, on: "2026-01-07"),
+                ],
+                scoreLedgers: [
+                    tuesday: try ledger(points: 90, workoutID: tuesday),
+                    wednesday: try ledger(points: 90, workoutID: wednesday),
+                ],
+                planCalendar: try calendar(),
+                restDayBudget: try RestDayBudget(daysPerWeek: 0)
+            )
+        )
+        XCTAssertEqual(
+            tallies.currentStreak, 2,
+            "Thu (today, empty) is skipped rather than breaking; Wed and Tue both extend; "
+                + "Fri/Sat/Sun are strictly after today and are never reached"
+        )
+        XCTAssertEqual(
+            tallies.effectiveDays.eligibleCount, 2,
+            "only Tue and Wed are decided and ask something (Mon is rest; Thu-Sun are still ahead)"
+        )
+        XCTAssertEqual(tallies.effectiveDays.effectiveCount, 2)
+    }
+
+    /// The regression test for the defect a review caught in this ticket's first draft:
+    /// an earlier version of the walk stopped at `today - 1`, so a run already
+    /// completed and scored *this morning* did not count until tomorrow — a smaller
+    /// version of the exact "the app is wrong about me" complaint the ticket exists to
+    /// fix. `ScoreCalendar.resolve` already treats a hit today as decided (it resolves
+    /// to `.scored`, never `.forthcoming`); the streak walk must agree.
+    func testATodayAlreadyTrainedCountsTowardTheStreakImmediately() throws {
+        let workoutID = UUID()
+        let tallies = try TalliesCalculator.compute(
+            input(
+                from: "2026-01-08", through: "2026-01-08",
+                today: "2026-01-08", // today itself, already run and scored
+                workouts: [try workout(id: workoutID, on: "2026-01-08")],
+                scoreLedgers: [workoutID: try ledger(points: 90, workoutID: workoutID)],
+                planCalendar: try calendar()
+            )
+        )
+        XCTAssertEqual(tallies.currentStreak, 1, "a hit today is a decided fact, counted the moment it happens")
+    }
+
+    /// The mirror image, and the reason the exception for `today` is narrow rather than
+    /// "today is always neutral": a run already performed today and already scored
+    /// below the threshold is just as decided as a hit, so it breaks the streak the
+    /// same day instead of waiting for tomorrow to notice.
+    func testATodayScoredBelowThresholdBreaksTheStreakImmediately() throws {
+        let yesterday = UUID()
+        let workoutID = UUID()
+        let tallies = try TalliesCalculator.compute(
+            input(
+                from: "2026-01-07", through: "2026-01-08", // Wed (effective) then Thu (today, ineffective)
+                today: "2026-01-08",
+                workouts: [
+                    try workout(id: yesterday, on: "2026-01-07"),
+                    try workout(id: workoutID, on: "2026-01-08"),
+                ],
+                scoreLedgers: [
+                    yesterday: try ledger(points: 90, workoutID: yesterday),
+                    workoutID: try ledger(points: 30, workoutID: workoutID),
+                ],
+                planCalendar: try calendar()
+            )
+        )
+        XCTAssertEqual(
+            tallies.currentStreak, 0,
+            "today's own ineffective score breaks the walk before it ever reaches yesterday's hit"
+        )
+    }
+
+    /// The invariant the ticket calls out explicitly: an interval that lies wholly in
+    /// the past must produce the same streak whether `today` is the day right after it
+    /// ends or is pushed arbitrarily further into the future — `today` never enters the
+    /// walk once it is past `through`. Reasoned against the same week
+    /// `testTheCombinedWeekExercisesAllFiveTalliesTogether` already worked out by hand.
+    func testAnIntervalEntirelyInThePastAgreesWithTheDefaultFarFutureToday() throws {
+        let tuesday = UUID()
+        let wednesday = UUID()
+        let saturday = UUID()
+        let sunday = UUID()
+        let workouts = [
+            try workout(id: tuesday, on: "2026-01-06"),
+            try workout(id: wednesday, on: "2026-01-07"),
+            try workout(id: saturday, on: "2026-01-10"),
+            try workout(id: sunday, on: "2026-01-11"),
+        ]
+        let scoreLedgers: [UUID: ScoreLedger] = [
+            tuesday: try ledger(points: 80, workoutID: tuesday),
+            wednesday: try ledger(points: 75, workoutID: wednesday),
+            sunday: try ledger(points: 90, workoutID: sunday),
+        ]
+
+        func compute(today: String) throws -> Tallies {
+            try TalliesCalculator.compute(
+                input(
+                    from: "2026-01-05", through: "2026-01-11",
+                    today: today,
+                    workouts: workouts, scoreLedgers: scoreLedgers,
+                    planCalendar: try calendar(), restDayBudget: try RestDayBudget(daysPerWeek: 1)
+                )
+            )
+        }
+
+        // The day right after the interval ends…
+        let barelyPast = try compute(today: "2026-01-12")
+        // …and a today pushed arbitrarily further out.
+        let farFuture = try compute(today: TalliesTests.defaultToday)
+
+        XCTAssertEqual(barelyPast, farFuture, "an interval wholly in the past must not care how far past `today` is")
+        XCTAssertEqual(barelyPast.currentStreak, 3, "matches the hand-worked value from the combined-week test")
+        XCTAssertEqual(barelyPast.effectiveDays.eligibleCount, 3)
+        XCTAssertEqual(barelyPast.effectiveDays.effectiveCount, 3)
+    }
+
+    /// An interval that has not started yet has no decided day at all — the walk must
+    /// not run, and every day is withheld from `eligibleCount`.
+    func testAnIntervalEntirelyInTheFutureHasNoEligibleDaysAndZeroStreak() throws {
+        let tallies = try TalliesCalculator.compute(
+            input(
+                from: "2026-01-05", through: "2026-01-11",
+                today: "2026-01-01", // before the interval even starts
+                planCalendar: try calendar(), restDayBudget: try RestDayBudget(daysPerWeek: 1)
+            )
+        )
+        XCTAssertEqual(tallies.currentStreak, 0, "nothing in the interval has a known outcome yet")
+        XCTAssertEqual(tallies.effectiveDays.eligibleCount, 0)
+        XCTAssertEqual(tallies.effectiveDays.effectiveCount, 0)
+    }
+
+    /// The boundary is strict, matching `ScoreCalendar`: `today` itself has not been
+    /// decided yet, so a single-day query landing exactly on `today` finds nothing
+    /// eligible — not because nothing was asked, but because the day is not yet in.
+    func testADayEqualToTodayDoesNotCountAsEligible() throws {
+        let tallies = try TalliesCalculator.compute(
+            input(
+                from: "2026-01-08", through: "2026-01-08", // Thursday, easy
+                today: "2026-01-08",
+                planCalendar: try calendar()
+            )
+        )
+        XCTAssertEqual(tallies.effectiveDays.eligibleCount, 0, "today itself is not yet decided")
+        XCTAssertEqual(tallies.effectiveDays.effectiveCount, 0)
+        XCTAssertEqual(
+            tallies.currentStreak, 0,
+            "the walk does visit today, finds it empty, and skips it neutrally — but there is no day "
+                + "before it in range to have extended the streak in the first place"
+        )
+    }
+
     // MARK: - Days no plan governs
 
     /// Days before the plan's `effectiveFrom` are neither missed nor eligible — they
@@ -449,6 +629,152 @@ final class TalliesTests: XCTestCase {
         XCTAssertEqual(tallies.effectiveDays.effectiveCount, 0)
     }
 
+    // MARK: - Calendar/tiles agreement (MAX-110)
+
+    /// **The strongest guarantee this ticket can leave behind**, per CLAUDE.md's "the
+    /// calendar and the tiles must agree": `TalliesCalculator` and `ScoreCalendar` are
+    /// two independent readers of the same records, and they must reach the same
+    /// verdict for every day. This reasons against `c1Plan()`, `today` Wednesday, and a
+    /// budget of 1 — the exact scenario `ScoreCalendarTests
+    /// .testTheRestDayBudgetIsNotSpentOnDaysThatHaveNotHappened` pins on the calendar
+    /// side, so the two suites can be read side by side. Monday converts (the week's
+    /// only decided candidate cheap enough); Tuesday stays a genuine miss; Wednesday is
+    /// scheduled rest; Thursday through Sunday have not happened yet.
+    ///
+    /// Rather than hard-coding the expected counts a second time, this derives them
+    /// from `ScoreCalendar.resolve`'s own output — so a future change that moves the
+    /// two calculators out of step fails here even if neither suite's hand-worked
+    /// numbers happen to still be right.
+    func testEffectiveDayTallyAgreesWithTheScoreCalendarOverTheSameInterval() throws {
+        let plan = try c1Plan()
+        let planCalendar = try calendar(plan)
+        let from = try day("2026-01-05")
+        let through = try day("2026-01-11")
+        let today = try day("2026-01-07")
+        let budget = try RestDayBudget(daysPerWeek: 1)
+
+        let tallies = try TalliesCalculator.compute(
+            TalliesInput(
+                from: from, through: through, timeZone: .gmt, today: today,
+                workouts: [], scoreLedgers: [:],
+                planCalendar: planCalendar, restDayBudget: budget
+            )
+        )
+
+        let calendarDays = try ScoreCalendar.resolve(
+            from: from, through: through, timeZone: .gmt, today: today,
+            workouts: [], scoreLedgers: [:],
+            planCalendar: planCalendar, restDayBudget: budget
+        )
+
+        var expectedEligible = 0
+        var expectedEffective = 0
+        for cell in calendarDays {
+            switch cell.state {
+            case .missed:
+                expectedEligible += 1
+            case .scored(let band, _):
+                expectedEligible += 1
+                if band == .effective { expectedEffective += 1 }
+            case .awaitingScore, .convertedRest, .scheduledRest, .forthcoming, .unplanned:
+                break // never eligible — matches `effectiveDayTally`'s own exclusions
+            }
+        }
+
+        XCTAssertEqual(expectedEligible, 1, "sanity: only Tuesday's genuine miss is decided, eligible, and unconverted")
+        XCTAssertEqual(tallies.effectiveDays.eligibleCount, expectedEligible)
+        XCTAssertEqual(tallies.effectiveDays.effectiveCount, expectedEffective)
+    }
+
+    /// Independently reconstructs the streak from `ScoreCalendarDay.state` — the same
+    /// states the calendar itself paints — so the test below does not simply restate
+    /// `TalliesCalculator.streak`'s own branches to check them against themselves. This
+    /// is the streak's counterpart to `expectedEligible`/`expectedEffective` above.
+    /// `calendarDays` must be ascending and cover at least `from...through`.
+    private func expectedStreak(
+        calendarDays: [ScoreCalendarDay],
+        from: CalendarDay,
+        through: CalendarDay,
+        today: CalendarDay
+    ) throws -> Int {
+        let walkStart = min(through, today)
+        guard walkStart >= from else { return 0 }
+        let byDate = Dictionary(uniqueKeysWithValues: calendarDays.map { ($0.date, $0) })
+        var streak = 0
+        var day = walkStart
+        while true {
+            if let cell = byDate[day] {
+                switch cell.state {
+                case .scored(let band, _):
+                    if band == .effective {
+                        streak += 1
+                    } else {
+                        return streak // breaks — matches `TalliesCalculator`'s own rule
+                    }
+                case .missed:
+                    return streak // breaks
+                case .awaitingScore, .convertedRest, .scheduledRest, .forthcoming, .unplanned:
+                    break // neutral — steps past without extending or breaking
+                }
+            }
+            guard day != from else { break }
+            day = try day.adding(days: -1)
+        }
+        return streak
+    }
+
+    /// The property the coordinator asked for explicitly: **the streak tile must not
+    /// contradict the calendar cell for the same day.** Reasons against `c1Plan()` with
+    /// `today` Thursday, a budget of 1, and — the case the eligibility-only agreement
+    /// test above did not cover — a workout already completed and scored *today*.
+    /// Monday converts (cheapest known miss); Tuesday stays a genuine miss; Thursday
+    /// (today) already has an effective run. `ScoreCalendar` resolves Thursday to
+    /// `.scored`, not `.forthcoming`, exactly because a hit is decided the moment it
+    /// happens — the assertion below is that the streak agrees, both by cross-checking
+    /// against an independent reconstruction of the calendar's own states and by the
+    /// hand-worked number.
+    func testCurrentStreakAgreesWithTheScoreCalendarWhenTodayIsAlreadyAHit() throws {
+        let plan = try c1Plan()
+        let planCalendar = try calendar(plan)
+        let from = try day("2026-01-05")
+        let through = try day("2026-01-11")
+        let today = try day("2026-01-08") // Thursday
+        let budget = try RestDayBudget(daysPerWeek: 1)
+        let thursdayWorkout = try workout(id: UUID(), on: "2026-01-08")
+        let scoreLedgers: [UUID: ScoreLedger] = [
+            thursdayWorkout.id: try ledger(points: 90, workoutID: thursdayWorkout.id),
+        ]
+
+        let tallies = try TalliesCalculator.compute(
+            TalliesInput(
+                from: from, through: through, timeZone: .gmt, today: today,
+                workouts: [thursdayWorkout], scoreLedgers: scoreLedgers,
+                planCalendar: planCalendar, restDayBudget: budget
+            )
+        )
+
+        let calendarDays = try ScoreCalendar.resolve(
+            from: from, through: through, timeZone: .gmt, today: today,
+            workouts: [thursdayWorkout], scoreLedgers: scoreLedgers,
+            planCalendar: planCalendar, restDayBudget: budget
+        )
+
+        let todayCell = try XCTUnwrap(calendarDays.first { $0.date == today })
+        XCTAssertEqual(
+            todayCell.state, .scored(band: .effective, activityType: .running),
+            "sanity: today's hit shows on the calendar as scored, not forthcoming (MAX-105)"
+        )
+        XCTAssertEqual(
+            tallies.currentStreak,
+            try expectedStreak(calendarDays: calendarDays, from: from, through: through, today: today),
+            "the streak tile must not contradict the calendar cell for the same day"
+        )
+        XCTAssertEqual(
+            tallies.currentStreak, 1,
+            "Thursday's hit counts today; Tuesday's earlier unconverted miss stops the walk before Monday"
+        )
+    }
+
     // MARK: - TalliesInput validation
 
     func testTalliesInputRejectsFromAfterThrough() throws {
@@ -458,6 +784,7 @@ final class TalliesTests: XCTestCase {
                 from: try day("2026-01-10"),
                 through: try day("2026-01-05"),
                 timeZone: .gmt,
+                today: try day(TalliesTests.defaultToday),
                 workouts: [],
                 planCalendar: nil,
                 restDayBudget: .standard
@@ -474,6 +801,7 @@ final class TalliesTests: XCTestCase {
                 from: try day("2026-01-05"),
                 through: try day("2026-01-05"),
                 timeZone: .gmt,
+                today: try day(TalliesTests.defaultToday),
                 workouts: [],
                 scoreLedgers: [mismatchedKey: try ledger(points: 80, workoutID: workoutID)],
                 planCalendar: nil,
