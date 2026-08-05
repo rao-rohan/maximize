@@ -553,6 +553,7 @@ feature was governed by a plan that could not exist).
 | MAX-128 … MAX-143 | The lifting build, decomposed from MAX-109 | MAX-109 | see below ✅ |
 | MAX-126 | **"No verdict by design" is a state** — a lift stops being drawn and spoken as a run awaiting a score | MAX-111 | **Opus** ✅ |
 | MAX-150 | **Copy and absence voice: the chat and dashboard surfaces** — split from MAX-104 so the finished half does not wait behind the lifting build | MAX-104, split | Sonnet ✅ |
+| MAX-152 | **The chat's waiting and streaming states** — the full ladder between "sent" and "answered", and every stream failure as a designed state with words | Owner | **Opus** |
 | MAX-154 | **Error handling, audited app-wide** — every failure path outside chat swept as a set, the failure-to-copy mapping moved into the core, and the inventory recorded below | Owner | **Opus** |
 | MAX-155 | **An HTTP status code reaches the athlete's screen** — `PlanProposalDrafting.description` renders `ScoringModelError.description` verbatim on the plan proposal card. Chat surface, so it waits for MAX-152 | MAX-154 | Sonnet |
 | MAX-156 | **`ScoringError.description` interpolates a workout identifier and a date** — latent, not leaking today, and one `.public` log line away from being a real one | MAX-154 | Sonnet |
@@ -1528,6 +1529,112 @@ it made before (a rename of the argument, not the call site's shape) as far as a
 line-by-line read can confirm. **This is "it compiles and its tests pass, as far as
 reading the diff can tell" — not a claim CI has confirmed**, per CLAUDE.md's own
 distinction between the two sentences.
+
+**MAX-152 — the chat's waiting and streaming states, and what a failure says.** The owner
+asked for a loading state on a par with Claude's own, and — mid-ticket — for error
+handling good enough that "the app should be good to use". Those turn out to be one
+ticket, because both are the same question: between pressing send and reading an answer,
+what does the app actually know, and does it say so.
+
+**Before: one bit, three states, and a diagnostic.** `ChatModel.isStreaming` was asked to
+mean "the request is open and nothing has come back", "text is arriving" and "text stopped
+arriving but the connection is alive" simultaneously, and `WorkoutChatStreamingBubble`
+drew the only thing available from a bit and a string — an ellipsis — for all three. On
+the failure side, every `ChatStreamError` but one reached the transcript as
+`ChatStreamError.description`: a `CustomStringConvertible` written for a developer reading
+a value, complete with `(401)`, `stop_reason: refusal`, and the sentence the owner
+actually hit on a device, *"The response was not a recognizable streaming reply"*.
+
+**`ChatReplyPhase` is the ladder and `ChatReplyProgress` the only thing that moves it** —
+eight rungs, in the core, decided from stream events and nothing else. The view branches
+on the rung it is handed; it reads no timing and inspects no stream internals, which is
+CLAUDE.md's central rule applied to a loading state rather than to a calculation.
+`isStreaming` survives as a computed `replyPhase.isLive`, because two flags describing one
+request are two flags that can disagree, and this one gates the composer.
+
+**How a stall is detected, and the alternative that was rejected.** The obvious design is
+a wall-clock watchdog: start a `Task.sleep`, call it stalled after N seconds of silence.
+It was rejected because it puts the decision behind a task racing a stream, which is the
+one shape this repo's CI cannot verify honestly — a test either sleeps (slow, flaky) or
+injects a fake clock and proves only that the fake was called. The Messages API already
+sends `ping` frames on an open stream, and a ping *is* the transport saying "I am here and
+I have nothing for you" — the exact fact that separates a stalled reply from a working
+one, delivered as an event rather than inferred from elapsed time. So `ChatStreamDecoder`
+forwards it (it was dropped before), `ChatStreamEvent` gains a payload-free `.heartbeat`,
+and `ChatReplyProgress.heartbeatsBeforeStall` — **two** consecutive beats with no token
+between them, because the API may legitimately ping mid-reply and one beat would flag a
+healthy stream — turns them into `.stalled`. The whole rule is a pure function tested to
+the beat. **The cost is stated rather than hidden:** a connection that hangs and sends no
+pings stays `.streaming` until the client's own idle timeout turns it into
+`.failed(.interrupted)`, and whether real pings arrive during a real stall is a device
+question, in the PR.
+
+**A beat before the first token is not a stall.** "The model has not started speaking" is
+what waiting already says truthfully, and calling that stalled would invent a fault out of
+a model that is thinking — the state the indicator exists for. A stall is specifically a
+reply that started and stopped.
+
+**Why the animation is a shimmer, what was taken from Claude, and where it differs.**
+Claude marks thinking with a gradient sweep travelling through text rather than with
+pulsing dots or three bouncing ones, and that is the choice worth taking — for a reason
+that is structural rather than aesthetic. **A shimmer needs words underneath it to travel
+across.** Dots say "something is happening" and nothing else; a sweep over
+`ChatConversationCopy.awaitingFirstReply` carries the state in copy first and motion
+second, which is CLAUDE.md's "no information carried by hue alone" one channel over — a
+state carried only by an animation vanishes the moment somebody turns animation off. It is
+also ambient rather than metronomic: a pulse has a beat, and a beat in the corner of the
+eye is what makes a loader nag. **Where it deliberately differs:** there is a live
+accessibility complaint against Claude's own shimmer for being distracting
+(anthropics/claude-code#6038), so this one runs slower than the usual implementations of
+the technique (`Motion.waitingSweep`, 1.4s linear, no autoreverse), is **withheld
+entirely** under both Reduce Motion and Reduce Transparency rather than shortened, and
+ends hard — the instant the first token lands the indicator is gone, replaced by the
+words, because an indicator that keeps shimmering beside arriving text is an app talking
+over its own answer. **Rejected: staggered dots at 100–150ms**, which is the generic
+loader this is deliberately not, and which fails the "words underneath" test outright.
+**Rejected: `markiv/SwiftUI-Shimmer` as a dependency** — read for the technique (gradient,
+mask, offset animated across the width), not added; this package has none.
+
+`App/DesignSystem/Motion.swift` gains the `Motion` ramp alongside MAX-070's
+`accessibleAnimation` seam, for the reason `Spacing` and the colour tokens exist: a call
+site should say which motion it is, not how many milliseconds. Four entries, one per job.
+
+**Every failure is now a designed state with words, and no case falls through.**
+`ChatFailureNotice` is the single mapping from `ChatStreamError` to a sentence, exhaustive
+with no `default`, plus three notices for the failures that are not stream failures (an
+empty reply, a reply that could not be saved, a message that could not be sent). The copy
+rules are tested mechanically: no numerals anywhere (the two cases carrying a status code
+never print it), no wire vocabulary, no parentheticals, nothing interpolated — so no
+health data can reach a notice by construction — every sentence distinct, and none of them
+equal to the `description` it replaced. The four states of a key are four sentences: no
+key stored (the shipped subject-worded sentences, moved rather than rewritten), a
+keychain that would not answer, a key the server rejected, and — separately — being rate
+limited. "Add a key" and "replace the key you have" are different actions, and a single
+"check your API key" would send the athlete to stare at something present and
+correct-looking.
+
+**Retry is decided, not defaulted: no failure ever re-asks itself.**
+`PlanProposalDrafting`'s one-automatic-retry policy was read and deliberately **not**
+followed, on that type's own reasoning: its retry exists to put a *correction* in front of
+the model when a reply's content could not be used, and none of these failures are content
+failures. There is nothing to correct in "you are offline", so a second automatic call is
+the same call, and a loop of them is A14's named failure mode — spending the owner's
+credit unasked. So `canRetry` gates a button, one call per tap, and it is false wherever
+`ChatStreamError.isWorthRetrying` is false: a missing key, a rejected key, a refusal and
+an unreadable response all say what to do instead rather than offering a button guaranteed
+to fail identically. A retry asks the same question from the same history (the failed turn
+was never persisted, so nothing moved), appends no second question bubble, and **erases
+nothing** — the dropped attempt and its notice stay above the answer that finally arrives,
+which is the additive treatment D8 gives a correction one surface over.
+
+**Reported, not done.** The two files outside this ticket's named scope that it had to
+touch are `ChatStreamEvent.swift` and `ChatStreamDecoder.swift` — a payload-free case and
+one `switch` arm, both additive, plus the two MAX-107 regression tests whose expectations
+now name the `ping` they always contained. Nothing else in the stream path moved. And the
+stalled rung is the one part of the ladder CI cannot reach end to end: `ChatStreamDecoder`
+is proved to emit heartbeats and `ChatReplyProgress` is proved to fold them into
+`.stalled`, but whether the live API emits them during a genuine stall is only answerable
+on a device.
 
 ### Phase 9 — Lifting (MAX-109)
 
