@@ -497,7 +497,14 @@ final class PlanProposalTests: XCTestCase {
             proposal.longRunArc.map(\.index)
         )
         for weekday in Weekday.allCases {
-            XCTAssertEqual(plan.weeklyTemplate.session(on: weekday), proposal[weekday])
+            // `.run` because a proposal can only prescribe the run slot: MAX-099's
+            // vocabulary derives from `ScheduledSessionKind.prescribable`, which excludes
+            // `.lift` until MAX-141 widens it. Asserting the lift slot here would be
+            // asserting a slot this type cannot yet fill.
+            XCTAssertEqual(
+                plan.weeklyTemplate.session(on: weekday, for: .run),
+                proposal[weekday]
+            )
         }
     }
 
