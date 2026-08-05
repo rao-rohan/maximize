@@ -508,7 +508,7 @@ final class LiftRubricVocabularyTests: XCTestCase {
         let tuesday = try XCTUnwrap(draft.week.first { $0.weekday == .tuesday })
         XCTAssertEqual(tuesday.durationSeconds, 2_700)
         XCTAssertEqual(try tuesday.session().durationSeconds, 2_700)
-        XCTAssertEqual(tuesday.liftSession.durationSeconds, 3_600)
+        XCTAssertEqual(try tuesday.liftSession().durationSeconds, 3_600)
     }
 
     /// The arc rebuilds a long-run session to substitute its distance. Everything else
