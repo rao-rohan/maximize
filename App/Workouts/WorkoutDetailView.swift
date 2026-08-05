@@ -69,6 +69,12 @@ struct WorkoutDetailView: View {
         case let .loaded(data):
             VStack(alignment: .leading, spacing: LayoutMetrics.sectionSpacing) {
                 VerdictHeaderView(verdict: data.verdict, distanceUnit: data.distanceUnit)
+                // Directly under the header, because on a lift the header is where the
+                // question is asked and this is where it is answered (A22). Renders
+                // nothing at all on a run — `MuscleGroupEntryData.isShown`.
+                MuscleGroupEntryView(data: data.muscleGroups) { groups in
+                    Task { await model.setMuscleGroups(groups) }
+                }
                 HRCurveView(chartData: data.heartRateChart)
                 CadenceBandView(data: data.cadence)
                 RouteMapView(data: data.routeMap)
