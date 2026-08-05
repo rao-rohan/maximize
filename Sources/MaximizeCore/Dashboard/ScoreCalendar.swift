@@ -271,7 +271,7 @@ public struct ScoreCalendarDay: Hashable, Sendable, Identifiable {
 /// converted to rest — two notions of the same weekly budget is exactly the D2 drift
 /// CLAUDE.md warns about, just wearing a calendar's clothes instead of a chart's. So
 /// this type does not read a stored `RestDayOverride`; like `TalliesCalculator`, it
-/// calls `RestDayBudgeting.convertingMissedDays` itself, over the same widened,
+/// calls `RestDayBudgeting.convertingMissedObligations` itself, over the same widened,
 /// whole-week range, and both types are pure functions of the same records. A caller
 /// already assembling a `TalliesInput` for the same interval already has everything
 /// `resolve` below needs.
@@ -428,9 +428,13 @@ public enum ScoreCalendar {
             planDaysInRange[planDay.date] = planDay
         }
 
-        let overrides = try RestDayBudgeting.convertingMissedDays(
+        let conversions = try RestDayBudgeting.convertingMissedObligations(
             planDays: expandedPlanDays,
-            workoutDays: Set(workoutsByDay.keys),
+            // The identical mapping `TalliesCalculator` builds for the identical call, so
+            // the two cannot disagree about which obligations the budget was offered —
+            // the same D2 argument that had both types recompute the budget rather than
+            // read a stored override.
+            workoutDisciplines: TalliesCalculator.workoutDisciplines(workoutsByDay),
             budget: restDayBudget,
             createdAt: restDayBudgetingStamp,
             // The whole week is still handed over (C1), so the week's *shape* — which
@@ -439,7 +443,13 @@ public enum ScoreCalendar {
             // cannot be a miss, so it cannot be forgiven.
             outcomesUnknownFrom: today
         )
-        return (planDaysInRange, Set(overrides.map(\.date)))
+        // **The run slot's conversions only**, because every state this set feeds —
+        // `.convertedRest` against `.missed` — describes `planDay.scheduledSession`, the
+        // run ask. A forgiven *lift* has no cell state to land in until MAX-135 gives the
+        // mixed day one, and folding it in here would silently paint a day's run as
+        // forgiven because its lift was. The budget itself is shared and spent over both
+        // slots (§6.4); it is only the rendering that is still one-slot.
+        return (planDaysInRange, Set(conversions.filter { $0.discipline == .run }.map(\.date)))
     }
 
     // MARK: - Per-day state
@@ -510,28 +520,17 @@ public enum ScoreCalendar {
             : .divergent(prescribed: prescribed, performed: performed)
     }
 
-    /// The best-banded workout of the day, deterministically. "Best" mirrors
-    /// `TalliesCalculator.effectiveDayTally`'s own "contains effective" generosity: a
-    /// day with two workouts is judged by its best session, not dragged down by a
-    /// warmup or a second, worse effort. Ties (same band) break on earliest start, so
-    /// the result never depends on `dayWorkouts`' input order.
+    /// The best-banded workout of the day, deterministically.
+    ///
+    /// **`DayObligationResolver.bestScored` is now the one implementation** (MAX-134):
+    /// the resolver has to pick the same workout per obligation that this picks per day,
+    /// and §7.3 is explicit that the calendar and the tallies must not each compute their
+    /// own answer to the same question. "Best" still mirrors the effective tally's own
+    /// "contains effective" generosity — a day with two workouts is judged by its best
+    /// session, not dragged down by a warmup or a second, worse effort — and ties (same
+    /// band) still break on earliest start, so the result never depends on
+    /// `dayWorkouts`' input order.
     private static func bestScoredPair(_ pairs: [(Workout, ScoreLedger)]) -> (Workout, ScoreLedger)? {
-        pairs.min { lhs, rhs in
-            let lhsRank = bandRank(lhs.1.automatic.band)
-            let rhsRank = bandRank(rhs.1.automatic.band)
-            if lhsRank != rhsRank { return lhsRank < rhsRank }
-            return lhs.0.start < rhs.0.start
-        }
-    }
-
-    /// Ascending cost — index 0 is the best band. Local to this type: nothing else
-    /// needs an ordering over `ScoreBand`, and adding `Comparable` to the type itself
-    /// would suggest a general-purpose ordering that PRD D4 never asked for.
-    private static func bandRank(_ band: ScoreBand) -> Int {
-        switch band {
-        case .effective: return 0
-        case .marginal: return 1
-        case .ineffective: return 2
-        }
+        DayObligationResolver.bestScored(pairs)
     }
 }

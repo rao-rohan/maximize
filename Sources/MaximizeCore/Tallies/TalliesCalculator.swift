@@ -39,11 +39,11 @@ public struct TalliesInput: Sendable {
     ///
     /// Three things depend on it:
     ///
-    /// - `EffectiveDayTally` never counts a day on or after `today` — see
-    ///   `TalliesCalculator.effectiveDayTally`. A day whose outcome is not yet in
-    ///   cannot be judged, so it is withheld from both sides of the ratio, strictly:
-    ///   today itself counts as not yet decided, and a session scheduled for this
-    ///   evening has not been skipped.
+    /// - `EffectiveObligationTally` never counts a day on or after `today` — see
+    ///   `TalliesCalculator.effectiveObligationTally`. A day whose outcome is not yet in
+    ///   cannot be judged, so **none of its obligations** reach either side of the ratio,
+    ///   strictly: today itself counts as not yet decided, and a session scheduled for
+    ///   this evening has not been skipped.
     /// - `RestDayBudgeting`'s weekly allowance is never spent on a day on or after
     ///   `today` — see `TalliesCalculator.resolveRestDayConversions`, which threads
     ///   this through as `outcomesUnknownFrom` (C3). Same strict boundary, same reason.
@@ -107,14 +107,32 @@ public struct TalliesInput: Sendable {
 /// Computes `Tallies` (FR-3.4, §8) from stored records — never from a counter that
 /// could drift from them.
 ///
+/// ## The unit of account is the obligation, not the day (A19, LIFTING-SPEC §6)
+///
+/// A Tuesday prescribing a run **and** a lift is two obligations, and meeting one is not
+/// meeting the day. Every figure below that counts the plan's asks — the effective ratio
+/// and the streak — resolves each obligation independently through `DayObligationResolver`,
+/// against the workouts of its own discipline, and rolls the day up from those.
+///
+/// **Two attempts at *one* obligation still resolve generously**, and that is a different
+/// question with a different answer: a warm-up jog plus a real run is one ask attempted
+/// twice, judged best-of, exactly as before. See `DayObligations.streakContribution` for
+/// why the two rules point in opposite directions on purpose.
+///
+/// `workoutDays` and `averageScore` are untouched by this: one asks whether the athlete
+/// showed up, the other averages the scores that exist. Neither counts the plan's asks,
+/// so neither has a unit to change.
+///
 /// ## The streak definition (the PRD leaves this open; this is the decision, and why)
 ///
 /// Walking backward day by day from the walk's **start day** (defined below, not
-/// always `through`), each day is one of four things:
+/// always `through`), each day is rolled up from its obligations (§6.3: any obligation
+/// missed-or-below-threshold breaks it; every obligation met extends it) into one of
+/// four things:
 ///
-/// 1. **Neutral — no ask.** No plan governs the day, or the plan's ask *was* rest
-///    (scheduled, or converted from a miss by MAX-016's weekly budget). The streak
-///    neither grows nor breaks; the walk simply steps to the day before. **This is
+/// 1. **Neutral — no ask.** No plan governs the day, or the plan's ask *was* rest on
+///    both slots (scheduled, or converted from a miss by MAX-016's weekly budget). The
+///    streak neither grows nor breaks; the walk simply steps to the day before. **This is
 ///    the load-bearing choice**: a streak that reset on a plan's own prescribed rest
 ///    day would punish the athlete for following the plan, which is worse than
 ///    useless — it is hostile to the thing the plan is for.
@@ -123,13 +141,16 @@ public struct TalliesInput: Sendable {
 ///    day: the athlete did not skip anything, so nothing here should cost them a
 ///    streak they may well still be building — but there is also no verdict yet to
 ///    count *for* them. The walk continues without extending the streak.
-/// 3. **Extends the streak.** A scheduled, non-rest day with a workout whose ledger
+/// 3. **Extends the streak.** A day with at least one obligation, **every** one of which
+///    was met — a workout of that obligation's own discipline whose ledger
 ///    (`ScoreLedger.isEffective` — the manual correction where one exists, else the
 ///    auto-score, per §8) clears the plan's threshold.
-/// 4. **Breaks the streak.** Either nothing was recorded and the day was not folded
-///    into rest by the budget (a genuine, unconverted miss), or a workout happened
-///    and was scored *below* the threshold. Both are real verdicts against the
-///    plan's ask, and a streak that skipped past them would stop meaning anything.
+/// 4. **Breaks the streak.** **Any** obligation of the day either had nothing of its
+///    discipline recorded and was not folded into rest by the budget (a genuine,
+///    unconverted miss), or was scored *below* the threshold. Both are real verdicts
+///    against the plan's ask, and a streak that skipped past them would stop meaning
+///    anything. A streak that survived skipping every lift would not be a streak of
+///    following the plan.
 ///
 /// The walk stops at whichever comes first: a break, or `from`. **A caller wanting an
 /// accurate streak must supply enough lookback for it not to be truncated** — the same
@@ -180,13 +201,14 @@ public struct TalliesInput: Sendable {
 ///   streak is `0` without the walk running at all — there is no decided day to start
 ///   from.
 ///
-/// ## Effective days (rule 2: converted rest is excluded, not merely spared)
+/// ## Effective obligations (rule 2: converted rest is excluded, not merely spared)
 ///
-/// A day MAX-016 converted is dropped from **both** `EffectiveDayTally.effectiveCount`
-/// and `.eligibleCount` — not counted as effective, not counted as a miss either. The
-/// alternative (counting it toward `eligibleCount` but not `effectiveCount`) would
-/// still drag the rate down, which is exactly the "penalty" rule 2 forbids. The same
-/// exclusion applies to the streak: see case 1 above.
+/// An obligation MAX-016 converted is dropped from **both**
+/// `EffectiveObligationTally.effectiveCount` and `.eligibleCount` — not counted as
+/// effective, not counted as a miss either. The alternative (counting it toward
+/// `eligibleCount` but not `effectiveCount`) would still drag the rate down, which is
+/// exactly the "penalty" rule 2 forbids. The same exclusion applies to the streak: see
+/// case 1 above.
 ///
 /// ## What "effective" reads (rule 1: annotations win, the auto-score stays recorded)
 ///
@@ -198,8 +220,8 @@ public struct TalliesInput: Sendable {
 /// untouched by every tally here) while the tallies themselves use the correction.
 public enum TalliesCalculator {
     /// Discarded by every reader here — `RestDayBudgeting` only stamps this on the
-    /// `RestDayOverride` values it returns, and this type reads nothing off them but
-    /// their dates. A fixed constant (never `Date()`) keeps the call deterministic
+    /// `ConvertedObligation` values it returns, and this type reads nothing off them but
+    /// their identity. A fixed constant (never `Date()`) keeps the call deterministic
     /// without asking every caller to thread through a timestamp that cannot affect
     /// the answer.
     private static let restDayBudgetingStamp = Date(timeIntervalSince1970: 0)
@@ -212,29 +234,33 @@ public enum TalliesCalculator {
         }
 
         let queriedDays = try CalendarDay.days(from: input.from, through: input.through)
+        // Still **days**, and deliberately: "did you show up" is a question about the
+        // athlete's week, not about the plan's asks, so a day with a run and a lift is
+        // one day here even though it is two obligations below. A19 moved the unit of
+        // account for *adherence*; it did not make this figure mean something else.
         let workoutDays = queriedDays.filter { workoutsByDay[$0] != nil }.count
         let averageScore = try computeAverageScore(queriedDays: queriedDays, workoutsByDay: workoutsByDay, input: input)
 
         // C1: resolve rest-day budgeting over the whole Monday-first weeks touching
         // the interval, never a slice of one. See `TalliesInput`'s documentation for
         // the matching obligation this places on its `workouts`.
-        let (planDaysInRange, convertedDates) = try resolveRestDayConversions(
+        let (planDaysInRange, convertedObligations) = try resolveRestDayConversions(
             workoutsByDay: workoutsByDay,
             input: input
         )
 
-        let effectiveDays = try effectiveDayTally(
+        let effectiveDays = try effectiveObligationTally(
             queriedDays: queriedDays,
             workoutsByDay: workoutsByDay,
             planDaysInRange: planDaysInRange,
-            convertedDates: convertedDates,
+            convertedObligations: convertedObligations,
             input: input
         )
 
         let currentStreak = try streak(
             workoutsByDay: workoutsByDay,
             planDaysInRange: planDaysInRange,
-            convertedDates: convertedDates,
+            convertedObligations: convertedObligations,
             input: input
         )
 
@@ -275,7 +301,7 @@ public enum TalliesCalculator {
     private static func resolveRestDayConversions(
         workoutsByDay: [CalendarDay: [Workout]],
         input: TalliesInput
-    ) throws -> (planDaysInRange: [CalendarDay: PlanDay], convertedDates: Set<CalendarDay>) {
+    ) throws -> (planDaysInRange: [CalendarDay: PlanDay], convertedObligations: Set<ObligationID>) {
         guard let planCalendar = input.planCalendar else { return ([:], []) }
 
         let expandedStart = try input.from.startOfTrainingWeek()
@@ -287,9 +313,9 @@ public enum TalliesCalculator {
             planDaysInRange[planDay.date] = planDay
         }
 
-        let overrides = try RestDayBudgeting.convertingMissedDays(
+        let conversions = try RestDayBudgeting.convertingMissedObligations(
             planDays: expandedPlanDays,
-            workoutDays: Set(workoutsByDay.keys),
+            workoutDisciplines: workoutDisciplines(workoutsByDay),
             budget: input.restDayBudget,
             createdAt: restDayBudgetingStamp,
             // C3: a day on or after `today` has not happened yet, so it is never a
@@ -298,41 +324,82 @@ public enum TalliesCalculator {
             // rest day) is unaffected. Mirrors `ScoreCalendar.resolveRestDayConversions`.
             outcomesUnknownFrom: input.today
         )
-        return (planDaysInRange, Set(overrides.map(\.date)))
+        return (planDaysInRange, Set(conversions.map(\.id)))
+    }
+
+    /// Which disciplines each day actually saw a workout in (A19/§6.2).
+    ///
+    /// The one place the day-level "was anything recorded" test becomes a per-slot one.
+    /// `ScoreCalendar` derives the identical mapping for the identical call, so the two
+    /// cannot disagree about which obligations the budget was offered.
+    static func workoutDisciplines(
+        _ workoutsByDay: [CalendarDay: [Workout]]
+    ) -> [CalendarDay: Set<Discipline>] {
+        workoutsByDay.mapValues { workouts in
+            Set(workouts.map { $0.activityType.discipline })
+        }
     }
 
     // MARK: - Effective days
 
-    private static func effectiveDayTally(
+    private static func effectiveObligationTally(
         queriedDays: [CalendarDay],
         workoutsByDay: [CalendarDay: [Workout]],
         planDaysInRange: [CalendarDay: PlanDay],
-        convertedDates: Set<CalendarDay>,
+        convertedObligations: Set<ObligationID>,
         input: TalliesInput
-    ) throws -> EffectiveDayTally {
+    ) throws -> EffectiveObligationTally {
         var effectiveCount = 0
         var eligibleCount = 0
         for day in queriedDays {
-            // MAX-110: a day on or after `today` has no outcome yet, so it is neither
-            // effective nor a miss — counting it toward `eligibleCount` would measure
-            // the rate against chances that have not happened. Strict, matching
-            // `ScoreCalendar`: today itself is not yet decided.
+            // MAX-110: a day on or after `today` has no outcome yet, so nothing it asked
+            // for is either effective or a miss — counting it toward `eligibleCount`
+            // would measure the rate against chances that have not happened. Strict,
+            // matching `ScoreCalendar`: today itself is not yet decided. Kept as a
+            // day-level guard rather than left to `.notYetDue` because it must also
+            // withhold a session *already performed* today, whose obligation the
+            // resolver would otherwise decide.
             guard day < input.today else { continue }
-            guard let planDay = planDaysInRange[day], planDay.canBeMissed else { continue }
-            guard !convertedDates.contains(day) else { continue }
 
-            let dayWorkouts = workoutsByDay[day] ?? []
-            let dayLedgers = dayWorkouts.compactMap { input.scoreLedgers[$0.id] }
-            if !dayWorkouts.isEmpty, dayLedgers.isEmpty {
-                continue // recorded but unscored: no verdict either way yet
-            }
-
-            eligibleCount += 1
-            if dayLedgers.contains(where: \.isEffective) {
-                effectiveCount += 1
-            }
+            // A19: each obligation contributes independently, so a Tuesday asking for a
+            // run and a lift adds two to the denominator and one to the numerator when
+            // only the run was met. Every exclusion the day-level rule made — converted
+            // rest, recorded-but-unscored, a day the plan does not govern — survives as
+            // an `ObligationOutcome` that `isEligible` answers false for.
+            let obligations = resolveObligations(
+                on: day,
+                workoutsByDay: workoutsByDay,
+                planDaysInRange: planDaysInRange,
+                convertedObligations: convertedObligations,
+                input: input
+            )
+            eligibleCount += obligations.eligibleCount
+            effectiveCount += obligations.effectiveCount
         }
-        return try EffectiveDayTally(effectiveCount: effectiveCount, eligibleCount: eligibleCount)
+        return try EffectiveObligationTally(
+            effectiveCount: effectiveCount,
+            eligibleCount: eligibleCount
+        )
+    }
+
+    /// One day's obligations, resolved through the shared roll-up (§7.3). The streak and
+    /// the ratio above both read this, and so does the calendar's mixed-day cell
+    /// (MAX-135) — which is the whole point of there being one function.
+    private static func resolveObligations(
+        on day: CalendarDay,
+        workoutsByDay: [CalendarDay: [Workout]],
+        planDaysInRange: [CalendarDay: PlanDay],
+        convertedObligations: Set<ObligationID>,
+        input: TalliesInput
+    ) -> DayObligations {
+        DayObligationResolver.resolve(
+            date: day,
+            planDay: planDaysInRange[day],
+            workouts: workoutsByDay[day] ?? [],
+            scoreLedgers: input.scoreLedgers,
+            convertedObligations: convertedObligations,
+            outcomeIsKnown: day < input.today
+        )
     }
 
     // MARK: - Streak
@@ -340,7 +407,7 @@ public enum TalliesCalculator {
     private static func streak(
         workoutsByDay: [CalendarDay: [Workout]],
         planDaysInRange: [CalendarDay: PlanDay],
-        convertedDates: Set<CalendarDay>,
+        convertedObligations: Set<ObligationID>,
         input: TalliesInput
     ) throws -> Int {
         // MAX-110: see the type's "Where the walk starts, and the asymmetry `today`
@@ -352,31 +419,29 @@ public enum TalliesCalculator {
         var streak = 0
         var day = walkStart
         while true {
-            if let planDay = planDaysInRange[day], planDay.canBeMissed {
-                let dayWorkouts = workoutsByDay[day] ?? []
-                if dayWorkouts.isEmpty {
-                    if day == input.today {
-                        // The one exception to case 4: `today` has not ended, so its
-                        // emptiness is not (yet) evidence of a miss. Neutral — the walk
-                        // steps to yesterday without extending or breaking. Yesterday
-                        // and every day before it get no such exception.
-                    } else if !convertedDates.contains(day) {
-                        break // genuine, unconverted miss
-                    }
-                    // else: converted rest — neutral
-                } else {
-                    let dayLedgers = dayWorkouts.compactMap { input.scoreLedgers[$0.id] }
-                    if !dayLedgers.isEmpty {
-                        if dayLedgers.contains(where: \.isEffective) {
-                            streak += 1
-                        } else {
-                            break // scored below the plan's threshold — decided, even today
-                        }
-                    }
-                    // else: recorded but unscored — neutral, fall through
-                }
+            // A19/§6.3: the four cases the walk used to spell out are now the day's
+            // roll-up over its obligations — AND at the day level, so a day that met its
+            // run and skipped its lift breaks the streak rather than extending it. The
+            // streak still counts **days**, not obligations: a fully-met Tuesday asking
+            // for both is one day of following the plan, not two.
+            let obligations = resolveObligations(
+                on: day,
+                workoutsByDay: workoutsByDay,
+                planDaysInRange: planDaysInRange,
+                convertedObligations: convertedObligations,
+                input: input
+            )
+            switch obligations.streakContribution {
+            case .extends:
+                streak += 1
+            case .breaks:
+                return streak
+            case .neutral:
+                // No plan governs the day, or it asked only for rest, or the budget
+                // converted what it asked for, or a workout is recorded and unscored, or
+                // — on `today` alone — nothing is recorded yet and the day has not ended.
+                break
             }
-            // else: no plan governs the day, or it was scheduled rest — neutral
             guard day != input.from else { break }
             day = try day.adding(days: -1)
         }

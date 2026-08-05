@@ -275,7 +275,7 @@ final class TrainingContextAgreementTests: XCTestCase {
         XCTAssertFalse(sheet.contains("Average score: 0.0"), sheet)
     }
 
-    /// Likewise for the effective-day ratio: `EffectiveDayTally.rate` is nil when nothing
+    /// Likewise for the effective-day ratio: `EffectiveObligationTally.rate` is nil when nothing
     /// was eligible, `TrendTileData` withholds the tile, and the roll-up says which kind
     /// of nothing it is rather than printing "0/0".
     func testAnEmptyEffectiveDayRatioIsWithheldOnBothSurfaces() throws {

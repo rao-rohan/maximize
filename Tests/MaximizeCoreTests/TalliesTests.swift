@@ -645,7 +645,7 @@ final class TalliesTests: XCTestCase {
     /// from `ScoreCalendar.resolve`'s own output — so a future change that moves the
     /// two calculators out of step fails here even if neither suite's hand-worked
     /// numbers happen to still be right.
-    func testEffectiveDayTallyAgreesWithTheScoreCalendarOverTheSameInterval() throws {
+    func testEffectiveObligationTallyAgreesWithTheScoreCalendarOverTheSameInterval() throws {
         let plan = try c1Plan()
         let planCalendar = try calendar(plan)
         let from = try day("2026-01-05")
@@ -817,14 +817,14 @@ final class TalliesTests: XCTestCase {
         )
     }
 
-    // MARK: - EffectiveDayTally / TrainingWeek / Tallies invariants
+    // MARK: - EffectiveObligationTally / TrainingWeek / Tallies invariants
 
-    func testEffectiveDayTallyRejectsEffectiveCountExceedingEligibleCount() throws {
-        assertThrows(.inconsistent, try EffectiveDayTally(effectiveCount: 2, eligibleCount: 1))
+    func testEffectiveObligationTallyRejectsEffectiveCountExceedingEligibleCount() throws {
+        assertThrows(.inconsistent, try EffectiveObligationTally(effectiveCount: 2, eligibleCount: 1))
     }
 
-    func testEffectiveDayTallyRateIsNilWhenNothingWasEligible() throws {
-        let tally = try EffectiveDayTally(effectiveCount: 0, eligibleCount: 0)
+    func testEffectiveObligationTallyRateIsNilWhenNothingWasEligible() throws {
+        let tally = try EffectiveObligationTally(effectiveCount: 0, eligibleCount: 0)
         XCTAssertNil(tally.rate)
     }
 
@@ -842,7 +842,7 @@ final class TalliesTests: XCTestCase {
                 from: try day("2026-01-10"),
                 through: try day("2026-01-05"),
                 workoutDays: 0,
-                effectiveDays: try EffectiveDayTally(effectiveCount: 0, eligibleCount: 0),
+                effectiveDays: try EffectiveObligationTally(effectiveCount: 0, eligibleCount: 0),
                 averageScore: nil,
                 currentStreak: 0,
                 currentWeek: try TrainingWeek(start: try day("2026-01-05"), end: try day("2026-01-11"), arcWeekIndex: nil)

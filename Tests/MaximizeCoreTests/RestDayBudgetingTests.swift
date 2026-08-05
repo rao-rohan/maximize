@@ -60,9 +60,9 @@ final class RestDayBudgetingTests: XCTestCase {
     ///
     /// leaving Tue (`.hard`) and Thu (`.long`) — the two most expensive days — red.
     func testLeastCostlyOrderingSpendsTierThenAdjacencyThenDate() throws {
-        let overrides = try RestDayBudgeting.convertingMissedDays(
+        let overrides = try RestDayBudgeting.convertingMissedObligations(
             planDays: fixtureWeek(),
-            workoutDays: [],
+            workoutDisciplines: [:],
             budget: budget(3),
             createdAt: createdAt
         )
@@ -75,7 +75,10 @@ final class RestDayBudgetingTests: XCTestCase {
         let converted = Set(overrides.map(\.date.description))
         XCTAssertFalse(converted.contains("2026-01-06"), "Tuesday's hard session stays red")
         XCTAssertFalse(converted.contains("2026-01-08"), "Thursday's long run stays red")
-        XCTAssertTrue(overrides.allSatisfy(\.convertedFromMissed))
+        XCTAssertTrue(
+            overrides.allSatisfy { $0.discipline == .run },
+            "this week prescribes nothing in the lift slot, so every conversion is a run's"
+        )
     }
 
     /// Two missed days of the same kind and the same adjacency can only be broken by
@@ -90,9 +93,9 @@ final class RestDayBudgetingTests: XCTestCase {
             try planDay("2026-01-09", .rest),
         ]
 
-        let overrides = try RestDayBudgeting.convertingMissedDays(
+        let overrides = try RestDayBudgeting.convertingMissedObligations(
             planDays: days,
-            workoutDays: [],
+            workoutDisciplines: [:],
             budget: budget(1),
             createdAt: createdAt
         )
@@ -103,9 +106,9 @@ final class RestDayBudgetingTests: XCTestCase {
     // MARK: - Budget boundaries
 
     func testBudgetZeroConvertsNothingEvenWithMisses() throws {
-        let overrides = try RestDayBudgeting.convertingMissedDays(
+        let overrides = try RestDayBudgeting.convertingMissedObligations(
             planDays: fixtureWeek(),
-            workoutDays: [],
+            workoutDisciplines: [:],
             budget: budget(0),
             createdAt: createdAt
         )
@@ -114,11 +117,14 @@ final class RestDayBudgetingTests: XCTestCase {
 
     func testAWeekWithNoMissesConvertsNothing() throws {
         let week = try fixtureWeek()
-        let workoutDays = Set(week.filter(\.canBeMissed).map(\.date))
+        // A19: showing up is now recorded per slot, so covering this week's obligations
+        // means a **run** on each day that asked for one.
+        let ran = week.filter(\.canBeMissed).map(\.date)
+        let workoutDisciplines = Dictionary(uniqueKeysWithValues: ran.map { ($0, Set([Discipline.run])) })
 
-        let overrides = try RestDayBudgeting.convertingMissedDays(
+        let overrides = try RestDayBudgeting.convertingMissedObligations(
             planDays: week,
-            workoutDays: workoutDays,
+            workoutDisciplines: workoutDisciplines,
             budget: budget(5),
             createdAt: createdAt
         )
@@ -129,9 +135,9 @@ final class RestDayBudgetingTests: XCTestCase {
     /// consumes budget and never receives an override, whether or not it happens to
     /// coincide with a logged workout.
     func testAScheduledRestDayIsNeverConverted() throws {
-        let overrides = try RestDayBudgeting.convertingMissedDays(
+        let overrides = try RestDayBudgeting.convertingMissedObligations(
             planDays: fixtureWeek(),
-            workoutDays: [],
+            workoutDisciplines: [:],
             budget: budget(7),
             createdAt: createdAt
         )
@@ -142,9 +148,9 @@ final class RestDayBudgetingTests: XCTestCase {
     /// Budget larger than the number of missed days converts every missed day and
     /// stops — it does not manufacture overrides for days that were not missed.
     func testBudgetLargerThanMissCountConvertsExactlyTheMisses() throws {
-        let overrides = try RestDayBudgeting.convertingMissedDays(
+        let overrides = try RestDayBudgeting.convertingMissedObligations(
             planDays: fixtureWeek(),
-            workoutDays: [],
+            workoutDisciplines: [:],
             budget: budget(7),
             createdAt: createdAt
         )
@@ -169,9 +175,9 @@ final class RestDayBudgetingTests: XCTestCase {
             try planDay("2026-01-18", .rest),  // Sun
         ]
 
-        let overrides = try RestDayBudgeting.convertingMissedDays(
+        let overrides = try RestDayBudgeting.convertingMissedObligations(
             planDays: weekOne + weekTwo,
-            workoutDays: [],
+            workoutDisciplines: [:],
             budget: budget(1),
             createdAt: createdAt
         )
@@ -190,9 +196,9 @@ final class RestDayBudgetingTests: XCTestCase {
         ]
         let interleaved = [weekTwo, weekOne].flatMap { $0 }.shuffled()
 
-        let overrides = try RestDayBudgeting.convertingMissedDays(
+        let overrides = try RestDayBudgeting.convertingMissedObligations(
             planDays: interleaved,
-            workoutDays: [],
+            workoutDisciplines: [:],
             budget: budget(1),
             createdAt: createdAt
         )
@@ -214,9 +220,9 @@ final class RestDayBudgetingTests: XCTestCase {
         let cutoff = try day("2026-01-09")
         let partial = week.filter { $0.date >= cutoff } // Fri, Sat, Sun
 
-        let overrides = try RestDayBudgeting.convertingMissedDays(
+        let overrides = try RestDayBudgeting.convertingMissedObligations(
             planDays: partial,
-            workoutDays: [],
+            workoutDisciplines: [:],
             budget: budget(1),
             createdAt: createdAt
         )
@@ -227,9 +233,9 @@ final class RestDayBudgetingTests: XCTestCase {
     /// A single day is the extreme case of a partial week: it still gets the full
     /// budget, not `budget * (1/7)`.
     func testASingleDayPartialWeekStillGetsTheFullBudget() throws {
-        let overrides = try RestDayBudgeting.convertingMissedDays(
+        let overrides = try RestDayBudgeting.convertingMissedObligations(
             planDays: [try planDay("2026-01-09", .other)],
-            workoutDays: [],
+            workoutDisciplines: [:],
             budget: budget(1),
             createdAt: createdAt
         )
@@ -242,14 +248,14 @@ final class RestDayBudgetingTests: XCTestCase {
         let week = try fixtureWeek()
         let shuffled = week.shuffled()
 
-        let first = try RestDayBudgeting.convertingMissedDays(
-            planDays: week, workoutDays: [], budget: budget(2), createdAt: createdAt
+        let first = try RestDayBudgeting.convertingMissedObligations(
+            planDays: week, workoutDisciplines: [:], budget: budget(2), createdAt: createdAt
         )
-        let second = try RestDayBudgeting.convertingMissedDays(
-            planDays: shuffled, workoutDays: [], budget: budget(2), createdAt: createdAt
+        let second = try RestDayBudgeting.convertingMissedObligations(
+            planDays: shuffled, workoutDisciplines: [:], budget: budget(2), createdAt: createdAt
         )
-        let third = try RestDayBudgeting.convertingMissedDays(
-            planDays: week, workoutDays: [], budget: budget(2), createdAt: createdAt
+        let third = try RestDayBudgeting.convertingMissedObligations(
+            planDays: week, workoutDisciplines: [:], budget: budget(2), createdAt: createdAt
         )
 
         XCTAssertEqual(first, second)
@@ -270,9 +276,9 @@ final class RestDayBudgetingTests: XCTestCase {
             try planDay("2026-01-10", .easy),
         ]
 
-        let overrides = try RestDayBudgeting.convertingMissedDays(
+        let overrides = try RestDayBudgeting.convertingMissedObligations(
             planDays: sparse,
-            workoutDays: [],
+            workoutDisciplines: [:],
             budget: budget(5),
             createdAt: createdAt
         )
@@ -292,18 +298,18 @@ final class RestDayBudgetingTests: XCTestCase {
     /// week and takes the allowance instead, spending it on a day nothing has happened
     /// on yet.
     func testDaysWhoseOutcomeIsNotYetKnownAreNotCandidates() throws {
-        let bounded = try RestDayBudgeting.convertingMissedDays(
+        let bounded = try RestDayBudgeting.convertingMissedObligations(
             planDays: fixtureWeek(),
-            workoutDays: [],
+            workoutDisciplines: [:],
             budget: budget(1),
             createdAt: createdAt,
             outcomesUnknownFrom: try day("2026-01-07")
         )
         XCTAssertEqual(bounded.map(\.date.description), ["2026-01-05"])
 
-        let unbounded = try RestDayBudgeting.convertingMissedDays(
+        let unbounded = try RestDayBudgeting.convertingMissedObligations(
             planDays: fixtureWeek(),
-            workoutDays: [],
+            workoutDisciplines: [:],
             budget: budget(1),
             createdAt: createdAt
         )
@@ -313,9 +319,9 @@ final class RestDayBudgetingTests: XCTestCase {
     /// The boundary is strict: the day named is itself excluded. Standing on Monday,
     /// nothing in the week has happened yet and nothing converts.
     func testTheBoundaryDayItselfIsNotACandidate() throws {
-        let overrides = try RestDayBudgeting.convertingMissedDays(
+        let overrides = try RestDayBudgeting.convertingMissedObligations(
             planDays: fixtureWeek(),
-            workoutDays: [],
+            workoutDisciplines: [:],
             budget: budget(3),
             createdAt: createdAt,
             outcomesUnknownFrom: try day("2026-01-05")
@@ -340,9 +346,9 @@ final class RestDayBudgetingTests: XCTestCase {
             try planDay("2026-01-08", .easy),  // Thu — framed by Friday's rest
             try planDay("2026-01-09", .rest),  // Fri — ahead of the boundary below
         ]
-        let overrides = try RestDayBudgeting.convertingMissedDays(
+        let overrides = try RestDayBudgeting.convertingMissedObligations(
             planDays: week,
-            workoutDays: [],
+            workoutDisciplines: [:],
             budget: budget(1),
             createdAt: createdAt,
             outcomesUnknownFrom: try day("2026-01-09")
@@ -353,9 +359,9 @@ final class RestDayBudgetingTests: XCTestCase {
     // MARK: - createdAt
 
     func testCreatedAtIsStampedFromTheParameterNotTheClock() throws {
-        let overrides = try RestDayBudgeting.convertingMissedDays(
+        let overrides = try RestDayBudgeting.convertingMissedObligations(
             planDays: [try planDay("2026-01-09", .other)],
-            workoutDays: [],
+            workoutDisciplines: [:],
             budget: budget(1),
             createdAt: createdAt
         )

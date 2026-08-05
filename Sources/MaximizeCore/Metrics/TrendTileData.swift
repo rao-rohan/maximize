@@ -47,7 +47,7 @@ import Foundation
 ///   runs in it has no distance to report; printing "0.00 km" would state a measurement
 ///   nobody took. It is *not* nil merely because the runs recorded no distance — a year
 ///   of treadmill runs with no distance recorded genuinely totals zero.
-/// - `effectiveDays` is nil exactly when `EffectiveDayTally.rate` is nil — nothing in
+/// - `effectiveDays` is nil exactly when `EffectiveObligationTally.rate` is nil — nothing in
 ///   the interval was eligible to be effective at (see that type's own documentation).
 /// - `workoutDays` carries **no denominator**, at either span that shows it. "18 / 31"
 ///   invites reading the month as 42% consistent, but the honest denominator is the days
@@ -80,7 +80,7 @@ public struct TrendTileData: Hashable, Sendable {
     public let totalDistance: Tile?
 
     /// `Tallies.effectiveDays`. At `.weekly`/`.monthly`, `"<effective>/<eligible>"` — the
-    /// numerator/denominator pair `EffectiveDayTally` itself prefers over a bare
+    /// numerator/denominator pair `EffectiveObligationTally` itself prefers over a bare
     /// percentage. At `.annual`, the rate, with the denominator moved into the caption so
     /// it is still on screen. Nil when nothing was eligible.
     public let effectiveDays: Tile?
