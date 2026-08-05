@@ -22,7 +22,7 @@ final class ScoreCalendarModel {
     private let workoutRepository: (any WorkoutRepository)?
     private let scoreRepository: (any ScoreRepository)?
     private let planRepository: (any PlanRepository)?
-    private let settingsRepository: any SettingsRepository
+    private let settingsRepository: (any SettingsRepository)?
 
     /// The zone the athlete's day boundaries are drawn in — never `.current` read
     /// inside `MaximizeCore` (see `TrendInterval.dateInterval(in:)`'s own
@@ -44,7 +44,12 @@ final class ScoreCalendarModel {
         self.workoutRepository = workoutRepository ?? PersistenceComposition.store
         self.scoreRepository = scoreRepository ?? PersistenceComposition.store
         self.planRepository = planRepository ?? PersistenceComposition.store
-        self.settingsRepository = settingsRepository ?? DefaultSettingsRepository.shared
+        // The real store, like the three above it — never the no-op stub. Defaulting
+        // this one to a stub is MAX-049's defect appearing a second time, and it bites
+        // hardest here: the rest-day budget is what decides which missed days convert,
+        // so a stubbed `.standard` colours the calendar with a budget the athlete never
+        // chose, on the one screen where that choice is visible.
+        self.settingsRepository = settingsRepository ?? PersistenceComposition.store
         self.timeZone = timeZone
     }
 
@@ -52,7 +57,8 @@ final class ScoreCalendarModel {
     /// changes — `ScoreCalendarView` does this via `.task(id: interval)`, so a new
     /// selection always supersedes an in-flight load rather than racing it.
     func load(for interval: TrendInterval) async {
-        guard let workoutRepository, let scoreRepository, let planRepository else {
+        guard let workoutRepository, let scoreRepository, let planRepository,
+              let settingsRepository else {
             state = .failed
             return
         }

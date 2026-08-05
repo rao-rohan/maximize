@@ -11,7 +11,20 @@ import MaximizeCore
 /// - Anthropic API key (MAX-022): entry point for authentication
 /// - Health access (MAX-030): HealthKit permission request
 ///
-/// All settings are persisted through the `SettingsRepository` and survive relaunch.
+/// All settings are persisted through `SettingsModel`, which talks to the real
+/// on-device store (`PersistenceComposition.store`), and survive relaunch.
+///
+/// **MAX-049.** Before this ticket, this view's `settingsRepository` parameter defaulted
+/// to a no-op stub — since deleted — whose `store(_:)` did nothing and whose
+/// `settings()` always answered `.standard`. The
+/// screen still moved a picker and showed a value; the value simply never survived
+/// relaunch, and rest-day budget feeds rest-day conversion (MAX-061's calendar,
+/// MAX-017's tallies), so the whole app ran on `.standard` regardless of what the
+/// athlete chose. `SettingsModel` fixes this the same way every other repository-backed
+/// screen in the app already reaches the store: an optional repository parameter that,
+/// left nil, resolves to `PersistenceComposition.store` — never to a stub. See
+/// `SettingsModel` for the load/save shape and how a store that failed to open is kept
+/// distinct from "settings are default".
 ///
 /// **The stored API key is never shown here, not even partially masked.** This view
 /// only ever asks the store whether a key is present; it never reads or displays
@@ -19,21 +32,24 @@ import MaximizeCore
 /// into the `SecureField`, and that never round-trips back onto screen once saved.
 struct SettingsView: View {
     private let keyStore: AnthropicAPIKeyStoring
-    private let settingsRepository: SettingsRepository
+
+    @State private var model: SettingsModel
 
     @State private var isKeyStored = false
     @State private var enteredKey = ""
     @State private var keyStatusMessage: String?
 
-    @State private var appSettings: AppSettings = .standard
-
+    /// - Parameters:
+    ///   - keyStore: where the Anthropic API key lives. Defaults to the real Keychain
+    ///     store; a test or preview passes a fake.
+    ///   - settingsRepository: forwarded to `SettingsModel`, which defaults it to
+    ///     `PersistenceComposition.store` — never to a stub. See that type's docs.
     init(
         keyStore: AnthropicAPIKeyStoring = KeychainAnthropicAPIKeyStore(),
-        settingsRepository: SettingsRepository? = nil
+        settingsRepository: (any SettingsRepository)? = nil
     ) {
         self.keyStore = keyStore
-        // In production, injected via environment; in tests, a custom impl is passed
-        self.settingsRepository = settingsRepository ?? DefaultSettingsRepository.shared
+        _model = State(initialValue: SettingsModel(settingsRepository: settingsRepository))
     }
 
     var body: some View {
@@ -48,7 +64,7 @@ struct SettingsView: View {
             HealthAccessSettingsSection()
 
             // MAX-064: Rest days per week (D9/A6)
-            restDaysSection
+            trainingPlanSection
 
             // MAX-064: Display preferences
             displaySection
@@ -75,32 +91,42 @@ struct SettingsView: View {
                 }
             }
         }
-        .onAppear(perform: loadSettings)
+        .task {
+            await model.load()
+            refreshStoredKeyStatus()
+        }
     }
 
     // MARK: - Rest days section
 
     @ViewBuilder
-    private var restDaysSection: some View {
+    private var trainingPlanSection: some View {
         Section("Training plan") {
-            HStack {
-                Text("Discretionary rest days per week")
-                Spacer()
-                Picker(
-                    "Rest days",
-                    selection: Binding(
-                        get: { appSettings.restDayBudget.daysPerWeek },
-                        set: { newValue in
-                            guard let budget = try? RestDayBudget(daysPerWeek: newValue) else { return }
-                            apply(updating(restDayBudget: budget))
+            switch model.state {
+            case .loading:
+                ProgressView()
+            case .failed:
+                unavailableMessage
+            case let .loaded(appSettings):
+                HStack {
+                    Text("Discretionary rest days per week")
+                    Spacer()
+                    Picker(
+                        "Rest days",
+                        selection: Binding(
+                            get: { appSettings.restDayBudget.daysPerWeek },
+                            set: { newValue in
+                                guard let budget = try? RestDayBudget(daysPerWeek: newValue) else { return }
+                                save(updating(appSettings, restDayBudget: budget))
+                            }
+                        )
+                    ) {
+                        ForEach(0...7, id: \.self) { days in
+                            Text("\(days)").tag(days)
                         }
-                    )
-                ) {
-                    ForEach(0...7, id: \.self) { days in
-                        Text("\(days)").tag(days)
                     }
+                    .pickerStyle(.menu)
                 }
-                .pickerStyle(.menu)
             }
         }
     }
@@ -110,61 +136,80 @@ struct SettingsView: View {
     @ViewBuilder
     private var displaySection: some View {
         Section("Display") {
-            Picker(
-                "Distance unit",
-                selection: Binding(
-                    get: { appSettings.distanceUnit },
-                    set: { apply(updating(distanceUnit: $0)) }
-                )
-            ) {
-                Text("Miles").tag(DistanceUnit.miles)
-                Text("Kilometers").tag(DistanceUnit.kilometers)
-            }
+            switch model.state {
+            case .loading:
+                ProgressView()
+            case .failed:
+                unavailableMessage
+            case let .loaded(appSettings):
+                Picker(
+                    "Distance unit",
+                    selection: Binding(
+                        get: { appSettings.distanceUnit },
+                        set: { save(updating(appSettings, distanceUnit: $0)) }
+                    )
+                ) {
+                    Text("Miles").tag(DistanceUnit.miles)
+                    Text("Kilometers").tag(DistanceUnit.kilometers)
+                }
 
-            Picker(
-                "Appearance",
-                selection: Binding(
-                    get: { appSettings.appearance },
-                    set: { apply(updating(appearance: $0)) }
-                )
-            ) {
-                Text("System").tag(AppearancePreference.system)
-                Text("Light").tag(AppearancePreference.light)
-                Text("Dark").tag(AppearancePreference.dark)
+                Picker(
+                    "Appearance",
+                    selection: Binding(
+                        get: { appSettings.appearance },
+                        set: { save(updating(appSettings, appearance: $0)) }
+                    )
+                ) {
+                    Text("System").tag(AppearancePreference.system)
+                    Text("Light").tag(AppearancePreference.light)
+                    Text("Dark").tag(AppearancePreference.dark)
+                }
             }
         }
+    }
+
+    /// Shown in place of the pickers whenever `model.state` is `.failed` — MAX-049's
+    /// second half. An athlete whose store could not be opened must not see a
+    /// rest-day budget (or any other setting) that looks editable and saved when
+    /// nothing was, or could be, written.
+    private var unavailableMessage: some View {
+        Text("Settings are unavailable right now, so changes here would not be saved.")
+            .font(.metricLabel)
+            .foregroundStyle(Color.textSecondary)
     }
 
     // MARK: - Editing an immutable value
 
     /// `AppSettings` is a value type whose properties are all `let` — deliberately, so
     /// nothing can mutate a settings record in place behind a reader's back. Editing one
-    /// therefore means constructing a new one, which is what these two helpers do.
+    /// therefore means constructing a new one from the last value `SettingsModel` loaded
+    /// or saved, which is what this helper does.
     ///
-    /// Note what `updating` carries forward untouched: the three accessibility fields.
-    /// This screen exposes no control for them (see the Accessibility note above), so a
+    /// Note what it carries forward untouched: the three accessibility fields. This
+    /// screen exposes no control for them (see the Accessibility note above), so a
     /// settings write from here must never silently overwrite whatever a future ticket
     /// has seeded into them from the OS.
     private func updating(
+        _ base: AppSettings,
         restDayBudget: RestDayBudget? = nil,
         distanceUnit: DistanceUnit? = nil,
         appearance: AppearancePreference? = nil
     ) -> AppSettings {
         AppSettings(
-            restDayBudget: restDayBudget ?? appSettings.restDayBudget,
-            distanceUnit: distanceUnit ?? appSettings.distanceUnit,
-            appearance: appearance ?? appSettings.appearance,
-            reducesTransparency: appSettings.reducesTransparency,
-            increasesContrast: appSettings.increasesContrast,
-            reducesMotion: appSettings.reducesMotion
+            restDayBudget: restDayBudget ?? base.restDayBudget,
+            distanceUnit: distanceUnit ?? base.distanceUnit,
+            appearance: appearance ?? base.appearance,
+            reducesTransparency: base.reducesTransparency,
+            increasesContrast: base.increasesContrast,
+            reducesMotion: base.reducesMotion
         )
     }
 
-    /// Shows the new value immediately and persists it. Kept in one place so no edit
-    /// path can update the screen without also writing, or write without updating.
-    private func apply(_ updated: AppSettings) {
-        appSettings = updated
-        Task { await saveSettings() }
+    /// Routes an edit through `SettingsModel.save`, which persists it and only then
+    /// updates `model.state` to match — see that method's documentation for why this
+    /// is deliberately not optimistic.
+    private func save(_ updated: AppSettings) {
+        Task { await model.save(updated) }
     }
 
     // MARK: - Accessibility
@@ -189,27 +234,6 @@ struct SettingsView: View {
     // consumes them owes two things this ticket was not scoped to decide: seeding from
     // the system, and override-up-only semantics, so a user may strengthen an
     // accessibility setting but never defeat one the OS has asked for.
-
-    // MARK: - Settings persistence
-
-    private func loadSettings() {
-        Task {
-            do {
-                appSettings = try await settingsRepository.settings()
-                refreshStoredKeyStatus()
-            } catch {
-                keyStatusMessage = "Could not load settings."
-            }
-        }
-    }
-
-    private func saveSettings() async {
-        do {
-            try await settingsRepository.store(appSettings)
-        } catch {
-            keyStatusMessage = "Could not save settings."
-        }
-    }
 
     // MARK: - Key management
 
@@ -247,23 +271,5 @@ struct SettingsView: View {
         } catch {
             keyStatusMessage = "Could not clear the key."
         }
-    }
-}
-
-// MARK: - Repository injection stub
-
-/// Placeholder settings repository for when the real one cannot be injected.
-/// The app container overrides this at launch with the real MaximizeStore.
-actor DefaultSettingsRepository: SettingsRepository {
-    static let shared = DefaultSettingsRepository()
-
-    private init() {}
-
-    func settings() async throws -> AppSettings {
-        .standard
-    }
-
-    func store(_ settings: AppSettings) async throws {
-        // No-op stub
     }
 }
