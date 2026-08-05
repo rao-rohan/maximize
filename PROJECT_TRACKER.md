@@ -1048,7 +1048,7 @@ twelve and is dispatchable immediately.
 | MAX-096 | `ChatModel` generalised; transcript cap; training task text | 095 | **Opus** 🔒 ✅ |
 | MAX-097 | Thread list, derived titles, new chat, scope subtitle | 093, 096 | Sonnet |
 | MAX-098 | The persistent glass button | 097 | Sonnet |
-| MAX-099 | `PlanProposal` — type, parse, schema derived from core enums | 095 | **Opus** 🔒 |
+| MAX-099 | `PlanProposal` — type, parse, schema derived from core enums | 095 | **Opus** 🔒 ✅ |
 | MAX-100 | The Anthropic client for plan proposals | 099 | Sonnet 🔒 |
 | MAX-101 | Conversational plan authoring; proposal card; handoff | 098, 100 | **Opus** |
 | MAX-102 | **The read-only plan screen with version history** | — | Sonnet ✅ |
@@ -1137,32 +1137,41 @@ the whole stored `WeeklyTemplate`, so LIFTING-SPEC §10.2's requirement that it 
 nothing to carry today. And the training thread's `ChatInstruction.task` text (§3.5) is
 **MAX-096's**, not this ticket's; nothing here touches `Chat/`.
 
-**MAX-096 made the chat model subject-driven, and capped the transcript.**
-`WorkoutChatModel` is now `ChatModel`, taking a `ChatSubject` instead of a workout id and
-asking `ContextBuilder` for whichever `PromptContext` that subject calls for. Four things
-worth carrying forward:
+**MAX-099 landed the proposal boundary, and D1 is where it was.** `PlanProposal` is a
+validated value describing a proposed plan — goals, weekly template, distance arc, HR cap,
+cadence band — with `parse`, a derived `schemaDescription`, `PlanProposalInstruction` and
+`PlanProposalModelInvoking`. Core-only, three new files under `Plan/`, nothing under `App/`.
+Five things are worth carrying forward:
 
-- **The workout path is a regression suite, not a rewrite.** Its guards run in the same
-  order and produce the same states (`.notYetScored`, `.noVerdict`, `.failed`) as before,
-  and `MAX-051`'s whole test file survives with the type renamed. The one deliberate
-  wording change is the "no API key" notice, which now says *"about your training"* on a
-  training thread rather than lying about "this workout".
-- **The transcript cap lives in `ChatInstruction`, not in the caller.** At most
-  `maximumReplayedTurns` (**40**) turns are replayed, and the initializer applies it — a
-  bound a caller has to remember is one that is eventually forgotten, and the failure is
-  silent. When turns are dropped the instruction prepends a bracketed notice turn saying
-  so, because A14's reason is that a model answering as though it had seen the start of a
-  conversation it did not is worse than one that says it lost the thread. It is a turn
-  rather than a field so the App-layer transport cannot forget to render it, and so a core
-  test can assert the model actually receives it.
-- **The training `task` (§3.5) is asserted clause by clause.** Naming the window beside
-  every aggregate (§3.6(b)) and refusing to re-score (D8) each have their own test, so
-  neither can be reworded away by a later edit that only reads well.
-- **A training turn now needs the settings store.** `TalliesCalculator` reads the rest-day
-  budget, so `ChatModel` gained a `settingsRepository` — read **only** on the training
-  path, deliberately, so a workout thread has no failure mode it did not have before. The
-  training path also widens its workout fetch to whole Monday-first weeks (C1) and skips
-  the heart-rate-series read entirely, since §3.3 sends no curve for any session.
+- **The proposal has no path to storage, and the near-miss A13 names has no half in this
+  PR to be built from.** Nothing in the three files returns a `Plan`, builds a `PlanDraft`,
+  or mentions a repository. `PlanDraft.applying(_:)` is deliberately **not** here; it is
+  MAX-101's, and `PlanProposalTests` builds that mapping in *test* code precisely so this
+  ticket can assert the door accepts its output without shipping the door a second key.
+- **A proposal that parses is one `PlanAuthoringSession` accepts** — a constraint, not a
+  convenience, because a proposal that parsed and then failed at the door would be a card
+  the athlete can tap and get nowhere with. Field-value rules are reported in the door's own
+  vocabulary (`PlanProposalError.rejectedByAuthoring(PlanAuthoringError)`) rather than
+  restated, and a test runs a parsed proposal through a real session.
+- **Three rules exist here that the door has no case for** — a complete week, an empty rest
+  day, a non-empty ascending arc. Each is something `PlanDraft` makes *unrepresentable*
+  (its initializer fills all seven weekdays; `setKind` clears a rest day's distance), so
+  enforcing them at the model boundary is agreement with the door, not divergence from it.
+  A proposal arrives whole and can break all three.
+- **§4.4's exclusions are refused, not ignored.** A reply carrying `version`,
+  `effectiveFrom`, or rubric bands is rejected by name. Dropping `effectiveFrom` silently
+  would keep an arc indexed from a date the app will not use — a plan wrong in a way nothing
+  on screen shows.
+- **The schema is generated from `ScheduledSessionKind.allCases`, `Weekday.allCases`,
+  `HeartRateSample.plausibleBPM` and `ScoreValue.permittedRange`**, with two guards: a
+  compiler-exhaustive `switch` for the per-kind gloss, and tests asserting every enum case
+  appears in the rendered text. Adding a session kind and forgetting the prompt now fails
+  CI instead of silently producing a model that cannot propose it.
+
+**One thing MAX-099 deliberately did not do.** `PlanProposal.parse` and `ScoreProposal.parse`
+now hold two copies of the same code-fence handling. Extracting a shared envelope helper
+means editing `Scoring/`, which this ticket does not own; a test pins that the two tolerate
+the same formatting, so the duplication cannot drift unnoticed. **Worth a small follow-up.**
 
 ### Phase 9 — Lifting (MAX-109)
 
