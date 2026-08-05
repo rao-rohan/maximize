@@ -553,6 +553,9 @@ feature was governed by a plan that could not exist).
 | MAX-128 … MAX-143 | The lifting build, decomposed from MAX-109 | MAX-109 | see below ✅ |
 | MAX-126 | **"No verdict by design" is a state** — a lift stops being drawn and spoken as a run awaiting a score | MAX-111 | **Opus** ✅ |
 | MAX-150 | **Copy and absence voice: the chat and dashboard surfaces** — split from MAX-104 so the finished half does not wait behind the lifting build | MAX-104, split | Sonnet ✅ |
+| MAX-154 | **Error handling, audited app-wide** — every failure path outside chat swept as a set, the failure-to-copy mapping moved into the core, and the inventory recorded below | Owner | **Opus** |
+| MAX-155 | **An HTTP status code reaches the athlete's screen** — `PlanProposalDrafting.description` renders `ScoringModelError.description` verbatim on the plan proposal card. Chat surface, so it waits for MAX-152 | MAX-154 | Sonnet |
+| MAX-156 | **`ScoringError.description` interpolates a workout identifier and a date** — latent, not leaking today, and one `.public` log line away from being a real one | MAX-154 | Sonnet |
 
 **MAX-066.** Splits currently need a GPS track, so a treadmill run has none — correctly
 rendered as an absence rather than fabricated. `distanceWalkingRunning` is already
@@ -2500,6 +2503,152 @@ scope, newest `lastActivityAt` with `id` breaking a tie, the same rule
 
 ---
 
+## MAX-154 — the app-wide error-handling audit
+
+**Scope: every failure path outside chat.** Chat's own failure states are MAX-152/153's
+and were not touched. The audit was a full sweep of `App/` and `Sources/MaximizeCore/`
+for the three defect classes the ticket named: a failure that reaches the person as
+nothing, a failure that reaches them as noise, and a failure the code claims cannot
+happen. **The inventory below is the deliverable, including the rows nothing was done
+to** — an audit whose findings vanish into a diff is not reviewable.
+
+### 1. Failures the code claims cannot happen — the ban holds
+
+Scanned across `App/` and `Sources/MaximizeCore/` (excluding `Tests/`, where these are
+permitted):
+
+| Construct | Count in non-test code | Verdict |
+|---|---|---|
+| Force unwrap (`x!`) | **0** | CLAUDE.md's rule is actually kept, not merely stated |
+| `try!` | **0** | Five source comments *mention* `try!` to explain why a defensive enum case exists instead of one |
+| `fatalError` | **0** | One comment, same shape (`PlanProposalDrafting`) |
+| `as!` | **0** | — |
+| Implicitly-unwrapped optional (`: T!`) | **0** | — |
+| `assertionFailure` | 1 | `Surfaces.swift:252` — the debug-only glass-over-data tripwire, a logged decision, compiles out of release |
+| Array subscripting | 2 | Both guarded: `ScoreCalendarView.door` subscripts `[0]` only inside `where workoutIDs.count == 1`; `DayWorkoutsView.step(by:)` guards on `indices.contains(next)` first |
+
+Nothing in this class needed fixing. Recording it matters anyway: the claim "the ban
+holds" had never been checked, and the checks above are what makes it a fact rather than
+an assumption.
+
+### 2. Failures that reached the person as nothing — fixed
+
+- **The dashboard drew a blank three sections deep.** `DashboardView` rendered
+  `ScoreCalendarView`, `DriftOverlayView` and `TrendTilesView` inside `if let interval =
+  intervalModel.state.interval`, with **no `else`**. When the interval model is `.failed`
+  — a system clock outside `CalendarDay`'s domain — the entire dashboard below the
+  selector was absent, with a one-line caption on a control above it the only hint.
+  Fixed: an `else` branch carrying `FailureCopy.dashboardUnavailableWithoutToday`.
+- **The store failing to open discarded its reason entirely.**
+  `PersistenceComposition.modelContainer` was `try? MaximizeModelContainer.makeOnDisk()`.
+  This is the most consequential failure in the app — every screen degrades, ingestion
+  falls back to the anchor-pinning sink, nothing is written — and the error went nowhere.
+  Fixed: a `do`/`catch` logging `domain` and `code` `.public` and the error itself
+  `.private`, following `IngestionComposition`'s established split for exactly this
+  reason (a Core Data error's `userInfo` can carry stored row values, i.e. health data).
+
+### 3. Failures that reached the person as noise, or as a false claim — fixed
+
+- **A failed Keychain read was reported as "No key is stored."** `SettingsView` held a
+  `Bool` and set it to `false` in the `catch`, so a device that could not be asked stated
+  flatly that nothing was there — and, because the **Clear** button was gated on that
+  flag, the only control that removes a key was withdrawn on exactly the device where one
+  might still be sitting. Fixed: `StoredAPIKeyPresence` is three states
+  (`stored`/`notStored`/`unknown`), `permitsClearing` is true for two of them, and a
+  failed save or clear now re-reads presence rather than leaving the line reading as it
+  did before the attempt.
+- **"No workouts yet." asserted something R10 says the app cannot know.** An empty list
+  and a refused Health *read* are indistinguishable from inside this app. Fixed: the copy
+  states the ordinary reading, then names the other possibility and where to check it —
+  **without** claiming Health is or is not connected, which is the claim R10 forbids. A
+  test asserts the words "connected" and "denied" appear in no Health-related string.
+- **Four verbs for one event.** "Could not load workouts.", "Couldn't load the plan.",
+  "Couldn't load the calendar.", "Couldn't load this plan version.", "Couldn't load the
+  runs in this interval." — five screens, four spellings, none of them the one
+  `ChatConversationCopy.failedToLoad` had already established at MAX-150. Fixed: one verb,
+  asserted against chat's by test, so the app has a single failure voice rather than a
+  chat one and a not-chat one.
+- **Nine `catch` blocks and `switch` arms were composing athlete-facing sentences in
+  `App/`.** CLAUDE.md is explicit that this is the defect and not the fix: the layer is
+  compiled by CI and never executed (R2, R13), so nothing but a reader could tell whether
+  an edit kept the care the comments described. All nine now read a value from
+  `MaximizeCore.FailureCopy`.
+
+### 4. Acceptable with reason — inspected, left alone
+
+Every one of these was read in full and is deliberate. Listing them is the point: a later
+audit should not have to re-derive that they are fine.
+
+- **`AnchoredWorkoutIngester:229` — `try? await anchorStore.clearAnchor()`.** Discarding a
+  clear failure is correct: the fetch is already retrying without an anchor, and failing
+  the pass over a failed *cleanup* would pin the pipeline on the corrupt byte the code is
+  in the middle of routing around.
+- **`WorkoutIngestionPipeline:234, 498` — `try? await scores.ledger(...)`.** A ledger read
+  that fails is not evidence a score is absent, and the pipeline treats "unknown" the same
+  as "present" — it declines to score rather than risking a second auto-score (D8).
+- **`WorkoutIngestionPipeline:636` — `try? await Task.sleep(...)`.** A cancelled sleep
+  means the model already answered. Commented as such.
+- **`MaximizeModelContainer:248, 290` — per-file `try? setAttributes`.** One file in a
+  transient state must not cost every other file its protection class; the enumerator's
+  `errorHandler` returns `true` for the same reason.
+- **`MiscategorisedScoreLabelling:115` — `try? ... else { continue }`.** One unreadable
+  ledger skips one score, not the pass. The pass is idempotent, so the skipped row is
+  labelled on the next launch.
+- **`WorkoutSampleExtractor:343, 435, 495` — `try?` per sample.** Rejecting one implausible
+  reading and keeping the series is the documented policy; a whole-series throw would lose
+  a run's curve permanently.
+- **`SettingsView:196` — `guard let budget = try? RestDayBudget(daysPerWeek:) else
+  { return }`.** Unreachable: the picker offers `0...7` and that is the type's whole
+  permitted domain. A silent `return` on an unreachable branch is preferable to inventing
+  copy for a state that cannot occur.
+- **`ScoringModelError` / `ScoringError` / `DomainError` `description`s.** Diagnostic by
+  design and correctly so — they are read in a debugger, and none reaches a screen. See
+  the finding below for the one place that is *nearly* untrue.
+- **R11's escape is implemented.** `WorkoutIngestionPipeline` reports
+  `.workoutAbandoned(step:)` at both `storingTheWorkout` and `discardingTheWorkout`, and
+  `IngestionComposition` logs it loudly, so a permanently unacceptable workout no longer
+  wedges the pipeline. The audit touched none of it. **The R11 row below still reads
+  "MAX-033 must handle this" and is now stale** — left for whoever owns that row to tick,
+  rather than re-graded by a ticket that only read the code.
+- **`ScoreProposal:75`, `PlanProposal:666`** interpolate a decoding error into a
+  `malformedResponse(reason:)` payload. Developer-facing, never rendered.
+
+### 5. Found, reported, not taken
+
+Each of these is a real finding in a file another ticket in flight owns, or on a surface
+another ticket owns. Per the brief, they are reported rather than taken.
+
+- **A status code can reach the athlete's screen.** `PlanProposalDrafting.description`
+  returns `"The plan could not be drafted. \(error.description)."`, where `error` is a
+  `ScoringModelError` — so "The Anthropic API returned an unexpected status (400)." is
+  rendered verbatim on the plan proposal card. That is defect class 2 exactly: an HTTP
+  status and a vendor name where a description of what happened belongs. **Not taken**:
+  the sentence is displayed on a chat surface and MAX-152 owns chat's failure states.
+  Filed as **MAX-155**.
+- **`ScoringError.description` interpolates a workout UUID and a `CalendarDay`.**
+  `contextAlreadyScored(workoutID:)` renders the identifier; `noPlanInEffect(day:)`
+  renders a date. Neither reaches a screen today, and the one log that could carry them
+  is `.private`, so this is a latent hazard rather than a live leak — but CLAUDE.md rules
+  identifiers and dates out of error strings without a "probably fine" exception, and the
+  distance between this and a leak is one future `.public` log line. Filed as **MAX-156**.
+- **`App/Workouts/WorkoutDetailView.swift:64`** still carries `Text("Could not load this
+  workout.")`, the last view literal of the five. `LoadFailureSurface.workoutDetail` and
+  its sentence are defined and tested; adopting them is one line. **Not taken**:
+  `App/Workouts/*` is MAX-139's.
+- **No surface in the app offers a retry.** Every `.failed` state is terminal until the
+  view is rebuilt, including the ones caused by something that plainly could succeed on a
+  second attempt. New risk row **R15** below.
+
+### What CI proves about this ticket, and what it does not
+
+CI compiles `App/` and runs `FailureCopyTests`. That proves every sentence exists, that no
+two cases share one, that none carries a digit or names a type, and that the Health copy
+claims nothing R10 forbids. **It proves nothing about any of the failures themselves.** CI
+opens no socket, touches no Health store, reads no Keychain and opens no SwiftData store,
+so every path this ticket touches is device-verified only. The PR lists how to provoke each one.
+
+---
+
 ## Risks
 
 | # | Item | Impact | Status |
@@ -2516,6 +2665,7 @@ scope, newest `lastActivityAt` with `id` breaking a tie, the same rule
 | **R9** | **MAX-030 acknowledges every background wake, including failed ones — so iOS never retries.** This is only safe because a missed wake is recovered by the next anchored fetch | If MAX-031 lands a fetch that is not anchored or not idempotent, missed workouts are lost permanently and silently | **Constraint on MAX-031, not a risk to monitor.** The reasoning is documented in `WorkoutObservationCoordinator`; if the anchor guarantee changes, that decision must be revisited |
 | **R11** | **A permanently unacceptable workout wedges the whole pipeline.** If the sink throws deterministically for one workout, the anchor never advances past it, so it is refetched and rethrown on every pass forever — and every later workout queues behind it | Zero-touch capture stops entirely, and the symptom is silence | **MAX-033 must handle this.** Found by MAX-031, which deliberately did not build a poison-pill escape: "give up on this workout" is a data decision belonging to whoever owns the store. The obligation is documented on `WorkoutIngestionSink` |
 | R12 | The anchor write and the workout write are two separate stores, so the window between them exists by construction | A crash between them re-delivers the batch — absorbed by dedupe, so this is the safe side | **Accepted permanently. Do not "fix" this.** ~~MAX-020 can close it by moving the anchor into the same SwiftData transaction~~ — that earlier note was wrong and MAX-020 correctly refused it. See below |
+| **R15** | **No failure state in the app offers a retry, and a whole-store failure is never named as one.** Every `.failed` state is terminal until the view is rebuilt — including the ones a second attempt would plainly clear (a scoring call that timed out, a Keychain read during the moment the device was locked). And when the *store* is what failed, every screen independently says its own content could not be loaded, which reads as five separate problems rather than the one that it is; nothing tells the athlete that nothing at all is being saved | An athlete's only recovery from a transient failure is to guess that backing out and re-entering a screen will help, and their only signal for a permanent one is that the whole app looks broken in five different ways | **Open.** MAX-154 made every failure legible and put the store-open reason in the log (it previously went nowhere), but deliberately did not add controls or an app-level banner — that is a design decision about affordances, not an error-handling audit. Found by MAX-154 |
 | R10 | The app cannot know whether Health *read* access was granted — `authorizationStatus(for:)` reports share status only, by Apple's design | No UI can honestly display "Health connected"; a permission problem is indistinguishable from "no workouts recorded yet" | Accepted, Apple-imposed. Found at MAX-030. Any future settings or onboarding UI must not claim read access it cannot verify |
 
 ## Overseer failure modes
