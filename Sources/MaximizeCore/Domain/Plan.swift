@@ -354,11 +354,20 @@ public struct Plan: Hashable, Sendable, Codable, Identifiable {
     /// scorer so there is exactly one interpretation of "cap + 8" in the system
     /// (the D3 spirit: one notion of the numbers, not two).
     ///
-    /// - Parameter scheduledDistanceMeters: the day's prescribed distance, needed
-    ///   only by `.scheduledDistance`; nil yields nil for that case.
+    /// - Parameter scheduledSession: the day's ask, which is what the ask-relative
+    ///   references (`.scheduledDistance`, `.scheduledDuration`) are relative *to*. A
+    ///   session that carries no distance, or no duration, yields nil for the reference
+    ///   that wanted it — an unresolvable comparison, which `RubricEvaluator` reads as
+    ///   no-match. Defaults to `.rest`, which carries neither and is the honest stand-in
+    ///   for "no ask to be relative to".
+    ///
+    ///   Passed as the whole session rather than as one loose figure per reference,
+    ///   which is what MAX-131 changed: two parallel optional parameters make "resolve a
+    ///   duration reference, but forget to pass the duration" a silent no-match at every
+    ///   call site instead of an impossibility.
     public func resolve(
         _ reference: RubricReference,
-        scheduledDistanceMeters: Double? = nil
+        against scheduledSession: ScheduledSession = .rest
     ) -> Double? {
         switch reference {
         case let .constant(value):
@@ -370,8 +379,11 @@ public struct Plan: Hashable, Sendable, Codable, Identifiable {
         case let .cadenceTargetHigh(offset):
             return cadenceTarget.highStepsPerMinute + offset
         case let .scheduledDistance(fraction):
-            guard let scheduledDistanceMeters else { return nil }
-            return scheduledDistanceMeters * fraction
+            guard let distanceMeters = scheduledSession.distanceMeters else { return nil }
+            return distanceMeters * fraction
+        case let .scheduledDuration(fraction):
+            guard let durationSeconds = scheduledSession.durationSeconds else { return nil }
+            return durationSeconds * fraction
         }
     }
 
