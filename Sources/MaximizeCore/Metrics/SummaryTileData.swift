@@ -18,15 +18,17 @@ import Foundation
 /// ## What "splits" does not mean here
 ///
 /// FR-1.5's requirement is written as "**Splits** and summary tiles (distance,
-/// duration, avg/max HR, energy, drift %, grade-adjusted pace)." The parenthetical
-/// names summary-tile figures only — a per-kilometre or per-mile pace breakdown is a
-/// different, unstored figure: `DerivedMetrics` has no such array (its only per-segment
-/// figure is `zoneSplits`, time spent in each *heart-rate zone*, not a distance split),
-/// and nothing computes pace splits at ingestion. Per D2, this type does not recompute
-/// one from the HR series or route to paper over that gap — doing so would create a
-/// number nothing else in the app agrees with. Only the summary tiles are built here;
-/// the per-distance splits half of FR-1.5 is left unbuilt and reported rather than
-/// invented (see the PR description).
+/// duration, avg/max HR, energy, drift %, grade-adjusted pace)." The parenthetical names
+/// summary-tile figures only — a per-kilometre or per-mile pace breakdown is a different
+/// figure, and this type still does not build one. MAX-045 declined to derive it here
+/// because nothing computed it at ingestion, and inventing a display-time pace would have
+/// created a number nothing else in the app agrees with (D2).
+///
+/// **MAX-046 supplied the missing data source rather than moving that line.** Splits are
+/// now cut once at ingestion by `DistanceSplitCalculator`, stored on
+/// `DerivedMetrics.distanceSplits`, and rendered by `SplitsListData` — a sibling section,
+/// not a tile. Note that `DerivedMetrics.zoneSplits` remains a different measurement
+/// entirely: time spent in each *heart-rate zone*, which shares only the word.
 ///
 /// ## Absent is not zero
 ///
