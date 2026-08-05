@@ -107,6 +107,17 @@ enum IngestionComposition {
         )
     }()
 
+    /// A21/MAX-143's labelling pass, or nil if there is no store to read.
+    ///
+    /// Assembled here rather than in `PersistenceComposition` because this is where the
+    /// app's history-repair passes already live — the distance-splits backfill is the
+    /// sibling, and both run from `applicationDidBecomeActive`. Nothing about this one
+    /// touches HealthKit or a model: it reads stored scores and writes stored labels.
+    private static let miscategorisedScoreLabeller: MiscategorisedScoreLabeller? = {
+        guard let workoutStore = PersistenceComposition.store else { return nil }
+        return MiscategorisedScoreLabeller(workouts: workoutStore, scores: workoutStore)
+    }()
+
     private static let sink: WorkoutIngestionSink = { () -> WorkoutIngestionSink in
         guard let pipeline else { return AwaitingPipelineWorkoutSink() }
         return pipeline
@@ -219,6 +230,36 @@ enum IngestionComposition {
             }
         }
     }
+
+    /// MAX-143: labels the auto-scores written against the wrong discipline's rubric.
+    ///
+    /// **Trigger: every launch, alongside the two passes above**, for the same reason and
+    /// with a much smaller bill — the pass reads stored rows only, and it is idempotent, so
+    /// once every affected score carries a label every future launch is one enumeration
+    /// that finds nothing to do. No flag records that it has run: see
+    /// `MiscategorisedScoreLabeller` for why a flag would be the more fragile half.
+    ///
+    /// **Nothing here writes to a score.** The pass adds label records and has no path to
+    /// a `Score` at all (D8).
+    static func labelMiscategorisedScores() {
+        guard let miscategorisedScoreLabeller else { return }
+        Task {
+            do {
+                let outcome = try await miscategorisedScoreLabeller.run()
+                // A count, never an identifier or a date (CLAUDE.md) — and silent once
+                // there is nothing left to label.
+                if outcome.scoresLabelled > 0 {
+                    ingestionLog.info(
+                        "Labelled \(outcome.scoresLabelled, privacy: .public) score(s) written against the wrong discipline's rubric."
+                    )
+                }
+            } catch {
+                // `.private` for the same reason as `reportFailure`: an arbitrary `Error`,
+                // not one of the payload-free pipeline diagnostics.
+                ingestionLog.error("Miscategorised-score labelling pass failed: \(String(describing: error), privacy: .private)")
+            }
+        }
+    }
 }
 
 /// Exists for one reason: HealthKit observer queries must be registered from
@@ -254,9 +295,12 @@ final class MaximizeAppDelegate: NSObject, UIApplicationDelegate {
     /// Cheap when there is nothing pending: one anchored query returning nothing.
     ///
     /// The backfill call alongside it is the same shape for the same reason — see
-    /// `IngestionComposition.backfillDistanceSplits()` for the trade it makes.
+    /// `IngestionComposition.backfillDistanceSplits()` for the trade it makes. MAX-143's
+    /// labelling pass is the third, and the cheapest: stored rows in, label rows out, and
+    /// silent once history is labelled.
     func applicationDidBecomeActive(_ application: UIApplication) {
         IngestionComposition.ingestPendingWorkouts()
         IngestionComposition.backfillDistanceSplits()
+        IngestionComposition.labelMiscategorisedScores()
     }
 }

@@ -39,6 +39,7 @@ public final class InMemoryWorkoutStore: WorkoutRepository, ScoreRepository, Pla
     private var metricsByID: [UUID: DerivedMetrics] = [:]
     private var scoresByID: [UUID: Score] = [:]
     private var annotationsByID: [UUID: [ScoreAnnotation]] = [:]
+    private var labelsByID: [UUID: [MiscategorisedScoreLabel]] = [:]
     private var calendar: PlanCalendar?
     private var appSettings: AppSettings = .standard
 
@@ -240,19 +241,35 @@ public final class InMemoryWorkoutStore: WorkoutRepository, ScoreRepository, Pla
         }
     }
 
+    /// The whole ledger, labels included — `ScoreRepository`'s contract, and the half a
+    /// fake is most tempting to skip: a ledger returned without its labels puts every
+    /// miscategorised lift back into the scorer-quality metric (A21, MAX-143).
     public func ledger(forWorkout id: UUID) async throws -> ScoreLedger? {
-        let pair = lock.locked { () -> (Score, [ScoreAnnotation])? in
+        let parts = lock.locked { () -> (Score, [ScoreAnnotation], [MiscategorisedScoreLabel])? in
             guard let score = scoresByID[id] else { return nil }
-            return (score, annotationsByID[id] ?? [])
+            return (score, annotationsByID[id] ?? [], labelsByID[id] ?? [])
         }
-        guard let pair else { return nil }
-        return try ScoreLedger(automatic: pair.0, annotations: pair.1)
+        guard let parts else { return nil }
+        return try ScoreLedger(automatic: parts.0, annotations: parts.1, labels: parts.2)
     }
 
     public func annotate(_ annotation: ScoreAnnotation) async throws {
         lock.locked {
             annotationsByID[annotation.workoutID, default: []].append(annotation)
         }
+    }
+
+    /// Additive, exactly as the real store is: an append, with no path to the score.
+    public func recordMiscategorisationLabel(_ label: MiscategorisedScoreLabel) async throws {
+        lock.locked {
+            labelsByID[label.workoutID, default: []].append(label)
+        }
+    }
+
+    /// Every label written, so a test can assert on what a pass did without reading it
+    /// back through a ledger.
+    public var allMiscategorisationLabels: [MiscategorisedScoreLabel] {
+        lock.locked { labelsByID.values.flatMap { $0 } }
     }
 
     // MARK: - PlanRepository

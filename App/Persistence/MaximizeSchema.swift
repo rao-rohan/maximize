@@ -73,6 +73,7 @@ enum MaximizeSchemaV1: VersionedSchema {
             DerivedMetricsRecord.self,
             ScoreRecord.self,
             ScoreAnnotationRecord.self,
+            MiscategorisedScoreLabelRecord.self,
             MuscleGroupEntryRecord.self,
             ChatThreadRecord.self,
             PlanRecord.self,
@@ -367,6 +368,58 @@ enum MaximizeSchemaV1: VersionedSchema {
         }
     }
 
+    /// A mark saying an auto-score was judged against the wrong discipline's ask (A21,
+    /// MAX-143).
+    ///
+    /// **Deliberately not a column on `ScoreRecord`.** A flag there would be a settable
+    /// property on the record D8 makes immutable, and the only thing keeping that record
+    /// immutable is that no door in this file writes to it. A separate table keeps that
+    /// true by construction: nothing here can reach a score.
+    ///
+    /// Its own identifier rather than the workout's, so two devices labelling the same
+    /// score before either has synced produce two rows rather than a conflict —
+    /// `ScoreLedger` reads labelling as a property of the set, so the duplicate costs
+    /// nothing.
+    ///
+    /// **Why this needs no migration**, in `MuscleGroupEntryRecord`'s words: it is a new
+    /// record type, so SwiftData creates its table on first load and no row of any other
+    /// model is read, rewritten or re-typed. Every property is non-optional with a
+    /// default, there is no `@Attribute(.unique)` and no relationship, per this file's
+    /// CloudKit rules — and adding a record type is the one shape change those rules
+    /// permit even after a schema has been promoted.
+    @Model
+    final class MiscategorisedScoreLabelRecord {
+        var labelUUID: UUID = UUID()
+        var workoutUUID: UUID = UUID()
+
+        /// `ScheduledSessionKind.rawValue` — the ask the score was actually judged
+        /// against, copied from the score so the label carries its own grounds.
+        var judgedAgainstRawValue: String = ""
+
+        /// `Discipline.rawValue` — what the workout actually was.
+        var actualDisciplineRawValue: String = ""
+
+        var recordedAt: Date = Date.distantPast
+
+        init(_ stored: StoredMiscategorisedScoreLabel) {
+            labelUUID = stored.labelUUID
+            workoutUUID = stored.workoutUUID
+            judgedAgainstRawValue = stored.judgedAgainstRawValue
+            actualDisciplineRawValue = stored.actualDisciplineRawValue
+            recordedAt = stored.recordedAt
+        }
+
+        var stored: StoredMiscategorisedScoreLabel {
+            StoredMiscategorisedScoreLabel(
+                labelUUID: labelUUID,
+                workoutUUID: workoutUUID,
+                judgedAgainstRawValue: judgedAgainstRawValue,
+                actualDisciplineRawValue: actualDisciplineRawValue,
+                recordedAt: recordedAt
+            )
+        }
+    }
+
     /// What the athlete said a strength session worked (A22).
     ///
     /// A sibling of `ScoreAnnotationRecord` in every respect that matters here: its own
@@ -633,6 +686,7 @@ typealias RouteRecord = MaximizeSchemaV1.RouteRecord
 typealias DerivedMetricsRecord = MaximizeSchemaV1.DerivedMetricsRecord
 typealias ScoreRecord = MaximizeSchemaV1.ScoreRecord
 typealias ScoreAnnotationRecord = MaximizeSchemaV1.ScoreAnnotationRecord
+typealias MiscategorisedScoreLabelRecord = MaximizeSchemaV1.MiscategorisedScoreLabelRecord
 typealias MuscleGroupEntryRecord = MaximizeSchemaV1.MuscleGroupEntryRecord
 typealias ChatThreadRecord = MaximizeSchemaV1.ChatThreadRecord
 typealias PlanRecord = MaximizeSchemaV1.PlanRecord

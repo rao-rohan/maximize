@@ -1480,6 +1480,10 @@ The three decisions worth knowing without reading all of it:
 written are wrong, D8 forbids overwriting them, and they are not scorer misjudgements —
 counting them as such corrupts the correction-rate signal D8 exists to protect. The
 recorded lean is to label them; the decision is the owner's, tracked as MAX-143.
+**Answered (owner, 2026-08-05): label them.** A21 carries the decision and what it changed
+about its own wording — the label is an additive *record*, not only a string, because the
+thing that has to happen to these scores is an exclusion from a number, and a sentence in a
+header excludes nothing. Built as MAX-143; see its paragraph below.
 
 **The spec's numbering collides with shipped work.** LIFTING-SPEC §14 was written while
 MAX-110 (the tallies' future-days fix) and MAX-129 (the stop-gap scoring gate) were in
@@ -1505,7 +1509,7 @@ is the overseer's, not a ticket's — flagged here rather than done.
 | MAX-140 | Trend tiles, honestly ("days run", the effective denominator) | 134 | Sonnet |
 | MAX-141 | `PlanProposal` covers lift days | 129, **099** | Sonnet 🔒 ✅ |
 | MAX-142 | ~~`TrainingContext` is per-session, not per-run~~ — **not needed**, MAX-095 landed briefed | 129, **095** | — ✅ |
-| MAX-143 | **Decide what to do with lifts already scored as runs** | 128 | Owner / overseer |
+| MAX-143 | ~~Decide what to do with lifts already scored as runs~~ — **owner chose: label them**, and it is built | 128 | **Opus** ✅ |
 | MAX-144 | ~~How adherence to a muscle-group prescription is judged~~ — **decided (A22)** | 129 | Owner ✅ |
 | MAX-145 | **Enter muscle groups on a strength workout's detail screen** (A22) | 129, 144 | **Opus** ✅ |
 
@@ -2036,6 +2040,67 @@ change:
 - **Not verified by CI beyond compilation.** The picker, the sheet and the persistence are
   App-layer (tracker R2, R13). See the PR's **Needs device verification** section — set
   groups, force-quit, reopen.
+
+**MAX-143 — the owner chose to label, and the label is a record.** A21's escalation is
+settled. Every lift scored against the running rubric keeps its score, byte for byte, and
+gains a `MiscategorisedScoreLabel` beside it — its own identifier, timestamped, carrying the
+ask the score was judged against and the discipline the workout actually was.
+`ScoreLedger.divergence` returns nil for a labelled score, and that single line is the whole
+product change: these scores stop counting as scorer misjudgements in the one metric D8
+exists to protect (PRD §2).
+
+- **Nothing stored moved, and it is asserted on bytes rather than argued.** `StoredScore`
+  before and after labelling, columns and the `ScheduledSession` blob inside it, and the
+  encoded `Score` after a full labelling pass. There is no write path from anything this
+  ticket added to a `Score`: `ScoreRepository` gained one method and it inserts a row in a
+  different table.
+- **The exclusion is at the metric, not at each consumer.** `divergence` *is* PRD §2's
+  correction-rate signal, so the guard lives there rather than in the callers — nothing
+  aggregates it yet, and `countsTowardScorerQuality` is exposed so the first thing that does
+  filters on the same predicate instead of re-deriving it. `wasCorrected` and
+  `effectiveValue` are deliberately **unchanged**: a label says the auto-score is not
+  evidence about the scorer, not that the athlete's correction never happened.
+- **Not an annotation, and that is the load-bearing distinction.** A21 rejected
+  manufacturing annotations because an annotation means *a human corrected this*, and filing
+  these as corrections would damage the metric worse than leaving them. A separate record
+  type is what makes that impossible rather than merely discouraged.
+- **Detection is a rule; labelling is a record.** `MiscategorisedScoreLabel
+  .isMiscategorised` is a pure function of the ask the score stored and the workout's own
+  discipline — a fact the app can answer only because MAX-133 made "its own discipline's
+  ask" a real thing. The label is nonetheless *stored*, for D1's reason: a derived answer
+  changes when the derivation changes, so a later ticket mapping a new HealthKit type to
+  `.lift` would silently relabel history and move a metric computed over it.
+- **A score judged against `.rest` is never labelled, and nothing is lost.** `.rest` belongs
+  to both slots, so it names no discipline. That is the one case the rule cannot see, and it
+  is also the case where the old evaluator and the new one resolve to the same ask — every
+  stored plan prescribes rest on every lift slot (MAX-129), so a lift on a run-rest day got
+  the bands it would get today.
+- **How a score comes to be labelled: an idempotent pass at launch**, alongside MAX-067's
+  splits backfill and for the same reasons. It reads stored rows and writes label rows,
+  skips anything already labelled, and therefore needs no "has this run" flag — a flag can be
+  lost, restored out of step with the rows it describes, and has to be migrated itself.
+  Candidates are lifts: a stored score judged against the other discipline's ask can only be
+  a lift shown a run ask, since nothing has ever written `.lift` into a plan's run slot.
+  **It is not a migration.** Nothing stored is rewritten, re-typed or deleted, and that
+  distinction is what makes the pass compatible with D8 rather than an exception to it.
+- **A score labelled twice costs nothing.** `ScoreLedger` reads labelling as a property of
+  the set rather than a count, and resolves the earliest as the one in force — the treatment
+  `WorkoutRepository` already gives a duplicate workout, for the same reason (two devices,
+  neither synced).
+- **How it presents, decided: the score is shown and a sentence explains it.** Nothing is
+  hidden, no number moves, the band and rationale read exactly as before, and the athlete's
+  history is not rewritten. `MiscategorisedScoreCopy` holds the two strings in the core where
+  copy lives. **Reported, not done: nothing renders them yet.** The verdict header
+  (`Domain/WorkoutVerdict.swift`, `App/Workouts/`) is MAX-139's and the calendar's VoiceOver
+  sentence is MAX-150's, both in flight — so the core carries the state and the words, and
+  wiring them to a surface wants whichever of those lands second.
+- **Also reported, not done: the average-score tile still counts these scores.** This ticket
+  excluded them from the scorer-quality metric, which is the one D8 protects. Whether a
+  miscategorised score should also leave the athlete's own averages is a question about a
+  number already on screen, it belongs to `Tallies` (MAX-134's files), and it was not taken.
+- **CI compiles the App layer and never runs it.** The SwiftData record, the store
+  conformance, the delete cascade and the launch trigger are App-layer (R2, R13); the
+  mapping they depend on is tested in the core. See the PR's **Needs device verification**.
 
 **MAX-136 — the prompt stops describing a lift as a run.** LIFTING-SPEC §10.1. A lift's
 fact sheet now carries the day and weekday, the type, duration, active energy, the

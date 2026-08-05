@@ -806,7 +806,7 @@ final class StoredRecordRoundTripTests: XCTestCase {
             Set(WorkoutAttachedRecord.allCases),
             [
                 .heartRateSeries, .route, .derivedMetrics, .automaticScore, .scoreAnnotations,
-                .chatThread, .muscleGroupEntries,
+                .miscategorisedScoreLabels, .chatThread, .muscleGroupEntries,
             ]
         )
     }
