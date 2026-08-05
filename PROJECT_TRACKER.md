@@ -550,6 +550,7 @@ feature was governed by a plan that could not exist).
 | MAX-092 … MAX-104 | The chat-first build, decomposed from MAX-090 | MAX-090 | see below |
 | MAX-109 | Lifting product spec: plans account for lifting and running | Owner | **Opus** ✅ |
 | MAX-110 … MAX-125 | The lifting build, decomposed from MAX-109 | MAX-109 | see below |
+| MAX-126 | **"No verdict by design" is a state** — a lift stops being drawn and spoken as a run awaiting a score | MAX-111 | **Opus** ✅ |
 
 **MAX-066.** Splits currently need a GPS track, so a treadmill run has none — correctly
 rendered as an absence rather than fabricated. `distanceWalkingRunning` is already
@@ -725,7 +726,46 @@ calendar renders it `.awaitingScore(activityType:)` with no agreement, which is 
 today and **wrong about tomorrow**: "awaiting" means *not yet*, and for a lift it is now
 *never*. Same for the detail view, which shows a spinner and "Scoring runs automatically once
 the run is captured." Distinguishing "waiting" from "has no verdict by design" is a new state,
-and **MAX-109's spec owns that decision** — reported, not invented.
+and **MAX-109's spec owns that decision** — reported, not invented. **Closed by MAX-126**,
+below.
+
+**MAX-126 — "no verdict by design" is now a state, and it cost the calendar nothing.**
+MAX-111's escalation, taken. `ScoreCalendarDayState` gains `.noVerdict(activityType:)` and
+`WorkoutVerdict.Scoring` gains `.noVerdict` (its `.unscored` is renamed `.awaitingScore`, so
+the pair reads as the tense difference it is). Both split on `Workout.activityType.isRun` —
+the same predicate the pipeline declines to score on, not a third notion of "is this a run".
+
+**One state, not two.** "Not a run, so no rubric" and "a run whose rubric could not be
+applied" are different facts, but `UnscoredReason` is a diagnostic that is deliberately never
+stored, so the activity type is the only durable input either surface has — and a run left
+unscored by `noBandMatched` is genuinely still waiting, because D1 makes a new band a new
+plan version. `.awaitingScore` stays truthful for it.
+
+**No new colour, and no new mark.** The two scoreless states can never carry the same
+activity type, so the activity glyph the cell already draws separates them for free; a
+lifting day is the same neutral fill every no-verdict day sits on, told apart the way
+`.scheduledRest` and `.convertedRest` already are. MAX-084/MAX-087's contrast budget and
+MAX-105's ring are untouched. On a day holding a run and a lift, **a pending answer outranks
+a settled absence**: the day is `.awaitingScore`, because the cell really is about to change.
+Whether an unmet *running* obligation should recolour such a day is LIFTING-SPEC §7.2's
+roll-up — MAX-116/MAX-117's, and it needs the lifting plan model first.
+
+**No stored score is touched** (D8): a lift ingested before MAX-111 still shows the band it
+was given, and A21/MAX-125 remains the owner's call. The detail header drops the spinner and
+says "Recorded, not scored — the plan scores runs, so there's no score for this workout."
+The chat gate's "chat opens once it has a score" was a third false promise on the same path
+and is fixed alongside.
+
+**Reported by MAX-126, not fixed by it — the drift overlay says the same untrue thing.**
+`DriftOverlayModel` does not pre-filter its candidates, so a lift in the selected interval
+becomes a `HeartRateDriftOverlayData.Candidate`, is excluded as `.notYetScored`, and is
+narrated under the chart as **"1 run isn't scored yet, so nothing has decided whether it was
+an easy or long run."** Three things wrong in one sentence: it calls a lift a run, it implies
+a score is coming, and it counts a session the overlay was never going to draw. The fix is
+not a string — `HeartRateDriftOverlayData` and `DriftFigureSelection` each need an exclusion
+reason and a note of their own, or the candidate set needs filtering before it reaches them,
+and which of those is right is a product question about whether a lift should be *counted* as
+an omission at all. Out of MAX-126's scope; needs a ticket.
 
 **Scores already written for lifts are untouched and still on the device.** D8 is absolute
 and the gate only stops new ones; correcting the existing ones is MAX-109's A21 and the owner
