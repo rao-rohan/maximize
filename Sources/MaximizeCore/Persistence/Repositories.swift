@@ -39,6 +39,10 @@ public enum WorkoutAttachedRecord: String, Hashable, Sendable, CaseIterable {
     case derivedMetrics
     case automaticScore
     case scoreAnnotations
+    /// A21/MAX-143's marks on an auto-score. Attached to the workout for the same reason
+    /// an annotation is: the label is a statement about that session's score, and it
+    /// means nothing once the score it qualifies is gone.
+    case miscategorisedScoreLabels
     case chatThread
     /// A22's athlete-supplied muscle groups. Attached to the workout for the same
     /// reason a score annotation is: it is a statement *about* a session, and it means
@@ -126,11 +130,31 @@ public protocol ScoreRepository: Sendable {
     ///   PRD §2 names as the scorer-quality metric.
     func recordAutomaticScore(_ score: Score) async throws
 
-    /// The auto-score together with its corrections, or nil if the workout is unscored.
+    /// The auto-score together with its corrections **and its labels**, or nil if the
+    /// workout is unscored.
+    ///
+    /// The whole ledger, never a half of it: `ScoreLedger.divergence` excludes a labelled
+    /// score from the scorer-quality metric, and an implementation that returned the
+    /// annotations without the labels would put every miscategorised lift straight back
+    /// into it (A21, MAX-143).
     func ledger(forWorkout id: UUID) async throws -> ScoreLedger?
 
     /// Adds a correction. Additive: it cannot touch the auto-score.
     func annotate(_ annotation: ScoreAnnotation) async throws
+
+    /// Marks an auto-score as written against the wrong discipline's ask (A21, MAX-143).
+    ///
+    /// Additive, like `annotate(_:)` and for the same reason — a separate record keyed by
+    /// its own identifier, with no update or delete path, so nothing here can reach the
+    /// score it qualifies. Deliberately **not** an annotation: an annotation means a human
+    /// disagreed with a number, and manufacturing them would corrupt the correction-rate
+    /// metric worse than leaving these scores alone.
+    ///
+    /// Callers are expected to skip a score that already carries a label
+    /// (`ScoreLedger.isMiscategorised`); an implementation that writes a second one has
+    /// still not broken anything, because `ScoreLedger` reads labelling as a property of
+    /// the set rather than as a count.
+    func recordMiscategorisationLabel(_ label: MiscategorisedScoreLabel) async throws
 }
 
 /// What the athlete said a strength session worked (A22, PRD §8's shape for an

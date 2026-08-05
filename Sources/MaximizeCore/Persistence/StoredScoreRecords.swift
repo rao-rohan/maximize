@@ -158,3 +158,74 @@ public struct StoredScoreAnnotation: Hashable, Sendable {
         )
     }
 }
+
+/// `MiscategorisedScoreLabel` as stored (A21, MAX-143).
+///
+/// Additive in the same sense `StoredScoreAnnotation` is, and the distinction between the
+/// two is the ticket: an annotation says *a human scored this differently*, a label says
+/// *the scorer was asked the wrong question*. They are separate record types because
+/// collapsing them would make every labelled lift look like a correction, which is the one
+/// thing that would damage the scorer-quality metric more than leaving the scores alone.
+///
+/// Nothing here can reach the auto-score. `StoredScore` has no field this writes and no
+/// path from this type into it — the label is a row beside the score, exactly as D8
+/// describes.
+public struct StoredMiscategorisedScoreLabel: Hashable, Sendable {
+    /// The record's own identity, not the workout's — see `MiscategorisedScoreLabel`.
+    public var labelUUID: UUID
+    public var workoutUUID: UUID
+    public var judgedAgainstRawValue: String
+    public var actualDisciplineRawValue: String
+    public var recordedAt: Date
+
+    public init(
+        labelUUID: UUID,
+        workoutUUID: UUID,
+        judgedAgainstRawValue: String,
+        actualDisciplineRawValue: String,
+        recordedAt: Date
+    ) {
+        self.labelUUID = labelUUID
+        self.workoutUUID = workoutUUID
+        self.judgedAgainstRawValue = judgedAgainstRawValue
+        self.actualDisciplineRawValue = actualDisciplineRawValue
+        self.recordedAt = recordedAt
+    }
+
+    public init(_ label: MiscategorisedScoreLabel) {
+        self.init(
+            labelUUID: label.id,
+            workoutUUID: label.workoutID,
+            judgedAgainstRawValue: label.judgedAgainst.rawValue,
+            actualDisciplineRawValue: label.actualDiscipline.rawValue,
+            recordedAt: label.recordedAt
+        )
+    }
+
+    /// - Note: both enums are closed, so an unrecognised raw value is a corrupted or
+    ///   downgraded record rather than a variant to tolerate — `StoredScore`'s treatment
+    ///   of `ScoreBand`, for its reason. Failing loudly matters more here than usual: a
+    ///   label that decoded to *nothing* would silently return its score to the
+    ///   scorer-quality metric, and nobody would ever see that happen.
+    public func toDomain() throws -> MiscategorisedScoreLabel {
+        guard let judgedAgainst = ScheduledSessionKind(rawValue: judgedAgainstRawValue) else {
+            throw DomainError.malformed(
+                field: "StoredMiscategorisedScoreLabel.judgedAgainstRawValue",
+                value: judgedAgainstRawValue
+            )
+        }
+        guard let actualDiscipline = Discipline(rawValue: actualDisciplineRawValue) else {
+            throw DomainError.malformed(
+                field: "StoredMiscategorisedScoreLabel.actualDisciplineRawValue",
+                value: actualDisciplineRawValue
+            )
+        }
+        return try MiscategorisedScoreLabel(
+            id: labelUUID,
+            workoutID: workoutUUID,
+            judgedAgainst: judgedAgainst,
+            actualDiscipline: actualDiscipline,
+            recordedAt: recordedAt
+        )
+    }
+}
