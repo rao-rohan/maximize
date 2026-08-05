@@ -198,7 +198,7 @@ public enum FailureCopy {
     /// "connected", which is the claim R10 forbids.
     public static let noWorkoutsRecorded =
         "No workouts yet. iOS never tells an app whether Health access was granted, so if "
-        + "you have recorded some, check Maximize under Settings › Health › Data Access & Devices."
+            + "you have recorded some, check Maximize under Settings › Health › Data Access & Devices."
 
     // MARK: - The dashboard's clock
 
@@ -216,7 +216,7 @@ public enum FailureCopy {
     /// only hint that anything was wrong. A blank is not a designed state.
     public static let dashboardUnavailableWithoutToday =
         "The calendar, drift and summary all measure against today, so none of them can be "
-        + "shown until this device's date can be read."
+            + "shown until this device's date can be read."
 
     // MARK: - The Anthropic API key
 

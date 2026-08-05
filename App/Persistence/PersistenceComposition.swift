@@ -42,7 +42,7 @@ enum PersistenceComposition {
     /// Core Data error's `userInfo` can carry `NSValidationErrorObject`, i.e. stored row
     /// values, which is health data in a log and forbidden without qualification — so it
     /// is `.private`, still visible in full to a debugger attached in Xcode.
-    static let modelContainer: ModelContainer? = {
+    static let modelContainer: ModelContainer? = { () -> ModelContainer? in
         do {
             return try MaximizeModelContainer.makeOnDisk()
         } catch {

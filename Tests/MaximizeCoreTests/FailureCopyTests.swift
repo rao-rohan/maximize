@@ -22,26 +22,46 @@ final class FailureCopyTests: XCTestCase {
     /// below cannot silently miss a mapping added later. Each entry pairs the sentence
     /// with a label naming where it came from, so a failure says which case broke the
     /// rule rather than only quoting the string.
-    private var allCopy: [(label: String, text: String)] {
-        LoadFailureSurface.allCases.map {
-            ("couldNotLoad(.\($0.rawValue))", FailureCopy.couldNotLoad($0))
+    private struct Entry {
+        let label: String
+        let text: String
+    }
+
+    private var allCopy: [Entry] {
+        var entries: [Entry] = []
+        for surface in LoadFailureSurface.allCases {
+            entries.append(
+                Entry(label: "couldNotLoad(.\(surface.rawValue))", text: FailureCopy.couldNotLoad(surface))
+            )
         }
-        + StoredAPIKeyPresence.allCases.map {
-            ("storedKeyPresence(\($0))", FailureCopy.storedKeyPresence($0))
+        for presence in StoredAPIKeyPresence.allCases {
+            entries.append(
+                Entry(label: "storedKeyPresence(\(presence))", text: FailureCopy.storedKeyPresence(presence))
+            )
         }
-        + APIKeyStatusMessage.allCases.map {
-            ("apiKeyStatus(\($0))", FailureCopy.apiKeyStatus($0))
+        for message in APIKeyStatusMessage.allCases {
+            entries.append(
+                Entry(label: "apiKeyStatus(\(message))", text: FailureCopy.apiKeyStatus(message))
+            )
         }
-        + HealthAccessState.allCases.map {
-            ("healthAccess(\($0))", FailureCopy.healthAccess($0))
+        for state in HealthAccessState.allCases {
+            entries.append(
+                Entry(label: "healthAccess(\(state))", text: FailureCopy.healthAccess(state))
+            )
         }
-        + [
-            ("noWorkoutsRecorded", FailureCopy.noWorkoutsRecorded),
-            ("todaysDateUnresolved", FailureCopy.todaysDateUnresolved),
-            ("dashboardUnavailableWithoutToday", FailureCopy.dashboardUnavailableWithoutToday),
-            ("planCouldNotBePrepared", FailureCopy.planCouldNotBePrepared),
-            ("planVersionCouldNotBeSaved", FailureCopy.planVersionCouldNotBeSaved),
-        ]
+        entries.append(Entry(label: "noWorkoutsRecorded", text: FailureCopy.noWorkoutsRecorded))
+        entries.append(Entry(label: "todaysDateUnresolved", text: FailureCopy.todaysDateUnresolved))
+        entries.append(
+            Entry(
+                label: "dashboardUnavailableWithoutToday",
+                text: FailureCopy.dashboardUnavailableWithoutToday
+            )
+        )
+        entries.append(Entry(label: "planCouldNotBePrepared", text: FailureCopy.planCouldNotBePrepared))
+        entries.append(
+            Entry(label: "planVersionCouldNotBeSaved", text: FailureCopy.planVersionCouldNotBeSaved)
+        )
+        return entries
     }
 
     /// The enums are the inventory. If a case is added and this count is not updated,
@@ -129,8 +149,8 @@ final class FailureCopyTests: XCTestCase {
     /// route, which is the finding CLAUDE.md's "health data is PII" rule is about.
     func testNoSentenceCarriesADigit() {
         for entry in allCopy {
-            XCTAssertNil(
-                entry.text.rangeOfCharacter(from: .decimalDigits),
+            XCTAssertFalse(
+                entry.text.contains(where: { $0.isNumber }),
                 "\(entry.label) carries a digit, so something is being interpolated: \"\(entry.text)\""
             )
         }
