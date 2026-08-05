@@ -369,8 +369,17 @@ function, so its branch never renders), and `enteredKey` is not cleared on the
 ### Deliberately not built
 
 Live coaching · manual entry/editing · strength analysis · HealthKit writes · multi-user ·
-nutrition · Claude on the dashboard tab · **any server component** (A1). PRD §3, §12.
+nutrition · ~~Claude on the dashboard tab~~ · **any server component** (A1). PRD §3, §12.
 Listed so nobody helpfully adds one.
+
+**Claude on the dashboard tab is struck, on purpose (A10).** The chat-first pivot puts a
+persistent Ask button on every screen, and on the dashboard it opens a thread about an
+interval of training — which *is* the deferred `summarize my month` feature. It is
+superseded on the record rather than allowed to arrive as a side effect of where a button
+was placed, because that is exactly the failure this list exists to catch. The rest of the
+list stands, and **live coaching in particular is now load-bearing**: A14 makes "no
+unattended chat call" an invariant, so a proactive coach is not a small extension of the
+chat work but a decision against a written rule.
 
 ---
 
@@ -467,17 +476,32 @@ and CI selects a 26.x toolchain explicitly rather than trusting the runner defau
 
 ## Post-PRD backlog
 
-Every ticket tracing to the PRD is merged. These came out of the work itself — reported
-by the agents that found them rather than fixed in place, per the standing instruction —
-and none of them is required for the PRD to be complete.
+Every ticket tracing to the PRD as written is merged. Most of what follows came out of
+the work itself — reported by the agents that found them rather than fixed in place, per
+the standing instruction. Two other sources appear here now that the app runs on a phone:
+**the owner**, reporting from the device or asking for a change of direction, and **the
+overseer**, where decomposition missed something the PRD implied but never spelled out
+(MAX-080 is the clearest case — nothing in the app ever wrote a plan, so every downstream
+feature was governed by a plan that could not exist).
 
 | ID | Ticket | Source | Tier |
 |---|---|---|---|
-| MAX-066 | Treadmill splits from a distance-sample series | MAX-046 | Sonnet |
-| MAX-067 | Backfill splits for runs ingested before MAX-046 | MAX-046 | Sonnet |
-| MAX-068 | Decide whether splits enter the Claude prompt | MAX-046 | **Opus** 🔒 |
-| MAX-069 | Extend file protection over Core Data's external-storage directory | MAX-072 R1 | Sonnet 🔒 |
+| MAX-066 | Treadmill splits from a distance-sample series | MAX-046 | Sonnet ✅ |
+| MAX-067 | Backfill splits for runs ingested before MAX-046 | MAX-046 | Sonnet ✅ |
+| MAX-068 | Decide whether splits enter the Claude prompt | MAX-046 | **Opus** 🔒 ✅ |
+| MAX-069 | Extend file protection over Core Data's external-storage directory | MAX-072 R1 | Sonnet 🔒 ✅ |
+| MAX-080 | Plan authoring — seed a plan, revise as a new version | Overseer, D1 gap | **Opus** ✅ |
 | MAX-081 | Move Settings out of the tab bar; fix keyboard handling | Device report | Sonnet ✅ |
+| MAX-082 | Design review of the whole app | Device report | **Opus** ✅ |
+| MAX-083 | Week / month / year intervals, each with a fitting representation | Owner | **Opus** ✅ |
+| MAX-084 | Fix score-band and chart contrast; resolve A7 | MAX-082 | Sonnet ✅ |
+| MAX-085 | **The tab bar, once**: Plan becomes a third tab, iOS 26 `Tab` builder, `.tint()`, surface elevation, Liquid Glass chrome | MAX-082, Owner | **Opus** |
+| MAX-086 | Absence-string voice; wire `AppearancePreference` | MAX-082 | Haiku |
+| MAX-087 | A non-hue channel for the year heatmap's 6pt cells | MAX-084 | Sonnet |
+| MAX-105 | **The plan on the dashboard calendar** — scheduled beneath actual | Owner | **Opus** |
+| MAX-090 | Chat-first product spec: plan generation and Q&A through chat | Owner | **Opus** 🔒 ✅ |
+| MAX-091 | Run both Claude clients on the Sonnet tier at `medium` effort | Owner, cost | Sonnet 🔒 ✅ |
+| MAX-092 … MAX-104 | The chat-first build, decomposed from MAX-090 | MAX-090 | see below |
 
 **MAX-066.** Splits currently need a GPS track, so a treadmill run has none — correctly
 rendered as an absence rather than fabricated. `distanceWalkingRunning` is already
@@ -518,6 +542,127 @@ while streaming, which silently resigned focus and dropped the keyboard on every
 Chat moved to its own sheet with the composer as a bottom `safeAreaInset`. **None of it
 is verified** — CI has no simulator and cannot observe an interaction; see the PR's device
 list.
+
+**MAX-085 is now the tab bar's only owner, and it is re-tiered to Opus.** It was filed off
+the design review as chrome polish — surface elevation, `.tint()`, Liquid Glass. The owner
+then asked for **the plan to become a tab**, and that lands in `App/RootTabView.swift`,
+which design review T2 already wanted (the iOS 26 `Tab` builder, `.tint(.accent)`,
+`.tabBarMinimizeBehavior`) and which MAX-098's persistent chat accessory needs after that.
+Three tickets converging on one 28-line file is three conflicting diffs of it, so the file
+gets one owner and does the work once.
+
+The tier moved because the ticket is no longer polish. A tab bar is the app's claim about
+what its parallel modes *are*, and MAX-081 already spent that reasoning once when it took
+Settings **out** — settings is somewhere you go to change a thing and leave, not a mode. A
+plan is the opposite: it is a place you look at, the reference every score on every other
+screen is measured against, and today it is legible only while you are editing it. It earns
+the slot on the same argument that denied Settings one, which is the sort of decision worth
+making deliberately rather than as a side effect of a `Tab` being easy to add.
+
+MAX-102 delivers the tab's *content* as a tab root and is explicitly barred from
+`RootTabView.swift`; MAX-085 mounts it. Sequence: 102 → 085 → 098.
+
+**MAX-105 — the plan on the dashboard calendar.** The owner's ask, and the most interesting
+design problem currently open, so it is Opus and it should be argued rather than assumed.
+
+Today a calendar cell shows what *happened*: a date, a state glyph, and MAX-084's score-band
+mark. The plan is what was *prescribed*. Putting both in a ~42pt cell without it turning to
+mush is the whole ticket, and the shape most likely to be right is that **the plan is the
+substrate and the actual is the mark on top of it** — you ran *against* a prescription, so
+the prescription is the ground and the result is the figure. A cell then reads in one glance
+as agreement or divergence, which is the question the calendar exists to answer and cannot
+currently answer at all.
+
+Two consequences that make this more than decoration:
+
+- **Future days become meaningful for the first time.** The calendar today shows only the
+  past, because a score is the only thing it draws. A plan tells you what is coming, so the
+  same grid starts answering "what am I doing Thursday" — and the empty-vs-scheduled-vs-rest
+  distinction on a future day is a new state that has to read as *not yet* rather than as
+  *missed*. Getting that wrong turns the whole forward half of the month into failure.
+- **D4 and MAX-084's rule both still bind.** The score still colours the day, and no two
+  bands may be distinguished by hue alone. A plan layer that eats the contrast budget
+  breaks a rule the project already paid to establish — and MAX-087 is spending that budget
+  at the year span right now, so the two must be read together.
+
+D1 and D2 are untouched: the plan layer reads the versioned record in effect on each day
+through `PlanCalendar`, never a literal and never a recomputation.
+
+**MAX-091.** Both Claude clients moved from the Opus tier to the Sonnet tier at `medium`
+effort, on the owner's cost instruction. Three things came with the model that are not
+optional and are easy to get wrong later, so they are recorded here rather than only in
+the diff:
+
+- **Effort is nested.** It is `output_config: {"effort": "medium"}`, not a top-level
+  request field, and it is an *output* control rather than a thinking budget — which is
+  why both clients can keep `thinking: {"type": "disabled"}` alongside it. Disabling
+  thinking is accepted only at `high` effort or below, so raising either client to
+  `xhigh` or `max` without also deleting its `Thinking` block is a 400. Both files say so
+  at the call site.
+- **The cacheable minimum went up**, from 512 tokens on the previous tier to 1024 on this
+  one. Neither client's system blocks reach it today, so both `cache_control` markers are
+  currently inert — no error, no saving. They stay because a multi-workout context
+  (MAX-090) plausibly crosses the line on its own.
+- **The tokenizer produces roughly 30% more tokens** for the same text. The chat client's
+  `max_tokens` went 2048 → 2560 to buy the same length of answer it was originally sized
+  for; the scoring client's 512 was already far past what an integer and a 140-character
+  rationale need, so it did not move.
+
+**Not verified.** Neither client is exercised by CI — no toolchain, no key, and no network
+request in the suite (see R1 and the files' own doc comments). What CI proves here is that
+the app target still compiles. That the request shape is accepted, and that a Sonnet-tier
+score is as good as an Opus-tier one, are both device checks against a real key.
+
+**MAX-090** is the chat-first product spec, and it is **delivered**:
+[`docs/CHAT-FIRST-SPEC.md`](./docs/CHAT-FIRST-SPEC.md) plus amendments **A9–A15**. Nothing
+in it is built. Two constraints were settled by the owner up front and the spec did not
+re-open them: the detailed dashboard and workout-detail screens **stay** — chat is additive
+— and the subject a chat is opened with must be a structured value the core understands,
+not a free-text hint, because a free-text hint would be a second unvalidated way of saying
+what context to assemble, which D3 forbids.
+
+The two decisions worth knowing without reading all of it:
+
+- **D3 is generalised, not weakened.** One context module keeps one entry point,
+  `build(for subject:)`, over a closed subject set. A training thread gets a **roll-up** —
+  plan in effect, tallies, one line per run, scope stated — not a stack of fact sheets. No
+  HR curves, no splits, no coordinates, no rationales. The rule with teeth is that every
+  aggregate comes from the same core function the corresponding screen reads, with a test
+  asserting a context and a tile agree over the same interval. Chat and a tile now describe
+  the same number to the same person, so a divergence is a visible defect.
+- **D1 is untouched.** The model emits a **proposal**, never a plan. It becomes a version
+  only through `PlanAuthoringSession`, the door MAX-080 built. The near-miss to watch for
+  in review is a helper that applies a proposal *and stores it*.
+
+Its §11 proposed thirteen tickets as MAX-091–103; they are renumbered **MAX-092–104** here
+and in the document, because MAX-091 was taken by the tier change that landed while the
+spec was being written. MAX-101 (the read-only plan screen) is independent of the other
+twelve and is dispatchable immediately.
+
+| ID | Ticket | Depends on | Tier |
+|---|---|---|---|
+| MAX-092 | `ChatSubject` and thread identity | — | **Opus** |
+| MAX-093 | The stored record: additive fields, no migration | 092 | Sonnet |
+| MAX-094 | Shared fact-sheet formatting — pure extraction | — | Sonnet |
+| MAX-095 | `TrainingContext` + one context entry point | 092, 094 | **Opus** 🔒 |
+| MAX-096 | `ChatModel` generalised; transcript cap; training task text | 095 | **Opus** 🔒 |
+| MAX-097 | Thread list, derived titles, new chat, scope subtitle | 093, 096 | Sonnet |
+| MAX-098 | The persistent glass button | 097 | Sonnet |
+| MAX-099 | `PlanProposal` — type, parse, schema derived from core enums | 095 | **Opus** 🔒 |
+| MAX-100 | The Anthropic client for plan proposals | 099 | Sonnet 🔒 |
+| MAX-101 | Conversational plan authoring; proposal card; handoff | 098, 100 | **Opus** |
+| MAX-102 | **The read-only plan screen with version history** | — | Sonnet |
+| MAX-103 | "Runs in this conversation" strip | 098 | Sonnet |
+| MAX-104 | Copy and absence voice over the new surfaces | 098, 102 | Sonnet |
+
+Three collisions the spec calls out and the overseer must respect: **094 lands before 095**
+(both touch `WorkoutFactSheet.swift`, and 094 is the extraction 095 builds on); **MAX-102
+then MAX-085 then MAX-098**, the single owner chain for `RootTabView.swift`; **MAX-087
+before MAX-105**, both being in the calendar's contrast budget; and — the original note —
+**MAX-085
+lands before 098** (both touch `RootTabView.swift`, and the button should be built against
+the migrated tab bar rather than merged into it afterwards); and **102 before 101** (both
+touch `App/Plan/`, and 102 is the smaller, independent one).
 
 ---
 

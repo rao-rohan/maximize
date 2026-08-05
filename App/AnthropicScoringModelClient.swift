@@ -11,8 +11,8 @@ import MaximizeCore
 /// look at `score` or `rationale`, and does not decide whether a workout is
 /// scoreable — `ScoreProposal.parse` and `WorkoutScorer` own all of that.
 ///
-/// Model: `claude-opus-5` (see `model` below) — no model is named in this ticket's
-/// spec, so the project's current default applies.
+/// Model: `claude-sonnet-5` at `medium` effort (see `model` and `outputConfig`
+/// below) — the project's chosen tier for both Claude calls.
 ///
 /// **Not exercised by CI.** As with `KeychainAnthropicAPIKeyStore`, this repo has no
 /// Swift toolchain, simulator, device, or API key locally, and CI never makes a
@@ -28,7 +28,13 @@ final class AnthropicScoringModelClient: ScoringModelInvoking, @unchecked Sendab
     /// The model this client asks. A fixed literal rather than something read from
     /// settings or plan data: D1 versions the *scoring rubric*, not which model
     /// executes it, and swift build fails loudly if this string is ever mistyped.
-    static let model = "claude-opus-5"
+    ///
+    /// Changing it is a cost decision, not a scoring-behaviour one *from D1's point of
+    /// view* — the rubric a version pins is the text in `ScoringInstruction`, not the
+    /// engine that reads it. Historical scores stay reproducible in the sense D1 cares
+    /// about (the same rubric governed them); they were never bit-reproducible, because
+    /// no Claude call is.
+    static let model = "claude-sonnet-5"
 
     /// Fixed and hardcoded — never derived from user input, plan data or a server
     /// response, so there is no surface here for redirecting a request carrying health
@@ -135,21 +141,31 @@ final class AnthropicScoringModelClient: ScoringModelInvoking, @unchecked Sendab
             // `instruction.task` is identical for every workout (see
             // `ScoringInstruction`'s documentation) — sent as a cacheable system
             // block for exactly the reason that type's doc comment states. Today's
-            // task text is short enough that it may fall under Claude Opus 5's
-            // 512-token cacheable minimum, in which case this is a harmless no-op;
-            // if the task text ever grows, caching starts working with no further
-            // change here.
+            // task text is well under this model's 1024-token cacheable minimum, so
+            // the marker is currently a no-op: it does not error, it just never
+            // creates an entry. Left in place because it costs nothing and starts
+            // working on its own if the task text ever grows past the minimum.
             system: [RequestBody.SystemBlock(text: instruction.task)],
             // Disabled deliberately, for latency: §11 asks for scoring within
             // seconds of ingestion, and a background wake's budget is short and
             // unspecified (tracker R8) — thinking adds generation time this call
             // cannot spare for a task that is "pick a number in a range and write
-            // one sentence", not open-ended reasoning. This call makes no tool
-            // calls, so the failure mode of disabled thinking on Claude Opus 5 that
-            // matters here is a reply with stray formatting around the JSON; that
-            // already surfaces as `ScoringError.malformedResponse`, which
-            // `WorkoutScorer` already treats as worth retrying.
+            // one sentence", not open-ended reasoning. Disabling it also keeps
+            // `maxTokens` meaning what it says: it caps thinking *and* reply
+            // together, so an adaptive turn could spend the whole 512 reasoning and
+            // truncate the answer.
+            //
+            // The two documented hazards of disabled thinking do not bite here. The
+            // model is less inclined to reach for tools — this call offers none. And
+            // it can emit stray formatting around the JSON, which already surfaces as
+            // `ScoringError.malformedResponse`, which `WorkoutScorer` already treats
+            // as worth retrying.
             thinking: RequestBody.Thinking(),
+            // The athlete's cost lever, and the reason this client can disable
+            // thinking at all: disabling is accepted only at `high` effort or below,
+            // so raising this to `xhigh` or `max` without also removing the line
+            // above is a 400.
+            outputConfig: RequestBody.OutputConfig(),
             messages: [RequestBody.Message(content: instruction.subject)]
         )
         request.httpBody = try JSONEncoder().encode(body)
@@ -176,6 +192,15 @@ final class AnthropicScoringModelClient: ScoringModelInvoking, @unchecked Sendab
             let type = "disabled"
         }
 
+        /// Effort is an output-level control, not a thinking budget: it is accepted
+        /// alongside disabled thinking and bounds how much work the model does on the
+        /// reply. `medium` is the deliberate step down from the `high` default —
+        /// roughly the previous Sonnet generation's `high` — which is ample for a task
+        /// whose whole output is an integer and one sentence.
+        struct OutputConfig: Encodable {
+            let effort = "medium"
+        }
+
         struct Message: Encodable {
             let role = "user"
             let content: String
@@ -185,11 +210,13 @@ final class AnthropicScoringModelClient: ScoringModelInvoking, @unchecked Sendab
         let maxTokens: Int
         let system: [SystemBlock]
         let thinking: Thinking
+        let outputConfig: OutputConfig
         let messages: [Message]
 
         enum CodingKeys: String, CodingKey {
             case model, system, thinking, messages
             case maxTokens = "max_tokens"
+            case outputConfig = "output_config"
         }
     }
 
