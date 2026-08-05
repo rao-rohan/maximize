@@ -27,7 +27,9 @@ import MaximizeCore
 /// The empty-transcript invitation, the composer's placeholder and the "could not load"
 /// notice all differ by subject — "this run" is a lie on a thread about a month. Which
 /// string to show is `ChatConversationCopy`'s decision (`MaximizeCore`); this view only
-/// asks for the one that matches `model.subject.kind`.
+/// asks for the one that matches `model.subject?.kind` — nil exactly when a thread-id-
+/// opened model has not yet resolved a subject, which each of the three degrades for
+/// on its own rather than this view guessing at a fallback.
 ///
 /// ## Why chat is its own screen (MAX-081)
 ///
@@ -57,6 +59,17 @@ import MaximizeCore
 /// the one place that supplies it. MAX-049 was a defaulted parameter silently
 /// resolving to a no-op stub in two files; there is nothing here for a future edit to
 /// default away by accident.
+///
+/// ## Two initializers, mirroring `ChatModel`'s two entry points (MAX-097 review)
+///
+/// `init(subject:...)` is the Ask button and **New chat** — the subject is what they
+/// are asking for. `init(threadID:...)` is the thread list (§2.3) — a specific row was
+/// tapped, and `ChatModel.init(threadID:...)` is what reads its subject off the *stored*
+/// thread rather than trusting whatever this view might have been told, which is what
+/// keeps a row tap from ever opening a different thread than the one shown (subjects are
+/// not unique: two training threads can legitimately share an identical frozen window).
+/// Both funnel into the same private initializer, which is the one place that owns
+/// wiring the closures and `currentInterval`.
 struct ChatConversationView: View {
     // `@State`, matching `WorkoutDetailView`'s own pattern: this view creates and owns
     // the model, and `@State` derives `$model.composerText` for the composer's
@@ -96,6 +109,7 @@ struct ChatConversationView: View {
     /// as a reply streams, and its own height changes underneath the scroll.
     private static let transcriptBottomAnchor = "transcript-bottom"
 
+    /// §2.2: the Ask button and **New chat**, both of which already know the subject.
     init(
         subject: ChatSubject,
         currentInterval: TrendInterval?,
@@ -103,11 +117,8 @@ struct ChatConversationView: View {
         onStartNewChatForCurrentWindow: @escaping () -> Void,
         onDone: @escaping () -> Void
     ) {
-        _model = State(
-            initialValue: ChatModel(
-                // MAX-096/MAX-097: the model is driven by a subject; this view no longer
-                // knows or cares which one. A training thread reaches the same type
-                // through the same initializer with `.training(scope)`.
+        self.init(
+            model: ChatModel(
                 subject: subject,
                 workoutRepository: PersistenceComposition.store,
                 scoreRepository: PersistenceComposition.store,
@@ -115,8 +126,48 @@ struct ChatConversationView: View {
                 settingsRepository: PersistenceComposition.store,
                 chatThreadRepository: PersistenceComposition.store,
                 chatClient: AnthropicStreamingChatClient(keyStore: KeychainAnthropicAPIKeyStore())
-            )
+            ),
+            currentInterval: currentInterval,
+            onOpenThreadList: onOpenThreadList,
+            onStartNewChatForCurrentWindow: onStartNewChatForCurrentWindow,
+            onDone: onDone
         )
+    }
+
+    /// §2.3: a row tapped in the thread list. See this type's own "Two initializers"
+    /// note for why the subject is never a parameter here.
+    init(
+        threadID: UUID,
+        currentInterval: TrendInterval?,
+        onOpenThreadList: @escaping () -> Void,
+        onStartNewChatForCurrentWindow: @escaping () -> Void,
+        onDone: @escaping () -> Void
+    ) {
+        self.init(
+            model: ChatModel(
+                threadID: threadID,
+                workoutRepository: PersistenceComposition.store,
+                scoreRepository: PersistenceComposition.store,
+                planRepository: PersistenceComposition.store,
+                settingsRepository: PersistenceComposition.store,
+                chatThreadRepository: PersistenceComposition.store,
+                chatClient: AnthropicStreamingChatClient(keyStore: KeychainAnthropicAPIKeyStore())
+            ),
+            currentInterval: currentInterval,
+            onOpenThreadList: onOpenThreadList,
+            onStartNewChatForCurrentWindow: onStartNewChatForCurrentWindow,
+            onDone: onDone
+        )
+    }
+
+    private init(
+        model: ChatModel,
+        currentInterval: TrendInterval?,
+        onOpenThreadList: @escaping () -> Void,
+        onStartNewChatForCurrentWindow: @escaping () -> Void,
+        onDone: @escaping () -> Void
+    ) {
+        _model = State(initialValue: model)
         self.currentInterval = currentInterval
         self.onOpenThreadList = onOpenThreadList
         self.onStartNewChatForCurrentWindow = onStartNewChatForCurrentWindow
@@ -149,8 +200,11 @@ struct ChatConversationView: View {
         }
         // §2.2: "New chat — training subjects only; absent for a workout subject." A
         // workout thread is one thread per run (§12, question 3 of the spec) and has
-        // nothing for a second thread to be about.
-        if model.subject.kind == .training {
+        // nothing for a second thread to be about. `subject` is nil only while a
+        // thread-id-opened model is still resolving, or after it failed to — either
+        // way, the honest answer is "not yet known to be training", so the button
+        // stays hidden rather than guessing.
+        if model.subject?.kind == .training {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("New chat", action: onStartNewChatForCurrentWindow)
             }
@@ -174,7 +228,16 @@ struct ChatConversationView: View {
             }
         case .failed:
             centered {
-                secondaryText(ChatConversationCopy.failedToLoad(for: model.subject.kind))
+                secondaryText(ChatConversationCopy.failedToLoad(for: model.subject?.kind))
+            }
+        case .threadNotFound:
+            // §2.3: reached by a thread id (a row tapped in the list, or resumed from
+            // one) that no longer resolves to a stored thread — most often because it,
+            // or the workout it belonged to, was deleted from another screen. Ordinary,
+            // not a failure: `ChatConversationCopy.threadNotFound` says so plainly
+            // rather than this screen guessing at a subject it never learned.
+            centered {
+                secondaryText(ChatConversationCopy.threadNotFound)
             }
         case .notYetScored:
             // Ordinary, not an error (constraint #5's sibling state): chat needs the
@@ -198,13 +261,17 @@ struct ChatConversationView: View {
             }
         case .ready:
             VStack(spacing: 0) {
-                // `currentInterval` is nil only for the one caller today that has no
-                // live dashboard selection to hand in (the workout entry point) — and
-                // `ChatScopeNotice` only ever has something to say about a training
-                // subject in the first place, so a nil interval here just means the
-                // banner has nothing to compare against, not that the comparison failed.
-                if let currentInterval,
-                   let notice = ChatScopeNotice.text(for: model.subject, currentInterval: currentInterval) {
+                // `model.subject` is always non-nil by `.ready` (`ChatModel.load()`
+                // only reaches it after resolving one) — unwrapped rather than
+                // force-unwrapped so that invariant stays enforced by a guard, not by
+                // trust. `currentInterval` is nil only for the one caller today that
+                // has no live dashboard selection to hand in (the workout entry
+                // point) — and `ChatScopeNotice` only ever has something to say about
+                // a training subject in the first place, so a nil interval here just
+                // means the banner has nothing to compare against, not that the
+                // comparison failed.
+                if let subject = model.subject, let currentInterval,
+                   let notice = ChatScopeNotice.text(for: subject, currentInterval: currentInterval) {
                     scopeMismatchBanner(notice)
                 }
                 transcript
@@ -241,7 +308,7 @@ struct ChatConversationView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: Spacing.compact) {
                     if model.messages.isEmpty && !model.isStreaming {
-                        secondaryText(ChatConversationCopy.emptyTranscriptInvitation(for: model.subject.kind))
+                        secondaryText(ChatConversationCopy.emptyTranscriptInvitation(for: model.subject?.kind))
                     }
 
                     ForEach(model.messages) { message in
@@ -282,7 +349,7 @@ struct ChatConversationView: View {
             // could be sent from the keyboard. Sending is the button, which is also
             // the only affordance that can be correctly disabled by `canSend`.
             TextField(
-                ChatConversationCopy.composerPlaceholder(for: model.subject.kind),
+                ChatConversationCopy.composerPlaceholder(for: model.subject?.kind),
                 text: $model.composerText,
                 axis: .vertical
             )

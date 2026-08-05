@@ -23,9 +23,12 @@ struct ChatThreadListView: View {
     ///   - chatThreadRepository: forwarded from `ChatSheet`, which itself has no
     ///     default to fall back on (`ChatModel`'s own reasoning against a silently
     ///     defaulted store — MAX-049).
-    ///   - onSelect: called with the tapped row's subject. `ChatSheet` reassigns its
-    ///     active subject and pops back to the conversation — this view does not know
-    ///     what "opening a thread" means beyond naming which one was chosen.
+    ///   - onSelect: called with the tapped row's full summary. `ChatSheet` reads
+    ///     `summary.id` — never `summary.subject` — and opens that exact thread by id
+    ///     (`ChatConversationView(threadID:...)`), then pops back to the conversation.
+    ///     Resolving by subject instead would be the review-caught defect this whole
+    ///     path exists to avoid: two threads can share an identical subject, and only
+    ///     the id says which one was actually tapped.
     init(chatThreadRepository: (any ChatThreadRepository)?, onSelect: @escaping (ChatThreadSummary) -> Void) {
         _model = State(initialValue: ChatThreadListModel(chatThreadRepository: chatThreadRepository))
         self.onSelect = onSelect
