@@ -48,6 +48,13 @@ import Observation
 /// `IngestionComposition.completeIngestion(forWorkout:)` (R8's lazy path) before this
 /// screen's chat entry point ever renders.
 ///
+/// **For a workout that is not a run it is not a wait at all** (MAX-126). MAX-111 stopped
+/// non-runs being scored, so the lazy path above re-reaches the same conclusion every
+/// time and no ledger ever appears. `.noVerdict` is that case, split out from
+/// `.notYetScored` for the same reason `WorkoutVerdict.Scoring` splits it: the two states
+/// are identical in what they lack and opposite in what happens next, and only one of
+/// them can honestly tell the athlete to come back later.
+///
 /// ## Only completed turns are persisted
 ///
 /// A user question and its assistant reply are written to the thread as one pair, and
@@ -77,8 +84,12 @@ public final class WorkoutChatModel {
         /// `TrendTilesModel`, `SettingsModel`).
         case failed
         /// See this type's "Why chat requires an existing score." Ordinary, not an
-        /// error — the app's state for every workout between capture and scoring.
+        /// error — a run's state between capture and scoring.
         case notYetScored
+        /// The workout is not a run, so no score will ever be stored for it and chat
+        /// cannot open (MAX-126). Distinct from `.notYetScored` because a view must not
+        /// tell the athlete to wait for something that is not coming.
+        case noVerdict
         case ready
     }
 
@@ -216,7 +227,9 @@ public final class WorkoutChatModel {
             // See "Why chat requires an existing score": no ledger means no stored
             // classification, and this type does not derive one of its own.
             guard let ledger = try await scoreRepository.ledger(forWorkout: workoutID) else {
-                loadState = .notYetScored
+                // The same `isRun` split `WorkoutVerdict` and `ScoreCalendar` make, for
+                // the same reason: without it, a lift is told a score is on its way.
+                loadState = workout.activityType.isRun ? .notYetScored : .noVerdict
                 return
             }
             guard let metrics = try await workoutRepository.derivedMetrics(forWorkout: workoutID) else {

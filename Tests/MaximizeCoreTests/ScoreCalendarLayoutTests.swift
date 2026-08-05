@@ -243,6 +243,9 @@ final class ScoreCalendarLayoutTests: XCTestCase {
             .scored(band: .marginal, activityType: .running),
             .scored(band: .effective, activityType: .running),
             .awaitingScore(activityType: .running),
+            // MAX-126: a lift is a day the athlete trained. Hollow means "asked and not
+            // delivered" at this density, which is the one thing it must never read as.
+            .noVerdict(activityType: .traditionalStrengthTraining),
             .convertedRest(scheduledKind: .easy),
             .scheduledRest,
             .unplanned,
@@ -276,6 +279,7 @@ final class ScoreCalendarLayoutTests: XCTestCase {
             .scored(band: .marginal, activityType: .running),
             .scored(band: .effective, activityType: .running),
             .awaitingScore(activityType: .running),
+            .noVerdict(activityType: .traditionalStrengthTraining),
             .missed(scheduledKind: .easy),
             .convertedRest(scheduledKind: .easy),
             .scheduledRest,

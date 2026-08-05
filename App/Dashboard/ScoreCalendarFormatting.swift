@@ -13,8 +13,8 @@ import MaximizeCore
 /// athlete cannot read hue). Two of the three redundant channels are decided here
 /// rather than left to the view to reinvent per call site:
 ///
-/// - **Glyph shape.** `.scored`/`.awaitingScore` show what activity was done;
-///   `.missed` shows a dedicated "not done" mark rather than an activity icon, so a
+/// - **Glyph shape.** `.scored`/`.awaitingScore`/`.noVerdict` show what activity was
+///   done; `.missed` shows a dedicated "not done" mark rather than an activity icon, so a
 ///   scored-badly day (an activity glyph on red) and a missed day (an X on the same
 ///   red) never look alike even in grayscale. `.scheduledRest` and `.convertedRest`
 ///   use two visually distinct rest glyphs for the same reason, even though both sit
@@ -54,6 +54,14 @@ enum ScoreCalendarFormatting {
         case .scored(_, let activityType):
             return systemImageName(for: activityType)
         case .awaitingScore(let activityType):
+            return systemImageName(for: activityType)
+        case .noVerdict(let activityType):
+            // The activity, exactly as `.scored` and `.awaitingScore` show it. A lift is
+            // a day the athlete trained, so the cell shows what they did; a mark meaning
+            // "nothing to report here" would be the apology this state must not make.
+            // The activity glyph is also the whole non-hue channel separating this state
+            // from `.awaitingScore`, and it is free: the two can never carry the same
+            // activity type (see `ScoreCalendarDayState.noVerdict`).
             return systemImageName(for: activityType)
         case .missed:
             return "xmark"
@@ -149,6 +157,13 @@ enum ScoreCalendarFormatting {
             return "\(dayText): \(WorkoutDisplayFormatting.describe(activityType)), \(bandLabel(band))."
         case .awaitingScore(let activityType):
             return "\(dayText): \(WorkoutDisplayFormatting.describe(activityType)), awaiting score."
+        case .noVerdict(let activityType):
+            // Not "awaiting score", and the clause after the dash is why: without it the
+            // sentence is the same absence VoiceOver already speaks for a run whose score
+            // is minutes away, and the athlete would be waiting on nothing. The reason is
+            // one short clause because a calendar is read cell after cell.
+            return "\(dayText): \(WorkoutDisplayFormatting.describe(activityType)), "
+                + "recorded. Not scored — the plan scores runs."
         case .missed(let scheduledKind):
             return "\(dayText): missed \(kindLabel(scheduledKind))."
         case .convertedRest(let scheduledKind):
@@ -181,13 +196,20 @@ enum ScoreCalendarFormatting {
         case .unprescribed?:
             return "Not on the plan."
         case nil:
-            // No score yet, so no classification to compare against (D2). The ask is
-            // still worth speaking — it is the whole reason the cell is ringed.
-            guard case .awaitingScore = day.state else { return nil }
-            guard let prescription = day.prescription, prescription.canBeMissed else {
-                return "Not on the plan."
+            // No score, so no classification to compare against (D2) — whether one is
+            // coming (`.awaitingScore`) or never will be (`.noVerdict`). The ask is still
+            // worth speaking on both: it is the whole reason the cell is ringed, and on a
+            // day the athlete lifted through a prescribed run it is the only channel that
+            // says the run was asked for at all.
+            switch day.state {
+            case .awaitingScore, .noVerdict:
+                guard let prescription = day.prescription, prescription.canBeMissed else {
+                    return "Not on the plan."
+                }
+                return "Planned: \(kindLabel(prescription.scheduledSession.kind))."
+            case .scored, .missed, .convertedRest, .scheduledRest, .forthcoming, .unplanned:
+                return nil
             }
-            return "Planned: \(kindLabel(prescription.scheduledSession.kind))."
         }
     }
 

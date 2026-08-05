@@ -80,10 +80,18 @@ enum ScoreCalendarDoorRoute: Hashable {
 /// nobody building this ticket could make; see the MAX-087 PR.
 ///
 /// `.scheduledRest` and `.convertedRest` sit on the same neutral fill as
-/// `.awaitingScore` and `.unplanned` (`ScoreBandColors.swift`'s own doc comment: a
-/// day with no verdict is not a fourth saturated band) but each still gets its own
-/// glyph and its own sentence, so "the plan asked for rest" and "a miss was forgiven"
+/// `.awaitingScore`, `.noVerdict` and `.unplanned` (`ScoreBandColors.swift`'s own doc
+/// comment: a day with no verdict is not a fourth saturated band) but each still gets its
+/// own glyph and its own sentence, so "the plan asked for rest" and "a miss was forgiven"
 /// never read as the same fact even though neither is a judgment.
+///
+/// **`.noVerdict` is the newest of those (MAX-126) and it deliberately costs nothing.**
+/// A lifting day is a neutral cell carrying the strength glyph — no new colour, no new
+/// mark, no new ring state. It can never be confused with `.awaitingScore` even though
+/// they share a fill, because the two states can never carry the same activity type
+/// (`ActivityType.isRun` splits them in the core), so the glyph the cell already draws
+/// is the channel, and it survives greyscale and every kind of colour vision because it
+/// is a shape. The VoiceOver sentence carries the reason, which no cell this size could.
 ///
 /// ## The plan layer (MAX-105)
 ///
@@ -544,11 +552,18 @@ private enum ScoreCalendarPalette {
             // which is also what makes a score-band heatmap a legitimate use of them
             // rather than a fourth surface borrowing the product's one signal.
             return Color.scoreIneffective
-        case .awaitingScore, .convertedRest, .scheduledRest, .forthcoming, .unplanned:
+        case .awaitingScore, .noVerdict, .convertedRest, .scheduledRest, .forthcoming, .unplanned:
             // `.forthcoming` is listed here for the year heatmap, where every
             // no-verdict day draws the same neutral mark. In the day grid it is drawn
             // with no fill at all — see `isDrawnUnfilledInTheDayGrid` — so this value
             // is never reached there.
+            //
+            // `.noVerdict` (MAX-126) takes the same neutral fill rather than a colour of
+            // its own, which is the whole point of it: a day with no verdict is not a
+            // fourth band, and MAX-084/MAX-087 already spent the contrast budget a fourth
+            // one would need. Its glyph and its VoiceOver sentence carry the difference,
+            // the way `.scheduledRest` and `.convertedRest` are already told apart on
+            // this same fill.
             return Color.surfaceInset
         }
     }
@@ -557,7 +572,7 @@ private enum ScoreCalendarPalette {
         switch state {
         case .scored, .missed:
             return Color.textOnSaturatedFill
-        case .awaitingScore, .convertedRest, .scheduledRest, .forthcoming, .unplanned:
+        case .awaitingScore, .noVerdict, .convertedRest, .scheduledRest, .forthcoming, .unplanned:
             // `.forthcoming`'s date and glyph sit on the calendar card rather than on
             // `surfaceInset`, since the cell has no fill. `textSecondary` is a text
             // token designed for both — it is the same ink the card's own labels use.

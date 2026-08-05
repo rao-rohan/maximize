@@ -47,6 +47,12 @@ final class ScoreBandMarkTests: XCTestCase {
         )
         XCTAssertNil(ScoreCalendarDayState.missed(scheduledKind: .easy).scoredBand)
         XCTAssertNil(ScoreCalendarDayState.awaitingScore(activityType: .running).scoredBand)
+        // MAX-126. The one state whose whole meaning is "no band was reached and none
+        // will be" — so if any state could tempt an accessor into inventing one, it is
+        // this one, and it must not.
+        XCTAssertNil(
+            ScoreCalendarDayState.noVerdict(activityType: .traditionalStrengthTraining).scoredBand
+        )
         XCTAssertNil(ScoreCalendarDayState.convertedRest(scheduledKind: .long).scoredBand)
         XCTAssertNil(ScoreCalendarDayState.scheduledRest.scoredBand)
         XCTAssertNil(ScoreCalendarDayState.unplanned.scoredBand)

@@ -27,9 +27,12 @@ final class WorkoutChatModelTests: XCTestCase {
 
     /// A store with a scored workout — the state `WorkoutChatModel.load()` needs to
     /// reach `.ready`. Callers that want `.notYetScored` skip `seedScore`.
-    private func readyStore(seedScore: Bool = true) async throws -> InMemoryWorkoutStore {
+    private func readyStore(
+        seedScore: Bool = true,
+        activityType: ActivityType = .running
+    ) async throws -> InMemoryWorkoutStore {
         let store = InMemoryWorkoutStore(planCalendar: try PlanCalendar([Fixture.plan()]))
-        try await store.store(Fixture.workout())
+        try await store.store(Fixture.workout(activityType: activityType))
         try await store.store(metrics())
         if seedScore {
             store.seedScore(try Fixture.score(points: 88))
@@ -107,6 +110,31 @@ final class WorkoutChatModelTests: XCTestCase {
         await workoutModel.load()
         XCTAssertEqual(workoutModel.loadState, .notYetScored)
         XCTAssertTrue(workoutModel.messages.isEmpty)
+    }
+
+    /// MAX-126. Same missing ledger, different reason, and the difference is the whole
+    /// point: `.notYetScored` renders as "chat opens once it has a score", which for a
+    /// lift is a door that never opens. MAX-111 stopped non-runs being scored, so the
+    /// lazy path re-reaches the same conclusion on every visit.
+    func testAnUnscoredLiftHasNoVerdictRatherThanNotYetScored() async throws {
+        let store = try await readyStore(
+            seedScore: false,
+            activityType: .traditionalStrengthTraining
+        )
+        let (workoutModel, _) = try await model(store: store)
+        await workoutModel.load()
+        XCTAssertEqual(workoutModel.loadState, .noVerdict)
+        XCTAssertTrue(workoutModel.messages.isEmpty)
+    }
+
+    /// D8, from chat's side: a lift that *was* scored before MAX-111 still has a stored
+    /// classification, so its thread still opens. Nothing here reaches back and closes a
+    /// conversation that already worked.
+    func testAnAlreadyScoredLiftStillReachesReady() async throws {
+        let store = try await readyStore(activityType: .traditionalStrengthTraining)
+        let (workoutModel, _) = try await model(store: store)
+        await workoutModel.load()
+        XCTAssertEqual(workoutModel.loadState, .ready)
     }
 
     func testChatThreadReadFailurePropagatesAsFailed() async throws {
