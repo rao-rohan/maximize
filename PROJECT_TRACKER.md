@@ -496,9 +496,10 @@ feature was governed by a plan that could not exist).
 | MAX-083 | Week / month / year intervals, each with a fitting representation | Owner | **Opus** ✅ |
 | MAX-084 | Fix score-band and chart contrast; resolve A7 | MAX-082 | Sonnet ✅ |
 | MAX-085 | **The tab bar, once**: Plan becomes a third tab, iOS 26 `Tab` builder, `.tint()`, surface elevation, Liquid Glass chrome | MAX-082, Owner | **Opus** |
-| MAX-086 | Absence-string voice; wire `AppearancePreference` | MAX-082 | Haiku |
+| MAX-086 | Wire `AppearancePreference` — a setting that silently does nothing | MAX-082 | Sonnet |
 | MAX-087 | A non-hue channel for the year heatmap's 6pt cells | MAX-084 | Sonnet |
 | MAX-105 | **The plan on the dashboard calendar** — scheduled beneath actual | Owner | **Opus** |
+| MAX-106 | The UI standard, written into `CLAUDE.md` | Owner | Sonnet ✅ |
 | MAX-090 | Chat-first product spec: plan generation and Q&A through chat | Owner | **Opus** 🔒 ✅ |
 | MAX-091 | Run both Claude clients on the Sonnet tier at `medium` effort | Owner, cost | Sonnet 🔒 ✅ |
 | MAX-092 … MAX-104 | The chat-first build, decomposed from MAX-090 | MAX-090 | see below |
@@ -542,6 +543,31 @@ while streaming, which silently resigned focus and dropped the keyboard on every
 Chat moved to its own sheet with the composer as a bottom `safeAreaInset`. **None of it
 is verified** — CI has no simulator and cannot observe an interaction; see the PR's device
 list.
+
+**MAX-086 is split, and what remains is a real defect rather than polish.** It was filed
+off the design review as "absence-string voice; wire `AppearancePreference`" — two
+unrelated jobs sharing a row. The absence-voice half moves to **MAX-104**, because the new
+chat and plan surfaces it should cover do not exist yet and doing that pass twice is worse
+than doing it once, late.
+
+What is left is not polish. `AppearancePreference` is a stored setting with three cases, a
+working picker in Settings, and a persistence path — and **nothing in the app applies it**.
+`.preferredColorScheme` occurs exactly twice in the codebase and both are previews in
+`DesignSystemGallery.swift`. An athlete chooses Light, the value saves correctly, and the
+app stays dark. That is worse than not offering the setting, because it reads as a bug in
+the app rather than a missing feature — and it is the same class of failure as R13, where
+app-layer wiring compiled fine and did nothing. Re-tiered to Sonnet: the mapping has to
+express "impose nothing" for `.system` distinctly from picking a scheme, and the
+preference has to take effect without a relaunch, which needs the existing settings
+observation path rather than a second one.
+
+**MAX-106 — the UI standard, written into `CLAUDE.md`.** The owner set a bar for the
+redesign; until this landed it lived only in individual agent briefs, so every ticket
+depended on the overseer restating it. Rules that live in a dispatch message decay. The
+section is deliberately concrete enough to review against — platform chrome, current
+components, numerals doing the hierarchy work, accessibility as part of the ticket rather
+than a follow-up, absence as a designed state, tokens for colour and spacing — and it ends
+by saying none of it is verifiable by CI, which is what keeps the rest honest.
 
 **MAX-085 is now the tab bar's only owner, and it is re-tiered to Opus.** It was filed off
 the design review as chrome polish — surface elevation, `.tint()`, Liquid Glass. The owner
@@ -643,7 +669,7 @@ twelve and is dispatchable immediately.
 |---|---|---|---|
 | MAX-092 | `ChatSubject` and thread identity | — | **Opus** |
 | MAX-093 | The stored record: additive fields, no migration | 092 | Sonnet |
-| MAX-094 | Shared fact-sheet formatting — pure extraction | — | Sonnet |
+| MAX-094 | Shared fact-sheet formatting — pure extraction | — | Sonnet ✅ |
 | MAX-095 | `TrainingContext` + one context entry point | 092, 094 | **Opus** 🔒 |
 | MAX-096 | `ChatModel` generalised; transcript cap; training task text | 095 | **Opus** 🔒 |
 | MAX-097 | Thread list, derived titles, new chat, scope subtitle | 093, 096 | Sonnet |
@@ -653,7 +679,7 @@ twelve and is dispatchable immediately.
 | MAX-101 | Conversational plan authoring; proposal card; handoff | 098, 100 | **Opus** |
 | MAX-102 | **The read-only plan screen with version history** | — | Sonnet |
 | MAX-103 | "Runs in this conversation" strip | 098 | Sonnet |
-| MAX-104 | Copy and absence voice over the new surfaces | 098, 102 | Sonnet |
+| MAX-104 | Copy and absence voice, **app-wide** — absorbs MAX-086's other half | 098, 102 | Sonnet |
 
 Three collisions the spec calls out and the overseer must respect: **094 lands before 095**
 (both touch `WorkoutFactSheet.swift`, and 094 is the extraction 095 builds on); **MAX-102
