@@ -56,7 +56,8 @@ final class TrendTilesModel {
         }
         do {
             let planCalendar = try await planRepository.planCalendar()
-            let restDayBudget = try await settingsRepository.settings().restDayBudget
+            let settings = try await settingsRepository.settings()
+            let restDayBudget = settings.restDayBudget
 
             // `TalliesInput.workouts` must cover the whole Monday-first weeks touching
             // the interval, not merely the interval itself (C1, see that type's own
@@ -94,7 +95,11 @@ final class TrendTilesModel {
             // `tallies.from...tallies.through` itself (see its own documentation), so
             // it is handed the same set rather than a second, narrower fetch.
             let tileData = try TrendTileData(
-                tallies: tallies, workouts: workouts, timeZone: timeZone, planCalendar: planCalendar
+                tallies: tallies,
+                workouts: workouts,
+                timeZone: timeZone,
+                planCalendar: planCalendar,
+                distanceUnit: settings.distanceUnit
             )
             state = .loaded(tileData)
         } catch {

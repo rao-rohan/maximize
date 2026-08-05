@@ -30,17 +30,17 @@ struct WorkoutsView: View {
                 .font(.bodyCopy)
                 .foregroundStyle(Color.textSecondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-        case let .loaded(workouts) where workouts.isEmpty:
+        case let .loaded(data) where data.workouts.isEmpty:
             Text("No workouts yet.")
                 .font(.bodyCopy)
                 .foregroundStyle(Color.textSecondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-        case let .loaded(workouts):
+        case let .loaded(data):
             ScrollView {
                 LazyVStack(spacing: Spacing.compact) {
-                    ForEach(workouts) { workout in
+                    ForEach(data.workouts) { workout in
                         NavigationLink(value: workout.id) {
-                            WorkoutRow(workout: workout)
+                            WorkoutRow(workout: workout, distanceUnit: data.distanceUnit)
                         }
                         .buttonStyle(.plain)
                     }

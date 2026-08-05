@@ -32,16 +32,19 @@ enum WorkoutDisplayFormatting {
         }
     }
 
-    /// - Parameter session: nil means no plan governs the day (`WorkoutVerdict.scheduledSession`).
-    static func describeScheduledSession(_ session: ScheduledSession?) -> String {
+    /// - Parameters:
+    ///   - session: nil means no plan governs the day (`WorkoutVerdict.scheduledSession`).
+    ///   - unit: MAX-047 — the athlete's chosen `DistanceUnit`. `ScheduledSession.distanceMeters`
+    ///     stays in metres always (D2); this is the one place that converts it for copy.
+    static func describeScheduledSession(_ session: ScheduledSession?, unit: DistanceUnit) -> String {
         guard let session else { return "No plan for this day" }
         switch session.kind {
         case .rest:
             return "Rest day"
         case .easy:
-            return distanceSuffixed("Easy run", session)
+            return distanceSuffixed("Easy run", session, unit: unit)
         case .long:
-            return distanceSuffixed("Long run", session)
+            return distanceSuffixed("Long run", session, unit: unit)
         case .hard:
             return session.note.map { "Hard: \($0)" } ?? "Hard session"
         case .other:
@@ -49,13 +52,15 @@ enum WorkoutDisplayFormatting {
         }
     }
 
-    private static func distanceSuffixed(_ base: String, _ session: ScheduledSession) -> String {
+    private static func distanceSuffixed(_ base: String, _ session: ScheduledSession, unit: DistanceUnit) -> String {
         guard let meters = session.distanceMeters else { return base }
-        return String(format: "%@ · %.1f km", base, meters / 1_000)
+        return String(format: "%@ · %.1f %@", base, unit.converted(fromMeters: meters), unit.abbreviation)
     }
 
-    static func distance(meters: Double) -> String {
-        String(format: "%.1f km", meters / 1_000)
+    /// - Parameter unit: MAX-047 — the athlete's chosen `DistanceUnit`. `meters` is
+    ///   always the stored figure (D2); this is the one place `WorkoutRow` converts it.
+    static func distance(meters: Double, unit: DistanceUnit) -> String {
+        String(format: "%.1f %@", unit.converted(fromMeters: meters), unit.abbreviation)
     }
 
     static let dateAndTime: DateFormatter = {

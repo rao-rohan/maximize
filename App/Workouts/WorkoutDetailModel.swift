@@ -36,6 +36,12 @@ struct WorkoutDetailData: Equatable {
     /// FR-1.5. Always present — `SummaryTileData.duration` is never absent (see its
     /// own documentation) — so there is no "nothing to build from" case here either.
     let summaryTiles: SummaryTileData
+
+    /// MAX-047. The athlete's chosen `DistanceUnit`, threaded down to every section on
+    /// this screen that shows a distance — `summaryTiles` already carries it into
+    /// `SummaryTileData`'s own formatting, and `VerdictHeaderView` needs it separately
+    /// for the scheduled session's distance, which lives outside `SummaryTileData`.
+    let distanceUnit: DistanceUnit
 }
 
 /// Loads one workout and assembles `WorkoutDetailData` for the detail screen. Everything
@@ -61,6 +67,7 @@ final class WorkoutDetailModel {
     private let workoutRepository: (any WorkoutRepository)?
     private let scoreRepository: (any ScoreRepository)?
     private let planRepository: (any PlanRepository)?
+    private let settingsRepository: (any SettingsRepository)?
 
     /// The zone the athlete's day boundary is drawn in. `Workout.calendarDay(in:)`
     /// requires one rather than guessing (see its doc comment); `.current` is the
@@ -70,14 +77,15 @@ final class WorkoutDetailModel {
 
     /// - Parameters:
     ///   - workoutID: which workout to load.
-    ///   - workoutRepository/scoreRepository/planRepository: each defaults to
-    ///     `PersistenceComposition.store`. Overridable so a preview or a future test
-    ///     can inject fakes instead of the real on-device store.
+    ///   - workoutRepository/scoreRepository/planRepository/settingsRepository: each
+    ///     defaults to `PersistenceComposition.store`. Overridable so a preview or a
+    ///     future test can inject fakes instead of the real on-device store.
     init(
         workoutID: UUID,
         workoutRepository: (any WorkoutRepository)? = nil,
         scoreRepository: (any ScoreRepository)? = nil,
         planRepository: (any PlanRepository)? = nil,
+        settingsRepository: (any SettingsRepository)? = nil,
         timeZone: TimeZone = .current
     ) {
         self.workoutID = workoutID
@@ -96,11 +104,16 @@ final class WorkoutDetailModel {
         } else {
             self.planRepository = PersistenceComposition.store
         }
+        if let settingsRepository {
+            self.settingsRepository = settingsRepository
+        } else {
+            self.settingsRepository = PersistenceComposition.store
+        }
         self.timeZone = timeZone
     }
 
     func load() async {
-        guard let workoutRepository, let scoreRepository, let planRepository else {
+        guard let workoutRepository, let scoreRepository, let planRepository, let settingsRepository else {
             state = .failed
             return
         }
@@ -111,6 +124,7 @@ final class WorkoutDetailModel {
             }
             let ledger = try await scoreRepository.ledger(forWorkout: workoutID)
             let planCalendar = try await planRepository.planCalendar()
+            let distanceUnit = try await settingsRepository.settings().distanceUnit
             let day = try workout.calendarDay(in: timeZone)
             let planDay = try planCalendar?.planDay(on: day)
 
@@ -138,17 +152,17 @@ final class WorkoutDetailModel {
             // The splits are read from the stored metrics, never derived from the route
             // fetched above (D2) — `DistanceSplitCalculator` cut them at ingestion.
             //
-            // `.kilometers` is passed explicitly rather than defaulted: every distance
-            // this app displays is in kilometres today, and `AppSettings.distanceUnit` is
-            // read by nothing. **MAX-047** is the ticket that decides whether that setting
-            // becomes load-bearing or is deleted; this is the one line it changes for this
-            // section, because the stored record already carries both units.
+            // MAX-046 passed `.kilometers` here and named this the one line MAX-047 would
+            // change. This is that change. It is a one-liner precisely because MAX-046
+            // stored *both* cuts: split boundaries in km and in miles do not align, and
+            // re-cutting one into the other would mean going back to the GPS track at
+            // display time, which is the D2 violation both tickets were written to avoid.
             let splits = SplitsListData.resolve(
                 hasRoute: workout.hasRoute,
                 splits: metrics?.distanceSplits,
-                unit: .kilometers
+                unit: distanceUnit
             )
-            let summaryTiles = SummaryTileData(workout: workout, metrics: metrics)
+            let summaryTiles = SummaryTileData(workout: workout, metrics: metrics, distanceUnit: distanceUnit)
 
             state = .loaded(WorkoutDetailData(
                 verdict: verdict,
@@ -156,7 +170,8 @@ final class WorkoutDetailModel {
                 cadence: cadence,
                 routeMap: routeMap,
                 splits: splits,
-                summaryTiles: summaryTiles
+                summaryTiles: summaryTiles,
+                distanceUnit: distanceUnit
             ))
         } catch {
             state = .failed

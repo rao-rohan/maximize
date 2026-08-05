@@ -37,8 +37,9 @@ public struct TrendTileData: Hashable, Sendable {
     public typealias Tile = SummaryTileData.Tile
 
     /// Actual distance covered vs. the plan's arc target for the interval, as
-    /// `"<actual> / <target>"` km. Nil when no plan governs any day in the interval —
-    /// see the type's own documentation for why that is not the same as a zero target.
+    /// `"<actual> / <target>"` in the athlete's chosen `DistanceUnit` (MAX-047). Nil
+    /// when no plan governs any day in the interval — see the type's own documentation
+    /// for why that is not the same as a zero target.
     public let mileage: Tile?
 
     /// `Tallies.effectiveDays`, as `"<effective>/<eligible>"` — the numerator/denominator
@@ -67,11 +68,17 @@ public struct TrendTileData: Hashable, Sendable {
     ///     `TalliesInput` and `TrendInterval.dateInterval(in:)`'s own requirement.
     ///   - planCalendar: nil before the first plan version is authored — a real state,
     ///     not "no data" (see `mileage`'s documentation).
+    ///   - distanceUnit: MAX-047 — a display decision only. `Workout.distanceMeters` and
+    ///     `ScheduledSession.distanceMeters` stay in metres regardless; this initializer
+    ///     is the one place that converts for the tile. No default, matching
+    ///     `SummaryTileData`'s initializer: every call site must say explicitly which
+    ///     unit it means.
     public init(
         tallies: Tallies,
         workouts: [Workout],
         timeZone: TimeZone,
-        planCalendar: PlanCalendar?
+        planCalendar: PlanCalendar?,
+        distanceUnit: DistanceUnit
     ) throws {
         var planDays: [PlanDay] = []
         if let planCalendar {
@@ -90,8 +97,9 @@ public struct TrendTileData: Hashable, Sendable {
                 actualMeters += workout.distanceMeters ?? 0
             }
             mileage = Tile(
-                value: "\(Self.formattedKilometers(actualMeters)) / \(Self.formattedKilometers(targetMeters))",
-                caption: "km vs. arc"
+                value: "\(Self.formattedDistance(actualMeters, unit: distanceUnit)) / "
+                    + "\(Self.formattedDistance(targetMeters, unit: distanceUnit))",
+                caption: "\(distanceUnit.abbreviation) vs. arc"
             )
         }
 
@@ -122,12 +130,13 @@ public struct TrendTileData: Hashable, Sendable {
     // Locale pinned to nil (POSIX), matching `SummaryTileData` — a comma-decimal
     // locale must not render a different number here than a point-decimal one.
 
-    /// Two decimal places, matching `SummaryTileData.formattedDistanceKilometers` — a
-    /// distance printed here and one printed on the per-workout tiles must never round
-    /// differently. Delegated rather than duplicated (both live in `MaximizeCore`, so
-    /// the internal helper is directly reachable).
-    private static func formattedKilometers(_ meters: Double) -> String {
-        SummaryTileData.formattedDistanceKilometers(meters)
+    /// Two decimal places, matching `SummaryTileData.formattedDistance` — a distance
+    /// printed here and one printed on the per-workout tiles must never round
+    /// differently, and must convert to the same unit the same way. Delegated rather
+    /// than duplicated (both live in `MaximizeCore`, so the internal helper is directly
+    /// reachable).
+    private static func formattedDistance(_ meters: Double, unit: DistanceUnit) -> String {
+        SummaryTileData.formattedDistance(meters, unit: unit)
     }
 
     private static func formattedAverageScore(_ score: Double) -> String {

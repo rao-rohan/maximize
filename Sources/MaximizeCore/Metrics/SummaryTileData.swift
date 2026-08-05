@@ -51,9 +51,10 @@ public struct SummaryTileData: Hashable, Sendable {
         }
     }
 
-    /// `Workout.distanceMeters`, formatted in kilometres. Nil when the workout recorded
-    /// no distance at all (common for an indoor session with no GPS and no manually
-    /// entered distance).
+    /// `Workout.distanceMeters`, converted and formatted in the athlete's chosen
+    /// `DistanceUnit` (MAX-047 — the unit is a display decision, never a stored one).
+    /// Nil when the workout recorded no distance at all (common for an indoor session
+    /// with no GPS and no manually entered distance).
     public let distance: Tile?
 
     /// `Workout.durationSeconds`, formatted `H:MM:SS`/`M:SS`. Always present — a
@@ -79,9 +80,12 @@ public struct SummaryTileData: Hashable, Sendable {
     /// distinguish the two reasons from this type alone; it simply omits the tile.
     public let heartRateDrift: Tile?
 
-    /// `DerivedMetrics.gradeAdjustedPaceSecondsPerKilometer`, unchanged, formatted as a
-    /// per-kilometre pace. Nil for indoor runs, a route with no usable altitude, or
-    /// metrics not yet computed.
+    /// `DerivedMetrics.gradeAdjustedPaceSecondsPerKilometer`, converted to seconds per
+    /// the athlete's chosen `DistanceUnit` and formatted as a pace. Stored as
+    /// seconds-per-kilometre always (D2); the caption names which unit this particular
+    /// figure is paced against, since "grade-adj. pace" alone is ambiguous once the
+    /// unit varies. Nil for indoor runs, a route with no usable altitude, or metrics
+    /// not yet computed.
     public let gradeAdjustedPace: Tile?
 
     /// - Parameters:
@@ -90,9 +94,14 @@ public struct SummaryTileData: Hashable, Sendable {
     ///   - metrics: `DerivedMetrics` for this workout (D2 — read, never recomputed),
     ///     or nil if metrics have not been computed yet. Supplies `averageHeartRate`,
     ///     `maximumHeartRate`, `heartRateDrift`, `gradeAdjustedPace`.
-    public init(workout: Workout, metrics: DerivedMetrics?) {
+    ///   - distanceUnit: MAX-047 — a display decision only. `Workout` and
+    ///     `DerivedMetrics` stay in metres/seconds-per-kilometre regardless; this
+    ///     initializer is the one place that converts for the tile. No default: every
+    ///     call site must say explicitly which unit it means, rather than one silently
+    ///     picking up a fallback (the shape MAX-049 removed for `SettingsRepository`).
+    public init(workout: Workout, metrics: DerivedMetrics?, distanceUnit: DistanceUnit) {
         self.distance = workout.distanceMeters.map {
-            Tile(value: Self.formattedDistanceKilometers($0), caption: "km")
+            Tile(value: Self.formattedDistance($0, unit: distanceUnit), caption: distanceUnit.abbreviation)
         }
         self.duration = Tile(value: Self.formattedDuration(seconds: workout.durationSeconds), caption: "duration")
         self.averageHeartRate = metrics?.averageHeartRateBPM.map {
@@ -108,7 +117,10 @@ public struct SummaryTileData: Hashable, Sendable {
             Tile(value: Self.formattedSignedPercent($0), caption: "% drift")
         }
         self.gradeAdjustedPace = metrics?.gradeAdjustedPaceSecondsPerKilometer.map {
-            Tile(value: Self.formattedPacePerKilometer($0), caption: "grade-adj. pace")
+            Tile(
+                value: Self.formattedPace($0, unit: distanceUnit),
+                caption: "grade-adj. pace /\(distanceUnit.abbreviation)"
+            )
         }
     }
 
@@ -143,21 +155,25 @@ public struct SummaryTileData: Hashable, Sendable {
         return String(format: "%d:%02d", locale: nil, minutes, remainderSeconds)
     }
 
-    /// "5:12" for a pace of 5 minutes 12 seconds per kilometre. The caption supplies
-    /// the "/km" and "grade-adjusted" context, so the value stays a bare stopwatch
-    /// reading, consistent with `formattedDuration`.
-    static func formattedPacePerKilometer(_ secondsPerKilometer: Double) -> String {
-        let totalSeconds = Int(secondsPerKilometer.rounded())
+    /// "5:12" for a pace of 5 minutes 12 seconds per the given unit. `secondsPerKilometer`
+    /// is always the stored figure (D2); this converts to seconds-per-unit before
+    /// formatting, since a mile is longer than a kilometre and so takes proportionally
+    /// longer to cover. The caption supplies the unit and "grade-adjusted" context, so
+    /// the value stays a bare stopwatch reading, consistent with `formattedDuration`.
+    static func formattedPace(_ secondsPerKilometer: Double, unit: DistanceUnit) -> String {
+        let secondsPerUnit = secondsPerKilometer * (unit.metersPerUnit / 1_000)
+        let totalSeconds = Int(secondsPerUnit.rounded())
         let minutes = totalSeconds / 60
         let remainderSeconds = totalSeconds % 60
         return String(format: "%d:%02d", locale: nil, minutes, remainderSeconds)
     }
 
-    /// Two decimal places, matching the precision `WorkoutFactSheet` already sends
-    /// Claude — so a number a user reads on this tile and a number Claude was told
-    /// about the same run are never rounded differently.
-    static func formattedDistanceKilometers(_ meters: Double) -> String {
-        String(format: "%.2f", locale: nil, meters / 1_000)
+    /// Two decimal places, matching the precision `WorkoutFactSheet` sends Claude for
+    /// the underlying kilometre figure — `WorkoutFactSheet` is deliberately unit-fixed
+    /// (D3: one deterministic fact sheet, independent of a display preference), so
+    /// this is the only place the athlete's chosen `DistanceUnit` enters the number.
+    static func formattedDistance(_ meters: Double, unit: DistanceUnit) -> String {
+        String(format: "%.2f", locale: nil, unit.converted(fromMeters: meters))
     }
 
     static func formattedBPM(_ beatsPerMinute: Double) -> String {
