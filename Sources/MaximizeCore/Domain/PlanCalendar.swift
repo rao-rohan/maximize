@@ -104,7 +104,8 @@ public struct PlanCalendar: Hashable, Sendable {
         return PlanDay(
             date: day,
             planVersion: plan.version,
-            scheduledSession: try scheduledSession(on: day, under: plan)
+            scheduledSession: try scheduledSession(on: day, for: .run, under: plan),
+            liftSession: try scheduledSession(on: day, for: .lift, under: plan)
         )
     }
 
@@ -134,10 +135,18 @@ public struct PlanCalendar: Hashable, Sendable {
         try day.weekIndex(since: plan.effectiveFrom.startOfTrainingWeek())
     }
 
-    /// The template's ask for the day, with a long run's distance taken from the arc.
+    /// The template's ask for the day and the given discipline, with a long run's
+    /// distance taken from the arc.
     ///
     /// The weekly template says *which* days are long runs; the arc says *how far* in a
     /// given week. Only the distance is substituted — kind and note stay the template's.
+    ///
+    /// **Only the run slot has an arc.** A17/LIFTING-SPEC §4.2 ships no numeric lifting
+    /// progression: its target would be a load or a volume, and A20 concluded neither is
+    /// obtainable from HealthKit, so there is nothing for a lift's ask to be substituted
+    /// from and the template's own words stand. The guard says so in code rather than
+    /// relying on `.long` never appearing in a lift slot, which is true today only
+    /// because nothing authors one.
     ///
     /// When the arc has no entry for the week, the template's own distance stands. The
     /// arc is a finite progression (D1's "16-week arc"), so running past its end is
@@ -145,9 +154,14 @@ public struct PlanCalendar: Hashable, Sendable {
     /// the code silently prescribe a peak long run indefinitely, which is a training
     /// decision this type has no standing to make. A plan whose arc has run out is a
     /// plan that wants a new version — which is exactly what D1 asks for.
-    private func scheduledSession(on day: CalendarDay, under plan: Plan) throws -> ScheduledSession {
-        let template = plan.weeklyTemplate.session(on: day)
-        guard template.kind == .long,
+    private func scheduledSession(
+        on day: CalendarDay,
+        for discipline: Discipline,
+        under plan: Plan
+    ) throws -> ScheduledSession {
+        let template = plan.weeklyTemplate.session(on: day, for: discipline)
+        guard discipline == .run,
+              template.kind == .long,
               let week = try arcWeek(for: day, under: plan),
               let distanceMeters = plan.longRunArc.distanceMeters(forWeek: week)
         else {

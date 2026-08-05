@@ -69,6 +69,19 @@ import Foundation
 /// so a different outcome) if it is queried inside two different partial ranges. The
 /// fix is a calling convention, not a rule this pure function could enforce — the
 /// dashboard should always resolve full weeks, never split one across two calls.
+///
+/// ## Days that have not happened yet (MAX-105)
+///
+/// A missed day is a day the plan asked something of and the athlete did not deliver.
+/// **A day still ahead of the athlete is neither** — and until `outcomesUnknownFrom`
+/// existed, every one of them was a candidate for forgiveness. In the current week that
+/// is not a cosmetic problem: the budget is a small integer, so converting Friday and
+/// Saturday before they have arrived leaves Tuesday's genuine miss with no allowance
+/// left and showing red, and the same week silently rearranges which day it forgave as
+/// the week goes on. Callers that know what day it is should say so; the parameter
+/// defaults to nil only for a caller reasoning purely about the past, which genuinely
+/// has no "today" to supply. `ScoreCalendar` and `TalliesCalculator` (MAX-105,
+/// MAX-110) both pass it now — the seam this note used to describe as open is closed.
 public enum RestDayBudgeting {
     /// Converts up to `budget.daysPerWeek` missed days per training week in `planDays`
     /// into `RestDayOverride`s, least-costly first (see the type's documentation for
@@ -87,13 +100,22 @@ public enum RestDayBudgeting {
     ///     nothing.
     ///   - createdAt: stamped on every produced override. Supplied by the caller,
     ///     never read from the clock, so the result depends only on its inputs.
+    ///   - outcomesUnknownFrom: the first day whose outcome is not yet known —
+    ///     typically the athlete's today. Days on or after it are **never candidates**:
+    ///     nothing has been missed there yet, so there is nothing to forgive. They stay
+    ///     in `planDays` and still shape the week (a scheduled rest day ahead of today
+    ///     still makes the day beside it cheaper to convert); they are only excluded
+    ///     from the pool being spent on. Nil means every day in `planDays` is a
+    ///     candidate — the behaviour before MAX-105, and correct for a caller reasoning
+    ///     purely about the past.
     /// - Returns: one `RestDayOverride` per converted day, ascending by date. Missed
     ///   days beyond the budget are simply absent — they stay red by omission.
     public static func convertingMissedDays(
         planDays: [PlanDay],
         workoutDays: Set<CalendarDay>,
         budget: RestDayBudget,
-        createdAt: Date
+        createdAt: Date,
+        outcomesUnknownFrom: CalendarDay? = nil
     ) throws -> [RestDayOverride] {
         guard budget.daysPerWeek > 0 else { return [] }
 
@@ -109,7 +131,8 @@ public enum RestDayBudgeting {
                 inOneWeek: weekPlanDays,
                 workoutDays: workoutDays,
                 budget: budget,
-                createdAt: createdAt
+                createdAt: createdAt,
+                outcomesUnknownFrom: outcomesUnknownFrom
             )
         }
         return overrides.sorted { $0.date < $1.date }
@@ -122,11 +145,23 @@ public enum RestDayBudgeting {
         inOneWeek planDays: [PlanDay],
         workoutDays: Set<CalendarDay>,
         budget: RestDayBudget,
-        createdAt: Date
+        createdAt: Date,
+        outcomesUnknownFrom: CalendarDay?
     ) throws -> [RestDayOverride] {
-        let missed = planDays.filter { $0.canBeMissed && !workoutDays.contains($0.date) }
+        func outcomeIsKnown(_ date: CalendarDay) -> Bool {
+            guard let outcomesUnknownFrom else { return true }
+            return date < outcomesUnknownFrom
+        }
+
+        let missed = planDays.filter {
+            $0.canBeMissed && !workoutDays.contains($0.date) && outcomeIsKnown($0.date)
+        }
         guard !missed.isEmpty else { return [] }
 
+        // Deliberately over the *whole* week handed in, including days ahead of
+        // `outcomesUnknownFrom`: the week's shape is known in advance, so a Thursday
+        // miss really is framed by Friday's scheduled rest whether or not Friday has
+        // arrived. Only candidacy is bounded above; adjacency is not.
         let scheduledRestDates = Set(planDays.filter(\.scheduledSession.isRest).map(\.date))
 
         func isAdjacentToScheduledRest(_ date: CalendarDay) -> Bool {
@@ -158,13 +193,28 @@ public enum RestDayBudgeting {
     /// .canBeMissed` excludes it before a day ever reaches this function); it is
     /// ranked last only so the switch stays exhaustive without a `default`, which
     /// would silently swallow a future `ScheduledSessionKind` case.
+    ///
+    /// **Only the order matters, never the numbers.** The tiers are compared, never
+    /// summed or thresholded, so inserting a case renumbers the ones after it without
+    /// changing a single conversion. What would rewrite the calendar's past is
+    /// *reordering* the existing cases — A19 names that trap explicitly, and this
+    /// function has not been reordered.
+    ///
+    /// `.lift` sits between `.easy` and `.hard`: a missed lift costs the week more than
+    /// a missed easy run, because it is a non-fungible stimulus rather than one of
+    /// several interchangeable aerobic hours — the same argument the ranking already
+    /// makes for `.hard` — and less than a missed quality session or long run. It is a
+    /// training judgement, LIFTING-SPEC §15 files it as the owner's to overrule, and it
+    /// is unreachable today: nothing can prescribe a `.lift` until the weekly template
+    /// grows a second slot (MAX-111), so no existing week's conversions move.
     private static func costTier(_ kind: ScheduledSessionKind) -> Int {
         switch kind {
         case .other: return 0
         case .easy: return 1
-        case .hard: return 2
-        case .long: return 3
-        case .rest: return 4
+        case .lift: return 2
+        case .hard: return 3
+        case .long: return 4
+        case .rest: return 5
         }
     }
 }

@@ -11,8 +11,20 @@ public enum ScheduledSessionKind: String, Hashable, Sendable, Codable, CaseItera
     case hard
     case rest
     /// Scheduled, but not one of the three run types the rubric reasons about
-    /// (cross-training, strength, mobility).
+    /// (cross-training, mobility). Strength work left this case when `.lift` arrived —
+    /// A17's argument is that a discipline the plan sets goals about cannot be the
+    /// residual, because the residual is by definition the cheapest thing to forgive.
     case other
+
+    /// A prescribed lifting session (A16, A17).
+    ///
+    /// **Appended, not inserted.** `CaseIterable` order is what the plan screen prints a
+    /// band's `appliesTo` list in, so putting `.lift` anywhere but last would reorder
+    /// copy the athlete already reads.
+    ///
+    /// The weekly template has a second slot as of MAX-129, so a plan can now prescribe
+    /// one. The authoring *screen* still cannot — see `prescribable`.
+    case lift
 
     public init(_ classification: WorkoutClassification) {
         switch classification {
@@ -20,8 +32,26 @@ public enum ScheduledSessionKind: String, Hashable, Sendable, Codable, CaseItera
         case .long: self = .long
         case .hard: self = .hard
         case .other: self = .other
+        // The only mapping A17 permits. Sending a lift to `.other` here would put it
+        // back in the residual the case above just took it out of.
+        case .lift: self = .lift
         }
     }
+
+    /// The kinds the **run** slot may be set to — which is the only slot the authoring
+    /// screen can edit.
+    ///
+    /// Offering `.lift` there would let the athlete prescribe a lift where the run ask
+    /// goes, and the day's run would then be judged against a lift ask: the exact
+    /// cross-discipline judgement A17 exists to make impossible. MAX-129 gave the
+    /// template its second slot, so the plan record is no longer the constraint; the
+    /// screen is, until MAX-137 gives it a second row set. This property retires with
+    /// that ticket.
+    ///
+    /// In the core rather than in the picker that reads it because "what may be
+    /// prescribed" is a rule about the plan, and a rule in a view is a rule CI never
+    /// checks.
+    public static let prescribable: [ScheduledSessionKind] = Self.allCases.filter { $0 != .lift }
 }
 
 /// What the athlete actually did, as classified from workout type + HR profile
@@ -32,11 +62,30 @@ public enum WorkoutClassification: String, Hashable, Sendable, Codable, CaseIter
     case hard
     case other
 
+    /// A lifting session (A16, A17).
+    ///
+    /// **Appended, not inserted**, for the same `CaseIterable`-order reason
+    /// `ScheduledSessionKind.lift` is.
+    ///
+    /// Nothing produces one yet: `WorkoutClassifier` still answers `.other` for every
+    /// non-run, and MAX-111's gate leaves a lift unscored, so no stored `Score` can
+    /// carry this. It exists so the rest of the lifting build has a word for what a
+    /// lift *is* — and because expressing one as `.other` is backwards, per A17.
+    case lift
+
     /// Drift is "near-meaningless on interval/hard runs" (§9), so it is surfaced
     /// conditionally. Encoding that here keeps the rule in one place instead of in
     /// every view that draws a drift number.
+    ///
+    /// A `switch` rather than the `==` chain it replaces: the chain answered `false`
+    /// for any case added later without anyone being asked, which is correct for
+    /// `.lift` — drift measures cardiac cost creeping up at a held effort, and a lift
+    /// holds no effort — but would have been correct only by luck for the next one.
     public var driftIsMeaningful: Bool {
-        self == .easy || self == .long
+        switch self {
+        case .easy, .long: return true
+        case .hard, .other, .lift: return false
+        }
     }
 }
 
@@ -55,20 +104,51 @@ public struct ScheduledSession: Hashable, Sendable, Codable {
     /// as context.
     public let note: String?
 
-    public init(kind: ScheduledSessionKind, distanceMeters: Double? = nil, note: String? = nil) throws {
+    /// What a prescribed lift is for — "Tuesday is chest and shoulders".
+    ///
+    /// A **set**, because a real session is rarely one group and a plan that forced one
+    /// would be wrong the first time it was used. Empty on every session that is not a
+    /// lift, and legitimately empty on a lift as well: "lift on Tuesday, groups
+    /// unstated" is a thing a plan may say, and it is a different statement from "no
+    /// lift on Tuesday", which is `.rest`. Both remain expressible, which is what keeps
+    /// the lift slot's totality meaningful rather than merely non-nil.
+    ///
+    /// **Nothing checks this.** HealthKit does not report which muscles a strength
+    /// workout worked, so a prescription of chest-and-shoulders cannot be verified any
+    /// more than a set count can (A20). See `MuscleGroup` — this is what a plan may
+    /// state, and no scoring, tallies or adherence code reads it.
+    public let muscleGroups: Set<MuscleGroup>
+
+    public init(
+        kind: ScheduledSessionKind,
+        distanceMeters: Double? = nil,
+        note: String? = nil,
+        muscleGroups: Set<MuscleGroup> = []
+    ) throws {
         try Validate.optionalPositive(distanceMeters, "ScheduledSession.distanceMeters")
         guard !(kind == .rest && distanceMeters != nil) else {
             throw DomainError.inconsistent(reason: "A rest day cannot carry a scheduled distance")
         }
+        // Same shape of rule as the one above, for the same reason: a value that cannot
+        // mean anything for this kind is a value somebody will later try to read. A run
+        // does not work a muscle group in the sense a plan means by it, and a rest day
+        // works none, so only a lift may name them.
+        guard muscleGroups.isEmpty || kind == .lift else {
+            throw DomainError.inconsistent(
+                reason: "Only a lift can prescribe muscle groups; \(kind) cannot"
+            )
+        }
         self.kind = kind
         self.distanceMeters = distanceMeters
         self.note = note
+        self.muscleGroups = muscleGroups
     }
 
     private init(uncheckedKind kind: ScheduledSessionKind) {
         self.kind = kind
         self.distanceMeters = nil
         self.note = nil
+        self.muscleGroups = []
     }
 
     /// The canonical rest day. A constant rather than a computed value so identity
@@ -78,7 +158,24 @@ public struct ScheduledSession: Hashable, Sendable, Codable {
     public var isRest: Bool { kind == .rest }
 
     private enum CodingKeys: String, CodingKey {
-        case kind, distanceMeters, note
+        case kind, distanceMeters, note, muscleGroups
+    }
+
+    /// Written as a **canonically ordered array**, and omitted entirely when empty.
+    ///
+    /// Ordered because a `Set`'s iteration order is not stable, and `PersistencePayload`
+    /// leans on an unchanged value re-encoding to identical bytes. Omitted when empty
+    /// because every `ScheduledSession` already on disk — inside a stored plan and
+    /// inside every stored `Score` (D8: those are immutable) — has no muscle groups, so
+    /// the shorter form is the one that leaves those bytes exactly as they are.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(kind, forKey: .kind)
+        try container.encodeIfPresent(distanceMeters, forKey: .distanceMeters)
+        try container.encodeIfPresent(note, forKey: .note)
+        if !muscleGroups.isEmpty {
+            try container.encode(muscleGroups.ordered, forKey: .muscleGroups)
+        }
     }
 
     public init(from decoder: any Decoder) throws {
@@ -86,7 +183,10 @@ public struct ScheduledSession: Hashable, Sendable, Codable {
         try self.init(
             kind: container.decode(ScheduledSessionKind.self, forKey: .kind),
             distanceMeters: container.decodeIfPresent(Double.self, forKey: .distanceMeters),
-            note: container.decodeIfPresent(String.self, forKey: .note)
+            note: container.decodeIfPresent(String.self, forKey: .note),
+            muscleGroups: Set(
+                container.decodeIfPresent([MuscleGroup].self, forKey: .muscleGroups) ?? []
+            )
         )
     }
 }

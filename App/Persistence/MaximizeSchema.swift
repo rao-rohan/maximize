@@ -368,42 +368,94 @@ enum MaximizeSchemaV1: VersionedSchema {
 
     /// See `StoredChatThread`'s doc comment for why `createdAt` exists and what it is
     /// not: a duplicate-resolution tiebreak (MAX-048), not domain data.
+    ///
+    /// ## MAX-093's additive columns, and why they need no migration
+    ///
+    /// `subjectKindRawValue`, `scopeFromISO8601`, `scopeThroughISO8601` and
+    /// `lastActivityAt` are new. Every one of them is either non-optional with a default
+    /// or optional with none — the two shapes `DerivedMetricsRecord.distanceSplitsComputed`
+    /// and `.distanceSplitsJSON` already established for "a column some rows will not
+    /// have written." That is what makes this additive: SwiftData's lightweight
+    /// migration adds a column to an existing table without touching a row's existing
+    /// data, so a `ChatThreadRecord` written before this build reads back with
+    /// `subjectKindRawValue == "workout"` (A11: every existing thread has a workout
+    /// subject) and both scope columns `nil`. Nothing is rewritten, and
+    /// `MaximizeSchemaV1`'s version number does not move — see
+    /// `distanceSplitsJSON`'s doc comment above for why a version bump is not owed until
+    /// this schema is actually promoted to CloudKit production, which A8 keeps off.
     @Model
     final class ChatThreadRecord {
         var threadUUID: UUID = UUID()
+
+        /// `ChatSubjectKind.rawValue`. Defaults to `"workout"`, matching what every row
+        /// written before this column existed actually is (A11's "no migration").
+        var subjectKindRawValue: String = ChatSubjectKind.workout.rawValue
+
+        /// Meaningful only when `subjectKindRawValue == "workout"`. Carries
+        /// `StoredChatThread.noWorkoutSentinel` for a training thread — see that type's
+        /// doc comment for why this stays non-optional rather than becoming one more
+        /// thing every reader has to unwrap.
         var workoutUUID: UUID = UUID()
+
+        /// `CalendarDay`'s `YYYY-MM-DD` form. `nil` for a workout subject, including
+        /// every row written before this column existed — there is nothing to backfill
+        /// it with, and there does not need to be (A11).
+        var scopeFromISO8601: String?
+
+        /// See `scopeFromISO8601`.
+        var scopeThroughISO8601: String?
 
         @Attribute(.externalStorage) var messagesJSON: Data = Data()
 
         /// Default `.distantPast` per this file's "every property has a default"
         /// rule. A record written before this field existed loads with that default,
-        /// which is deliberate rather than a gap: `MaximizeStore.threadRecords(for:)`
+        /// which is deliberate rather than a gap: `MaximizeStore.workoutThreadRecords(for:)`
         /// breaks a tie on `threadUUID`, so two such pre-migration duplicates still
         /// resolve deterministically even though they collapse onto the same
         /// `createdAt`.
         var createdAt: Date = Date.distantPast
 
+        /// What the thread list sorts on and "which thread opens" resolves by (§2.2,
+        /// §2.3). Defaults to `StoredChatThread.unsetLastActivityAt`
+        /// (`Date.distantPast`) — a pre-MAX-093 row loads with that sentinel, and
+        /// `StoredChatThread.toDomain()` derives the real value from `messagesJSON` and
+        /// `createdAt` exactly as MAX-092 did before this column existed. A record
+        /// written by this build always sets it explicitly.
+        var lastActivityAt: Date = StoredChatThread.unsetLastActivityAt
+
         init(_ stored: StoredChatThread) {
             threadUUID = stored.threadUUID
+            subjectKindRawValue = stored.subjectKindRawValue
             workoutUUID = stored.workoutUUID
+            scopeFromISO8601 = stored.scopeFromISO8601
+            scopeThroughISO8601 = stored.scopeThroughISO8601
             messagesJSON = stored.messagesJSON
             createdAt = stored.createdAt
+            lastActivityAt = stored.lastActivityAt
         }
 
         var stored: StoredChatThread {
             get {
                 StoredChatThread(
                     threadUUID: threadUUID,
+                    subjectKindRawValue: subjectKindRawValue,
                     workoutUUID: workoutUUID,
+                    scopeFromISO8601: scopeFromISO8601,
+                    scopeThroughISO8601: scopeThroughISO8601,
                     messagesJSON: messagesJSON,
-                    createdAt: createdAt
+                    createdAt: createdAt,
+                    lastActivityAt: lastActivityAt
                 )
             }
             set {
                 threadUUID = newValue.threadUUID
+                subjectKindRawValue = newValue.subjectKindRawValue
                 workoutUUID = newValue.workoutUUID
+                scopeFromISO8601 = newValue.scopeFromISO8601
+                scopeThroughISO8601 = newValue.scopeThroughISO8601
                 messagesJSON = newValue.messagesJSON
                 createdAt = newValue.createdAt
+                lastActivityAt = newValue.lastActivityAt
             }
         }
     }

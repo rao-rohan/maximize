@@ -228,7 +228,11 @@ struct PlanAuthoringView: View {
                             set: { kind in model.edit { $0.setKind(kind, on: day.weekday) } }
                         )
                     ) {
-                        ForEach(ScheduledSessionKind.allCases, id: \.self) { kind in
+                        // `prescribable`, not `allCases`: the vocabulary now contains
+                        // `.lift` and the template still has one slot per weekday, so
+                        // offering it here would put a lift ask where the run ask goes.
+                        // The core owns that rule; see `ScheduledSessionKind.prescribable`.
+                        ForEach(ScheduledSessionKind.prescribable, id: \.self) { kind in
                             Text(PlanAuthoringFormatting.describe(kind)).tag(kind)
                         }
                     }

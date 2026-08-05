@@ -164,6 +164,56 @@ final class DesignPaletteContrastTests: XCTestCase {
         }
     }
 
+    // MARK: The plan layer's ring (MAX-105)
+
+    /// The plan ring is a graphical object carrying meaning, so WCAG 1.4.11's 3:1 is
+    /// the bar it has to clear — against the calendar card, which is the *only* ground
+    /// it is ever drawn on.
+    ///
+    /// That "only" is the design decision this test pins. The ring sits at the cell's
+    /// edge with the state fill inset inside it (`LayoutMetrics.planRingGutter`), so it
+    /// never touches a score-band fill. That matters because no ink in this palette
+    /// survives both grounds: a near-white stroke measures ~1.2:1 on `scoreEffective`
+    /// and a near-black one ~1.2:1 on `surfaceInset`, so a ring drawn *on* the fill
+    /// would have been invisible on one state or another whatever colour it was given.
+    /// Keeping it on the card is what makes one token — and one measurement — enough.
+    func testThePlanRingIsLegibleOnTheCalendarCard() {
+        assertAA(
+            DesignPalette.accent.dark, DesignPalette.surfaceElevated.dark,
+            .largeTextOrNonText, "plan ring on the calendar card [dark]"
+        )
+        assertAA(
+            DesignPalette.accent.light, DesignPalette.surfaceElevated.light,
+            .largeTextOrNonText, "plan ring on the calendar card [light]"
+        )
+        assertAA(
+            DesignPalette.accent.darkHighContrast, DesignPalette.surfaceElevated.darkHighContrast,
+            .largeTextOrNonText, "plan ring on the calendar card [dark, Increase Contrast]"
+        )
+        assertAA(
+            DesignPalette.accent.lightHighContrast, DesignPalette.surfaceElevated.lightHighContrast,
+            .largeTextOrNonText, "plan ring on the calendar card [light, Increase Contrast]"
+        )
+    }
+
+    /// Increase Contrast must never make the ring *harder* to see — the same property
+    /// `testIncreaseContrastNeverLowersAChartMarksContrast` asserts for chart marks.
+    /// The ring also thickens under that setting
+    /// (`LayoutMetrics.planRingWidthIncreasedContrast`), which is the half of contrast
+    /// this suite cannot measure.
+    func testIncreaseContrastNeverLowersThePlanRingsContrast() {
+        assertRaised(
+            DesignPalette.accent.darkHighContrast, on: DesignPalette.surfaceElevated.darkHighContrast,
+            isAtLeast: DesignPalette.accent.dark, on: DesignPalette.surfaceElevated.dark,
+            "plan ring [dark]"
+        )
+        assertRaised(
+            DesignPalette.accent.lightHighContrast, on: DesignPalette.surfaceElevated.lightHighContrast,
+            isAtLeast: DesignPalette.accent.light, on: DesignPalette.surfaceElevated.light,
+            "plan ring [light]"
+        )
+    }
+
     // MARK: Score bands against *each other* — the gap MAX-084 found
 
     /// The check this suite was missing, and the reason a 1.02:1 pair shipped.
@@ -294,6 +344,20 @@ final class DesignPaletteContrastTests: XCTestCase {
         assertAtLeast(2.0, DesignPalette.chartExcursion, on: plotSurface, "chartExcursion")
     }
 
+    /// MAX-127: the invariant the two tests above were missing. Both `chartGridline`
+    /// and `chartExcursion` used to clear their floor by hundredths (1.43:1 against
+    /// 1.4, 2.01:1 against 2.0) — a margin indistinguishable, in a diff, from sitting
+    /// exactly on the line, and it took `surfaceInset` moving to prove it. This asserts
+    /// a buffer above each floor, not just the floor, so a future edit that quietly
+    /// walks either token back down cannot pass by accident the way the old ones did.
+    /// 0.15 is chosen below every appearance's actual margin (chartGridline's tightest
+    /// is 0.19:1 in dark; chartExcursion's is 0.25:1 in dark) with room to spare.
+    func testChartGridlineAndExcursionClearTheirFloorsWithRealMargin() {
+        let realMargin = 0.15
+        assertAtLeast(1.4 + realMargin, DesignPalette.chartGridline, on: plotSurface, "chartGridline (margin)")
+        assertAtLeast(2.0 + realMargin, DesignPalette.chartExcursion, on: plotSurface, "chartExcursion (margin)")
+    }
+
     /// The constraint from the other direction, and the one that stops a future edit
     /// from simply making the shading darker until it wins: `HRCurveView` annotates the
     /// cap rule with "Cap N bpm" in `chartThreshold`, positioned directly above the cap
@@ -402,6 +466,143 @@ final class DesignPaletteContrastTests: XCTestCase {
                 "\(mark.name) [light]"
             )
         }
+    }
+
+    // MARK: Surface elevation — MAX-085, widened by MAX-127
+
+    /// The whole of the design review's §2.1 finding, as an invariant that outlives the
+    /// particular fix.
+    ///
+    /// A card has to be *seen* as a card. It can earn that from its fill step, from its
+    /// edge, or from both; what it may not do is neither. MAX-085 shipped with the fill
+    /// step at 1.09:1 — the number the review measured — carried entirely by the edge.
+    /// MAX-127 widened the fill step to ~1.16:1 in every appearance (see
+    /// `DesignPalette.surfaceInset` for why that is real but not larger) and re-tuned
+    /// `surfaceBorder`'s light value to keep pace, so today both terms clear the floor
+    /// on their own and `max` has slack either way. This test is written as `max`
+    /// rather than as two separate assertions on purpose: it is the invariant, not the
+    /// mechanism, and a future ticket is free to move the mechanism again.
+    func testACardSeparatesFromTheScreenBySomething() {
+        for appearance in Appearance.allCases {
+            let screen = appearance.token(DesignPalette.surface)
+            let card = appearance.token(DesignPalette.surfaceElevated)
+            let edge = appearance.token(DesignPalette.surfaceBorder)
+            let fillStep = WCAGContrast.contrastRatio(card, screen)
+            let edgeStep = WCAGContrast.contrastRatio(edge, card)
+            XCTAssertGreaterThanOrEqual(
+                max(fillStep, edgeStep), 1.4,
+                """
+                a card is invisible against the screen [\(appearance.rawValue)]: its fill \
+                steps \(String(format: "%.2f", fillStep)):1 and its edge \
+                \(String(format: "%.2f", edgeStep)):1 — neither reads as a boundary
+                """
+            )
+        }
+    }
+
+    /// MAX-127: pins the fill step's own contribution, so `testACardSeparatesFromThe-
+    /// ScreenBySomething` passing on `max(fillStep, edgeStep)` can't quietly mean the
+    /// fill step drifted back toward MAX-085's 1.09:1 while the edge alone kept the
+    /// invariant afloat — which is exactly the state this ticket was asked to leave
+    /// behind. 1.12 sits below every appearance's actual value (dark and light both
+    /// measure ~1.16:1; Increase Contrast measures higher still) with margin.
+    func testTheFillStepAloneIsMeaningfullyWiderThanMAX085Shipped() {
+        for appearance in Appearance.allCases {
+            let ratio = WCAGContrast.contrastRatio(
+                appearance.token(DesignPalette.surfaceElevated),
+                appearance.token(DesignPalette.surface)
+            )
+            XCTAssertGreaterThanOrEqual(
+                ratio, 1.12,
+                """
+                surfaceElevated on surface measures \(String(format: "%.2f", ratio)):1 \
+                [\(appearance.rawValue)] — back near MAX-085's 1.09:1, leaning on the \
+                edge alone again
+                """
+            )
+        }
+    }
+
+    /// The edge against both of the things it lies between. A hairline that reads on the
+    /// card but vanishes into the screen behind it is half an edge.
+    func testTheCardEdgeIsVisibleFromBothSides() {
+        assertAtLeast(
+            1.4, DesignPalette.surfaceBorder, on: DesignPalette.surfaceElevated,
+            "surfaceBorder on the card"
+        )
+        assertAtLeast(
+            1.4, DesignPalette.surfaceBorder, on: DesignPalette.surface,
+            "surfaceBorder on the screen"
+        )
+    }
+
+    /// A card's outer boundary outranks the rules drawn inside it. Stated as an ordering
+    /// rather than as two numbers, for the same reason the chart ladder is: it is the
+    /// relationship that matters, and it is what a future edit to either token breaks.
+    func testTheCardEdgeOutranksTheSeparatorsInsideIt() {
+        for appearance in Appearance.allCases {
+            let card = appearance.token(DesignPalette.surfaceElevated)
+            let edge = WCAGContrast.contrastRatio(appearance.token(DesignPalette.surfaceBorder), card)
+            let rule = WCAGContrast.contrastRatio(appearance.token(DesignPalette.separator), card)
+            XCTAssertGreaterThan(
+                edge, rule,
+                """
+                the card edge (\(String(format: "%.2f", edge)):1) is quieter than the \
+                separators inside the card (\(String(format: "%.2f", rule)):1) \
+                [\(appearance.rawValue)] — the boundary should outrank its contents
+                """
+            )
+        }
+    }
+
+    /// And the ceiling from the other side: the edge is structure, so it stays quieter
+    /// than the quietest thing a card exists to hold. `textTertiary` is that floor —
+    /// axis ticks and timestamps — and an edge louder than the type in the card is an
+    /// outline, which is a different and worse design.
+    func testTheCardEdgeStaysQuieterThanTheTypeItSurrounds() {
+        for appearance in Appearance.allCases {
+            let card = appearance.token(DesignPalette.surfaceElevated)
+            let edge = WCAGContrast.contrastRatio(appearance.token(DesignPalette.surfaceBorder), card)
+            let quietestText = WCAGContrast.contrastRatio(appearance.token(DesignPalette.textTertiary), card)
+            XCTAssertLessThan(
+                edge, quietestText,
+                """
+                the card edge (\(String(format: "%.2f", edge)):1) is louder than \
+                textTertiary on the same card (\(String(format: "%.2f", quietestText)):1) \
+                [\(appearance.rawValue)] — that is an outline, not an edge
+                """
+            )
+        }
+    }
+
+    /// FR-4.5 / MAX-070: Increase Contrast must strengthen this app's cues, and the
+    /// surface ramp is the one most easily flattened by accident, because its high
+    /// contrast variants were written before there was an edge to keep in step with them.
+    func testIncreaseContrastStrengthensTheCardEdge() {
+        assertRaised(
+            DesignPalette.surfaceBorder.darkHighContrast, on: DesignPalette.surfaceElevated.darkHighContrast,
+            isAtLeast: DesignPalette.surfaceBorder.dark, on: DesignPalette.surfaceElevated.dark,
+            "surfaceBorder on the card [dark]"
+        )
+        assertRaised(
+            DesignPalette.surfaceBorder.lightHighContrast, on: DesignPalette.surfaceElevated.lightHighContrast,
+            isAtLeast: DesignPalette.surfaceBorder.light, on: DesignPalette.surfaceElevated.light,
+            "surfaceBorder on the card [light]"
+        )
+    }
+
+    /// Under Increase Contrast the edge stops being a design flourish and becomes a
+    /// genuine graphical object, so it is held to WCAG 1.4.11's 3:1 against the screen
+    /// it separates the card from — which the standard appearances are not, deliberately.
+    func testTheCardEdgeMeetsTheGraphicalObjectMinimumUnderIncreaseContrast() {
+        assertAA(
+            DesignPalette.surfaceBorder.darkHighContrast, DesignPalette.surface.darkHighContrast,
+            .largeTextOrNonText, "surfaceBorder on the screen [dark, Increase Contrast]"
+        )
+        assertAA(
+            DesignPalette.surfaceBorder.lightHighContrast, DesignPalette.surface.lightHighContrast,
+            .largeTextOrNonText, "surfaceBorder on the screen [light, Increase Contrast]"
+        )
     }
 
     private func ink(for band: ScoreBand) -> DesignPalette.Ink {

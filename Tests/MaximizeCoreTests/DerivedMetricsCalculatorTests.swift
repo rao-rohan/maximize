@@ -332,6 +332,180 @@ final class DerivedMetricsCalculatorTests: XCTestCase {
         XCTAssertEqual(metrics.zoneSplits.totalSeconds, 3_600, accuracy: 1e-9)
     }
 
+    // MARK: - MAX-111/MAX-130: what each discipline's metrics are
+    //
+    // MAX-111 gated three metrics on `isRun` at their call sites. MAX-130 moves the
+    // decision into `DerivedMetricKind` and settles what a lift's record actually
+    // contains. The rules themselves are pinned in `DerivedMetricKindTests`; what is
+    // checked here is that the calculator honours them end to end, on inputs rich
+    // enough that every withheld figure would otherwise have been produced.
+
+    /// A run's stored record, in full, against hand-computed values (see the header).
+    /// The regression promise of the refactor: not one number moves.
+    func testEveryFigureOfARunIsUnchangedByDisciplineGating() throws {
+        let plan = try Fixture.plan()
+        let input = try DerivedMetricsInput(
+            workout: try Fixture.workout(),
+            heartRateSeries: try MetricsFixture.series([(0, 120), (3_600, 180)]),
+            route: try matchingRoute(),
+            totalStepCount: 9_900,
+            classification: .easy
+        )
+
+        let metrics = try DerivedMetricsCalculator.compute(input, plan: plan)
+
+        XCTAssertEqual(try XCTUnwrap(metrics.averageHeartRateBPM), 150, accuracy: 1e-9)
+        XCTAssertEqual(try XCTUnwrap(metrics.maximumHeartRateBPM), 180, accuracy: 1e-9)
+        XCTAssertEqual(try XCTUnwrap(metrics.timeAboveCapSeconds), 1_800, accuracy: 1e-9)
+        XCTAssertEqual(try XCTUnwrap(metrics.heartRateDriftFraction), 2.0 / 9.0, accuracy: 1e-9)
+        XCTAssertEqual(try XCTUnwrap(metrics.averageCadenceStepsPerMinute), 165, accuracy: 1e-9)
+        XCTAssertEqual(
+            try XCTUnwrap(metrics.gradeAdjustedPaceSecondsPerKilometer), 360, accuracy: 1e-9
+        )
+        XCTAssertEqual(metrics.zoneSplits.totalSeconds, 3_600, accuracy: 1e-9)
+        XCTAssertEqual(try XCTUnwrap(metrics.distanceSplits?.series(in: .kilometers)).splits.count, 10)
+        XCTAssertTrue(metrics.distanceSplitsComputed)
+        XCTAssertEqual(metrics.planVersion, plan.version)
+
+        // Stated as a totality rather than eight assertions: a run is entitled to
+        // everything, and this fails if a future metric quietly stops applying to one.
+        for kind in DerivedMetricKind.allCases {
+            XCTAssertTrue(metrics.isRecorded(kind), "a run should record \(kind.rawValue)")
+        }
+    }
+
+    /// The lift is handed a heart-rate series, a step count, a recorded distance, a route
+    /// long enough to cut into splits, **and** an `.easy` classification — none of which a
+    /// real lift would carry together. That is the point: every figure absent below is
+    /// absent because the discipline says so, not because the input was missing.
+    private func liftWithEveryRunningIngredient() throws -> DerivedMetricsInput {
+        try DerivedMetricsInput(
+            workout: try Fixture.workout(activityType: .traditionalStrengthTraining),
+            heartRateSeries: try MetricsFixture.series([(0, 120), (3_600, 180)]),
+            route: try matchingRoute(),
+            totalStepCount: 9_900,
+            classification: .easy
+        )
+    }
+
+    /// The whole of §3.2 in one assertion: a lift records exactly the figures that apply
+    /// to a lift, and nothing else — absent, never zero.
+    func testALiftRecordsExactlyTheFiguresThatApplyToALift() throws {
+        let metrics = try DerivedMetricsCalculator.compute(
+            try liftWithEveryRunningIngredient(), plan: try Fixture.plan()
+        )
+
+        for kind in DerivedMetricKind.allCases {
+            XCTAssertEqual(
+                metrics.isRecorded(kind),
+                kind.applies(to: .traditionalStrengthTraining),
+                kind.rawValue
+            )
+        }
+    }
+
+    /// The confirmed defect MAX-111 found: a strength session was storing a "cadence" —
+    /// its incidental between-sets step count divided by the session's duration — and
+    /// `WorkoutFactSheet` was sending that number to Claude as a measured fact.
+    ///
+    /// A zero would be averaged into the dashboard's cadence trend and drawn on the
+    /// cadence band as a session with no turnover at all. Absent is the only honest
+    /// answer, and it stays absent under the new gate.
+    func testALiftGetsNoCadenceNoRunningPaceAndNoSplits() throws {
+        let metrics = try DerivedMetricsCalculator.compute(
+            try liftWithEveryRunningIngredient(), plan: try Fixture.plan()
+        )
+
+        XCTAssertNil(metrics.averageCadenceStepsPerMinute)
+        XCTAssertNil(metrics.gradeAdjustedPaceSecondsPerKilometer)
+        XCTAssertNil(metrics.distanceSplits)
+        // MAX-067's backfill selects on this flag; leaving it false would have the sweep
+        // re-fetch a lift's samples on every launch, forever, hunting splits it will never
+        // be allowed to compute.
+        XCTAssertTrue(metrics.distanceSplitsComputed)
+    }
+
+    /// A lift's heart rate is a real measurement of a thing the athlete really did, and it
+    /// is the one rich signal this discipline gives us for free (§3.2). Zone splits stay
+    /// with it — §3.3(b) — as the only figure in the record that could tell a lifting
+    /// session apart from a walk.
+    func testALiftKeepsTheHeartRateItActuallyProduced() throws {
+        let metrics = try DerivedMetricsCalculator.compute(
+            try liftWithEveryRunningIngredient(), plan: try Fixture.plan()
+        )
+
+        XCTAssertEqual(try XCTUnwrap(metrics.averageHeartRateBPM), 150, accuracy: 1e-9)
+        XCTAssertEqual(try XCTUnwrap(metrics.maximumHeartRateBPM), 180, accuracy: 1e-9)
+        XCTAssertTrue(metrics.hasHeartRateData)
+        XCTAssertEqual(metrics.zoneSplits.totalSeconds, 3_600, accuracy: 1e-9)
+        XCTAssertEqual(metrics.zoneSplits.seconds(in: .five), 360, accuracy: 1e-9)
+    }
+
+    /// §3.3(a), and the one figure this ticket takes away from a lift that MAX-111 left.
+    ///
+    /// `Plan.heartRateCapBPM` is the **easy-run** ceiling and `timeAboveCapSeconds` is
+    /// documented as the primary easy-run discipline metric. A heavy set puts most people
+    /// over that cap, so on a lift the figure silently changes meaning — from "how well
+    /// did you hold the plan's discipline" to "how hard did you work" — while keeping its
+    /// name, its column and its heading. It is withheld rather than restated.
+    ///
+    /// Note what this is *not*: it is not "no heart-rate data". The reading is there; the
+    /// cap it would be read against is a run field, and whether a lift should ever have a
+    /// ceiling of its own is a plan-model question this ticket does not open.
+    func testALiftHasNoTimeAboveCapEvenThoughItHasAHeartRate() throws {
+        let metrics = try DerivedMetricsCalculator.compute(
+            try liftWithEveryRunningIngredient(), plan: try Fixture.plan()
+        )
+
+        XCTAssertNil(metrics.timeAboveCapSeconds)
+        XCTAssertTrue(metrics.hasHeartRateData)
+    }
+
+    /// Drift is aerobic decoupling — cardiac cost creeping up at a *held* effort — and a
+    /// lift holds no effort. `driftIsMeaningful` already withholds it for every
+    /// classification a lift can currently carry, so this passes twice over. The
+    /// redundancy is deliberate: the classification arriving here is an input, and the
+    /// gate must not depend on `WorkoutClassifier` never answering `.easy` for a lift.
+    func testALiftHasNoDriftEvenWhenHandedAClassificationThatWouldSurfaceIt() throws {
+        let metrics = try DerivedMetricsCalculator.compute(
+            try liftWithEveryRunningIngredient(), plan: try Fixture.plan()
+        )
+        XCTAssertNil(metrics.heartRateDriftFraction)
+    }
+
+    /// The gap between the run *slot* and a run: a hike is `Discipline.run` — A17 is
+    /// explicit that it is not a discipline of its own — and it still has no running
+    /// form. Before MAX-111 it got a pace off Minetti's cost-of-**running** curve and a
+    /// set of running pace splits. A gate written as `discipline == .run` would hand them
+    /// straight back.
+    func testARunSlotWorkoutThatIsNotARunStillGetsNoRunningPaceOrSplits() throws {
+        let input = try DerivedMetricsInput(
+            workout: try Fixture.workout(activityType: .hiking),
+            heartRateSeries: try MetricsFixture.series([(0, 120), (3_600, 180)]),
+            route: try matchingRoute(),
+            totalStepCount: 9_900
+        )
+
+        let metrics = try DerivedMetricsCalculator.compute(input, plan: try Fixture.plan())
+
+        XCTAssertEqual(metrics.workoutID, Fixture.workoutID)
+        XCTAssertNil(metrics.gradeAdjustedPaceSecondsPerKilometer)
+        XCTAssertNil(metrics.distanceSplits)
+        XCTAssertNil(metrics.averageCadenceStepsPerMinute)
+        XCTAssertTrue(metrics.distanceSplitsComputed)
+
+        // Unchanged: a hike is in the run slot, so the run prescription's cap is the ask
+        // it is measured against. Only the lift slot loses the cap figure.
+        XCTAssertEqual(try XCTUnwrap(metrics.timeAboveCapSeconds), 1_800, accuracy: 1e-9)
+        XCTAssertEqual(metrics.zoneSplits.totalSeconds, 3_600, accuracy: 1e-9)
+    }
+
+    // The other half of the gate — that the treadmill is still a run, so an indoor run is
+    // not quietly demoted — is already pinned above by
+    // `testIndoorRunHasNoGradeAdjustedPaceAndKeepsEverythingElse` (cadence 165) and
+    // `testTreadmillDistanceSplitsAreComputedOnTheMetricsRecordFromDistanceSamples`
+    // (a real breakdown). Both fail if the discipline check ever narrows to outdoor runs.
+
     // MARK: - Input invariants
 
     func testSeriesFromAnotherWorkoutIsRejected() throws {

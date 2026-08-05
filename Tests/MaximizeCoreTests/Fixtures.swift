@@ -13,20 +13,68 @@ enum Fixture {
         try CalendarDay(year: year, month: month, day: dayOfMonth)
     }
 
+    /// `epoch` plus an offset, so a test can say when a turn happened in seconds.
+    static func at(_ offsetSeconds: Double) -> Date {
+        epoch.addingTimeInterval(offsetSeconds)
+    }
+
+    static func scope(
+        from start: (Int, Int, Int),
+        through end: (Int, Int, Int)
+    ) throws -> TrainingScope {
+        try TrainingScope(
+            from: day(start.0, start.1, start.2),
+            through: day(end.0, end.1, end.2)
+        )
+    }
+
+    /// A thread, with `lastActivityAt` defaulted to the last turn (MAX-092).
+    ///
+    /// The default exists so tests that are about ordering, subjects or titles do not
+    /// have to restate an invariant `ChatThread` already enforces. A test that is
+    /// *about* `lastActivityAt` passes it.
+    static func thread(
+        id: UUID = UUID(),
+        subject: ChatSubject = .workout(Fixture.workoutID),
+        messages: [ChatMessage] = [],
+        lastActivityAt: Date? = nil
+    ) throws -> ChatThread {
+        try ChatThread(
+            id: id,
+            subject: subject,
+            messages: messages,
+            lastActivityAt: lastActivityAt ?? messages.last?.timestamp ?? epoch
+        )
+    }
+
+    static func message(
+        _ role: ChatRole,
+        _ content: String,
+        at offsetSeconds: Double
+    ) throws -> ChatMessage {
+        try ChatMessage(id: UUID(), role: role, content: content, timestamp: at(offsetSeconds))
+    }
+
     static func samples(_ pairs: [(Double, Double)]) throws -> [HeartRateSample] {
         try pairs.map { try HeartRateSample(offsetSeconds: $0.0, beatsPerMinute: $0.1) }
     }
 
-    static func weeklyTemplate() throws -> WeeklyTemplate {
-        try WeeklyTemplate([
-            .monday: .rest,
-            .tuesday: ScheduledSession(kind: .easy, distanceMeters: 8_000),
-            .wednesday: ScheduledSession(kind: .hard, note: "6 × 800m"),
-            .thursday: ScheduledSession(kind: .easy, distanceMeters: 8_000),
-            .friday: .rest,
-            .saturday: ScheduledSession(kind: .easy, distanceMeters: 6_000),
-            .sunday: ScheduledSession(kind: .long, distanceMeters: 18_000),
-        ])
+    /// - Parameter lift: the lift slot. Defaults to empty — i.e. rest on every weekday,
+    ///   which is what every plan authored before MAX-129 prescribes, so every existing
+    ///   test keeps measuring exactly what it measured before.
+    static func weeklyTemplate(lift: [Weekday: ScheduledSession] = [:]) throws -> WeeklyTemplate {
+        try WeeklyTemplate(
+            [
+                .monday: .rest,
+                .tuesday: ScheduledSession(kind: .easy, distanceMeters: 8_000),
+                .wednesday: ScheduledSession(kind: .hard, note: "6 × 800m"),
+                .thursday: ScheduledSession(kind: .easy, distanceMeters: 8_000),
+                .friday: .rest,
+                .saturday: ScheduledSession(kind: .easy, distanceMeters: 6_000),
+                .sunday: ScheduledSession(kind: .long, distanceMeters: 18_000),
+            ],
+            lift: lift
+        )
     }
 
     /// A rubric shaped like PRD §10.3's worked example, written entirely as data.
@@ -138,12 +186,22 @@ enum Fixture {
     /// The band is derived here only because this is test scaffolding standing in for
     /// a scorer. Production code must not turn a number into a `ScoreBand`; that
     /// decision belongs to MAX-015, reading the plan version's thresholds.
+    /// - Parameters:
+    ///   - scheduledKind/actualClassification: the plan-versus-execution pair the
+    ///     scorer recorded. They agree by default, which is the ordinary case; pass
+    ///     differing values to build a run that diverged from what was prescribed
+    ///     (`ScoreCalendarTests`).
     static func score(
         points: Int,
         threshold: Int = 70,
         marginal: Int = 45,
-        workoutID: UUID = Fixture.workoutID
+        workoutID: UUID = Fixture.workoutID,
+        scheduledKind: ScheduledSessionKind = .easy,
+        actualClassification: WorkoutClassification = .easy
     ) throws -> Score {
+        // `ScheduledSession` rejects a rest day carrying a distance; no caller passes
+        // `.rest` today, and this keeps the fixture from becoming a trap if one does.
+        let scheduledDistance: Double? = scheduledKind == .rest ? nil : 8_000
         let band: ScoreBand
         if points >= threshold {
             band = .effective
@@ -155,8 +213,8 @@ enum Fixture {
         return try Score(
             workoutID: workoutID,
             planVersion: PlanVersion(1),
-            scheduledSession: ScheduledSession(kind: .easy, distanceMeters: 8_000),
-            actualClassification: .easy,
+            scheduledSession: ScheduledSession(kind: scheduledKind, distanceMeters: scheduledDistance),
+            actualClassification: actualClassification,
             value: ScoreValue(points),
             effectiveThreshold: ScoreValue(threshold),
             band: band,

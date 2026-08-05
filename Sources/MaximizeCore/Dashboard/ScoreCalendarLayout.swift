@@ -190,8 +190,47 @@ extension ScoreCalendarDayState {
     /// to distinguish (both are `.scored`, just with different bands). See
     /// `ScoreBandHeatmapMark` (MAX-087) for that channel, and
     /// `ScoreCalendarRepresentation.weekColumnHeatmap` for how the two combine.
+    ///
+    /// **`.forthcoming` is deliberately not hollow** (MAX-105). Hollow already means
+    /// "the plan asked and nothing came of it" at this density, and a day that has not
+    /// arrived is the one thing that must never read that way. It draws as an ordinary
+    /// neutral mark, alongside rest and awaiting-score — every no-verdict day looks the
+    /// same at six points, which is the honest rendering of a year whose second half
+    /// has not happened. The VoiceOver sentence still says which it is.
+    ///
+    /// **`.noVerdict` is not hollow either** (MAX-126), and for the stronger version of
+    /// the same reason: a lift is a day the athlete *trained*. Drawing it as the outline
+    /// that means "asked and not delivered" would turn a session that happened into a
+    /// miss at year density — the one misreading this whole state exists to prevent.
     public var isDrawnHollowAtHeatmapDensity: Bool {
         if case .missed = self { return true }
+        return false
+    }
+
+    /// Whether the day-grid cell draws no fill at all — an outline with nothing in it.
+    ///
+    /// The day grid's counterpart to `isDrawnHollowAtHeatmapDensity`, and the channel
+    /// that separates a `.forthcoming` day from every other neutral one. `.awaitingScore`,
+    /// `.noVerdict`, `.scheduledRest`, `.convertedRest` and `.unplanned` all sit on the
+    /// same neutral fill (`ScoreBandColors.swift`: a day with no verdict is not a fourth
+    /// band), which is fine for states told apart by their glyphs — but `.forthcoming`
+    /// would have been one more neutral cell carrying a session glyph, which is very
+    /// nearly `.awaitingScore` at a glance and means the opposite thing.
+    ///
+    /// So a forthcoming day is drawn as the plan's outline around empty space: a slot
+    /// with the athlete's name on it and nothing in it yet. It is the same figure/ground
+    /// argument the whole plan layer rests on, applied to the one state where the ground
+    /// is all there is — and unfilled-versus-filled survives greyscale and every kind of
+    /// colour vision, so it costs nothing from the band contrast budget MAX-084 and
+    /// MAX-087 already spent.
+    ///
+    /// A useful side effect worth stating, because a later ticket will want it: the
+    /// boundary between the filled cells and the unfilled ones *is* today. The calendar
+    /// gains a "you are here" reading without spending a channel on one — see
+    /// `docs/DESIGN-REVIEW.md` §5.4, which proposed an accent ring on the current day
+    /// for that job.
+    public var isDrawnUnfilledInTheDayGrid: Bool {
+        if case .forthcoming = self { return true }
         return false
     }
 }

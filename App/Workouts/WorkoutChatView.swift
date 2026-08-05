@@ -7,7 +7,7 @@ import MaximizeCore
 /// This view is thinner than any other section on the detail screen, and that is the
 /// point: every decision — when a turn is complete, what streams versus what is shown
 /// versus what is persisted, what "no key stored" or a dropped connection should say —
-/// lives in `WorkoutChatModel` (`MaximizeCore`) and is unit tested there. This file
+/// lives in `ChatModel` (`MaximizeCore`) and is unit tested there. This file
 /// only renders `model.loadState`/`model.messages`/`model.streamingText` and forwards
 /// `send()`, the same "observe, render, forward intent" shape every other view in this
 /// app follows. MAX-081 changed where it is presented and how the keyboard behaves; it
@@ -41,7 +41,7 @@ import MaximizeCore
 /// ## Construction, not a default
 ///
 /// Every repository is named explicitly here, the same way `SettingsModel`'s own
-/// documentation insists on — `WorkoutChatModel`'s initializer has no default for any
+/// documentation insists on — `ChatModel`'s initializer has no default for any
 /// of them (`MaximizeCore` cannot see `PersistenceComposition`), so this call site is
 /// the one place that supplies it. MAX-049 was a defaulted parameter silently
 /// resolving to a no-op stub in two files; there is nothing here for a future edit to
@@ -51,7 +51,7 @@ struct WorkoutChatView: View {
     // the model, and `@State` derives `$model.composerText` for the composer's
     // `TextField` directly for an `@Observable` class — no `@Bindable` needed for a
     // model the view owns rather than receives.
-    @State private var model: WorkoutChatModel
+    @State private var model: ChatModel
 
     /// Owned here rather than by the presenting view so that dismissing the screen and
     /// releasing the keyboard are the same action — see the `Done` button below.
@@ -67,11 +67,15 @@ struct WorkoutChatView: View {
 
     init(workoutID: UUID) {
         _model = State(
-            initialValue: WorkoutChatModel(
-                workoutID: workoutID,
+            initialValue: ChatModel(
+                // MAX-096: the model is driven by a subject now, and this screen's
+                // subject is the run it was pushed from. A training thread reaches the
+                // same type through the same initializer with `.training(scope)`.
+                subject: .workout(workoutID),
                 workoutRepository: PersistenceComposition.store,
                 scoreRepository: PersistenceComposition.store,
                 planRepository: PersistenceComposition.store,
+                settingsRepository: PersistenceComposition.store,
                 chatThreadRepository: PersistenceComposition.store,
                 chatClient: AnthropicStreamingChatClient(keyStore: KeychainAnthropicAPIKeyStore())
             )
@@ -113,10 +117,21 @@ struct WorkoutChatView: View {
         case .notYetScored:
             // Ordinary, not an error (constraint #5's sibling state): chat needs the
             // score already assigned (FR-2.1), and that arrives moments after capture
-            // in the common case — see `WorkoutChatModel`'s own "why chat requires an
+            // in the common case — see `ChatModel`'s own "why chat requires an
             // existing score."
             centered {
                 secondaryText("This run hasn't been scored yet — chat opens once it has a score.")
+            }
+        case .noVerdict:
+            // The same absence, and the opposite tense (MAX-126). The sentence above
+            // would be a promise here: the plan scores runs, so this workout will never
+            // have the score chat is seeded from. Said once, plainly, in the same voice
+            // the verdict header uses on the screen behind this sheet.
+            centered {
+                secondaryText(
+                    "The plan scores runs, so there's no score for this workout — "
+                        + "and chat starts from one."
+                )
             }
         case .ready:
             transcript
@@ -232,11 +247,11 @@ struct WorkoutChatView: View {
     }
 }
 
-/// One row of the transcript. Purely a rendering of `WorkoutChatModel.DisplayMessage`
+/// One row of the transcript. Purely a rendering of `ChatModel.DisplayMessage`
 /// — every one of its flags (`wasTruncated`, `wasInterruptedByFailure`) is something
 /// the model already decided, not something this view infers.
 private struct WorkoutChatBubble: View {
-    let message: WorkoutChatModel.DisplayMessage
+    let message: ChatModel.DisplayMessage
 
     var body: some View {
         switch message.kind {

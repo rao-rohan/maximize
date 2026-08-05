@@ -539,23 +539,13 @@ final class StoredRecordRoundTripTests: XCTestCase {
     }
 
     func testChatThreadRoundTripsUnchanged() throws {
-        let thread = try ChatThread(
+        let thread = try Fixture.thread(
             id: Fixture.otherWorkoutID,
-            workoutID: Fixture.workoutID,
+            subject: .workout(Fixture.workoutID),
             messages: [
-                ChatMessage(id: UUID(), role: .system, content: "Context", timestamp: Fixture.epoch),
-                ChatMessage(
-                    id: UUID(),
-                    role: .user,
-                    content: "Why was this scored 62?",
-                    timestamp: Fixture.epoch.addingTimeInterval(5)
-                ),
-                ChatMessage(
-                    id: UUID(),
-                    role: .assistant,
-                    content: "Your average HR was above the cap.",
-                    timestamp: Fixture.epoch.addingTimeInterval(9)
-                ),
+                try Fixture.message(.system, "Context", at: 0),
+                try Fixture.message(.user, "Why was this scored 62?", at: 5),
+                try Fixture.message(.assistant, "Your average HR was above the cap.", at: 9),
             ]
         )
         let restored = try StoredChatThread(thread, createdAt: Fixture.epoch).toDomain()
@@ -566,7 +556,7 @@ final class StoredRecordRoundTripTests: XCTestCase {
     }
 
     func testEmptyChatThreadRoundTrips() throws {
-        let thread = try ChatThread(id: UUID(), workoutID: Fixture.workoutID)
+        let thread = try Fixture.thread(lastActivityAt: Fixture.epoch)
         let restored = try StoredChatThread(thread, createdAt: Fixture.epoch).toDomain()
         XCTAssertEqual(restored, thread)
         XCTAssertTrue(restored.isEmpty)
@@ -574,9 +564,7 @@ final class StoredRecordRoundTripTests: XCTestCase {
 
     func testChatMessageTimestampsSurviveExactly() throws {
         let precise = Fixture.epoch.addingTimeInterval(0.123456)
-        let thread = try ChatThread(
-            id: UUID(),
-            workoutID: Fixture.workoutID,
+        let thread = try Fixture.thread(
             messages: [ChatMessage(id: UUID(), role: .user, content: "hi", timestamp: precise)]
         )
         XCTAssertEqual(
@@ -585,27 +573,145 @@ final class StoredRecordRoundTripTests: XCTestCase {
         )
     }
 
-    /// MAX-048: `createdAt` is storage-only bookkeeping for duplicate resolution, not
-    /// domain data — `ChatThread` has no timestamp of its own to carry it. What CI can
-    /// verify here is that `StoredChatThread` carries exactly the value its caller
-    /// gave it, and that the value cannot leak into the domain type because there is
-    /// no field for it to leak into. The rule for *which* value `MaximizeStore` passes
-    /// — the existing record's `createdAt` on an update, `Date()` on first insert, and
-    /// the sort in `threadRecords(for:)` that makes the tiebreak matter — lives in
-    /// `App/Persistence/MaximizeStore.swift`, which CI never executes (no simulator or
-    /// device in this pipeline — tracker R2).
-    func testChatThreadCreatedAtIsStorageOnlyBookkeeping() throws {
-        let thread = try ChatThread(id: UUID(), workoutID: Fixture.workoutID)
-        let createdAt = Fixture.epoch.addingTimeInterval(42)
+    /// MAX-092: the record has no `lastActivityAt` column yet (MAX-093 adds one), so
+    /// `toDomain()` derives it from what the record does hold. This pins the derivation,
+    /// because it is what MAX-093 has to backfill existing rows with.
+    ///
+    /// For a thread anybody has spoken in, the value is not a guess at all — every turn
+    /// carries its own timestamp, so the last one *is* the last activity.
+    func testLastActivityIsDerivedFromTheLastTurn() throws {
+        let thread = try Fixture.thread(
+            messages: [
+                try Fixture.message(.user, "Was that on plan?", at: 0),
+                try Fixture.message(.assistant, "Yes.", at: 90),
+            ],
+            lastActivityAt: Fixture.at(90)
+        )
+        let restored = try StoredChatThread(thread, createdAt: Fixture.at(-1_000)).toDomain()
+        XCTAssertEqual(restored.lastActivityAt, Fixture.at(90))
+        XCTAssertEqual(restored, thread)
+    }
 
-        let stored = try StoredChatThread(thread, createdAt: createdAt)
-        XCTAssertEqual(stored.createdAt, createdAt)
+    /// MAX-048: `createdAt` is pure storage bookkeeping for duplicate resolution — the
+    /// dedupe tiebreak `MaximizeStore.workoutThreadRecords(for:)` sorts on. MAX-093 gives
+    /// `lastActivityAt` its own column, so unlike MAX-092's stopgap (which derived it
+    /// from `createdAt` because there was nowhere else to get it), `createdAt` no longer
+    /// has any influence on a freshly-written thread's `lastActivityAt`.
+    func testCreatedAtNoLongerInfluencesAFreshlyWrittenThreadsLastActivity() throws {
+        let lastActivityAt = Fixture.epoch.addingTimeInterval(42)
+        let thread = try Fixture.thread(lastActivityAt: lastActivityAt)
 
-        // Two stored records for the same thread that differ only in `createdAt` must
-        // round-trip to the identical domain value — there is nowhere on `ChatThread`
-        // for the difference to surface.
-        let otherStored = try StoredChatThread(thread, createdAt: createdAt.addingTimeInterval(3_600))
-        XCTAssertEqual(try stored.toDomain(), try otherStored.toDomain())
+        let stored = try StoredChatThread(thread, createdAt: Fixture.epoch)
+        XCTAssertEqual(stored.createdAt, Fixture.epoch)
+        XCTAssertEqual(stored.lastActivityAt, lastActivityAt)
+        XCTAssertEqual(try stored.toDomain().lastActivityAt, lastActivityAt)
+
+        // As `MaximizeStore.store(_:)` does when it preserves `createdAt` across an
+        // update: a different `createdAt` changes only the tiebreak column, never the
+        // activity the thread itself reports.
+        let later = try StoredChatThread(thread, createdAt: Fixture.epoch.addingTimeInterval(3_600))
+        XCTAssertEqual(
+            try later.toDomain().lastActivityAt,
+            lastActivityAt,
+            "lastActivityAt is now a real column and must not follow createdAt"
+        )
+    }
+
+    /// The no-migration claim (A11, CLAUDE.md), proven as behaviour rather than
+    /// asserted in prose: a `ChatThreadRecord` written before this ticket's columns
+    /// existed loads `lastActivityAt` at its column default
+    /// (`StoredChatThread.unsetLastActivityAt`), because that is what SwiftData hands
+    /// back for an attribute a stored row never wrote. `toDomain()` has to fall back to
+    /// exactly the derivation MAX-092 used — the last turn's timestamp, or `createdAt`
+    /// for a thread nobody has spoken in — or every athlete's existing thread would
+    /// silently jump to the bottom of the list the first time this build runs.
+    func testALegacyRowWithNoLastActivityColumnDerivesItExactlyAsMAX092Did() throws {
+        let messages = [
+            try Fixture.message(.user, "Was that on plan?", at: 0),
+            try Fixture.message(.assistant, "Yes.", at: 90),
+        ]
+        let spokenTo = StoredChatThread(
+            threadUUID: Fixture.workoutID,
+            subjectKindRawValue: ChatSubjectKind.workout.rawValue,
+            workoutUUID: Fixture.workoutID,
+            scopeFromISO8601: nil,
+            scopeThroughISO8601: nil,
+            messagesJSON: try PersistencePayload.encode(messages, field: "test"),
+            createdAt: Fixture.at(-1_000),
+            lastActivityAt: StoredChatThread.unsetLastActivityAt
+        )
+        XCTAssertEqual(try spokenTo.toDomain().lastActivityAt, Fixture.at(90))
+
+        let neverSpokenTo = StoredChatThread(
+            threadUUID: Fixture.otherWorkoutID,
+            subjectKindRawValue: ChatSubjectKind.workout.rawValue,
+            workoutUUID: Fixture.otherWorkoutID,
+            scopeFromISO8601: nil,
+            scopeThroughISO8601: nil,
+            messagesJSON: try PersistencePayload.encode([ChatMessage](), field: "test"),
+            createdAt: Fixture.epoch.addingTimeInterval(42),
+            lastActivityAt: StoredChatThread.unsetLastActivityAt
+        )
+        XCTAssertEqual(
+            try neverSpokenTo.toDomain().lastActivityAt,
+            Fixture.epoch.addingTimeInterval(42),
+            "with no turn to date it by, the record's own createdAt is the only answer"
+        )
+    }
+
+    /// `MaximizeSchemaV1.ChatThreadRecord.subjectKindRawValue` defaults to the literal
+    /// `"workout"` so a pre-MAX-093 row — which never wrote this column — loads as a
+    /// workout thread (A11: "every existing thread has a workout subject"). Pinning the
+    /// raw value here means a future rename of `ChatSubjectKind.workout` fails this test
+    /// loudly instead of silently breaking that migration story in a file CI never runs.
+    func testWorkoutSubjectKindRawValueMatchesTheSchemasColumnDefault() {
+        XCTAssertEqual(ChatSubjectKind.workout.rawValue, "workout")
+    }
+
+    /// The load-bearing case MAX-093 exists for: a training thread — no workout at all —
+    /// round trips through storage exactly like a workout thread always has.
+    func testTrainingChatThreadRoundTripsUnchanged() throws {
+        let thread = try Fixture.thread(
+            subject: .training(try Fixture.scope(from: (2026, 8, 1), through: (2026, 8, 31))),
+            messages: [
+                try Fixture.message(.user, "Has my drift flattened this month?", at: 0),
+                try Fixture.message(.assistant, "Yes — down from 6% to 3% over the window.", at: 12),
+            ]
+        )
+        let stored = try StoredChatThread(thread, createdAt: Fixture.epoch)
+        let restored = try stored.toDomain()
+
+        XCTAssertEqual(restored, thread)
+        XCTAssertNil(restored.subject.workoutID)
+        XCTAssertEqual(restored.subject.trainingScope, thread.subject.trainingScope)
+        // Deterministic, not a fresh UUID() per write — see `noWorkoutSentinel`'s doc.
+        XCTAssertEqual(stored.workoutUUID, StoredChatThread.noWorkoutSentinel)
+    }
+
+    func testEmptyTrainingChatThreadRoundTrips() throws {
+        let scope = try Fixture.scope(from: (2026, 9, 1), through: (2026, 9, 30))
+        let thread = try Fixture.thread(subject: .training(scope), lastActivityAt: Fixture.epoch)
+        let restored = try StoredChatThread(thread, createdAt: Fixture.epoch).toDomain()
+        XCTAssertEqual(restored, thread)
+        XCTAssertTrue(restored.isEmpty)
+    }
+
+    /// A record whose `subjectKindRawValue` says "training" but is missing a scope
+    /// column is a corrupted or mid-write row, not a workout in disguise — it must be
+    /// rejected, not silently reinterpreted as something it is not.
+    func testTrainingRowMissingAScopeColumnIsRejected() throws {
+        var stored = try StoredChatThread(
+            Fixture.thread(subject: .training(try Fixture.scope(from: (2026, 8, 1), through: (2026, 8, 31)))),
+            createdAt: Fixture.epoch
+        )
+        stored.scopeThroughISO8601 = nil
+        assertThrows(.inconsistent, try stored.toDomain())
+    }
+
+    func testUnknownSubjectKindRawValueIsRejected() throws {
+        var stored = try StoredChatThread(Fixture.thread(), createdAt: Fixture.epoch)
+        stored.subjectKindRawValue = "coaching"
+        assertThrows(.malformed, try stored.toDomain())
     }
 
     func testAppSettingsRoundTripUnchanged() throws {

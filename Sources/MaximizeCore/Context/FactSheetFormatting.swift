@@ -61,4 +61,51 @@ enum FactSheetFormatting {
         let sign = fraction >= 0 ? "+" : ""
         return "\(sign)\(String(format: "%.1f", locale: nil, fraction * 100))%"
     }
+
+    /// "Monday".
+    ///
+    /// A fixed English table rather than a `DateFormatter`, for the same three reasons
+    /// `CalendarDayLabel` gives for month names — chiefly that a prompt must not change
+    /// with the device's region settings, which is the locale pin above restated for a
+    /// word instead of a number.
+    ///
+    /// Moved here from `WorkoutFactSheet`'s private `weekdayName` (MAX-095) when
+    /// `TrainingFactSheet` became its second caller: a roll-up that called a day
+    /// "Tuesday" where the workout sheet called it "Tue" would be A12 rule 3 failing on
+    /// a word rather than a figure.
+    static func weekdayName(_ weekday: Weekday) -> String {
+        switch weekday {
+        case .monday: return "Monday"
+        case .tuesday: return "Tuesday"
+        case .wednesday: return "Wednesday"
+        case .thursday: return "Thursday"
+        case .friday: return "Friday"
+        case .saturday: return "Saturday"
+        case .sunday: return "Sunday"
+        }
+    }
+
+    /// The plan's ask for one day — "easy, 8.0 km", "hard (6 × 800m)", "rest".
+    ///
+    /// Moved here from `WorkoutFactSheet` (MAX-095) for the same reason as
+    /// `weekdayName`: the training roll-up prints a scheduled session on every line, and
+    /// two renderings of the same prescription is exactly the divergence A12 rule 3
+    /// forbids.
+    ///
+    /// **The `%.1f` is deliberate and is not `distance(_:)`'s two places.** This is what
+    /// the workout fact sheet has printed since MAX-014, and that sheet is the scorer's
+    /// prompt: changing the rounding here would change every scoring call's input, which
+    /// D3 forbids doing as a side effect of adding a second renderer. The two precisions
+    /// coexist because they describe different things — a prescription written in whole
+    /// and half kilometres, and a measured distance.
+    static func scheduledSession(_ session: ScheduledSession) -> String {
+        var parts = [session.kind.rawValue]
+        if let distanceMeters = session.distanceMeters {
+            parts.append("\(String(format: "%.1f", locale: nil, distanceMeters / 1000)) km")
+        }
+        if let note = session.note, !note.isEmpty {
+            parts.append("(\(note))")
+        }
+        return parts.joined(separator: ", ")
+    }
 }

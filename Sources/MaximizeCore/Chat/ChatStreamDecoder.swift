@@ -76,6 +76,37 @@ public struct ChatStreamDecoder {
             return []
         }
 
+        // A new `data:` closes the buffered frame **only when that buffer is already a
+        // complete JSON value**, which is what makes this independent of blank lines
+        // without giving up multi-line `data:` fields.
+        //
+        // **This is MAX-107's fix.** SSE says a blank line ends an event, and the
+        // original decoder trusted that exclusively — every test synthesised the blank
+        // line itself, so the suite only ever saw an idealised stream. The real
+        // transport does not guarantee one: `URLSession.AsyncBytes.lines` is a line
+        // sequence, not an SSE parser, and a stream whose blank lines do not survive it
+        // leaves every frame accumulating into one buffer. The joined payload is then
+        // several JSON objects separated by newlines, which is not JSON at all, and the
+        // whole turn dies as `unreadableResponse` — on every turn, for every model,
+        // which is exactly the failure reported from the device.
+        //
+        // The completeness test is what distinguishes the two cases, and they are
+        // genuinely different streams rather than a trade-off to pick between:
+        //
+        // - **One `data:` per event, blank lines lost.** The buffer holds a whole JSON
+        //   object, so the next `data:` closes it. This is what the Messages API sends.
+        // - **A multi-line `data:` field**, which SSE permits and `parts` of a payload
+        //   split across lines. Each fragment alone is not valid JSON, so the buffer
+        //   keeps accumulating and the blank line joins them, exactly as before.
+        //
+        // Blank-line completion is kept below regardless: it is what the format
+        // specifies, and it is what closes the final frame of a well-behaved stream.
+        var completed: [ChatStreamEvent] = []
+        if bufferHoldsACompleteValue {
+            completed = completeFrame()
+            if hasEmittedTerminal { return completed }
+        }
+
         var payload = String(line.dropFirst(Self.dataFieldName.count))
         // The format allows exactly one optional space after the colon, and it is not
         // part of the value.
@@ -83,7 +114,7 @@ public struct ChatStreamDecoder {
             payload.removeFirst()
         }
         frameLines.append(payload)
-        return []
+        return completed
     }
 
     /// Tells the decoder the connection ended, returning whatever that implies.
@@ -109,6 +140,21 @@ public struct ChatStreamDecoder {
     // MARK: - Frames
 
     private static let dataFieldName = "data:"
+
+    /// Whether what has been buffered so far is already a whole JSON value.
+    ///
+    /// The question a multi-line `data:` field and a lost blank line answer
+    /// differently, and the only thing that tells them apart from inside the decoder:
+    /// a fragment of a payload split across lines does not parse on its own, and a
+    /// complete event does. Deliberately `JSONSerialization` rather than a `Frame`
+    /// decode — `Frame`'s fields are all optional, so it would accept a fragment that
+    /// merely happened to be object-shaped, and the point here is strict completeness.
+    private var bufferHoldsACompleteValue: Bool {
+        guard !frameLines.isEmpty,
+              let data = frameLines.joined(separator: "\n").data(using: .utf8)
+        else { return false }
+        return (try? JSONSerialization.jsonObject(with: data)) != nil
+    }
 
     private mutating func completeFrame() -> [ChatStreamEvent] {
         guard !frameLines.isEmpty else { return [] }

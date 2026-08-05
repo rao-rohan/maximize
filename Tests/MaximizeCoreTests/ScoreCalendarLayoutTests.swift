@@ -243,6 +243,9 @@ final class ScoreCalendarLayoutTests: XCTestCase {
             .scored(band: .marginal, activityType: .running),
             .scored(band: .effective, activityType: .running),
             .awaitingScore(activityType: .running),
+            // MAX-126: a lift is a day the athlete trained. Hollow means "asked and not
+            // delivered" at this density, which is the one thing it must never read as.
+            .noVerdict(activityType: .traditionalStrengthTraining),
             .convertedRest(scheduledKind: .easy),
             .scheduledRest,
             .unplanned,
@@ -250,5 +253,52 @@ final class ScoreCalendarLayoutTests: XCTestCase {
         for state in notHollow {
             XCTAssertFalse(state.isDrawnHollowAtHeatmapDensity, "\(state)")
         }
+    }
+
+    // MARK: - MAX-105: the plan layer, per density
+
+    /// The requirement the device report made non-negotiable, asserted at the density
+    /// where it is easiest to get wrong: hollow means "asked and not delivered" in the
+    /// year heatmap, and a day that has not arrived must never draw that way.
+    func testAForthcomingDayIsNeverDrawnHollowAtHeatmapDensity() {
+        XCTAssertFalse(
+            ScoreCalendarDayState.forthcoming(scheduledKind: .easy).isDrawnHollowAtHeatmapDensity
+        )
+    }
+
+    /// The day grid's counterpart channel: only a forthcoming day is unfilled. It is
+    /// what keeps it from reading as `.awaitingScore`, which sits on the same neutral
+    /// fill and carries a session glyph too.
+    func testOnlyAForthcomingDayIsDrawnUnfilledInTheDayGrid() {
+        XCTAssertTrue(
+            ScoreCalendarDayState.forthcoming(scheduledKind: .long).isDrawnUnfilledInTheDayGrid
+        )
+
+        let filled: [ScoreCalendarDayState] = [
+            .scored(band: .ineffective, activityType: .running),
+            .scored(band: .marginal, activityType: .running),
+            .scored(band: .effective, activityType: .running),
+            .awaitingScore(activityType: .running),
+            .noVerdict(activityType: .traditionalStrengthTraining),
+            .missed(scheduledKind: .easy),
+            .convertedRest(scheduledKind: .easy),
+            .scheduledRest,
+            .unplanned,
+        ]
+        for state in filled {
+            XCTAssertFalse(state.isDrawnUnfilledInTheDayGrid, "\(state)")
+        }
+    }
+
+    /// The plan ring is a day-grid device only. See
+    /// `ScoreCalendarRepresentation.drawsThePlanLayer` for why the year heatmap does
+    /// without it rather than shrinking the channel MAX-087 bought.
+    func testThePlanLayerIsDrawnInTheDayGridAndNotInTheYearHeatmap() {
+        XCTAssertTrue(ScoreCalendarRepresentation.dayGrid.drawsThePlanLayer)
+        XCTAssertFalse(ScoreCalendarRepresentation.weekColumnHeatmap.drawsThePlanLayer)
+
+        XCTAssertTrue(TrendIntervalKind.week.scoreCalendarRepresentation.drawsThePlanLayer)
+        XCTAssertTrue(TrendIntervalKind.month.scoreCalendarRepresentation.drawsThePlanLayer)
+        XCTAssertFalse(TrendIntervalKind.year.scoreCalendarRepresentation.drawsThePlanLayer)
     }
 }

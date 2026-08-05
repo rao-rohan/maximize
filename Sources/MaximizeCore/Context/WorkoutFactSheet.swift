@@ -50,7 +50,8 @@ extension WorkoutContext {
             lines.append("Cadence target: \(FactSheetFormatting.number(plan.cadenceTarget.lowStepsPerMinute))–"
                 + "\(FactSheetFormatting.number(plan.cadenceTarget.highStepsPerMinute)) spm")
             if let planDay {
-                lines.append("Scheduled for this day: \(Self.session(planDay.scheduledSession))")
+                lines.append("Scheduled for this day: "
+                    + "\(FactSheetFormatting.scheduledSession(planDay.scheduledSession))")
             }
             if !plan.goals.statements.isEmpty {
                 lines.append("Goals: \(plan.goals.statements.joined(separator: "; "))")
@@ -107,15 +108,7 @@ extension WorkoutContext {
     }
 
     private var weekdayName: String {
-        switch day.weekday {
-        case .monday: return "Monday"
-        case .tuesday: return "Tuesday"
-        case .wednesday: return "Wednesday"
-        case .thursday: return "Thursday"
-        case .friday: return "Friday"
-        case .saturday: return "Saturday"
-        case .sunday: return "Sunday"
-        }
+        FactSheetFormatting.weekdayName(day.weekday)
     }
 
     // MARK: - Lines that must explain their own absence
@@ -238,26 +231,20 @@ extension WorkoutContext {
     //
     // `bpm`, `distance`, `duration`, `pace`, `percent`, `signedPercent` and `number` moved
     // to `FactSheetFormatting` (MAX-094) so that a second renderer — MAX-095's roll-up
-    // over many runs — cannot format the same measurement a different way. What stays
-    // here are the two formatters with exactly one caller each, `energy` and `session`;
-    // moving a formatter nothing else needs to agree with would only add an import for no
-    // shared guarantee. Both still route their numeric part through
-    // `FactSheetFormatting.number` and inherit its locale-pinned-to-nil discipline rather
-    // than repeating it — see that type's doc comment for why the pin matters.
+    // over many sessions — cannot format the same measurement a different way. MAX-095
+    // then moved `weekdayName` and the scheduled-session formatter for the same reason,
+    // the moment the roll-up gained a second caller for each: every line it prints names
+    // a weekday and a prescription.
+    //
+    // What stays here is `energy`, the one formatter with exactly one caller — the
+    // roll-up carries no active-energy figure — because moving a formatter nothing else
+    // needs to agree with buys no shared guarantee. It still routes its numeric part
+    // through `FactSheetFormatting.number` and inherits the locale-pinned-to-nil
+    // discipline rather than repeating it; see that type's doc comment for why the pin
+    // matters.
 
     private static func energy(_ kilocalories: Double?) -> String {
         guard let kilocalories else { return "not recorded" }
         return "\(FactSheetFormatting.number(kilocalories)) kcal"
-    }
-
-    private static func session(_ session: ScheduledSession) -> String {
-        var parts = [session.kind.rawValue]
-        if let distanceMeters = session.distanceMeters {
-            parts.append("\(String(format: "%.1f", locale: nil, distanceMeters / 1000)) km")
-        }
-        if let note = session.note, !note.isEmpty {
-            parts.append("(\(note))")
-        }
-        return parts.joined(separator: ", ")
     }
 }

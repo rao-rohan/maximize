@@ -56,10 +56,46 @@ final class WeeklyTemplateTests: XCTestCase {
         let template = try Fixture.weeklyTemplate()
         // Resolution is a total function: seven weekdays in, seven sessions out, no
         // optional to unwrap and no "unknown day" case for the scorer to invent.
-        XCTAssertEqual(Weekday.allCases.map { template.session(on: $0) }.count, 7)
-        XCTAssertTrue(template.session(on: .monday).isRest)
-        XCTAssertEqual(template.session(on: .sunday).kind, .long)
+        XCTAssertEqual(Weekday.allCases.map { template.session(on: $0, for: .run) }.count, 7)
+        XCTAssertTrue(template.session(on: .monday, for: .run).isRest)
+        XCTAssertEqual(template.session(on: .sunday, for: .run).kind, .long)
         XCTAssertEqual(template.scheduledRunCount, 5)
+    }
+
+    /// A17: totality now applies twice rather than being weakened once. Fourteen pairs
+    /// in, fourteen sessions out — there is no (weekday, discipline) pair for which the
+    /// plan has no answer, so nothing downstream ever has to invent one.
+    func testEveryWeekdayResolvesToASessionForEveryDiscipline() throws {
+        let template = try Fixture.weeklyTemplate()
+        for weekday in Weekday.allCases {
+            for discipline in Discipline.allCases {
+                // Total: this simply cannot fail to produce a session. The assertion
+                // that earns its place is the one below it.
+                _ = template.session(on: weekday, for: discipline)
+            }
+            XCTAssertTrue(
+                template.session(on: weekday, for: .lift).isRest,
+                "a template authored without lifts prescribes rest on every lift slot"
+            )
+        }
+        XCTAssertEqual(template.scheduledLiftCount, 0)
+    }
+
+    func testPrescribesBothDisciplinesOnOneWeekday() throws {
+        let template = try Fixture.weeklyTemplate(lift: [
+            .tuesday: ScheduledSession(kind: .lift, note: "Upper", muscleGroups: [.chest, .shoulders]),
+        ])
+
+        // The normal case, not an edge case (LIFTING-SPEC §5): Tuesday asks for both.
+        XCTAssertEqual(template.session(on: .tuesday, for: .run).kind, .easy)
+        XCTAssertEqual(template.session(on: .tuesday, for: .run).distanceMeters, 8_000)
+        XCTAssertEqual(template.session(on: .tuesday, for: .lift).kind, .lift)
+        XCTAssertEqual(template.session(on: .tuesday, for: .lift).muscleGroups, [.chest, .shoulders])
+
+        // And the lift slot is still total on every other day.
+        XCTAssertTrue(template.session(on: .wednesday, for: .lift).isRest)
+        XCTAssertEqual(template.scheduledLiftCount, 1)
+        XCTAssertEqual(template.scheduledRunCount, 5, "the run slot is untouched")
     }
 
     /// A partial template would push "I don't know what today was" into the scorer,
@@ -85,9 +121,21 @@ final class WeeklyTemplateTests: XCTestCase {
     func testResolvesByCalendarDay() throws {
         let template = try Fixture.weeklyTemplate()
         // 2026-08-04 is a Tuesday: an easy 8k in this template.
-        let session = template.session(on: try Fixture.day(2026, 8, 4))
+        let session = template.session(on: try Fixture.day(2026, 8, 4), for: .run)
         XCTAssertEqual(session.kind, .easy)
         XCTAssertEqual(session.distanceMeters, 8_000)
+    }
+
+    /// The lift dictionary defaults per weekday; the run dictionary does not. The
+    /// asymmetry is what lets a stored payload and a freshly authored template reach
+    /// the same value — see `WeeklyTemplate.init(_:lift:)`.
+    func testLiftSlotDefaultsToRestWhileTheRunSlotMustBeComplete() throws {
+        let template = try Fixture.weeklyTemplate(lift: [.monday: ScheduledSession(kind: .lift)])
+        XCTAssertEqual(template.session(on: .monday, for: .lift).kind, .lift)
+        for weekday in Weekday.allCases where weekday != .monday {
+            XCTAssertTrue(template.session(on: weekday, for: .lift).isRest)
+        }
+        assertThrows(.inconsistent, try WeeklyTemplate([.monday: .rest, .tuesday: .rest]))
     }
 }
 
