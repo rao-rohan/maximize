@@ -28,6 +28,14 @@ import MaximizeCore
 /// `ChatReplyProgress` in the core, from stream events, under test; this view branches on
 /// the answer and inspects nothing about the stream itself.
 ///
+/// **MAX-153 did the same to the two things left in this file that were still decisions.**
+/// The composer's trailing control is `ChatComposerSendControl`, resolved from `canSend`
+/// and `replyPhase` — not a tint computed inline from a boolean. Whether an arriving token
+/// is allowed to move the viewport is `ChatTranscriptFollow`, and the answer is usually
+/// *no*: this screen used to scroll to the bottom on every change, including when the
+/// athlete had scrolled up to re-read something. Both types are in `MaximizeCore` with
+/// tests; what is left here is classifying an `onChange` and obeying the directive.
+///
 /// ## Subject-dependent copy, never re-decided here
 ///
 /// The empty-transcript invitation, the composer's placeholder and the "could not load"
@@ -57,6 +65,9 @@ import MaximizeCore
 /// is: the composer is a bottom `safeAreaInset`, so SwiftUI lifts it above the keyboard
 /// as a unit and the transcript insets underneath it rather than being displaced.
 ///
+/// MAX-153 replaced what sits *in* that inset — `ChatComposerView` now — and changed
+/// nothing about the arrangement itself, which is the part that was load-bearing.
+///
 /// ## Construction, not a default
 ///
 /// Every repository is named explicitly here, the same way `SettingsModel`'s own
@@ -78,9 +89,9 @@ import MaximizeCore
 /// wiring the closures and `currentInterval`.
 struct ChatConversationView: View {
     // `@State`, matching `WorkoutDetailView`'s own pattern: this view creates and owns
-    // the model, and `@State` derives `$model.composerText` for the composer's
-    // `TextField` directly for an `@Observable` class — no `@Bindable` needed for a
-    // model the view owns rather than receives.
+    // the model, and `@State` derives `$model.composerText` — the binding
+    // `ChatComposerView` writes through — directly for an `@Observable` class, with no
+    // `@Bindable` needed for a model the view owns rather than receives.
     @State private var model: ChatModel
 
     /// §3.6(b)'s note, when this thread's frozen scope no longer matches the window the
@@ -122,6 +133,15 @@ struct ChatConversationView: View {
     /// Owned here rather than by the presenting view so that dismissing the screen and
     /// releasing the keyboard are the same action — see the Done button below.
     @FocusState private var isComposerFocused: Bool
+
+    /// Whether arriving content is allowed to move the viewport (MAX-153).
+    ///
+    /// State rather than a computed property because it is a small machine with a memory:
+    /// "the reader left the bottom" and "something arrived while they were gone" are facts
+    /// about a sequence of events, not about the current frame. The machine itself is
+    /// `ChatTranscriptFollow` in `MaximizeCore`, where its three rules are unit tested;
+    /// this view feeds it events and carries out the directive it returns.
+    @State private var follow = ChatTranscriptFollow()
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -365,9 +385,27 @@ struct ChatConversationView: View {
                     // `ChatModel` never writes it to the thread.
                     planDraftingContent
 
+                    // The scroll target, and — since MAX-153 — the sentinel that answers
+                    // "is the reader at the newest turn?". `onScrollVisibilityChange` is
+                    // the iOS 18 way to ask that, and it beats arithmetic on
+                    // `ScrollGeometry`: the composer is a `safeAreaInset`, so any
+                    // hand-rolled offset comparison would have to know how far the
+                    // content is inset, and this asks the scroll view instead.
+                    //
+                    // Four points rather than a hairline for the same reason: a half-point
+                    // view's visible *fraction* is a sub-pixel question, and this signal
+                    // should not turn on rounding. It sits inside the stack's existing
+                    // bottom padding, so nothing moves.
                     Color.clear
-                        .frame(height: LayoutMetrics.hairline)
+                        .frame(height: Spacing.tight)
                         .id(Self.transcriptBottomAnchor)
+                        .onScrollVisibilityChange(threshold: 0.01) { isAtLatest in
+                            if isAtLatest {
+                                follow.readerReachedLatest()
+                            } else {
+                                follow.readerScrolledAway()
+                            }
+                        }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .screenMargins()
@@ -378,18 +416,70 @@ struct ChatConversationView: View {
             // that was impossible while this lived inside the detail screen's scroll
             // view, where the same gesture was how you read the rest of the workout.
             .scrollDismissesKeyboard(.interactively)
-            .onChange(of: model.messages.count) { scrollToBottom(proxy) }
+            // Open at the newest turn (MAX-153). A thread with history used to lay out at
+            // its top and be dragged to the bottom by the first `onChange` that fired
+            // after `load()` — which worked only because nothing could suppress that
+            // scroll. Something can now: the sentinel below reports "not at the latest"
+            // as soon as it lays out off screen, and if that lands first the athlete opens
+            // a conversation at its beginning with a "Jump to latest" pill over it.
+            //
+            // `for: .initialOffset` deliberately, not the whole-hog overload: this fixes
+            // where the scroll view *starts* and says nothing about what it does when the
+            // content grows, because that question is `ChatTranscriptFollow`'s and a
+            // platform anchor quietly answering it too is two mechanisms for one
+            // behaviour.
+            .defaultScrollAnchor(.bottom, for: .initialOffset)
+            // MAX-153: every one of these used to scroll to the bottom unconditionally.
+            // `ChatTranscriptFollow` (`MaximizeCore`) is what decides now, and it is the
+            // decision, not the scrolling, that is worth having under test — see that
+            // type's three rules. This view classifies the change and applies the answer.
+            .onChange(of: model.messages.count) {
+                apply(follow.transcriptChanged(latestMessageChange), proxy)
+            }
             // The phase rather than a streaming flag (MAX-152): the placeholder giving
             // way to the first tokens, and a stall growing a caption underneath the
             // partial reply, both change the transcript's height without changing the
-            // message count.
-            .onChange(of: model.replyPhase) { scrollToBottom(proxy) }
-            .onChange(of: model.planDrafting) { scrollToBottom(proxy) }
-            .onChange(of: isComposerFocused) {
-                guard isComposerFocused else { return }
-                scrollToBottom(proxy)
+            // message count. Classified as `.reflow` — it moves content, but nothing was
+            // said, so it must not tell a reader who scrolled up that a reply arrived.
+            .onChange(of: model.replyPhase) {
+                apply(follow.transcriptChanged(.reflow), proxy)
             }
+            // Tokens, on the other hand, *are* the reply arriving.
+            .onChange(of: model.streamingText) {
+                apply(follow.transcriptChanged(.incoming), proxy)
+            }
+            .onChange(of: model.planDrafting) {
+                apply(follow.transcriptChanged(.reflow), proxy)
+            }
+            // The deliberate departure (MAX-153): this used to scroll to the bottom on
+            // focus unconditionally. A reader who scrolled up to look at a split, then
+            // tapped the field to ask about *that split*, was taken away from it. A reader
+            // already at the bottom still stays there when the keyboard rises, which is
+            // the case the old behaviour was written for.
+            .onChange(of: isComposerFocused) {
+                apply(follow.composerFocusChanged(isFocused: isComposerFocused), proxy)
+            }
+            .overlay(alignment: .bottom) {
+                if follow.showsJumpToLatest {
+                    ChatJumpToLatestButton(follow: follow) {
+                        apply(follow.jumpToLatestRequested(), proxy)
+                    }
+                    .padding(.bottom, Spacing.snug)
+                    .transition(.opacity)
+                }
+            }
+            .accessibleAnimation(Motion.stateChange, value: follow.showsJumpToLatest)
         }
+    }
+
+    /// Whether the newest row is something the athlete just wrote.
+    ///
+    /// The one classification this view makes, and it is a read rather than a judgement:
+    /// `send()` appends the user's turn locally the instant it runs, so a message count
+    /// that grew with a `.user` row last is the athlete's own send. Everything else —
+    /// a completed reply, a notice — arrived without them asking for it now.
+    private var latestMessageChange: ChatTranscriptChange {
+        model.messages.last?.kind == .user ? .ownMessage : .incoming
     }
 
     /// MAX-152: "Try again", offered for exactly the failures where asking again could
@@ -454,21 +544,23 @@ struct ChatConversationView: View {
     /// a training thread's toolbar already carries **New chat**. Absent entirely on a
     /// workout thread — `canDraftPlan` is false there and there is nothing for a disabled
     /// button to teach.
-    @ViewBuilder
+    ///
+    /// The "is this a training thread" test used to be here and is now in `composer`
+    /// (MAX-153), because that is where it has consequences: a workout thread takes
+    /// `ChatComposerView`'s `EmptyView` overload and gets no accessory row at all, rather
+    /// than an accessory that renders nothing but still occupies a `VStack` slot.
     private var draftPlanButton: some View {
-        if model.subject?.kind == .training {
-            Button(action: draftPlan) {
-                Label("Draft a plan from this conversation", systemImage: "list.clipboard")
-                    .font(.metricLabel)
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-            .tint(Color.accent)
-            .disabled(!model.canDraftPlan)
-            .accessibilityHint(
-                "Asks Claude for a plan built from this conversation. You review it before anything is saved."
-            )
+        Button(action: draftPlan) {
+            Label("Draft a plan from this conversation", systemImage: "list.clipboard")
+                .font(.metricLabel)
+                .frame(maxWidth: .infinity)
         }
+        .buttonStyle(.bordered)
+        .tint(Color.accent)
+        .disabled(!model.canDraftPlan)
+        .accessibilityHint(
+            "Asks Claude for a plan built from this conversation. You review it before anything is saved."
+        )
     }
 
     private func draftPlan() {
@@ -476,57 +568,52 @@ struct ChatConversationView: View {
         Task { await model.draftPlan() }
     }
 
-    /// The bottom bar: §4.7's drafting action above the input row, in one glass
-    /// container.
+    /// The bottom bar (MAX-153).
     ///
-    /// One container rather than two stacked bars, because two floating glass surfaces
-    /// over the same transcript is chrome competing with itself — and because the two
-    /// belong together: both are things you do *to* this conversation.
+    /// The hand-rolled row this used to be — a `TextField` in a `.contentSurface(.inset)`
+    /// well, a bare `Image` for a send button, and one `.glassChrome(.toolbar)` wrapped
+    /// round both — is now `ChatComposerView`, which carries its own
+    /// `GlassEffectContainer` and takes its capsules from `.floatingControl`. **There is
+    /// deliberately no glass modifier left here**: a second one round a view that already
+    /// glasses itself is chrome over chrome, which is exactly what `CLAUDE.md`'s "let the
+    /// platform supply its chrome" rules out, and it would also put the container's
+    /// merge-and-morph behaviour inside an opaque rectangle where it cannot be seen.
+    ///
+    /// **The control reads MAX-152's reply ladder, not a boolean.** `replyPhase` is the
+    /// one authority on "is a reply in flight" now that `isStreaming` is derived from it;
+    /// `ChatComposerSendControl.resolve(canSend:replyPhase:)` is where those two facts
+    /// become one of four controls, in the core, under test. `cancellation` is left at its
+    /// default — `ChatModel` cannot stop a stream, so the honest control mid-reply is a
+    /// progress indicator, not a stop button that does nothing.
+    ///
+    /// **Retry is not here.** MAX-152 put "Try again" in the transcript, beside the
+    /// failure notice that explains what went wrong, which is the right place for it: two
+    /// retry affordances, or one in each of two registers, is worse than either alone.
+    ///
+    /// §4.7's drafting action rides above the input row as the composer's `accessory`, so
+    /// the two are one piece of chrome rather than two floating bars over one transcript —
+    /// both are things you do *to* this conversation. The training/workout branch lives
+    /// here rather than inside `draftPlanButton`, so "which subject offers this" is
+    /// decided once: a workout thread gets the `EmptyView` overload and no empty row.
+    @ViewBuilder
     private var composer: some View {
-        VStack(spacing: Spacing.snug) {
-            draftPlanButton
-            inputRow
-        }
-        // A bar pinned over scrolling content is chrome, not a data surface, so glass
-        // is the correct treatment (FR-4.2). `.contentSurface(.inset)` below marks only
-        // the text field's own subtree, which sits under this modifier — the misuse
-        // assertion reads the environment where `glassChrome` is applied, and that is
-        // outside it.
-        //
-        // Floating rather than edge-to-edge, so the bar ends above the home indicator
-        // instead of leaving a strip of transcript below a full-width bar's bottom edge.
-        .padding(Spacing.snug)
-        .glassChrome(.toolbar)
-        .padding(.horizontal, LayoutMetrics.screenMargin)
-        .padding(.top, Spacing.snug)
-    }
-
-    private var inputRow: some View {
-        HStack(alignment: .bottom, spacing: Spacing.snug) {
-            // No `onSubmit` and no `submitLabel`. With `axis: .vertical` the return key
-            // inserts a newline and `onSubmit` is never called, so the previous
-            // `.onSubmit(send)` here was unreachable code that read like the field
-            // could be sent from the keyboard. Sending is the button, which is also
-            // the only affordance that can be correctly disabled by `canSend`.
-            TextField(
-                ChatConversationCopy.composerPlaceholder(for: model.subject?.kind),
+        if model.subject?.kind == .training {
+            ChatComposerView(
                 text: $model.composerText,
-                axis: .vertical
+                placeholder: ChatConversationCopy.composerPlaceholder(for: model.subject?.kind),
+                sendControl: .resolve(canSend: model.canSend, replyPhase: model.replyPhase),
+                isFocused: $isComposerFocused,
+                onActivate: send,
+                accessory: { draftPlanButton }
             )
-                .font(.bodyCopy)
-                .foregroundStyle(Color.textPrimary)
-                .lineLimit(1...4)
-                .focused($isComposerFocused)
-                .padding(Spacing.snug)
-                .contentSurface(.inset)
-
-            Button(action: send) {
-                Image(systemName: "arrow.up.circle.fill")
-                    .imageScale(.large)
-                    .foregroundStyle(model.canSend ? Color.accent : Color.textTertiary)
-            }
-            .disabled(!model.canSend)
-            .accessibilityLabel("Send")
+        } else {
+            ChatComposerView(
+                text: $model.composerText,
+                placeholder: ChatConversationCopy.composerPlaceholder(for: model.subject?.kind),
+                sendControl: .resolve(canSend: model.canSend, replyPhase: model.replyPhase),
+                isFocused: $isComposerFocused,
+                onActivate: send
+            )
         }
     }
 
@@ -541,10 +628,15 @@ struct ChatConversationView: View {
         Task { await model.send() }
     }
 
-    private func scrollToBottom(_ proxy: ScrollViewProxy) {
-        // `Motion.scrollSettle` rather than a duration written here (MAX-152): the ramp
-        // names the job, and a second call site that wanted "about the same speed" is how
-        // a design system ends up with three of them.
+    /// Carries out whatever `ChatTranscriptFollow` decided. `.stay` is the common answer
+    /// while somebody is reading, and it is a no-op on purpose — the whole point of the
+    /// type is that not scrolling is a first-class outcome rather than a missing call.
+    ///
+    /// `Motion.scrollSettle` rather than a duration written here (MAX-152): the ramp names
+    /// the job, and a second call site that wanted "about the same speed" is how a design
+    /// system ends up with three of them.
+    private func apply(_ directive: ChatTranscriptScrollDirective, _ proxy: ScrollViewProxy) {
+        guard directive == .scrollToLatest else { return }
         let animation: Animation? = reduceMotion ? nil : Motion.scrollSettle
         withAnimation(animation) {
             proxy.scrollTo(Self.transcriptBottomAnchor, anchor: .bottom)

@@ -13,6 +13,12 @@ import MaximizeCore
 /// artifact, and it doubles as compile-time proof that each token is usable from a
 /// view (an unused token is an unproven one).
 struct DesignSystemGallery: View {
+
+    /// Live state for the composer specimen below. The gallery is otherwise stateless;
+    /// these exist because a text field with no binding is not a specimen of anything.
+    @State private var composerText = ""
+    @FocusState private var isComposerFocused: Bool
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: LayoutMetrics.sectionSpacing) {
@@ -21,6 +27,7 @@ struct DesignSystemGallery: View {
                 scoreBandSection
                 paletteSection
                 spacingSection
+                chatComposerSection
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .screenMargins()
@@ -299,6 +306,65 @@ struct DesignSystemGallery: View {
         .padding(.vertical, Spacing.compact)
         .glassChrome(.floatingControl)
         .padding(.bottom, Spacing.section)
+    }
+
+    // MARK: The chat composer (MAX-153)
+
+    /// Every state the composer's trailing control has, one under another, plus the
+    /// jump-to-latest offer in both of its wordings.
+    ///
+    /// This is the only place a human can see all six at once without driving a live
+    /// conversation into each of them, and it is also the compile-time proof `MAX-153`'s
+    /// two new views are usable from a call site — the gallery's stated second job.
+    ///
+    /// The specimens are double-inset: `ChatComposerView` carries its own
+    /// `screenMargin`, and the gallery's stack carries one too. Judge the capsules and
+    /// the control sizing here, not the outer gutter.
+    private var chatComposerSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.regular) {
+            heading("Chat composer")
+
+            ForEach(ChatComposerSendControl.allCases, id: \.self) { control in
+                VStack(alignment: .leading, spacing: Spacing.tight) {
+                    Text(control.accessibilityLabel + (control.accessibilityValue.map { " — \($0)" } ?? ""))
+                        .font(.microLabel)
+                        .foregroundStyle(Color.textTertiary)
+                    ChatComposerView(
+                        text: $composerText,
+                        placeholder: "Ask about your training…",
+                        sendControl: control,
+                        isFocused: $isComposerFocused,
+                        onActivate: {}
+                    )
+                }
+            }
+
+            heading("Jump to latest")
+            HStack(spacing: Spacing.compact) {
+                ChatJumpToLatestButton(follow: quietFollow, action: {})
+                ChatJumpToLatestButton(follow: followWithNews, action: {})
+            }
+
+            Text("Glass, capsules and the 44pt control box are all device judgements.")
+                .font(.microLabel)
+                .foregroundStyle(Color.textTertiary)
+        }
+    }
+
+    /// Scrolled away, nothing new — "Jump to latest".
+    private var quietFollow: ChatTranscriptFollow {
+        var follow = ChatTranscriptFollow()
+        follow.readerScrolledAway()
+        return follow
+    }
+
+    /// Scrolled away and a reply arrived — "New reply". Two labels, no tint difference:
+    /// the specimen exists partly so a reviewer can confirm that.
+    private var followWithNews: ChatTranscriptFollow {
+        var follow = ChatTranscriptFollow()
+        follow.readerScrolledAway()
+        _ = follow.transcriptChanged(.incoming)
+        return follow
     }
 
     // MARK: Shared
