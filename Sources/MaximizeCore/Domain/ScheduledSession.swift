@@ -22,8 +22,10 @@ public enum ScheduledSessionKind: String, Hashable, Sendable, Codable, CaseItera
     /// band's `appliesTo` list in, so putting `.lift` anywhere but last would reorder
     /// copy the athlete already reads.
     ///
-    /// The weekly template has a second slot as of MAX-129, so a plan can now prescribe
-    /// one. The authoring *screen* still cannot — see `prescribable`.
+    /// The weekly template has had a second slot since MAX-129, and the authoring
+    /// screen can prescribe one as of MAX-137 — through the lift slot's own picker
+    /// (`liftPrescribable`), never through `prescribable`, which still gates the run
+    /// slot only.
     case lift
 
     public init(_ classification: WorkoutClassification) {
@@ -38,20 +40,32 @@ public enum ScheduledSessionKind: String, Hashable, Sendable, Codable, CaseItera
         }
     }
 
-    /// The kinds the **run** slot may be set to — which is the only slot the authoring
-    /// screen can edit.
+    /// The kinds the **run** slot may be set to.
     ///
-    /// Offering `.lift` there would let the athlete prescribe a lift where the run ask
+    /// Offering `.lift` here would let the athlete prescribe a lift where the run ask
     /// goes, and the day's run would then be judged against a lift ask: the exact
-    /// cross-discipline judgement A17 exists to make impossible. MAX-129 gave the
-    /// template its second slot, so the plan record is no longer the constraint; the
-    /// screen is, until MAX-137 gives it a second row set. This property retires with
-    /// that ticket.
+    /// cross-discipline judgement A17 exists to make impossible. MAX-137 gives the lift
+    /// slot its own picker and its own vocabulary (`liftPrescribable`) rather than
+    /// widening this one, so a lift can never reach the run picker no matter how the
+    /// screen grows.
     ///
     /// In the core rather than in the picker that reads it because "what may be
     /// prescribed" is a rule about the plan, and a rule in a view is a rule CI never
     /// checks.
     public static let prescribable: [ScheduledSessionKind] = Self.allCases.filter { $0 != .lift }
+
+    /// The kinds the **lift** slot may be set to (MAX-137).
+    ///
+    /// Not `prescribable` minus one case swapped for another — a genuinely smaller,
+    /// different vocabulary. The run slot distinguishes easy/long/hard/other because the
+    /// rubric reasons about those distinctly; the lift slot has no such gradient
+    /// (LIFTING-SPEC §3.5 — the only bands a lift day can match are adherence bands over
+    /// `.lift` itself, there is no "long lift" or "hard lift" the plan can ask for). So a
+    /// lift day is either prescribed or it is not: two cases, not the run slot's five.
+    /// Offering `.easy`, `.long`, `.hard` or `.other` here would let a plan write a
+    /// run-shaped ask into the lift slot — the same cross-discipline confusion
+    /// `prescribable` exists to keep out of the run slot, arriving from the other side.
+    public static let liftPrescribable: [ScheduledSessionKind] = [.rest, .lift]
 }
 
 /// What the athlete actually did, as classified from workout type + HR profile
@@ -188,5 +202,41 @@ public struct ScheduledSession: Hashable, Sendable, Codable {
                 container.decodeIfPresent([MuscleGroup].self, forKey: .muscleGroups) ?? []
             )
         )
+    }
+}
+
+/// What a **lift** slot's ask reads as — its own totality distinction, kept separate
+/// from `ScheduledSessionKind` so "no lift" (`.rest`) and "a lift with no groups named"
+/// (`.lift` with an empty `muscleGroups`) can never collapse into the same rendered
+/// state (A17).
+///
+/// Free-standing rather than a computed property on `ScheduledSession` alone, because
+/// `PlanDraft.DayDraft` wants the identical decision computed from its own loose (kind,
+/// groups) pair *before* it has assembled a session to ask — see
+/// `PlanDraft.DayDraft.liftSummary`. One initializer taking the two raw values is what
+/// keeps the two call sites from drifting into two readings of the same day.
+public enum LiftPrescriptionSummary: Hashable, Sendable {
+    /// The plan asks nothing of this slot.
+    case rest
+    /// A lift is asked for, and the plan has not said which muscle groups — a real,
+    /// intentional statement (see `ScheduledSession.muscleGroups`), not a gap.
+    case unstatedGroups
+    /// A lift is asked for, naming these groups. Never empty — an empty set is
+    /// `.unstatedGroups`, which is what keeps the two states from overlapping.
+    case groups(Set<MuscleGroup>)
+
+    public init(kind: ScheduledSessionKind, muscleGroups: Set<MuscleGroup>) {
+        guard kind == .lift else {
+            self = .rest
+            return
+        }
+        self = muscleGroups.isEmpty ? .unstatedGroups : .groups(muscleGroups)
+    }
+}
+
+extension ScheduledSession {
+    /// This session's ask, read as the lift slot's own vocabulary.
+    public var liftPrescriptionSummary: LiftPrescriptionSummary {
+        LiftPrescriptionSummary(kind: kind, muscleGroups: muscleGroups)
     }
 }

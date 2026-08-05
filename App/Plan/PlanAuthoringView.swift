@@ -220,18 +220,27 @@ struct PlanAuthoringView: View {
     private func weekSection(_ editing: PlanAuthoringModel.Editing) -> some View {
         Section("Weekly template") {
             ForEach(editing.draft.week) { day in
-                VStack(alignment: .leading, spacing: Spacing.tight) {
+                VStack(alignment: .leading, spacing: Spacing.snug) {
+                    // The weekday, and the fact both slots roll up to — the caption a
+                    // scanning eye reads before either picker's own detail, so checking
+                    // a proposed week means reading the caption down the list rather
+                    // than opening fourteen pickers (MAX-137).
+                    VStack(alignment: .leading, spacing: Spacing.hairspace) {
+                        Text(PlanAuthoringFormatting.describe(day.weekday))
+                            .font(.sectionHeading)
+                        quietText(PlanAuthoringFormatting.describe(day.obligationSummary))
+                    }
+
                     Picker(
-                        PlanAuthoringFormatting.describe(day.weekday),
+                        "Run",
                         selection: Binding(
                             get: { day.kind },
                             set: { kind in model.edit { $0.setKind(kind, on: day.weekday) } }
                         )
                     ) {
-                        // `prescribable`, not `allCases`: the vocabulary now contains
-                        // `.lift` and the template still has one slot per weekday, so
-                        // offering it here would put a lift ask where the run ask goes.
-                        // The core owns that rule; see `ScheduledSessionKind.prescribable`.
+                        // `prescribable`, not `allCases`: offering `.lift` here would
+                        // put a lift ask where the run ask goes. The core owns that
+                        // rule; see `ScheduledSessionKind.prescribable`.
                         ForEach(ScheduledSessionKind.prescribable, id: \.self) { kind in
                             Text(PlanAuthoringFormatting.describe(kind)).tag(kind)
                         }
@@ -252,12 +261,54 @@ struct PlanAuthoringView: View {
                             )
                         }
                     }
+
+                    Picker(
+                        "Lift",
+                        selection: Binding(
+                            get: { day.liftKind },
+                            set: { kind in model.edit { $0.setLiftKind(kind, on: day.weekday) } }
+                        )
+                    ) {
+                        // The lift slot's own, smaller vocabulary — a lift is either
+                        // prescribed or it is not. See
+                        // `ScheduledSessionKind.liftPrescribable`.
+                        ForEach(ScheduledSessionKind.liftPrescribable, id: \.self) { kind in
+                            Text(PlanAuthoringFormatting.describe(kind)).tag(kind)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    if day.liftKind == .lift {
+                        Menu {
+                            ForEach(MuscleGroup.allCases, id: \.self) { group in
+                                Toggle(
+                                    PlanAuthoringFormatting.describe(group),
+                                    isOn: Binding(
+                                        get: { day.liftMuscleGroups.contains(group) },
+                                        set: { _ in
+                                            model.edit {
+                                                $0.toggleLiftMuscleGroup(group, on: day.weekday)
+                                            }
+                                        }
+                                    )
+                                )
+                            }
+                        } label: {
+                            row("Groups", PlanAuthoringFormatting.describe(day.liftSummary))
+                        }
+                    }
                 }
+                .padding(.vertical, Spacing.tight)
             }
 
             quietText(
                 "A long run's distance comes from the arc below for the week it falls in; "
                     + "the distance set here is only used once the arc has run out."
+            )
+            quietText(
+                "A lift's muscle groups are a statement of intent — nothing checks that they "
+                    + "were the ones actually worked. Leaving them unstated is a real choice, "
+                    + "distinct from resting."
             )
         }
     }
@@ -354,8 +405,8 @@ struct PlanAuthoringView: View {
                 ForEach(editing.governedDays) { planDay in
                     row(
                         planDay.date.description,
-                        PlanAuthoringFormatting.describeSession(
-                            planDay.scheduledSession,
+                        PlanAuthoringFormatting.describeBothSessions(
+                            planDay,
                             unit: editing.distanceUnit
                         )
                     )

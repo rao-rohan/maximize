@@ -52,26 +52,30 @@ public struct PlanDraft: Hashable, Sendable {
         public private(set) var distanceMeters: Double?
         public private(set) var note: String?
 
-        /// The **lift** slot's ask, carried verbatim (A17).
-        ///
-        /// Not decomposed into kind/distance/note the way the run slot is, and not
-        /// editable here, because nothing on the authoring screen can edit it yet —
-        /// MAX-137 is the ticket that gives the screen its second row set, and a
-        /// decomposition with no editor is a shape chosen before its use is known.
-        ///
-        /// It is carried because `PlanDraft.init(_:)` is documented as lossless and
-        /// this is the first field that could have made that untrue: a revision that
-        /// dropped it would silently delete a lifting prescription the next time the
-        /// athlete changed their HR cap. A17 leans on exactly that carry-forward when
-        /// it argues one plan record rather than two.
-        public private(set) var liftSession: ScheduledSession
+        /// The **lift** slot's kind — `.rest` or `.lift`. Nothing else is offered; see
+        /// `ScheduledSessionKind.liftPrescribable`.
+        public private(set) var liftKind: ScheduledSessionKind
+        /// Free text carried from the stored plan, **not editable here** (MAX-137 gave
+        /// the lift slot's kind and muscle groups an editor; a lift's duration is still
+        /// only expressible as this note, and that stays true until a future ticket
+        /// gives `ScheduledSession` a structured duration field — LIFTING-SPEC §3.5).
+        /// Carried rather than dropped for the same reason the whole slot used to be:
+        /// `PlanDraft.init(_:)` is documented as lossless, and losing a note here would
+        /// silently delete it the next time the athlete changed an unrelated number.
+        public private(set) var liftNote: String?
+        /// What the lift is for. Empty while `.lift` is a real, distinct state — "a
+        /// lift with no groups named" — from `liftKind == .rest`, "no lift". See
+        /// `liftSummary`.
+        public private(set) var liftMuscleGroups: Set<MuscleGroup>
 
         public init(weekday: Weekday, session: ScheduledSession, liftSession: ScheduledSession = .rest) {
             self.weekday = weekday
             self.kind = session.kind
             self.distanceMeters = session.distanceMeters
             self.note = session.note
-            self.liftSession = liftSession
+            self.liftKind = liftSession.kind
+            self.liftNote = liftSession.note
+            self.liftMuscleGroups = liftSession.muscleGroups
         }
 
         public mutating func setKind(_ kind: ScheduledSessionKind) {
@@ -101,6 +105,76 @@ public struct PlanDraft: Hashable, Sendable {
         ///   rules out rest-with-distance.
         public func session() throws -> ScheduledSession {
             try ScheduledSession(kind: kind, distanceMeters: distanceMeters, note: note)
+        }
+
+        /// Sets the lift slot's kind. Choosing anything but `.lift` clears the groups
+        /// the same way choosing rest on the run slot clears its distance and note —
+        /// `ScheduledSession` rejects muscle groups on a non-lift kind, and clearing
+        /// here keeps the draft always convertible instead of parking an illegal
+        /// combination until save time.
+        public mutating func setLiftKind(_ kind: ScheduledSessionKind) {
+            liftKind = kind
+            if kind != .lift {
+                liftMuscleGroups = []
+            }
+        }
+
+        /// Replaces the lift's muscle groups outright. Ignored while the slot is not
+        /// `.lift`, for the same reason `setDistanceMeters` is ignored on a rest day:
+        /// there is nowhere legal for the value to go.
+        public mutating func setLiftMuscleGroups(_ groups: Set<MuscleGroup>) {
+            guard liftKind == .lift else { return }
+            liftMuscleGroups = groups
+        }
+
+        /// Adds or removes one group — what a checklist-style control actually calls.
+        public mutating func toggleLiftMuscleGroup(_ group: MuscleGroup) {
+            guard liftKind == .lift else { return }
+            if liftMuscleGroups.contains(group) {
+                liftMuscleGroups.remove(group)
+            } else {
+                liftMuscleGroups.insert(group)
+            }
+        }
+
+        /// The lift ask this draft would save.
+        ///
+        /// Never expected to throw in practice: `setLiftKind` already clears the groups
+        /// the moment the kind leaves `.lift`, so the one combination `ScheduledSession`
+        /// rejects — groups on a non-lift kind — cannot be reached through this type's
+        /// own setters. `throws` anyway, the same belt-and-braces reasoning
+        /// `PlanAuthoringError.wouldRewriteHistory` documents: the alternative to a
+        /// defensive case is a `try!`, which non-test code may not write.
+        public func liftSession() throws -> ScheduledSession {
+            try ScheduledSession(kind: liftKind, note: liftNote, muscleGroups: liftMuscleGroups)
+        }
+
+        /// The lift slot's ask, in the vocabulary that keeps "no lift" and "a lift with
+        /// no groups named" distinct (A17). What a screen reads to decide what the
+        /// empty state says, rather than switching on `liftKind`/`liftMuscleGroups`
+        /// itself — see `LiftPrescriptionSummary`'s note on why this exists.
+        public var liftSummary: LiftPrescriptionSummary {
+            LiftPrescriptionSummary(kind: liftKind, muscleGroups: liftMuscleGroups)
+        }
+
+        /// Whether the weekday carries a run ask, a lift ask, both, or neither — the
+        /// fact a scannable week view leads with, before either slot's own detail
+        /// (MAX-137: "a person checking seven days of two slots wants to see the week
+        /// at once").
+        public enum ObligationSummary: Hashable, Sendable {
+            case rest
+            case runOnly
+            case liftOnly
+            case both
+        }
+
+        public var obligationSummary: ObligationSummary {
+            switch (kind != .rest, liftKind != .rest) {
+            case (false, false): return .rest
+            case (true, false): return .runOnly
+            case (false, true): return .liftOnly
+            case (true, true): return .both
+            }
         }
     }
 
@@ -144,9 +218,10 @@ public struct PlanDraft: Hashable, Sendable {
     ///   - weeklySessions: any weekday left out defaults to rest, so a caller cannot
     ///     accidentally produce a partial week — `WeeklyTemplate` rejects one, and the
     ///     rejection would surface at save time rather than here.
-    ///   - liftSessions: the lift slot, carried but not edited — see `DayDraft
-    ///     .liftSession`. A weekday left out is rest, matching `WeeklyTemplate`'s own
-    ///     default.
+    ///   - liftSessions: the lift slot's starting ask, decomposed per weekday into
+    ///     `DayDraft.liftKind` / `.liftMuscleGroups` (and a carried, unedited
+    ///     `.liftNote` — see that property). A weekday left out is rest, matching
+    ///     `WeeklyTemplate`'s own default.
     ///   - longRunArcWeeks: must be non-empty and strictly ascending by index, the same
     ///     rule `LongRunArc` enforces. Checked here so a draft is always convertible.
     public init(
@@ -235,6 +310,20 @@ public struct PlanDraft: Hashable, Sendable {
 
     public mutating func setNote(_ note: String?, on weekday: Weekday) {
         mutateDay(weekday) { $0.setNote(note) }
+    }
+
+    // MARK: - Editing the lift slot (MAX-137)
+
+    public mutating func setLiftKind(_ kind: ScheduledSessionKind, on weekday: Weekday) {
+        mutateDay(weekday) { $0.setLiftKind(kind) }
+    }
+
+    public mutating func setLiftMuscleGroups(_ groups: Set<MuscleGroup>, on weekday: Weekday) {
+        mutateDay(weekday) { $0.setLiftMuscleGroups(groups) }
+    }
+
+    public mutating func toggleLiftMuscleGroup(_ group: MuscleGroup, on weekday: Weekday) {
+        mutateDay(weekday) { $0.toggleLiftMuscleGroup(group) }
     }
 
     private mutating func mutateDay(_ weekday: Weekday, _ transform: (inout DayDraft) -> Void) {

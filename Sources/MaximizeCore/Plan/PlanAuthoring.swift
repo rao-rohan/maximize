@@ -25,6 +25,16 @@ public enum PlanAuthoringError: Error, Hashable, Sendable, CustomStringConvertib
     case scheduledDistanceNotPositive(weekday: Weekday)
     case longRunDistanceNotPositive(week: Int)
 
+    /// The lift slot the athlete assembled is not a legal session.
+    ///
+    /// Unreachable in practice, for the same reason `wouldRewriteHistory` is: every
+    /// setter `PlanDraft.DayDraft` exposes for the lift slot already keeps it
+    /// convertible (`setLiftKind` clears the groups the moment the kind leaves
+    /// `.lift`), so `DayDraft.liftSession()` has no path left to a rejected
+    /// combination. Kept as a real, readable case anyway rather than a `try!`, which
+    /// non-test code may not write.
+    case liftSessionInvalid(weekday: Weekday)
+
     /// The version set this plan would produce is not one `PlanCalendar` accepts.
     ///
     /// Unreachable in practice — `effectiveFromTooEarly` is checked first and covers
@@ -56,6 +66,9 @@ public enum PlanAuthoringError: Error, Hashable, Sendable, CustomStringConvertib
                 + "the distance off entirely."
         case let .longRunDistanceNotPositive(week):
             return "Week \(week) of the long-run arc prescribes a distance of zero."
+        case let .liftSessionInvalid(weekday):
+            let name = String(describing: weekday).capitalized
+            return "\(name)'s lift prescription is not valid. Reopen the screen and try again."
         case .wouldRewriteHistory:
             return "This version would change days an earlier plan version already governs, "
                 + "so it cannot be saved. Reopen the screen and try again."
@@ -276,12 +289,8 @@ public struct PlanAuthoringSession: Hashable, Sendable {
         )
     }
 
-    /// The run slot is assembled from the draft's loose (kind, distance, note) triples
-    /// and can therefore fail validation; the lift slot is carried through as an
-    /// already-constructed `ScheduledSession` and cannot, which is why only the run half
-    /// has an error case here. That stays true only while the screen cannot edit the
-    /// lift slot — MAX-137 gives it an editor, and an editor means a lift ask can be
-    /// half-typed, which means this function grows the matching translation.
+    /// Both slots are assembled from the draft's own loose fields now (MAX-137) and can
+    /// therefore both fail validation, each with its own readable error.
     private func weeklyTemplate(from draft: PlanDraft) throws -> WeeklyTemplate {
         var sessions: [Weekday: ScheduledSession] = [:]
         var liftSessions: [Weekday: ScheduledSession] = [:]
@@ -289,8 +298,11 @@ public struct PlanAuthoringSession: Hashable, Sendable {
             guard let session = try? day.session() else {
                 throw PlanAuthoringError.scheduledDistanceNotPositive(weekday: day.weekday)
             }
+            guard let liftSession = try? day.liftSession() else {
+                throw PlanAuthoringError.liftSessionInvalid(weekday: day.weekday)
+            }
             sessions[day.weekday] = session
-            liftSessions[day.weekday] = day.liftSession
+            liftSessions[day.weekday] = liftSession
         }
         return try WeeklyTemplate(sessions, lift: liftSessions)
     }
