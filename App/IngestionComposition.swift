@@ -86,6 +86,12 @@ enum IngestionComposition {
                     ingestionLog.notice("Workout's samples stored without derived metrics (\(String(describing: reason), privacy: .public)).")
                 case let .enrichmentFailed(stage):
                     ingestionLog.error("Enrichment failed at \(String(describing: stage), privacy: .public); the workout is stored and can be completed later.")
+                case .leftUnscored(reason: .workoutIsNotARun):
+                    // MAX-111. Split out because the line below would be a lie here:
+                    // this one is not retried and is not waiting on anything. The plan
+                    // scores runs, so a lift is captured, kept, and left without a
+                    // verdict until MAX-109 gives lifting a plan of its own.
+                    ingestionLog.notice("Workout stored unscored: not a run, and the plan only scores runs.")
                 case let .leftUnscored(reason):
                     ingestionLog.notice("Workout stored but unscored (\(String(describing: reason), privacy: .public)); scoring is retried on first view.")
                 case let .workoutAbandoned(step):

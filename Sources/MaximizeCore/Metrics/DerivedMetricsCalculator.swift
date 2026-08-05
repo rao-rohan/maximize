@@ -149,33 +149,78 @@ public enum DerivedMetricsCalculator {
             }
         }
 
+        // MAX-111. Three of the metrics below are models *of running*, not measurements
+        // that happen to be taken on a run, and handing them a workout that is not a run
+        // produces a number rather than an answer:
+        //
+        // - **Cadence** is steps per minute against `Plan.cadenceTarget`, a running band.
+        //   A strength session's step count is incidental movement between sets, and
+        //   dividing it by the session's duration invents a running form metric for a
+        //   session with no running form in it. Confirmed on the device: a lift was
+        //   storing a "cadence" and sending it to Claude as fact.
+        // - **Grade-adjusted pace** applies Minetti's cost-of-*running* polynomial to a
+        //   route. A hike or a ride carrying a route would get a running pace it never
+        //   ran.
+        // - **Distance splits** are FR-1.5's per-kilometre *pace* breakdown, read
+        //   everywhere in the app as a run's splits.
+        //
+        // So they are absent for a non-run — absent, never zero, for the reason stated
+        // above: a nil is left out of a trend and out of the fact sheet, whereas a zero is
+        // averaged in and shown as measured. `distanceSplitsComputed` stays true, so
+        // MAX-067's backfill does not re-fetch a lift's samples on every launch forever
+        // looking for splits it will never find.
+        //
+        // Deliberately *not* gated: average and maximum heart rate, time above cap and
+        // the zone splits. Those are true readings of a heart-rate series the athlete
+        // genuinely produced, and the cap they were read against is recorded on the result
+        // (`planVersion`) so a later version cannot silently reinterpret them. Whether a
+        // lift should be measured against a cap of its own is a plan-model question, and
+        // MAX-109 owns it.
+        //
+        // Drift needs no gate here: it is already conditional on
+        // `WorkoutClassification.driftIsMeaningful`, and `WorkoutClassifier` answers
+        // `.other` for everything that is not a run.
+        let isRun = input.workout.activityType.isRun
+
+        let averageCadenceStepsPerMinute: Double? = isRun
+            ? averageCadence(
+                totalStepCount: input.totalStepCount,
+                durationSeconds: input.workout.durationSeconds
+            )
+            : nil
+
+        let gradeAdjustedPaceSecondsPerKilometer: Double? = isRun
+            ? GradeAdjustedPace.secondsPerKilometer(
+                workout: input.workout,
+                route: input.route,
+                parameters: gradeAdjustment
+            )
+            : nil
+
+        // FR-1.5, and D2's whole point: the pace breakdown is cut here, once, from
+        // the route (or, for an indoor run, the distance-sample series — MAX-066)
+        // and the recorded distance — not in a view, and not a second time for the
+        // chat. `DistanceSplitCalculator` documents what it measures against, which
+        // source wins when both are present, and every case in which it truthfully
+        // returns nil.
+        let distanceSplits: DistanceSplits? = isRun
+            ? DistanceSplitCalculator.splits(
+                workout: input.workout,
+                route: input.route,
+                distanceSamples: input.distanceSamples
+            )
+            : nil
+
         return try DerivedMetrics(
             workoutID: input.workout.id,
             averageHeartRateBPM: averageHeartRateBPM,
             maximumHeartRateBPM: maximumHeartRateBPM,
             timeAboveCapSeconds: timeAboveCapSeconds,
             heartRateDriftFraction: heartRateDriftFraction,
-            averageCadenceStepsPerMinute: averageCadence(
-                totalStepCount: input.totalStepCount,
-                durationSeconds: input.workout.durationSeconds
-            ),
-            gradeAdjustedPaceSecondsPerKilometer: GradeAdjustedPace.secondsPerKilometer(
-                workout: input.workout,
-                route: input.route,
-                parameters: gradeAdjustment
-            ),
+            averageCadenceStepsPerMinute: averageCadenceStepsPerMinute,
+            gradeAdjustedPaceSecondsPerKilometer: gradeAdjustedPaceSecondsPerKilometer,
             zoneSplits: zoneSplits,
-            // FR-1.5, and D2's whole point: the pace breakdown is cut here, once, from
-            // the route (or, for an indoor run, the distance-sample series — MAX-066)
-            // and the recorded distance — not in a view, and not a second time for the
-            // chat. `DistanceSplitCalculator` documents what it measures against, which
-            // source wins when both are present, and every case in which it truthfully
-            // returns nil.
-            distanceSplits: DistanceSplitCalculator.splits(
-                workout: input.workout,
-                route: input.route,
-                distanceSamples: input.distanceSamples
-            ),
+            distanceSplits: distanceSplits,
             planVersion: plan.version
         )
     }
@@ -192,6 +237,11 @@ public enum DerivedMetricsCalculator {
     /// plan data, `CadenceBand.contains` already answers the question, and baking a
     /// verdict into a stored metric would freeze one plan version's opinion into the
     /// record.
+    ///
+    /// **This is arithmetic, and it does not know what a run is** — steps divided by
+    /// minutes is a number for any workout that reports both. Whether asking the question
+    /// makes sense is `compute`'s call, and MAX-111 is where it is made; see the note
+    /// there. Callers reaching this directly are responsible for the same check.
     static func averageCadence(totalStepCount: Double?, durationSeconds: Double) -> Double? {
         guard let totalStepCount, durationSeconds > 0 else { return nil }
         return totalStepCount / (durationSeconds / 60)

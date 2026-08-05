@@ -534,7 +534,8 @@ feature was governed by a plan that could not exist).
 | MAX-107 | Chat stream framing: close a frame without a blank line | Device report | Sonnet 🔒 ✅ |
 | MAX-108 | Tap a calendar day → its workouts; swipe between two on one day | Owner | Sonnet ✅ |
 | MAX-109 | **Plans cover lifting as well as running** — spec first | Owner | **Opus** |
-| MAX-110 | **Tallies count future scheduled days as missed** — the streak tile reads 0 for most of every month | MAX-105 | Sonnet ✅ |
+| MAX-110 | **Tallies count future scheduled days as missed** — the streak tile reads 0 for most of every month | MAX-105 | Sonnet |
+| MAX-111 | **Stop scoring lifts against the running rubric** — stop-gap ahead of MAX-109 | MAX-109 (spec) | Sonnet ✅ |
 | MAX-090 | Chat-first product spec: plan generation and Q&A through chat | Owner | **Opus** 🔒 ✅ |
 | MAX-091 | Run both Claude clients on the Sonnet tier at `medium` effort | Owner, cost | Sonnet 🔒 ✅ |
 | MAX-092 … MAX-104 | The chat-first build, decomposed from MAX-090 | MAX-090 | see below |
@@ -681,6 +682,43 @@ scheduled day**. On the "this month" interval that means the streak tile reads *
 of every month**. The calendar half is closed (C3); the tallies half needs `today` on
 `TalliesInput` and changes numbers on a surface MAX-063 owns, which is why it was reported
 rather than fixed in place.
+
+**MAX-111 — lifts were being scored against the running rubric. Merged; it is a tourniquet,
+not the lifting feature.** Nothing filtered non-runs out of the pipeline, so a strength
+session was stored, enriched against the running HR cap, classified `.other` and then
+**scored**. The mechanism is worth writing down because it is not obvious: `RubricEvaluator`
+filters bands by the **scheduled** session kind and then tests their conditions against what
+actually happened — deliberately, since that is how "ran hard on an easy day" works — so a
+lift on an easy day inherited the `.easy` bands. `StandardPlanSeed`'s `easy.wellOverCap` has
+one condition (average HR above cap + 8) and **none on what was performed**, which a lift
+clears trivially: **20–45, "Well above the easy cap for the whole run."** On a day with no
+matching band it fell to `fallback.recorded` at 40–69. **D8 made every one of them
+permanent.** Separately, `DerivedMetricsCalculator.averageCadence` had no discipline gate, so
+a lift stored a fabricated cadence and `WorkoutFactSheet` sent it to Claude as fact.
+
+The fix is one predicate, `Workout.activityType.isRun`, applied at two points in the core —
+the same predicate `WorkoutClassifier` already short-circuits on, deliberately not a second
+notion of "is this a run". A non-run is left unscored through the pipeline's existing
+first-class state, `.leftUnscored(reason: .workoutIsNotARun)`, which **returns** rather than
+throws, so R11's poison pill cannot form and capture is untouched. Cadence, grade-adjusted
+pace and distance splits are absent for a non-run — absent, never zero. Heart-rate readings
+are kept: they are true measurements, and choosing a cap for lifting is a plan-model
+question, not a metrics one.
+
+**What a lift looks like on the dashboard now, and the honest gap.** The existing states
+already say the right thing on the tallies: `TalliesCalculator` counts an unscored workout
+toward `workoutDays` (the athlete showed up), drops it from **both** sides of
+`EffectiveDayTally` (no verdict either way), and treats it as **neutral** in the streak —
+neither extending nor breaking it. That is the honest answer and it needed no change. The
+calendar renders it `.awaitingScore(activityType:)` with no agreement, which is honest about
+today and **wrong about tomorrow**: "awaiting" means *not yet*, and for a lift it is now
+*never*. Same for the detail view, which shows a spinner and "Scoring runs automatically once
+the run is captured." Distinguishing "waiting" from "has no verdict by design" is a new state,
+and **MAX-109's spec owns that decision** — reported, not invented.
+
+**Scores already written for lifts are untouched and still on the device.** D8 is absolute
+and the gate only stops new ones; correcting the existing ones is MAX-109's A21 and the owner
+has not made that call.
 
 **MAX-086 is split, and what remains is a real defect rather than polish.** It was filed
 off the design review as "absence-string voice; wire `AppearancePreference`" — two

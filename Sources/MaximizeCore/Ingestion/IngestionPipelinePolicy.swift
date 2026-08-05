@@ -183,6 +183,23 @@ public enum IngestionPipelineDiagnostic: Hashable, Sendable {
     }
 
     public enum UnscoredReason: Hashable, Sendable {
+        /// MAX-111: the workout is not a run, and the plan only knows how to score runs.
+        ///
+        /// Not a failure and not a gap in the capture — the workout is stored, its
+        /// heart-rate series is stored, and it shows up in the app. What it does not have
+        /// is a verdict, because every band in `StandardPlanSeed`'s rubric measures a run
+        /// — against the plan's heart-rate cap, or against a prescribed running distance
+        /// — and the last one matches unconditionally. A strength session judged against
+        /// those gets a confident number that means nothing, and D8 would then make that
+        /// number permanent.
+        ///
+        /// Distinct from `rubricCouldNotBeApplied`, which says the rubric was applied and
+        /// nothing matched. Here the rubric is never consulted at all, so nothing about
+        /// the workout is assembled into a prompt either.
+        ///
+        /// Permanent under this plan model: the lazy path re-reaches the same conclusion
+        /// every time, and it should. Giving a lift a plan of its own is MAX-109's.
+        case workoutIsNotARun
         /// The rubric could not be applied: no band matched what happened, or the
         /// context and the evaluation did not describe the same run. Deterministic in
         /// the plan data, so the lazy path will fail the same way until a new plan
