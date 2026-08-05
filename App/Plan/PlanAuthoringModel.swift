@@ -19,6 +19,21 @@ import Observation
 /// `PlanAuthoringSession`'s answers, computed in `MaximizeCore` under test. What is
 /// genuinely this layer's is the two things the core declines to do: read the wall
 /// clock, and pick a time zone to turn an instant into a civil day.
+///
+/// ## Opening prefilled from a chat proposal (MAX-101, §4.6)
+///
+/// `init(proposal:)` is the handoff target for the proposal card. The session is still
+/// derived exactly as it always was — against whatever is stored, at load time — and the
+/// proposal is then applied to *that* session's draft (`PlanDraft.applying(_:)`). Two
+/// consequences worth naming:
+///
+/// - **The version and the effective date still come from storage, never from the
+///   model.** §4.4 forbids a proposal carrying either, and this screen would ignore them
+///   if it did: `session.version` and `session.suggestedEffectiveFrom` are computed here
+///   the same way they are for a hand-authored revision.
+/// - **Prefilling is not saving.** Nothing is written by `load()`. The athlete still sets
+///   the date and taps Save, and `save()` is still the only method that touches
+///   `PlanRepository.store(_:)` — A13's door, opened by hand.
 @MainActor
 @Observable
 final class PlanAuthoringModel {
@@ -46,7 +61,28 @@ final class PlanAuthoringModel {
         /// Set after a successful write, and cleared by the next edit.
         var confirmation: String?
 
+        /// Why this form arrived already filled in, when it did (MAX-101). Nil for the
+        /// ordinary case: an athlete who opened the screen from the plan tab is not
+        /// prefilled from anything and does not need telling so.
+        ///
+        /// Survives an edit, unlike `confirmation`: where the values came from stays true
+        /// however many of them the athlete then changes, and a note that vanished on the
+        /// first keystroke would leave them wondering what they were looking at.
+        var prefill: PlanPrefillNotice?
+
         var canSave: Bool { problem == nil }
+    }
+
+    /// The banner shown when the form was filled in from a chat proposal (§4.6's
+    /// handoff).
+    ///
+    /// Every string here is the core's, taken from a `PlanProposalReview` rebuilt against
+    /// *this* screen's session — so the sentence about lifts on the form is the same
+    /// sentence the card said a tap ago, and stays true of the draft actually loaded.
+    struct PlanPrefillNotice: Equatable {
+        let headline: String
+        let explanation: String
+        let liftNote: String
     }
 
     private(set) var state: LoadState = .loading
@@ -56,6 +92,16 @@ final class PlanAuthoringModel {
     private let settingsRepository: (any SettingsRepository)?
     private let timeZone: TimeZone
     private let todayOverride: CalendarDay?
+
+    /// The chat proposal this screen was opened with, if any (MAX-101). Held rather than
+    /// applied at `init` because the session it applies *to* does not exist until
+    /// `load()` has read the store — and applying it to a session built from stale data
+    /// is exactly the failure the handoff is shaped to avoid.
+    ///
+    /// Cleared by a successful `save()`, which reloads: at that moment the screen is
+    /// authoring the version *after* the one just written, and re-applying the proposal
+    /// on top of it — banner and all — would offer to make the same change twice.
+    private var proposal: PlanProposal?
 
     /// - Parameters:
     ///   - planRepository: defaults to `PersistenceComposition.store`. Overridable only
@@ -68,11 +114,15 @@ final class PlanAuthoringModel {
     ///     answer for a single-user, single-device app, and it is threaded in from here
     ///     rather than read inside `MaximizeCore` — matching `WorkoutDetailModel` and
     ///     `ScoreCalendarModel`.
+    ///   - proposal: a chat proposal to prefill the form with (MAX-101), or nil for the
+    ///     ordinary case of an athlete opening the screen to author by hand. Applied to
+    ///     the session `load()` builds, never to one built ahead of it.
     init(
         planRepository: (any PlanRepository)? = nil,
         settingsRepository: (any SettingsRepository)? = nil,
         today: CalendarDay? = nil,
-        timeZone: TimeZone = .current
+        timeZone: TimeZone = .current,
+        proposal: PlanProposal? = nil
     ) {
         // Written as `if let` rather than `??` for the reason `SettingsModel` is: the
         // fallback is a concrete `MaximizeStore?` and the property is an existential,
@@ -89,6 +139,7 @@ final class PlanAuthoringModel {
         }
         self.timeZone = timeZone
         self.todayOverride = today
+        self.proposal = proposal
     }
 
     // MARK: - Loading
@@ -105,22 +156,57 @@ final class PlanAuthoringModel {
                 revising: try await planRepository.planCalendar(),
                 today: today
             )
+            let unit = await loadedDistanceUnit()
+            let applied = try prefilled(session: session, distanceUnit: unit)
             state = .editing(
                 refreshed(
                     Editing(
                         session: session,
-                        distanceUnit: await loadedDistanceUnit(),
-                        draft: session.draft,
+                        distanceUnit: unit,
+                        draft: applied?.draft ?? session.draft,
                         effectiveFrom: session.suggestedEffectiveFrom,
                         governedDays: [],
                         problem: nil,
-                        confirmation: nil
+                        confirmation: nil,
+                        prefill: applied?.notice
                     )
                 )
             )
         } catch {
             state = .failed
         }
+    }
+
+    /// Applies the chat proposal, if there is one, and prepares the banner explaining
+    /// that the form arrived filled in (MAX-101, §4.6).
+    ///
+    /// The review is rebuilt here rather than carried across the handoff, and that is
+    /// deliberate: a review built in chat describes the session chat saw, and this screen
+    /// has just read the store again. Rebuilding is what keeps the banner's lift sentence
+    /// true of the draft actually on screen.
+    ///
+    /// - Throws: from `PlanDraft.applying(_:)`, which for a parsed proposal throws
+    ///   nothing — a failure here reaches `.failed` rather than silently opening an
+    ///   un-prefilled form, because a form that quietly ignored the proposal would look
+    ///   like the model had proposed the seed.
+    private func prefilled(
+        session: PlanAuthoringSession,
+        distanceUnit: DistanceUnit
+    ) throws -> (draft: PlanDraft, notice: PlanPrefillNotice)? {
+        guard let proposal else { return nil }
+        let review = try PlanProposalReview.build(
+            applying: proposal,
+            to: session,
+            distanceUnit: distanceUnit
+        )
+        return (
+            draft: try session.draft.applying(proposal),
+            notice: PlanPrefillNotice(
+                headline: review.headline,
+                explanation: PlanProposalReview.acceptExplanation,
+                liftNote: review.liftNote
+            )
+        )
     }
 
     /// A settings read that fails is not a reason to refuse to author a plan — the unit
@@ -254,6 +340,9 @@ final class PlanAuthoringModel {
             return
         }
 
+        // The proposal has been acted on; the next version is authored from what was
+        // saved. See the property's own note.
+        proposal = nil
         await load()
         guard case .editing(var reloaded) = state else { return }
         reloaded.confirmation = "Saved plan \(saved.version), effective from \(saved.effectiveFrom)."

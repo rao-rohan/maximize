@@ -51,6 +51,7 @@ public final class InMemoryWorkoutStore: WorkoutRepository, ScoreRepository, Pla
     private var deleteError: Error?
     private var workoutStoredHook: (@Sendable (Workout) -> Void)?
     private var workoutWrites = 0
+    private var planWrites = 0
 
     public init(planCalendar: PlanCalendar? = nil) {
         self.calendar = planCalendar
@@ -65,6 +66,12 @@ public final class InMemoryWorkoutStore: WorkoutRepository, ScoreRepository, Pla
     /// Every write of a workout, counting upserts — so "a replay ingested once" is an
     /// assertion about this and not about the set of identifiers.
     public var workoutWriteCount: Int { lock.locked { workoutWrites } }
+
+    /// Every call to `store(_ plan:)`, so a test can assert D1's door stayed shut
+    /// (MAX-101, A13). Counting writes rather than comparing calendars is the assertion
+    /// that actually holds: a proposal restating the plan already in force would store an
+    /// identical-looking version and leave the calendar looking untouched.
+    public var planWriteCount: Int { lock.locked { planWrites } }
 
     // Named `all*` rather than `stored*` so none of them shares a base name with the
     // per-workout accessors below.
@@ -262,7 +269,10 @@ public final class InMemoryWorkoutStore: WorkoutRepository, ScoreRepository, Pla
         versions.removeAll { $0.version == plan.version }
         versions.append(plan)
         let updated = try PlanCalendar(versions)
-        lock.locked { calendar = updated }
+        lock.locked {
+            calendar = updated
+            planWrites += 1
+        }
     }
 
     // MARK: - SettingsRepository

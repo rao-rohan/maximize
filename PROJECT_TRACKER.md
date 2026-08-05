@@ -1060,7 +1060,7 @@ twelve and is dispatchable immediately.
 | MAX-098 | The persistent glass button | 097 | Sonnet ✅ |
 | MAX-099 | `PlanProposal` — type, parse, schema derived from core enums | 095 | **Opus** 🔒 ✅ |
 | MAX-100 | The Anthropic client for plan proposals | 099 | Sonnet 🔒 ✅ |
-| MAX-101 | Conversational plan authoring; proposal card; handoff | 098, 100 | **Opus** |
+| MAX-101 | Conversational plan authoring; proposal card; handoff | 098, 100 | **Opus** ✅ |
 | MAX-102 | **The read-only plan screen with version history** | — | Sonnet ✅ |
 | MAX-103 | "Runs in this conversation" strip | 098 | Sonnet |
 | MAX-104 | Copy and absence voice, **app-wide** — absorbs MAX-086's other half | 098, 102 | Sonnet |
@@ -1278,6 +1278,63 @@ carrying forward:
 - **A14 holds.** The button presents a sheet and nothing else — no pre-warm, no pre-fetch,
   no speculative call. `ChatSheet` is constructed only on presentation and `ChatModel.load()`
   reads stored records; the model is reached when the athlete sends.
+
+**MAX-101 closed the owner's original ask.** A plan can now be generated through the chat
+interface: a training thread carries a **Draft a plan from this conversation** action, the
+reply becomes a reviewable proposal card in the transcript, and accepting it opens
+`PlanAuthoringView` prefilled. Seven things are worth carrying forward:
+
+- **`PlanDraft.applying(_:)` applies and does not store**, which is A13's named near-miss
+  and is asserted rather than described: `PlanProposalApplyingTests` runs the mapping
+  against a `PlanRepository` whose `store` calls `XCTFail`, and
+  `ChatPlanDraftingTests.testNoPlanIsEverStoredByTheProposalPath` drafts, discards and
+  drafts again against a store that counts writes (`InMemoryWorkoutStore.planWriteCount`, new).
+  There is no repository parameter on the mapping to pass one; the tests are what fail if a
+  future edit adds one.
+- **It is an instance method for one reason: lifts.** `PlanProposal`'s vocabulary derives
+  from `ScheduledSessionKind.prescribable`, which excludes `.lift` until MAX-141, so a
+  proposal describes the run slot and says nothing about lift days. Applying *onto* the
+  draft being revised carries them through untouched — including the `liftNote` MAX-137
+  deliberately left uneditable — and the card states that in words on **every** card
+  (`PlanProposalReview.liftNote`, never optional), so an athlete who wrote "and lift on
+  Tuesdays" is not told yes by omission.
+- **The diff is a core value with tests, not a view.** `PlanProposalReview` builds the whole
+  card — headline, summary, four sections of labelled rows, each row's `Change`
+  (`stated`/`unchanged`/`changed(from:)`/`added`), the lift sentence and what accept and
+  discard each promise — from the same `PlanAuthoringSession` the handoff will use, so the
+  card cannot describe a plan different from the one the form is about to show.
+  `PlanProposalReviewTests` pins §4.6's worked example directly: a proposal that drops
+  Thursday to 6 km *and* moves the cap to 148 is exactly two changed rows. **Rows diff the
+  rendered strings, not the raw doubles** — 148.0 and 148.2 read identically and flagging
+  that would train an athlete to ignore the highlight.
+- **A dropped arc week is still a row** ("No longer in the arc"), because a sixteen-week
+  block quietly becoming twelve is the edit the diff exists to surface.
+- **The one retry lives in `PlanProposalDrafting`**, under test, and is uniform: parse or
+  validation failure → one corrected re-ask carrying the rejection's own `description`;
+  a second failure → the athlete reads the error and nothing changes. A **transport**
+  failure is not retried at all — it is not a failure of the proposal's content, and A14
+  bounds plan drafting to one call per tap. Empty transcript, or one not opening with the
+  athlete, costs zero calls.
+- **Failure is a state, four ways.** No key points at Settings in chat's own existing
+  wording; network, refusal and two failed parses each get one honest sentence appended as a
+  `.notice` — never written to the thread, exactly like a dropped stream's.
+- **A proposal is not a turn.** It lives on `ChatModel.planDrafting`, is never persisted,
+  and is cleared by a reload. `canDraftPlan` is training-subject-only and requires the
+  *thread* to hold a user turn (not merely the screen), so an enabled button can never
+  produce "there is nothing to draft from".
+
+**Two edits MAX-101 made outside its own new files, both to remove a duplicate rather than
+add one.** `PlanAuthoring.currentVersion(of:)` is now public and `PlanDisplayData` calls it
+instead of repeating its `max(by:)` — three readers of "which version is in force" needed to
+be one. And the plan's athlete-facing vocabulary (weekday, session kind, muscle group,
+distance, a day's one-line ask) moved into `MaximizeCore.PlanCopy`, with
+`PlanAuthoringFormatting` calling through; the card and the form it hands off to must not
+spell "Long run · 18.0 km" two ways. No call site changed.
+
+**What MAX-101 did not do.** §4.7 Phase B — a proposal emerging mid-stream — is still
+deferred; this is Phase A, a separate one-shot call behind a button. `PlanProposal` still
+cannot prescribe a lift (MAX-141). And the card's copy is not yet through MAX-104's
+app-wide absence-voice pass.
 
 ### Phase 9 — Lifting (MAX-109)
 
