@@ -25,6 +25,32 @@ extension WorkoutContext {
     /// every metric appears exactly once, and the ones that do not apply say so and say
     /// why. "Drift: not meaningful for a hard session" is information; a blank is not.
     ///
+    /// ## …except where the discipline, not the record, is what is missing (MAX-136)
+    ///
+    /// The rule above is about *this workout's* record. It is the wrong rule for a
+    /// figure that could never describe the workout at all, and LIFTING-SPEC §10.1 names
+    /// the failure it produced: a lift rendered as a run with most lines saying they do
+    /// not apply, and two of them — the heart-rate cap and the cadence band — printing
+    /// the plan's *running* settings under "The plan" as if they governed the session.
+    ///
+    /// So the rule inverts rather than lapsing, exactly as `TrainingFactSheet` inverts it
+    /// for a roll-up. A lift's sheet omits those lines outright and says once, in
+    /// `disciplineFraming`, that the omission is a fact about the discipline rather than
+    /// a gap in the record. That is one sentence instead of nine headings that exist only
+    /// to disclaim themselves, and it still closes the hazard the rule exists for: Claude
+    /// is told why the page is short, so it cannot reason from the shortness.
+    ///
+    /// This is **one renderer with a discipline branch**, not a second renderer and not a
+    /// second entry point (A12). Every figure both branches carry goes through the same
+    /// `FactSheetFormatting` function, so A12 rule 3 holds by construction.
+    ///
+    /// The branch is on the *discipline* — the slot the plan judges this workout against
+    /// — and not on the narrower `ActivityType.isRun`. A hike and a ride sit in the run
+    /// slot by A17, and they render exactly as they did before this ticket. Whether the
+    /// running-form figures (`DerivedMetricKind`'s `.runningActivity` set) should be
+    /// omitted for those too is a real question and a different one; it changes a
+    /// scoring prompt for workouts A17 did not move, so it is not taken here.
+    ///
     /// ## Deterministic by construction
     ///
     /// Fixed field order, fixed precision, no locale. The same context must render
@@ -32,26 +58,48 @@ extension WorkoutContext {
     /// being true at the prompt boundary.
     public func factSheet() -> String {
         var lines: [String] = []
+        // The one branch, read once and named, so every use below reads as the same
+        // decision rather than as six independent ones.
+        let describesARun = discipline == .run
 
         lines.append("## Workout")
         lines.append("Date: \(day) (\(weekdayName))")
         lines.append("Type: \(workout.activityType)")
-        lines.append("Setting: \(workout.hasRoute ? "outdoor (GPS route recorded)" : "indoor (no route)")")
+        if describesARun {
+            // A lift's setting is not a fact about the session: this line exists to say
+            // why there is no route, and a lift's sheet asks after none.
+            lines.append("Setting: \(workout.hasRoute ? "outdoor (GPS route recorded)" : "indoor (no route)")")
+        }
         lines.append("Duration: \(FactSheetFormatting.duration(workout.durationSeconds))")
-        lines.append("Distance: \(FactSheetFormatting.distance(workout.distanceMeters))")
+        if describesARun {
+            lines.append("Distance: \(FactSheetFormatting.distance(workout.distanceMeters))")
+        }
         lines.append("Active energy: \(Self.energy(workout.activeEnergyKilocalories))")
+        // Kept for a lift. It is not running vocabulary — `WorkoutClassification` has a
+        // `.lift` case (§9.3) — and it is the single input the rubric's bands select on,
+        // so a prompt that hid it would hide what the scorer reasoned from. It reads
+        // `other` until MAX-133 teaches the classifier to answer `.lift`; that is honest
+        // about today's record rather than a claim this renderer should be making.
         lines.append("Classified as: \(classification.rawValue)")
+        if !describesARun {
+            lines.append(Self.disciplineFraming)
+        }
 
         lines.append("")
         lines.append("## The plan")
         if let plan {
             lines.append("Plan version: \(plan.version)")
-            lines.append("Heart-rate cap: \(FactSheetFormatting.bpm(plan.heartRateCapBPM))")
-            lines.append("Cadence target: \(FactSheetFormatting.number(plan.cadenceTarget.lowStepsPerMinute))–"
-                + "\(FactSheetFormatting.number(plan.cadenceTarget.highStepsPerMinute)) spm")
-            if let planDay {
-                lines.append("Scheduled for this day: "
-                    + "\(FactSheetFormatting.scheduledSession(planDay.scheduledSession))")
+            if describesARun {
+                // §10.1's sharpest finding: both of these are the plan's *run* settings.
+                // `heartRateCapBPM` is documented as the easy-run ceiling and the cadence
+                // band is steps per minute against a running gait, so printing either
+                // under "The plan" on a lift asserts an ask that was never made.
+                lines.append("Heart-rate cap: \(FactSheetFormatting.bpm(plan.heartRateCapBPM))")
+                lines.append("Cadence target: \(FactSheetFormatting.number(plan.cadenceTarget.lowStepsPerMinute))–"
+                    + "\(FactSheetFormatting.number(plan.cadenceTarget.highStepsPerMinute)) spm")
+            }
+            if let scheduledSession {
+                lines.append("Scheduled for this day: \(prescriptionLine(scheduledSession))")
             }
             if !plan.goals.statements.isEmpty {
                 lines.append("Goals: \(plan.goals.statements.joined(separator: "; "))")
@@ -68,12 +116,23 @@ extension WorkoutContext {
 
         lines.append("")
         lines.append("## Measured")
+        // Both disciplines. A heart rate measured during a lift is a heart rate —
+        // `DerivedMetricKind` says so, and it is the one rich signal a lift gives us free.
         lines.append("Average heart rate: \(FactSheetFormatting.bpm(metrics.averageHeartRateBPM))")
         lines.append("Maximum heart rate: \(FactSheetFormatting.bpm(metrics.maximumHeartRateBPM))")
-        lines.append("Time above cap: \(timeAboveCapLine)")
-        lines.append("Heart-rate drift: \(driftLine)")
-        lines.append("Average cadence: \(cadenceLine)")
-        lines.append("Grade-adjusted pace: \(gradeAdjustedPaceLine)")
+        if describesARun {
+            // `DerivedMetricKind`'s `.runDiscipline` pair, plus the two of its
+            // `.runningActivity` set that this section prints. Every one of them is nil
+            // for a lift after MAX-130 — but a lift ingested *before* MAX-130 has stored
+            // numbers for the last two, so this is a guard and not a formality.
+            lines.append("Time above cap: \(timeAboveCapLine)")
+            lines.append("Heart-rate drift: \(driftLine)")
+            lines.append("Average cadence: \(cadenceLine)")
+            lines.append("Grade-adjusted pace: \(gradeAdjustedPaceLine)")
+        }
+        // §3.3 keeps zone splits for a lift: they are a neutral description of how the
+        // session's heart rate was distributed, they cost nothing extra, and they are the
+        // only thing in the record that could tell a lifting session apart from a walk.
         lines.append("Time in zones: \(zoneLine)")
 
         if let heartRateShape {
@@ -86,12 +145,13 @@ extension WorkoutContext {
                 .joined(separator: " · "))
         }
 
-        // Chat only (MAX-068). The section is absent from a scoring prompt entirely —
-        // not stated-as-absent — because for the scorer this is not a metric that
-        // happens to be missing, it is a part of the record the scorer is never shown,
-        // like the route coordinates. Within a chat prompt the usual rule applies and
-        // the section always appears, saying why it is empty when it is.
-        if audience == .chat {
+        // Chat only (MAX-068), and runs only (MAX-136). The section is absent from a
+        // scoring prompt entirely — not stated-as-absent — because for the scorer this is
+        // not a metric that happens to be missing, it is a part of the record the scorer
+        // is never shown, like the route coordinates. It is absent from a lift's prompt
+        // for a third reason again: §10.1 asks for no splits section at all, and the
+        // three absences the wording below distinguishes are all facts about a *run*.
+        if audience == .chat, describesARun {
             lines.append("")
             lines.append("## Pace by \(Self.unitName)")
             lines.append(contentsOf: paceBreakdownLines)
@@ -109,6 +169,76 @@ extension WorkoutContext {
 
     private var weekdayName: String {
         FactSheetFormatting.weekdayName(day.weekday)
+    }
+
+    // MARK: - Discipline (LIFTING-SPEC §10.1)
+
+    /// Why a lift's sheet is short, said once instead of nine times.
+    ///
+    /// The hazard this renderer's absence rule guards against is Claude reasoning from a
+    /// gap, and omitting the running figures for a lift would reopen exactly that hazard
+    /// if nothing were said. So the rule is not dropped, it is moved: one sentence at the
+    /// top of the record instead of a disclaimer on every line it would have applied to.
+    /// `TrainingFactSheet` makes the identical trade for the identical reason at the
+    /// scale of a roll-up, and this is the same convention read at the scale of a page.
+    ///
+    /// Worded without naming the figures it is standing in for. Naming them would put
+    /// "cadence", "pace" and "cap" back into a lift's prompt to say they do not apply,
+    /// which is the token spend §10.1 objected to, in a different shape.
+    private static let disciplineFraming =
+        "This was a lift, not a run. The figures a run is measured by are absent below "
+        + "rather than empty: they do not describe this session and were never computed "
+        + "for it, so read nothing into their absence and do not judge the session by them."
+
+    /// The day's ask, rendered in the vocabulary of the slot it came from.
+    ///
+    /// The one place this renderer's two branches meet a shared value, and they must not
+    /// meet it the same way: a run's ask is written in kilometres and a lift's in minutes
+    /// and muscle groups (MAX-131, A22).
+    private func prescriptionLine(_ session: ScheduledSession) -> String {
+        switch discipline {
+        case .run: return FactSheetFormatting.scheduledSession(session)
+        case .lift: return Self.liftPrescription(session)
+        }
+    }
+
+    /// The lift slot's ask — "lift, 45m 0s, muscle groups: chest, shoulders".
+    ///
+    /// Not `FactSheetFormatting.scheduledSession(_:)`. That function renders a prescribed
+    /// *distance*, which no lift carries, and is silent about the two fields a lift's ask
+    /// is actually written in: `durationSeconds`, which MAX-131 added to `ScheduledSession`
+    /// precisely so a lift could be prescribed in minutes, and `muscleGroups`.
+    ///
+    /// Here rather than in `FactSheetFormatting` for the reason `energy` is (see the
+    /// formatting note at the foot of this file): a formatter with one caller buys no
+    /// shared guarantee by moving. Its numeric part still routes through
+    /// `FactSheetFormatting.duration`, so the one figure it shares with every other
+    /// renderer is already spelled the one way. It moves the moment
+    /// `TrainingFactSheet`'s plan block carries the lift slot and becomes its second
+    /// caller.
+    ///
+    /// **Absences are omitted, not stated** — this renderer's rule inverted again, and
+    /// §10.1's instruction. "Lift on Tuesday, length unstated" and "lift on Tuesday,
+    /// groups unstated" are ordinary asks a plan really makes (`ScheduledSession`
+    /// documents both as distinct from rest), not gaps in a record, so there is nothing
+    /// for a disclaimer to tell Claude that the short line does not.
+    private static func liftPrescription(_ session: ScheduledSession) -> String {
+        var parts = [session.kind.rawValue]
+        if let durationSeconds = session.durationSeconds {
+            parts.append(FactSheetFormatting.duration(durationSeconds))
+        }
+        if !session.muscleGroups.isEmpty {
+            // `ordered`, never the set's own iteration order: a prompt that shuffled its
+            // muscle groups between two builds of the same context would be D3's
+            // determinism failing on a word rather than on a number.
+            parts.append("muscle groups: "
+                + session.muscleGroups.ordered.map(\.rawValue).joined(separator: ", "))
+        }
+        let prescription = parts.joined(separator: ", ")
+        // The note trails the list rather than joining it: it is a gloss on the whole
+        // ask, not another item in it, and ", (upper body)" reads as a fourth field.
+        guard let note = session.note, !note.isEmpty else { return prescription }
+        return "\(prescription) (\(note))"
     }
 
     // MARK: - Lines that must explain their own absence

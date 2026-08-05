@@ -1495,10 +1495,10 @@ is the overseer's, not a ticket's — flagged here rather than done.
 | MAX-130 | Discipline-gated derived metrics; stop fabricating cadence | 128 | **Opus** ✅ |
 | MAX-131 | Rubric vocabulary for lifts — **closes gap P3** | 128 | **Opus** ✅ |
 | MAX-132 | Seed bands for lift days; the `easy.wellOverCap` shadow | 131 | Sonnet ✅ |
-| MAX-133 | Match a workout to its own discipline's ask | 129, 131 | **Opus** |
+| MAX-133 | Match a workout to its own discipline's ask | 129, 131 | **Opus** ✅ |
 | MAX-134 | Obligations, not days: tallies, streak, rest-day budget | 129, 133 | **Opus** |
 | MAX-135 | The calendar's mixed day | 134, **105** | **Opus** |
-| MAX-136 | Context and fact sheet learn discipline | 129, 130 | **Opus** 🔒 |
+| MAX-136 | Context and fact sheet learn discipline | 129, 130 | **Opus** ✅ |
 | MAX-137 | Plan authoring for two slots | 129 | Sonnet ✅ |
 | MAX-138 | The plan screen shows both | 129 | Sonnet ✅ |
 | MAX-139 | Workout detail for a lift | 130, 133 | Sonnet |
@@ -1516,9 +1516,11 @@ is the overseer's, not a ticket's — flagged here rather than done.
 2. ~~**MAX-095's brief must carry LIFTING-SPEC §10.2 before it is written.**~~ **Done —
    MAX-095 landed briefed, so MAX-142 is not needed.** Its roll-up is one line per
    *session*, discipline-tagged, with fields that do not apply omitted rather than
-   nil-rendered, and the cap counts sessions. The plan block renders the whole stored
-   `WeeklyTemplate`, so the lift slot appears there the moment MAX-131/132 adds one — no
-   further edit to `Context/` is required for it.
+   nil-rendered, and the cap counts sessions. **The claim that followed — that the plan
+   block needs no further edit — is wrong, and MAX-136 verified it against the code.** The
+   block iterates `weeklyTemplate.entries` and prints `entry.session`, the *run* slot;
+   MAX-129 put the lift ask on `Entry.liftSession`, so it never appears there. §10.2's plan-block
+   half is still open. See MAX-136's note below.
 3. ~~**MAX-110 adds `.lift` to `RestDayBudgeting.costTier` without reordering the existing
    cases.**~~ **Respected — MAX-128 inserted `.lift` between `.easy` and `.hard` and
    renumbered nothing else**, so every existing comparison is unchanged and no historical
@@ -1585,10 +1587,11 @@ lift slot — but each currently answers about the day's *run* while calling it 
 
 | Reader | What it reads | Ticket |
 |---|---|---|
-| `RubricEvaluator.evaluate` | `planDay.scheduledSession.kind` picks the bands | MAX-133 |
+| `RubricEvaluator.evaluate` | ~~`planDay.scheduledSession.kind` picks the bands~~ **the workout's own discipline's ask, as of MAX-133** | MAX-133 ✅ |
 | `RestDayBudgeting` / `TalliesCalculator` | `PlanDay.canBeMissed`, `costTier` | MAX-134 |
 | `ScoreCalendar.dayState` / `agreement` | the day's single prescribed kind | MAX-135 |
-| `TrainingFactSheet` / `WorkoutFactSheet` | `entry.session`, `planDay.scheduledSession` | MAX-136 |
+| `WorkoutFactSheet` | ~~`planDay.scheduledSession`~~ **the workout's own slot, as of MAX-136** | MAX-136 ✅ |
+| `TrainingFactSheet` plan block | `entry.session` — the lift slot is still unrendered | **open, see MAX-136** |
 | `PlanDraft` setters, `PlanAuthoringError` | ~~the run slot only~~ **both, as of MAX-137** | MAX-137 ✅ |
 | `PlanDisplayData.WeekdayRow` | ~~one kind/distance/note per weekday~~ **both slots, as of MAX-138** | MAX-138 ✅ |
 | `TrendTileData` planned mileage | sums `planDay.scheduledSession.distanceMeters` | MAX-140 |
@@ -1848,9 +1851,13 @@ The two that were not are now `RubricCondition.actualDiscipline(oneOf:)` and
   A21 records), and the identical band plus `.actualDiscipline(oneOf: [.run])` cannot.
   **Writing that condition into `StandardPlanSeed` is MAX-132** — the vocabulary is a
   type-level decision the whole rubric inherits, the seed is one plan's opinion.
-- **No behaviour change, and a lift is still left unscored** by MAX-111's ingestion gate.
+- ~~**No behaviour change, and a lift is still left unscored** by MAX-111's ingestion gate.
   Nothing added here is reachable until MAX-133 matches a workout to its own discipline's
-  ask; `RubricEvaluator` still reads `planDay.scheduledSession` for every workout.
+  ask; `RubricEvaluator` still reads `planDay.scheduledSession` for every workout.~~
+  **MAX-133 landed: the evaluator now reads the ask of the workout's own discipline**, so
+  this vocabulary is reachable the moment a rubric carries a lift band. A lift is still
+  left unscored by MAX-111's gate — see MAX-133's paragraph for why that stays until
+  MAX-132.
 - **Nothing stored moves, pinned in MAX-129's shape.** A hand-written pre-change rubric
   payload decodes to identical bands with identical conditions, six §10.3 rows match the
   identical band under it and under the in-code fixture, and a `ScheduledSession` with no
@@ -1929,6 +1936,69 @@ both additive to the seed, neither reaching a stored plan (D1):
   What to do about them is §11.4's escalation, tracked as MAX-143 and explicitly not this
   ticket's to decide — no migration and no rescore were written.
 
+**MAX-133 — a workout is judged against its own discipline's ask.** `RubricEvaluator`
+resolves `planDay.scheduledSession(for:)` on `workout.activityType.discipline` instead of
+reading the run slot for everything. `RubricBand.appliesTo` filters on the *scheduled*
+kind, so this one line is what makes MAX-132's lift bands reachable at all — and it closes
+A21's defect from the other side: `easy.wellOverCap` cannot fire on a lift because a lift
+is never shown an easy-run day's bands, whatever conditions that band carries.
+
+- **The discipline is stored on the `RubricEvaluation`, not the resolved session.** The
+  evaluation outlives its context — `WorkoutScorer` is handed it on its own — so it has to
+  carry which slot it read. Recording the *fact* (`discipline`) and leaving the resolution
+  to `PlanDay.scheduledSession(for:)` keeps one place turning a (day, discipline) pair into
+  an ask, rather than a second copy that can disagree with the calendar. `Score` gains
+  nothing, exactly as LIFTING-SPEC §5 predicted: the `scheduledSession` it already stored
+  now names the right slot.
+- **Reference resolution moved too, and it was the half easy to miss.** `holds` resolved
+  `.scheduledDistance` / `.scheduledDuration` against `planDay.scheduledSession`. Filtering
+  bands by one slot while resolving thresholds against the other would have measured a
+  lift's *"70% of the prescribed duration"* against the run the day also wanted. Both now
+  read the one session the evaluator resolved; a fixture prescribing 60 minutes of running
+  and 45 of lifting on the same Tuesday pins it.
+- **A discipline the day prescribed nothing for resolves to `.rest`.** Not an error and not
+  a fallback to the other slot: `PlanDay.scheduledSession(for:)` is total, "no ask to be
+  relative to" is a thing a plan says, and `.rest` is how it says it. The workout is then
+  judged by whatever the rubric says about a rest day (`rest.ranAnyway`), which is the
+  treatment a run on a rest day has always had. Rejected: falling back to the other
+  discipline's ask, which is the cross-discipline judgement A17 exists to prevent; and a
+  new error case, which would put in Swift a decision D1 says belongs in plan data — a
+  rubric with nothing to say about a rest day still refuses (`noBandMatched`) rather than
+  defaulting.
+- **`WorkoutScorer` gained the guard the routing needs.** Day plus plan version no longer
+  identifies a pairing: a lift and a run on the same Tuesday share both, so an evaluation
+  made against one discipline's ask would have passed the existing checks and written the
+  other's prescription into a permanent record (D8). The scorer now also requires
+  `evaluation.discipline` to match the context's workout.
+- **MAX-111's ingestion gate stays, and taking it out is now its own ticket.** MAX-132
+  merged while this was in flight, so the seed does have lift bands — but only for a day
+  whose **lift slot is prescribed**, and `StandardPlanSeed.weeklySessions()` prescribes a
+  lift on no weekday, as does every plan already on disk. So a lift let through today
+  routes correctly to `.rest` and matches `rest.ranAnyway`, which is unconditional and
+  reads *"Ran on a scheduled rest day."* — running language on a lift, permanently, under
+  D8. Routing a lift correctly is not the same as having somewhere to route it *to*.
+  Removing the gate is also a behaviour change with reach this ticket does not cover: a
+  lift that scores acquires a calendar colour and enters the tallies, which is MAX-134's
+  and MAX-135's arithmetic. **Reported, not done**, with the seed-side fix it wants named:
+  either `.actualDiscipline(oneOf: [.run])` on `rest.ranAnyway`, or a lift-on-an-unasked-day
+  band. The comment at the gate now states this reason rather than the mechanism this
+  ticket removed, and a test pins that a lift under a rubric with no band for it is
+  *refused* rather than mis-scored.
+- **No existing run's score moves, proven with fixtures rather than by argument.** Ten
+  historical (day, execution) rows — every scheduled kind the fixture week prescribes and
+  every row of §10.3's ladder — are scored through the new routing and compared against the
+  record the previous evaluator would have written, reconstructed by substituting the exact
+  expression it used (`planDay.scheduledSession`). Value equality *and* encoded bytes, with
+  band identifiers pinned as literals alongside so both sides cannot drift together.
+- **Nothing already scored is rescored, and nothing is backfilled** (D8). The lifts already
+  carrying a failed-easy-run score keep it; what to do about them is A21/MAX-143, still the
+  owner's.
+- **Reported, not done: `WorkoutScorer`'s task text still opens *"You are scoring one
+  running workout"*.** It is the stable, health-data-free half of the scoring prompt, and no
+  lift can reach it while MAX-111's gate stands. Rewording it is prompt content, which wants
+  the ticket that owns the lift's fact sheet (MAX-136) and its own security review — not a
+  routing ticket.
+
 **MAX-145 — the athlete says what a lift worked, and the app learns to wait for it.**
 A22 built. The picker is the small half; the two consequences the amendment named are the
 change:
@@ -1966,6 +2036,69 @@ change:
 - **Not verified by CI beyond compilation.** The picker, the sheet and the persistence are
   App-layer (tracker R2, R13). See the PR's **Needs device verification** section — set
   groups, force-quit, reopen.
+
+**MAX-136 — the prompt stops describing a lift as a run.** LIFTING-SPEC §10.1. A lift's
+fact sheet now carries the day and weekday, the type, duration, active energy, the
+classification, the plan version, **its own slot's prescription**, the goals, average and
+maximum heart rate, zone splits and the heart-rate shape — and no cap line, no cadence
+line, no pace line, no distance line, no setting line and no splits section. The two lines
+§10.1 singled out are gone: the HR cap and the cadence band are the plan's *running*
+settings, and they were being printed under "The plan" as though they governed a lift.
+
+- **One renderer with a discipline branch, not a second renderer.** `factSheet()` keeps its
+  single entry point (A12 rule 1) and every figure both branches carry still goes through
+  the same `FactSheetFormatting` function (rule 3). What a lift needs and a run does not —
+  a prescription written in minutes and muscle groups — is a private formatter in
+  `WorkoutFactSheet`, deliberately *not* moved into `FactSheetFormatting`, on the precedent
+  the file already sets for `energy`: a formatter with one caller buys no shared guarantee
+  by moving, and it gains its second caller the day `TrainingFactSheet`'s plan block
+  carries the lift slot.
+- **The absence rule inverts rather than lapsing.** This renderer's standing rule is that
+  an absent metric states its own absence; §10.1 forbids that for a lift, because a heading
+  that exists only to disclaim itself is prompt tokens spent on nothing. But the rule
+  exists to stop Claude reasoning from a gap, and that hazard does not go away — so the
+  sheet says once, in one sentence, that the missing figures are a fact about the
+  discipline and not about the record. Stated once instead of nine times, which is exactly
+  the trade `TrainingFactSheet` already makes for a roll-up.
+- **`WorkoutContext.scheduledSession` is the accessor that describes the workout**, and it
+  is computed, not stored. `planDay.scheduledSession` is the run slot whatever the workout
+  was; `scheduledSession` asks `PlanDay.scheduledSession(for:)` with the workout's own
+  discipline. **Rejected: selecting it into a stored property in the builder.** It is a
+  total lookup over two values the context already carries, so a stored copy would be a
+  second answer to "which ask governs this workout", free to drift from `planDay` — the
+  shape D2 warns about. `planDay` is untouched, so `RubricEvaluator` still reads the run
+  slot; matching a workout to its own discipline's ask there is **MAX-133**.
+- **`.rest` is rendered, not dropped.** "You lifted on a day the plan asked for no lift" is
+  precisely what a scorer needs; the lift slot's totality is what makes it sayable.
+- **The builder gates the split series on discipline too**, so the answer to "did this
+  health data leave the device" stays in the one assembler D3 names. Not a formality: a
+  lift ingested before MAX-130 has a fabricated cadence, grade-adjusted pace and split
+  series on file, and this is what stops those reaching a prompt. **Rejected: gating on
+  `DerivedMetricKind.distanceSplits`,** whose requirement is the narrower
+  `.runningActivity` — the section is gated on discipline, so a narrower data gate would
+  have a hike's chat prompt printing "no breakdown is on file for this run" over splits
+  that are on file.
+- **A hike and a ride are untouched.** They sit in the run slot by A17 and render exactly as
+  before. Whether the running-*form* figures should be omitted for them as well is a real
+  question and a different one — it moves a scoring prompt for workouts A17 did not move —
+  and it is reported here rather than taken.
+- **A run's fact sheet is pinned byte for byte.** `ContextDisciplineTests` writes the whole
+  expected sheet out as a literal rather than probing it with `contains`, because the
+  property that had to be preserved is that the scoring prompt is character-identical: a
+  regression here would not look like a failure, it would look like slightly different
+  scores, stored forever under D8.
+- **Reported, not done: `TrainingFactSheet`'s plan block still renders only the run slot.**
+  The collision note above records MAX-142 as unnecessary because "the plan block renders
+  the whole stored `WeeklyTemplate`". Verified against the code: **the roll-up half of
+  §10.2 is genuinely done** — one line per session, discipline-tagged, absent fields
+  omitted, the cap counting sessions — but the plan block iterates `plan.weeklyTemplate
+  .entries` and prints `entry.session`, which is the *run* slot. MAX-129 put the lift ask
+  on `Entry.liftSession`, not into `entries`, so it never appears. §10.2's second sentence
+  ("the plan block must carry the weekly template's **lift** slot, or 'am I on plan' is
+  answerable about half the plan") is therefore still open. It is one line in
+  `Context/TrainingFactSheet.swift` plus a decision about whether an all-rest lift column
+  is stated once or per weekday; this ticket's brief scoped it to `WorkoutFactSheet`,
+  `WorkoutContext` and `WorkoutContextBuilder`, so it was left alone.
 
 **MAX-093 landed the stored record.** `StoredChatThread` is columnar —
 `subjectKindRawValue`, `workoutUUID` (a fixed sentinel for a training row),

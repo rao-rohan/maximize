@@ -1,6 +1,6 @@
 import Foundation
 
-/// The single assembler of what Claude knows about a run (D3).
+/// The single assembler of what Claude knows about one workout — a run or a lift (D3).
 ///
 /// Both the scorer (MAX-015) and the per-workout chat consume `build`'s output and
 /// render it with `WorkoutContext.factSheet()`. Nothing else in the system may
@@ -81,7 +81,21 @@ public enum WorkoutContextBuilder {
             // are *selected* here rather than reached for by the renderer, so "does this
             // health data leave the device" is answered by the single assembler D3 names
             // and not by a branch somewhere downstream.
-            paceBreakdown: audience == .chat
+            //
+            // MAX-136 adds the discipline half of the same question. A lift has no
+            // per-kilometre pace breakdown to send, and the guard is not redundant: it
+            // is the only thing standing between a lift's *stored* metrics from before
+            // MAX-130 gated them — which really do carry a fabricated split series — and
+            // a prompt describing a strength session in kilometres.
+            //
+            // Gated on the discipline rather than on `DerivedMetricKind.distanceSplits`,
+            // whose requirement is the narrower `.runningActivity`. The fact sheet
+            // branches on discipline (LIFTING-SPEC §10.1), so gating the data more
+            // narrowly than the section would leave a hike's chat prompt printing "no
+            // breakdown is on file for this run" over splits that are on file — an
+            // absence stated about a record that has the thing, which is worse than
+            // either sending or omitting it.
+            paceBreakdown: audience == .chat && workout.activityType.discipline == .run
                 ? metrics.distanceSplits?.series(in: WorkoutContext.paceBreakdownUnit)
                 : nil,
             existingScore: existingScore

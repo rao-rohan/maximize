@@ -210,6 +210,14 @@ public enum WorkoutScorer {
     /// evaluation from a different run's context would produce a confident,
     /// permanently stored score for the wrong workout, which is the same class of
     /// mistake `WorkoutContextBuilder` refuses to assemble.
+    ///
+    /// **The day and the plan version stopped being enough to identify a pairing**
+    /// (MAX-133). A `PlanDay` now carries two asks, and `RubricEvaluation` records which
+    /// of them it judged; a lift and a run on the same Tuesday share a date and a plan
+    /// version, so the two checks below would both pass for an evaluation made against
+    /// the other one's ask. The score that came out would carry the wrong discipline's
+    /// prescription — permanently, under D8 — which is precisely the failure the day
+    /// check exists to prevent, arriving through the axis A17 added.
     private static func assertScoreable(
         _ context: WorkoutContext,
         _ evaluation: RubricEvaluation
@@ -235,6 +243,14 @@ public enum WorkoutScorer {
             throw DomainError.inconsistent(
                 reason: "WorkoutScorer: the evaluation was made for \(evaluation.planDay.date) under "
                     + "plan \(evaluation.plan.version), which does not describe this context"
+            )
+        }
+        let discipline = context.workout.activityType.discipline
+        guard evaluation.discipline == discipline else {
+            throw DomainError.inconsistent(
+                reason: "WorkoutScorer: the evaluation was made against the day's "
+                    + "\(evaluation.discipline.rawValue) ask, but this context carries a "
+                    + "\(discipline.rawValue) workout"
             )
         }
     }

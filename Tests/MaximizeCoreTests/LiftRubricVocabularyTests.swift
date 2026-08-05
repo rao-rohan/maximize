@@ -322,13 +322,30 @@ final class LiftRubricVocabularyTests: XCTestCase {
     ///
     /// **This changes no behaviour.** MAX-132 is the ticket that writes the condition
     /// into `StandardPlanSeed`; both rubrics here are authored by this test.
+    ///
+    /// **Updated by MAX-133**, which closed the same defect from the other side: a lift
+    /// is now shown only the day's *lift* ask, so on any template an athlete could author
+    /// it never reaches an easy-run band at all (`DisciplineMatchedEvaluationTests`).
+    /// Reproducing the shadow therefore needs a template that routes a lift to the
+    /// easy-run bands deliberately — which is the case this test was always about: a band
+    /// that names its discipline cannot make the mistake *regardless of what routed a
+    /// workout to it*, and belt-and-braces is worth having precisely because routing is
+    /// one line that a future ticket could get wrong.
     func testADisciplineConditionMakesTheWellOverCapShadowUnwritable() throws {
         let liftWithAHighHeartRate = try Self.lift()
         let metrics = try Self.liftMetrics(averageHeartRateBPM: 162)
+        // A lift slot prescribing an easy *run*: only a hand-built template can say it —
+        // `ScheduledSessionKind.liftPrescribable` keeps it out of every authoring path —
+        // and it is here so the lift reaches the easy-run bands in spite of MAX-133's
+        // routing, leaving the band's own condition as the only thing under test.
+        let template = try Fixture.weeklyTemplate(lift: [
+            .tuesday: ScheduledSession(kind: .easy, distanceMeters: 8_000),
+        ])
 
         let asSeeded = try ScoringFixture.workedExampleRubric()
         let shadowed = try Self.evaluate(
             rubric: asSeeded,
+            weeklyTemplate: template,
             workout: liftWithAHighHeartRate,
             classification: .other,
             metrics: metrics
@@ -358,6 +375,7 @@ final class LiftRubricVocabularyTests: XCTestCase {
         XCTAssertNotEqual(
             try Self.evaluate(
                 rubric: guarded,
+                weeklyTemplate: template,
                 workout: liftWithAHighHeartRate,
                 classification: .other,
                 metrics: metrics
@@ -380,13 +398,12 @@ final class LiftRubricVocabularyTests: XCTestCase {
 
     /// A lift that ran the prescribed length takes `StandardPlanSeed`'s top lift band.
     ///
-    /// Written on the **run** slot, for the same reason
-    /// `testABandCanRequireAFractionOfThePrescribedDuration` is: `RubricEvaluator`
-    /// still reads `planDay.scheduledSession` for every workout, and MAX-133 is what
-    /// teaches it to read a workout's own discipline's ask. What is pinned here is the
-    /// seed's bands, which are discipline-agnostic about how they get reached.
+    /// **On the lift slot as of MAX-133**, which is where a plan actually says it. This
+    /// test wrote `.lift` onto the *run* slot until then, because that was the only slot
+    /// `RubricEvaluator` consulted; now the day prescribes an easy run *and* a lift, and
+    /// the lift is judged against the lift ask.
     func testTheSeedsLiftBandsScoreAFullDurationLiftWell() throws {
-        let template = try Self.liftScheduledTemplate(durationSeconds: 2_700)
+        let template = try Self.liftSlotTemplate(durationSeconds: 2_700)
 
         XCTAssertEqual(
             try Self.evaluate(
@@ -402,7 +419,7 @@ final class LiftRubricVocabularyTests: XCTestCase {
 
     /// A lift cut well short of the ask falls to the seed's lower band, not the top one.
     func testTheSeedsLiftBandsScoreAShortLiftLower() throws {
-        let template = try Self.liftScheduledTemplate(durationSeconds: 2_700)
+        let template = try Self.liftSlotTemplate(durationSeconds: 2_700)
 
         XCTAssertEqual(
             try Self.evaluate(
@@ -422,8 +439,14 @@ final class LiftRubricVocabularyTests: XCTestCase {
     /// discipline is `.run`. The day still has a recorded workout, so it is not the
     /// unreachable `skipped` row either — it lands on the plan's unconditional
     /// catch-all, exactly as any other workout with no rule written for it does.
+    ///
+    /// **Stays on the run slot after MAX-133**, and that is now the whole point: routing
+    /// makes a run unable to reach a lift band on any template an athlete could author,
+    /// so reaching one requires a hand-built template that prescribes `.lift` where the
+    /// run ask goes. What is pinned here is that the bands refuse it *on their own
+    /// conditions* even then.
     func testTheSeedsLiftBandsDoNotMatchWhenTheLiftDidNotHappen() throws {
-        let template = try Self.liftScheduledTemplate(durationSeconds: 2_700)
+        let template = try Self.liftScheduledOnTheRunSlotTemplate(durationSeconds: 2_700)
 
         XCTAssertEqual(
             try Self.evaluate(
@@ -510,10 +533,10 @@ final class LiftRubricVocabularyTests: XCTestCase {
     /// A20's adherence judgement, end to end through the evaluator: a session of at
     /// least 70% of the prescribed length takes the band, a short one falls past it.
     ///
-    /// Written on the **run** slot, because `RubricEvaluator` still reads
-    /// `planDay.scheduledSession` for every workout — MAX-133 is the ticket that matches
-    /// a workout to its own discipline's ask, and nothing here pretends otherwise. What
-    /// is being pinned is the vocabulary, which is discipline-agnostic.
+    /// Written on the **run** slot, because what is being pinned is the vocabulary, which
+    /// is discipline-agnostic. That the same reference resolves against a *lift* ask on a
+    /// day prescribing both is MAX-133's, and lives in
+    /// `DisciplineMatchedEvaluationTests`.
     func testABandCanRequireAFractionOfThePrescribedDuration() throws {
         let rubric = try Self.rubric(
             named: "session.longEnough",
@@ -655,15 +678,29 @@ final class LiftRubricVocabularyTests: XCTestCase {
         )
     }
 
-    /// `Fixture.weeklyTemplate()`, except Tuesday's **run** slot prescribes a lift of
-    /// the given length rather than an easy run.
+    /// `Fixture.weeklyTemplate()`, except Tuesday's **lift** slot prescribes a lift of
+    /// the given length — a day scheduled as a lift, the way a plan actually says it.
     ///
-    /// Written on the run slot, not the lift slot — see the note on
-    /// `testABandCanRequireAFractionOfThePrescribedDuration`. `RubricEvaluator` does
-    /// not read `PlanDay.liftSession` yet (MAX-133), so this is the only slot the
-    /// evaluator that exists today will consult; the vocabulary and the seed's bands
-    /// are themselves discipline-agnostic about which slot eventually routes to them.
-    private static func liftScheduledTemplate(durationSeconds: Double) throws -> WeeklyTemplate {
+    /// **Moved from the run slot to the lift slot by MAX-133**, which is what taught
+    /// `RubricEvaluator` to read `PlanDay.scheduledSession(for:)` on the workout's own
+    /// discipline. Before it, the run slot was the only one the evaluator consulted and
+    /// these tests had to write `.lift` there to reach the bands at all.
+    private static func liftSlotTemplate(durationSeconds: Double) throws -> WeeklyTemplate {
+        try Fixture.weeklyTemplate(lift: [
+            .tuesday: ScheduledSession(kind: .lift, durationSeconds: durationSeconds),
+        ])
+    }
+
+    /// Tuesday's **run** slot prescribing a lift — which no authoring path can produce
+    /// (`ScheduledSessionKind.liftPrescribable`) and only a hand-built template can say.
+    ///
+    /// Kept deliberately after MAX-133. Routing now makes a run unable to reach a lift
+    /// band on any template an athlete could author, so this is the only way left to test
+    /// that the seed's lift bands refuse a run *on their own conditions* —
+    /// belt-and-braces that holds regardless of what routes a workout to them.
+    private static func liftScheduledOnTheRunSlotTemplate(
+        durationSeconds: Double
+    ) throws -> WeeklyTemplate {
         try WeeklyTemplate([
             .monday: .rest,
             .tuesday: ScheduledSession(kind: .lift, durationSeconds: durationSeconds),
