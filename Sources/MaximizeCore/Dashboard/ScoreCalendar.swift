@@ -2,7 +2,7 @@ import Foundation
 
 /// What one day on the score-colored calendar (D4, FR-3.2) actually is.
 ///
-/// ## Why seven cases, not "good / bad / empty"
+/// ## Why eight cases, not "good / bad / empty"
 ///
 /// The PRD treats these as different facts, and collapsing them would throw away
 /// information the athlete can act on:
@@ -12,6 +12,10 @@ import Foundation
 ///   capture-to-score gap, or no API key stored). Not a verdict either way — showing
 ///   it as ineffective would be lying about a score that has not been reached, and
 ///   showing it as effective would be a promise nobody made.
+/// - `.noVerdict` — a workout happened and none ever will be reached for it, because
+///   the plan scores runs and this was not one (MAX-111). The same absence of a score
+///   as `.awaitingScore`, and the opposite tense: one is a wait, the other is a
+///   settled fact. See the case's own documentation for why they are not one state.
 /// - `.missed` — the plan asked for something and nothing happened, and the weekly
 ///   rest-day budget did not stretch to cover it (D9). A real failure to execute.
 /// - `.forthcoming` — the plan asks for something on a day that **has not happened
@@ -48,8 +52,57 @@ public enum ScoreCalendarDayState: Hashable, Sendable {
     /// and why a double-workout day is not penalized for its worse session.
     case scored(band: ScoreBand, activityType: ActivityType)
 
-    /// A workout was recorded but has no score yet.
+    /// A workout was recorded but has no score yet. **A score is still coming**: the
+    /// lazy path (`WorkoutIngestionPipeline.completeIngestion(forWorkout:)`) re-attempts
+    /// it every time the workout is opened, and every reason it has not arrived —
+    /// no key stored, no network, a rubric with no band for what happened — is one a
+    /// later launch or a later plan version resolves.
+    ///
+    /// Only ever carries a *run*'s activity type, by construction: see `.noVerdict`.
     case awaitingScore(activityType: ActivityType)
+
+    /// A workout was recorded and **no score will ever be reached for it**: the plan
+    /// scores runs (D1 — every band in the rubric measures a run), and this was a lift,
+    /// a ride, a hike or a walk.
+    ///
+    /// ## Why this is not `.awaitingScore`
+    ///
+    /// Until MAX-111, every recorded workout was scored, so "recorded and unscored"
+    /// could only ever mean "not yet". MAX-111 stopped non-runs being judged against a
+    /// running rubric — correctly, because `easy.wellOverCap` matches a strength session
+    /// on heart rate alone and D8 would then make that number permanent — and left
+    /// this state with no case of its own. A lift rendered as `.awaitingScore` tells the
+    /// athlete a verdict is on its way, forever, which is a promise the app cannot keep.
+    ///
+    /// **Not a failure, and not an omission.** The athlete trained; the plan simply has
+    /// no rubric to judge that training by. Everything else about the workout is
+    /// captured and stored exactly as a run's is — duration, energy, the heart-rate
+    /// series, the samples. What is absent is one number.
+    ///
+    /// ## Why one state and not two
+    ///
+    /// "Not a run, so no rubric" and "a run whose rubric could not be applied" are two
+    /// different facts (`IngestionPipelineDiagnostic.UnscoredReason` names both), but
+    /// only the first is decidable here and only the first is permanent. The reason a
+    /// score is missing is a *diagnostic* — deliberately never stored, and carrying no
+    /// workout identifier — so the only durable input this decision has is the
+    /// workout's own activity type. And a run left unscored by `noBandMatched` is
+    /// genuinely still waiting: D1 makes a new band a new plan version, not a code
+    /// change, so the day that version lands the score arrives. `.awaitingScore` is the
+    /// truthful state for it.
+    ///
+    /// ## The invariant that pays for the calendar's drawing
+    ///
+    /// `.awaitingScore` and this case can never carry the same activity type — one holds
+    /// runs, the other holds everything else, split on `ActivityType.isRun`, the same
+    /// predicate `WorkoutIngestionPipeline` and `WorkoutClassifier` both branch on. So
+    /// the glyph channel the cell already spends on the activity separates the two for
+    /// free, and this state needs no colour of its own (MAX-084/MAX-087 spent that
+    /// budget; MAX-105 spent the ring). It draws on the same neutral fill every
+    /// no-verdict day draws on, and the whole distinction is carried by the glyph and
+    /// the VoiceOver sentence — the way `.scheduledRest` and `.convertedRest` are
+    /// already told apart.
+    case noVerdict(activityType: ActivityType)
 
     /// The plan asked for `scheduledKind` (never `.rest` — see `PlanDay.canBeMissed`)
     /// and nothing was recorded; the weekly budget did not cover it.
@@ -172,8 +225,10 @@ public struct ScoreCalendarDay: Hashable, Sendable, Identifiable {
     public let prescription: PlanDay?
 
     /// How the day's execution compares with `prescription` — nil when nothing was
-    /// performed, and nil while a performed workout is still awaiting its score, since
-    /// the classification this compares against is stored on the score (D2).
+    /// performed, and nil whenever a performed workout carries no score, since the
+    /// classification this compares against is stored on the score (D2). That covers
+    /// both `.awaitingScore` and `.noVerdict`: a lift has no `WorkoutClassification`
+    /// to compare against a prescription and, unlike an awaiting run, never will.
     public let agreement: PlanExecutionAgreement?
 
     /// What a tap on this day should do (MAX-108). See
@@ -347,8 +402,8 @@ public enum ScoreCalendar {
             return outcomeIsKnown ? .nothingRecorded : .notYetDue
         }
         // Ascending by start — the order a swipe between them should present, and the
-        // same tiebreak `bestScoredPair` and the `.awaitingScore` picker above both use,
-        // so three different reads of "which workout is first" never disagree.
+        // same tiebreak `bestScoredPair` and the unscored picker above both use, so
+        // three different reads of "which workout is first" never disagree.
         return .workouts(dayWorkouts.sorted { $0.start < $1.start }.map(\.id))
     }
 
@@ -404,8 +459,24 @@ public enum ScoreCalendar {
         if let best = bestScored {
             return .scored(band: best.1.automatic.band, activityType: best.0.activityType)
         }
-        if let earliestUnscored = dayWorkouts.min(by: { $0.start < $1.start }) {
-            return .awaitingScore(activityType: earliestUnscored.activityType)
+        // Nothing on this day carries a score, so every workout below is unscored.
+        //
+        // **A pending answer outranks a settled absence.** A day holding a run and a
+        // lift — the ordinary day once MAX-109 lands — is a day whose cell is about to
+        // change: the run's score arrives and the fill becomes a band. Calling that day
+        // "no verdict" would be false the moment scoring completes, while calling it
+        // "awaiting" is true of the obligation that is actually outstanding. The reverse
+        // ordering has no such reading.
+        //
+        // Within each group the earliest start wins, the same tiebreak `bestScoredPair`
+        // and `destination` both use, so three reads of "which workout is first" cannot
+        // disagree.
+        let earliestFirst = dayWorkouts.sorted { $0.start < $1.start }
+        if let earliestRun = earliestFirst.first(where: { $0.activityType.isRun }) {
+            return .awaitingScore(activityType: earliestRun.activityType)
+        }
+        if let earliest = earliestFirst.first {
+            return .noVerdict(activityType: earliest.activityType)
         }
 
         guard let planDay else { return .unplanned }

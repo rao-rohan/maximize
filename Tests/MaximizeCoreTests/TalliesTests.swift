@@ -676,7 +676,11 @@ final class TalliesTests: XCTestCase {
             case .scored(let band, _):
                 expectedEligible += 1
                 if band == .effective { expectedEffective += 1 }
-            case .awaitingScore, .convertedRest, .scheduledRest, .forthcoming, .unplanned:
+            case .awaitingScore, .noVerdict, .convertedRest, .scheduledRest, .forthcoming, .unplanned:
+                // `.noVerdict` (MAX-126) joins `.awaitingScore` here for the reason it is
+                // a separate state everywhere else and the same one here: a day with no
+                // stored score has no verdict to count on either side of the tally, and
+                // whether one is still coming does not change that.
                 break // never eligible — matches `effectiveDayTally`'s own exclusions
             }
         }
@@ -713,7 +717,10 @@ final class TalliesTests: XCTestCase {
                     }
                 case .missed:
                     return streak // breaks
-                case .awaitingScore, .convertedRest, .scheduledRest, .forthcoming, .unplanned:
+                case .awaitingScore, .noVerdict, .convertedRest, .scheduledRest, .forthcoming, .unplanned:
+                    // `.noVerdict` is neutral for the same reason `.awaitingScore` is: the
+                    // athlete showed up, and nothing judged it. A lift neither extends a
+                    // streak of effective runs nor breaks one.
                     break // neutral — steps past without extending or breaking
                 }
             }
