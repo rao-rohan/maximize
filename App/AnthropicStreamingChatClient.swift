@@ -15,7 +15,7 @@ import MaximizeCore
 /// output, passed through untouched (D3); nothing in this file reads a workout, and
 /// there is no prompt text in it to read.
 ///
-/// Model: `claude-opus-5`, matching `AnthropicScoringModelClient`.
+/// Model: `claude-sonnet-5` at `medium` effort, matching `AnthropicScoringModelClient`.
 ///
 /// **Not exercised by CI.** As with the scoring client and the Keychain store, this
 /// repo has no Swift toolchain, simulator, device or API key locally, and CI never
@@ -40,7 +40,7 @@ final class AnthropicStreamingChatClient: StreamingChatModelInvoking, @unchecked
     /// A fixed literal rather than something read from settings or plan data: D1
     /// versions the scoring rubric, not which model the app talks to, and `swift build`
     /// fails loudly if this string is ever mistyped.
-    static let model = "claude-opus-5"
+    static let model = "claude-sonnet-5"
 
     /// Fixed and hardcoded — never derived from user input, plan data or a server
     /// response, so there is no surface here for redirecting a request carrying health
@@ -58,7 +58,13 @@ final class AnthropicStreamingChatClient: StreamingChatModelInvoking, @unchecked
     /// Hitting it is not a failure here — the decoder reports it as
     /// `ChatTurnCompletion.truncated`, and four usable paragraphs are still four usable
     /// paragraphs.
-    private static let maxTokens = 2048
+    ///
+    /// Raised from 2048 with the move to this model, which tokenizes roughly 30% higher
+    /// than the previous generation: the old figure would have bought noticeably less
+    /// prose for the same number. It is a ceiling, not a spend — a turn still bills only
+    /// what it generates — so this restores the length of answer the 2048 was chosen for
+    /// rather than buying a longer one.
+    private static let maxTokens = 2560
 
     private let keyStore: AnthropicAPIKeyStoring
     private let session: URLSession
@@ -238,9 +244,10 @@ final class AnthropicStreamingChatClient: StreamingChatModelInvoking, @unchecked
             // turn in the app — and the second covers task + fact sheet, identical for
             // every turn of one workout's thread (D6). A five-message conversation
             // therefore re-sends the run's facts four times at cache-read price instead
-            // of full price. As with the scoring client, today's text may fall under
-            // the model's cacheable minimum, in which case this is a harmless no-op
-            // that starts working if the text grows.
+            // of full price. As with the scoring client, text under this model's
+            // 1024-token cacheable minimum simply never creates an entry — no error,
+            // no benefit — and starts caching on its own once a fact sheet grows past
+            // it, which a multi-workout context (MAX-090) plausibly will.
             system: [
                 RequestBody.SystemBlock(text: instruction.task),
                 RequestBody.SystemBlock(text: instruction.factSheet),
@@ -248,18 +255,26 @@ final class AnthropicStreamingChatClient: StreamingChatModelInvoking, @unchecked
             // Disabled deliberately, and the reason is this ticket's requirement rather
             // than a preference. D10 asks for a token-by-token reveal and §11 asks for
             // a first token within seconds; on this model thinking is on by default and
-            // its content is not returned, so an adaptive turn shows the athlete a
-            // silent pause of unknown length and *then* text. That is the one shape
+            // its blocks stream with empty text, so an adaptive turn shows the athlete a
+            // silent pause of unknown length and *then* words. That is the one shape
             // FR-2.4 rules out.
             //
+            // The alternative — `display: "summarized"`, streaming a reasoning summary
+            // ahead of the answer — is a product decision about what a chat turn looks
+            // like, not a transport one, so it is not taken here.
+            //
             // Two consequences a later ticket must not trip over. Disabling thinking is
-            // only accepted at effort `high` or below, and this request sends no effort
-            // (so: the default, `high`) — adding `xhigh` or `max` here without removing
-            // this line is a 400. And with thinking off the model can occasionally emit
-            // an internal XML tag into its visible answer; the fix for that is a line in
-            // the prompt, which belongs to whoever owns `instruction.task`, not here —
-            // this file does not write prompt text.
+            // only accepted at effort `high` or below, so raising `outputConfig` to
+            // `xhigh` or `max` without removing this line is a 400. And with thinking
+            // off the model can occasionally emit an internal XML tag into its visible
+            // answer; the fix is a line in the prompt, which belongs to whoever owns
+            // `instruction.task` — this file writes no prompt text.
             thinking: RequestBody.Thinking(),
+            // The athlete's cost lever. `medium` is the deliberate step down from the
+            // `high` default, and is where a question about one run's numbers sits: it
+            // is comprehension over a fact sheet already assembled by the core (D3), not
+            // open-ended analysis the model has to go find data for.
+            outputConfig: RequestBody.OutputConfig(),
             messages: instruction.turns.map {
                 RequestBody.Message(role: $0.speaker.rawValue, content: $0.text)
             }
@@ -288,6 +303,14 @@ final class AnthropicStreamingChatClient: StreamingChatModelInvoking, @unchecked
             let type = "disabled"
         }
 
+        /// Effort is an output-level control, not a thinking budget: it is accepted
+        /// alongside disabled thinking and bounds how much work the model does on the
+        /// reply. See `AnthropicScoringModelClient.RequestBody.OutputConfig`; the two
+        /// clients deliberately run at the same tier so a cost change is one decision.
+        struct OutputConfig: Encodable {
+            let effort = "medium"
+        }
+
         struct Message: Encodable {
             let role: String
             let content: String
@@ -300,11 +323,13 @@ final class AnthropicStreamingChatClient: StreamingChatModelInvoking, @unchecked
         let stream = true
         let system: [SystemBlock]
         let thinking: Thinking
+        let outputConfig: OutputConfig
         let messages: [Message]
 
         enum CodingKeys: String, CodingKey {
             case model, stream, system, thinking, messages
             case maxTokens = "max_tokens"
+            case outputConfig = "output_config"
         }
     }
 

@@ -37,8 +37,8 @@ extension WorkoutContext {
         lines.append("Date: \(day) (\(weekdayName))")
         lines.append("Type: \(workout.activityType)")
         lines.append("Setting: \(workout.hasRoute ? "outdoor (GPS route recorded)" : "indoor (no route)")")
-        lines.append("Duration: \(Self.duration(workout.durationSeconds))")
-        lines.append("Distance: \(Self.distance(workout.distanceMeters))")
+        lines.append("Duration: \(FactSheetFormatting.duration(workout.durationSeconds))")
+        lines.append("Distance: \(FactSheetFormatting.distance(workout.distanceMeters))")
         lines.append("Active energy: \(Self.energy(workout.activeEnergyKilocalories))")
         lines.append("Classified as: \(classification.rawValue)")
 
@@ -46,9 +46,9 @@ extension WorkoutContext {
         lines.append("## The plan")
         if let plan {
             lines.append("Plan version: \(plan.version)")
-            lines.append("Heart-rate cap: \(Self.bpm(plan.heartRateCapBPM))")
-            lines.append("Cadence target: \(Self.number(plan.cadenceTarget.lowStepsPerMinute))–"
-                + "\(Self.number(plan.cadenceTarget.highStepsPerMinute)) spm")
+            lines.append("Heart-rate cap: \(FactSheetFormatting.bpm(plan.heartRateCapBPM))")
+            lines.append("Cadence target: \(FactSheetFormatting.number(plan.cadenceTarget.lowStepsPerMinute))–"
+                + "\(FactSheetFormatting.number(plan.cadenceTarget.highStepsPerMinute)) spm")
             if let planDay {
                 lines.append("Scheduled for this day: \(Self.session(planDay.scheduledSession))")
             }
@@ -67,8 +67,8 @@ extension WorkoutContext {
 
         lines.append("")
         lines.append("## Measured")
-        lines.append("Average heart rate: \(Self.bpm(metrics.averageHeartRateBPM))")
-        lines.append("Maximum heart rate: \(Self.bpm(metrics.maximumHeartRateBPM))")
+        lines.append("Average heart rate: \(FactSheetFormatting.bpm(metrics.averageHeartRateBPM))")
+        lines.append("Maximum heart rate: \(FactSheetFormatting.bpm(metrics.maximumHeartRateBPM))")
         lines.append("Time above cap: \(timeAboveCapLine)")
         lines.append("Heart-rate drift: \(driftLine)")
         lines.append("Average cadence: \(cadenceLine)")
@@ -81,7 +81,7 @@ extension WorkoutContext {
             lines.append("Average bpm per tenth of elapsed time, so the curve can be read "
                 + "without the underlying samples:")
             lines.append(heartRateShape.buckets
-                .map { "\(Self.percent($0.startFraction)) \(Self.number($0.averageBeatsPerMinute))" }
+                .map { "\(FactSheetFormatting.percent($0.startFraction)) \(FactSheetFormatting.number($0.averageBeatsPerMinute))" }
                 .joined(separator: " · "))
         }
 
@@ -124,7 +124,7 @@ extension WorkoutContext {
         guard let seconds = metrics.timeAboveCapSeconds else {
             return "not applicable — this workout has no heart-rate data"
         }
-        return Self.duration(seconds)
+        return FactSheetFormatting.duration(seconds)
     }
 
     private var driftLine: String {
@@ -136,16 +136,16 @@ extension WorkoutContext {
                 ? "not meaningful for a \(classification.rawValue) session, so it was not computed"
                 : "not applicable — this workout has no heart-rate data"
         }
-        return Self.signedPercent(drift)
+        return FactSheetFormatting.signedPercent(drift)
     }
 
     private var cadenceLine: String {
         guard let cadence = metrics.averageCadenceStepsPerMinute else {
             return "not recorded for this workout"
         }
-        guard let plan else { return "\(Self.number(cadence)) spm" }
+        guard let plan else { return "\(FactSheetFormatting.number(cadence)) spm" }
         let verdict = plan.cadenceTarget.contains(cadence) ? "within" : "outside"
-        return "\(Self.number(cadence)) spm (\(verdict) the target band)"
+        return "\(FactSheetFormatting.number(cadence)) spm (\(verdict) the target band)"
     }
 
     private var gradeAdjustedPaceLine: String {
@@ -155,14 +155,14 @@ extension WorkoutContext {
                 ? "not available for this workout"
                 : "not applicable — indoor run, so there is no grade to correct for"
         }
-        return "\(Self.pace(pace)) per km"
+        return "\(FactSheetFormatting.pace(pace)) per km"
     }
 
     private var zoneLine: String {
         let present = HeartRateZone.allCases.compactMap { zone -> String? in
             let seconds = metrics.zoneSplits.seconds(in: zone)
             guard seconds > 0 else { return nil }
-            return "zone \(zone.rawValue) \(Self.duration(seconds))"
+            return "zone \(zone.rawValue) \(FactSheetFormatting.duration(seconds))"
         }
         return present.isEmpty ? "not applicable — no heart-rate data" : present.joined(separator: ", ")
     }
@@ -218,9 +218,9 @@ extension WorkoutContext {
     private static func splitEntry(_ split: DistanceSplit) -> String {
         // The same stopwatch formatter grade-adjusted pace uses. Two paces in one prompt
         // rounded two different ways would be MAX-045's drift, in prose.
-        let paceText = Self.pace(split.paceSeconds(per: WorkoutContext.paceBreakdownUnit))
+        let paceText = FactSheetFormatting.pace(split.paceSeconds(per: WorkoutContext.paceBreakdownUnit))
         guard split.isComplete else {
-            return "final \(Self.distance(split.distanceMeters)) \(paceText)"
+            return "final \(FactSheetFormatting.distance(split.distanceMeters)) \(paceText)"
         }
         return "\(split.ordinal) \(paceText)"
     }
@@ -236,51 +236,18 @@ extension WorkoutContext {
 
     // MARK: - Formatting
     //
-    // Locale is pinned to nil (POSIX) everywhere. A device set to a comma-decimal locale
-    // must not send Claude a different fact sheet than one set to a point-decimal locale;
-    // that would be D3's divergence arriving through `String(format:)`.
-
-    private static func number(_ value: Double) -> String {
-        String(format: "%.0f", locale: nil, value)
-    }
-
-    private static func bpm(_ value: Double?) -> String {
-        guard let value else { return "not applicable — this workout has no heart-rate data" }
-        return "\(number(value)) bpm"
-    }
-
-    private static func distance(_ meters: Double?) -> String {
-        guard let meters else { return "not recorded (indoor runs may report none)" }
-        return "\(String(format: "%.2f", locale: nil, meters / 1000)) km"
-    }
+    // `bpm`, `distance`, `duration`, `pace`, `percent`, `signedPercent` and `number` moved
+    // to `FactSheetFormatting` (MAX-094) so that a second renderer — MAX-095's roll-up
+    // over many runs — cannot format the same measurement a different way. What stays
+    // here are the two formatters with exactly one caller each, `energy` and `session`;
+    // moving a formatter nothing else needs to agree with would only add an import for no
+    // shared guarantee. Both still route their numeric part through
+    // `FactSheetFormatting.number` and inherit its locale-pinned-to-nil discipline rather
+    // than repeating it — see that type's doc comment for why the pin matters.
 
     private static func energy(_ kilocalories: Double?) -> String {
         guard let kilocalories else { return "not recorded" }
-        return "\(number(kilocalories)) kcal"
-    }
-
-    private static func duration(_ seconds: Double) -> String {
-        let total = Int(seconds.rounded())
-        let hours = total / 3600
-        let minutes = (total % 3600) / 60
-        let remainder = total % 60
-        if hours > 0 { return "\(hours)h \(minutes)m \(remainder)s" }
-        if minutes > 0 { return "\(minutes)m \(remainder)s" }
-        return "\(remainder)s"
-    }
-
-    private static func pace(_ secondsPerKilometer: Double) -> String {
-        let total = Int(secondsPerKilometer.rounded())
-        return "\(total / 60):\(String(format: "%02d", locale: nil, total % 60))"
-    }
-
-    private static func percent(_ fraction: Double) -> String {
-        "\(String(format: "%.0f", locale: nil, fraction * 100))%"
-    }
-
-    private static func signedPercent(_ fraction: Double) -> String {
-        let sign = fraction >= 0 ? "+" : ""
-        return "\(sign)\(String(format: "%.1f", locale: nil, fraction * 100))%"
+        return "\(FactSheetFormatting.number(kilocalories)) kcal"
     }
 
     private static func session(_ session: ScheduledSession) -> String {
