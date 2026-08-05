@@ -426,9 +426,9 @@ final class DerivedMetricsCalculatorTests: XCTestCase {
     }
 
     /// A lift's heart rate is a real measurement of a thing the athlete really did, and it
-    /// is the one rich signal this discipline gives us for free (§3.2). Whether the cap
-    /// those readings are measured against — an easy-run ceiling — is the right reference
-    /// for a lift is the next question, and this ticket answers it separately.
+    /// is the one rich signal this discipline gives us for free (§3.2). Zone splits stay
+    /// with it — §3.3(b) — as the only figure in the record that could tell a lifting
+    /// session apart from a walk.
     func testALiftKeepsTheHeartRateItActuallyProduced() throws {
         let metrics = try DerivedMetricsCalculator.compute(
             try liftWithEveryRunningIngredient(), plan: try Fixture.plan()
@@ -436,10 +436,41 @@ final class DerivedMetricsCalculatorTests: XCTestCase {
 
         XCTAssertEqual(try XCTUnwrap(metrics.averageHeartRateBPM), 150, accuracy: 1e-9)
         XCTAssertEqual(try XCTUnwrap(metrics.maximumHeartRateBPM), 180, accuracy: 1e-9)
-        XCTAssertEqual(try XCTUnwrap(metrics.timeAboveCapSeconds), 1_800, accuracy: 1e-9)
         XCTAssertTrue(metrics.hasHeartRateData)
         XCTAssertEqual(metrics.zoneSplits.totalSeconds, 3_600, accuracy: 1e-9)
         XCTAssertEqual(metrics.zoneSplits.seconds(in: .five), 360, accuracy: 1e-9)
+    }
+
+    /// §3.3(a), and the one figure this ticket takes away from a lift that MAX-111 left.
+    ///
+    /// `Plan.heartRateCapBPM` is the **easy-run** ceiling and `timeAboveCapSeconds` is
+    /// documented as the primary easy-run discipline metric. A heavy set puts most people
+    /// over that cap, so on a lift the figure silently changes meaning — from "how well
+    /// did you hold the plan's discipline" to "how hard did you work" — while keeping its
+    /// name, its column and its heading. It is withheld rather than restated.
+    ///
+    /// Note what this is *not*: it is not "no heart-rate data". The reading is there; the
+    /// cap it would be read against is a run field, and whether a lift should ever have a
+    /// ceiling of its own is a plan-model question this ticket does not open.
+    func testALiftHasNoTimeAboveCapEvenThoughItHasAHeartRate() throws {
+        let metrics = try DerivedMetricsCalculator.compute(
+            try liftWithEveryRunningIngredient(), plan: try Fixture.plan()
+        )
+
+        XCTAssertNil(metrics.timeAboveCapSeconds)
+        XCTAssertTrue(metrics.hasHeartRateData)
+    }
+
+    /// Drift is aerobic decoupling — cardiac cost creeping up at a *held* effort — and a
+    /// lift holds no effort. `driftIsMeaningful` already withholds it for every
+    /// classification a lift can currently carry, so this passes twice over. The
+    /// redundancy is deliberate: the classification arriving here is an input, and the
+    /// gate must not depend on `WorkoutClassifier` never answering `.easy` for a lift.
+    func testALiftHasNoDriftEvenWhenHandedAClassificationThatWouldSurfaceIt() throws {
+        let metrics = try DerivedMetricsCalculator.compute(
+            try liftWithEveryRunningIngredient(), plan: try Fixture.plan()
+        )
+        XCTAssertNil(metrics.heartRateDriftFraction)
     }
 
     /// The gap between the run *slot* and a run: a hike is `Discipline.run` — A17 is
@@ -463,8 +494,8 @@ final class DerivedMetricsCalculatorTests: XCTestCase {
         XCTAssertNil(metrics.averageCadenceStepsPerMinute)
         XCTAssertTrue(metrics.distanceSplitsComputed)
 
-        // Unchanged from MAX-111: the heart-rate figures are readings, and a hike
-        // produces them like anything else wearing the watch.
+        // Unchanged: a hike is in the run slot, so the run prescription's cap is the ask
+        // it is measured against. Only the lift slot loses the cap figure.
         XCTAssertEqual(try XCTUnwrap(metrics.timeAboveCapSeconds), 1_800, accuracy: 1e-9)
         XCTAssertEqual(metrics.zoneSplits.totalSeconds, 3_600, accuracy: 1e-9)
     }

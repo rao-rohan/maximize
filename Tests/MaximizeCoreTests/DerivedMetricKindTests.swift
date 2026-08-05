@@ -74,10 +74,11 @@ final class DerivedMetricKindTests: XCTestCase {
         }
     }
 
-    /// The gap between `Discipline.run` and `ActivityType.isRun`, and the reason
-    /// `.runningActivity` is not spelled `discipline == .run`. A ride and a hike sit in
-    /// the run slot — A17 is explicit that they are not disciplines of their own — and
-    /// still get no running form, because they have none.
+    /// The gap between `Discipline.run` and `ActivityType.isRun`, which is exactly why
+    /// `Requirement` has three cases rather than two. A ride and a hike sit in the run
+    /// slot — A17 is explicit that they are not disciplines of their own — so the run
+    /// prescription's cap is the ask they are measured against, and they still get no
+    /// running form, because they have none.
     func testARunSlotActivityThatIsNotARunGetsTheCapFiguresAndNoRunningForm() {
         for activityType in [ActivityType.hiking, .cycling, .walking, .other] {
             XCTAssertEqual(activityType.discipline, .run, "\(activityType)")
@@ -96,19 +97,13 @@ final class DerivedMetricKindTests: XCTestCase {
         }
     }
 
-    /// MAX-111's answer for a lift, unchanged by the move: the running-shaped figures
-    /// go, the heart-rate ones stay. What a lift's record *should* contain is a separate
-    /// question from where the decision lives, and it is asked next.
-    func testALiftGetsTheHeartRateFiguresAndNoRunningForm() {
+    /// §3.3, the decision about what a lift's metrics *are* rather than only what they
+    /// are not: the heart-rate readings are real and stay, and everything anchored to a
+    /// run field of the plan or modelling running gait goes.
+    func testALiftGetsTheHeartRateReadingsAndNothingAnchoredToARunField() {
         XCTAssertEqual(
             DerivedMetricKind.applicable(to: .traditionalStrengthTraining),
-            [
-                .averageHeartRateBPM,
-                .maximumHeartRateBPM,
-                .timeAboveCapSeconds,
-                .heartRateDriftFraction,
-                .zoneSplits,
-            ]
+            [.averageHeartRateBPM, .maximumHeartRateBPM, .zoneSplits]
         )
     }
 
@@ -125,9 +120,10 @@ final class DerivedMetricKindTests: XCTestCase {
     }
 
     /// A figure a lift is entitled to must be one every workout is entitled to: nothing
-    /// but `.anyDiscipline` can reach the lift slot, because `isRun` is defined through
-    /// `Discipline` and excludes it (see `ActivityType.isRun`). Stated as a property so
-    /// a requirement added later cannot quietly become a second route in.
+    /// but `.anyDiscipline` can reach the lift slot, because `.runDiscipline` excludes it
+    /// outright and `isRun` is defined through `Discipline` so it excludes it too (see
+    /// `ActivityType.isRun`). Stated as a property so a requirement added later cannot
+    /// quietly become a second route in.
     func testALiftOnlyEverGetsTheFiguresEveryWorkoutGets() {
         for kind in DerivedMetricKind.allCases where kind.applies(to: .traditionalStrengthTraining) {
             XCTAssertEqual(kind.requirement, .anyDiscipline, "\(kind.rawValue)")
