@@ -79,7 +79,7 @@ struct DriftOverlayView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, Spacing.roomy)
             case .failed:
-                Text("Couldn't load the runs in this interval.")
+                Text(FailureCopy.couldNotLoad(.heartRateDrift))
                     .font(.metricLabel)
                     .foregroundStyle(Color.textSecondary)
             case .overlay(let data):

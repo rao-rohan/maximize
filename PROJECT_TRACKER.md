@@ -553,6 +553,11 @@ feature was governed by a plan that could not exist).
 | MAX-128 … MAX-143 | The lifting build, decomposed from MAX-109 | MAX-109 | see below ✅ |
 | MAX-126 | **"No verdict by design" is a state** — a lift stops being drawn and spoken as a run awaiting a score | MAX-111 | **Opus** ✅ |
 | MAX-150 | **Copy and absence voice: the chat and dashboard surfaces** — split from MAX-104 so the finished half does not wait behind the lifting build | MAX-104, split | Sonnet ✅ |
+| MAX-152 | **The chat's waiting and streaming states** — the full ladder between "sent" and "answered", and every stream failure as a designed state with words | Owner | **Opus** |
+| MAX-154 | **Error handling, audited app-wide** — every failure path outside chat swept as a set, the failure-to-copy mapping moved into the core, and the inventory recorded below | Owner | **Opus** |
+| MAX-155 | **An HTTP status code reaches the athlete's screen** — `PlanDraftingFailure.description` interpolates `PlanProposalModelError.description` in `ChatModel.noteDraftingFailure`, so "…returned an unexpected status (400)." renders on the plan proposal card. **MAX-152 has landed and did not fix this** — its `ChatFailureNotice` covers `ChatStreamError`, and the drafting path is a separate error type. Route it through `ChatFailureNotice`'s no-default, no-numerals, nothing-interpolated discipline | MAX-154 | Sonnet |
+| MAX-156 | **`ScoringError.description` interpolates a workout identifier and a date** — latent, not leaking today, and one `.public` log line away from being a real one | MAX-154 | Sonnet |
+| MAX-153 | **The chat shell** — composer, thread list, sheet chrome. The design pass the chat's *shell* never had | Owner | **Opus** |
 
 **MAX-066.** Splits currently need a GPS track, so a treadmill run has none — correctly
 rendered as an absence rather than fabricated. `distanceWalkingRunning` is already
@@ -1526,6 +1531,112 @@ line-by-line read can confirm. **This is "it compiles and its tests pass, as far
 reading the diff can tell" — not a claim CI has confirmed**, per CLAUDE.md's own
 distinction between the two sentences.
 
+**MAX-152 — the chat's waiting and streaming states, and what a failure says.** The owner
+asked for a loading state on a par with Claude's own, and — mid-ticket — for error
+handling good enough that "the app should be good to use". Those turn out to be one
+ticket, because both are the same question: between pressing send and reading an answer,
+what does the app actually know, and does it say so.
+
+**Before: one bit, three states, and a diagnostic.** `ChatModel.isStreaming` was asked to
+mean "the request is open and nothing has come back", "text is arriving" and "text stopped
+arriving but the connection is alive" simultaneously, and `WorkoutChatStreamingBubble`
+drew the only thing available from a bit and a string — an ellipsis — for all three. On
+the failure side, every `ChatStreamError` but one reached the transcript as
+`ChatStreamError.description`: a `CustomStringConvertible` written for a developer reading
+a value, complete with `(401)`, `stop_reason: refusal`, and the sentence the owner
+actually hit on a device, *"The response was not a recognizable streaming reply"*.
+
+**`ChatReplyPhase` is the ladder and `ChatReplyProgress` the only thing that moves it** —
+eight rungs, in the core, decided from stream events and nothing else. The view branches
+on the rung it is handed; it reads no timing and inspects no stream internals, which is
+CLAUDE.md's central rule applied to a loading state rather than to a calculation.
+`isStreaming` survives as a computed `replyPhase.isLive`, because two flags describing one
+request are two flags that can disagree, and this one gates the composer.
+
+**How a stall is detected, and the alternative that was rejected.** The obvious design is
+a wall-clock watchdog: start a `Task.sleep`, call it stalled after N seconds of silence.
+It was rejected because it puts the decision behind a task racing a stream, which is the
+one shape this repo's CI cannot verify honestly — a test either sleeps (slow, flaky) or
+injects a fake clock and proves only that the fake was called. The Messages API already
+sends `ping` frames on an open stream, and a ping *is* the transport saying "I am here and
+I have nothing for you" — the exact fact that separates a stalled reply from a working
+one, delivered as an event rather than inferred from elapsed time. So `ChatStreamDecoder`
+forwards it (it was dropped before), `ChatStreamEvent` gains a payload-free `.heartbeat`,
+and `ChatReplyProgress.heartbeatsBeforeStall` — **two** consecutive beats with no token
+between them, because the API may legitimately ping mid-reply and one beat would flag a
+healthy stream — turns them into `.stalled`. The whole rule is a pure function tested to
+the beat. **The cost is stated rather than hidden:** a connection that hangs and sends no
+pings stays `.streaming` until the client's own idle timeout turns it into
+`.failed(.interrupted)`, and whether real pings arrive during a real stall is a device
+question, in the PR.
+
+**A beat before the first token is not a stall.** "The model has not started speaking" is
+what waiting already says truthfully, and calling that stalled would invent a fault out of
+a model that is thinking — the state the indicator exists for. A stall is specifically a
+reply that started and stopped.
+
+**Why the animation is a shimmer, what was taken from Claude, and where it differs.**
+Claude marks thinking with a gradient sweep travelling through text rather than with
+pulsing dots or three bouncing ones, and that is the choice worth taking — for a reason
+that is structural rather than aesthetic. **A shimmer needs words underneath it to travel
+across.** Dots say "something is happening" and nothing else; a sweep over
+`ChatConversationCopy.awaitingFirstReply` carries the state in copy first and motion
+second, which is CLAUDE.md's "no information carried by hue alone" one channel over — a
+state carried only by an animation vanishes the moment somebody turns animation off. It is
+also ambient rather than metronomic: a pulse has a beat, and a beat in the corner of the
+eye is what makes a loader nag. **Where it deliberately differs:** there is a live
+accessibility complaint against Claude's own shimmer for being distracting
+(anthropics/claude-code#6038), so this one runs slower than the usual implementations of
+the technique (`Motion.waitingSweep`, 1.4s linear, no autoreverse), is **withheld
+entirely** under both Reduce Motion and Reduce Transparency rather than shortened, and
+ends hard — the instant the first token lands the indicator is gone, replaced by the
+words, because an indicator that keeps shimmering beside arriving text is an app talking
+over its own answer. **Rejected: staggered dots at 100–150ms**, which is the generic
+loader this is deliberately not, and which fails the "words underneath" test outright.
+**Rejected: `markiv/SwiftUI-Shimmer` as a dependency** — read for the technique (gradient,
+mask, offset animated across the width), not added; this package has none.
+
+`App/DesignSystem/Motion.swift` gains the `Motion` ramp alongside MAX-070's
+`accessibleAnimation` seam, for the reason `Spacing` and the colour tokens exist: a call
+site should say which motion it is, not how many milliseconds. Four entries, one per job.
+
+**Every failure is now a designed state with words, and no case falls through.**
+`ChatFailureNotice` is the single mapping from `ChatStreamError` to a sentence, exhaustive
+with no `default`, plus three notices for the failures that are not stream failures (an
+empty reply, a reply that could not be saved, a message that could not be sent). The copy
+rules are tested mechanically: no numerals anywhere (the two cases carrying a status code
+never print it), no wire vocabulary, no parentheticals, nothing interpolated — so no
+health data can reach a notice by construction — every sentence distinct, and none of them
+equal to the `description` it replaced. The four states of a key are four sentences: no
+key stored (the shipped subject-worded sentences, moved rather than rewritten), a
+keychain that would not answer, a key the server rejected, and — separately — being rate
+limited. "Add a key" and "replace the key you have" are different actions, and a single
+"check your API key" would send the athlete to stare at something present and
+correct-looking.
+
+**Retry is decided, not defaulted: no failure ever re-asks itself.**
+`PlanProposalDrafting`'s one-automatic-retry policy was read and deliberately **not**
+followed, on that type's own reasoning: its retry exists to put a *correction* in front of
+the model when a reply's content could not be used, and none of these failures are content
+failures. There is nothing to correct in "you are offline", so a second automatic call is
+the same call, and a loop of them is A14's named failure mode — spending the owner's
+credit unasked. So `canRetry` gates a button, one call per tap, and it is false wherever
+`ChatStreamError.isWorthRetrying` is false: a missing key, a rejected key, a refusal and
+an unreadable response all say what to do instead rather than offering a button guaranteed
+to fail identically. A retry asks the same question from the same history (the failed turn
+was never persisted, so nothing moved), appends no second question bubble, and **erases
+nothing** — the dropped attempt and its notice stay above the answer that finally arrives,
+which is the additive treatment D8 gives a correction one surface over.
+
+**Reported, not done.** The two files outside this ticket's named scope that it had to
+touch are `ChatStreamEvent.swift` and `ChatStreamDecoder.swift` — a payload-free case and
+one `switch` arm, both additive, plus the two MAX-107 regression tests whose expectations
+now name the `ping` they always contained. Nothing else in the stream path moved. And the
+stalled rung is the one part of the ladder CI cannot reach end to end: `ChatStreamDecoder`
+is proved to emit heartbeats and `ChatReplyProgress` is proved to fold them into
+`.stalled`, but whether the live API emits them during a genuine stall is only answerable
+on a device.
+
 ### Phase 9 — Lifting (MAX-109)
 
 **MAX-144 is decided, by the owner: A22.** *"You can set the muscle group in the detail view
@@ -1660,6 +1771,90 @@ is the overseer's, not a ticket's — flagged here rather than done.
 | MAX-148 | A lift's duration and note become editable, proposable, and type-safe | 137, 141 | Sonnet ✅ |
 | MAX-149 | Duration floor for fragments — **the classifier half of gap P3**; not yet wired to any author | 013, 131 | Sonnet ✅ |
 | MAX-151 | **Author the duration floor** — `StandardPlanSeed` states one, the authoring screen edits it, `PlanProposal` can propose it. Without this MAX-149 never fires | 149, 146, 148 | Sonnet |
+| MAX-153 | **The chat shell: composer, thread list, sheet chrome** — the design pass MAX-092–103 never had over the shell its features sit in | Owner, 092–103 | **Opus** |
+
+**MAX-153 — what was decided, what was rejected, and what it is blocked on.**
+
+The owner's ask was "ensure our chat interface is top shelf; look online for examples",
+plus, mid-ticket, "make sure the input is a Liquid Glass input with good button sizing"
+and "the app should be good to use."
+
+**Decided, and in the core where CI can see it.**
+
+- **`ChatComposerSendControl`** — four states for one 44pt box (`.send`, `.unavailable`,
+  `.awaitingReply`, `.stop`), resolved from `canSend`/`isStreaming` plus a
+  `ChatComposerCancellation` parameter. Streaming outranks `canSend` unconditionally.
+  Enabled and disabled send draw the **same glyph** so the target never changes shape
+  under a keystroke; every state is spoken distinguishably, because the visual difference
+  between two of them is a tint and `CLAUDE.md`'s hue rule applies to controls as much as
+  to charts.
+- **`ChatTranscriptFollow`** — follow-or-hold. Your own message always scrolls; incoming
+  content scrolls only if you were already at the bottom; **focusing the composer no
+  longer drags a scrolled-up reader down**, which is a deliberate departure from the
+  pre-153 behaviour and the ticket's most user-visible change. Unseen activity is a
+  **flag, not a count**, because the unit of arrival in a stream is a token — a counter
+  would read "New (417)".
+- **`ChatThreadListPresentation`** — recency banding (Today / Yesterday / Previous 7 days
+  / Previous 30 days / Earlier), newest band first, empty bands never emitted; a
+  Messages-style compact timestamp ladder (`now`, `12m`, `5h`, `Yesterday`, `Tue`,
+  `3 Aug`, `3 Aug 2025`) built from `CalendarDay` arithmetic rather than `DateFormatter`
+  so it is assertable on Linux CI; the row's scope line; and the whole VoiceOver sentence.
+- **Copy moved to `ChatThreadListCopy`** — the empty and failed sentences the view held as
+  literals, following MAX-150's precedent rather than opening a second voice.
+
+**Rejected, with reasons.**
+
+- **A tinted badge for "something arrived while you were away."** Information by hue
+  alone. The label carries it: "Jump to latest" against "New reply".
+- **A stop button during a stream, today.** `ChatModel` has no cancellation, and a stop
+  that does not stop is worse than none. `.awaitingReply` shows progress; the `.stop`
+  state exists, is tested, and turns on when one call site passes
+  `cancellation: .available`.
+- **`Text(_:style:.relative)` on a list row.** Wider than the title it competes with above
+  default Dynamic Type, re-lays-out every minute, and says "0 seconds ago". Kept for
+  VoiceOver, where width is free.
+- **A counter of unread messages.** See above.
+- **Scope on every row.** Nil for a workout thread (the title is already the run's date)
+  and for a training thread still titled by its own window — otherwise the row prints one
+  string twice.
+
+**Research citations** (all in the PR, all read for this ticket): Apple's HIG 44×44pt
+minimum tap target with the visible control permitted to be smaller than the region;
+`GlassEffectContainer` + `glassEffect` as the iOS 26 way to let the system merge and morph
+adjacent glass rather than hand-rolling a blur; `ScrollPosition` /
+`defaultScrollAnchor(.bottom)` and the jump-to-latest pattern for transcripts;
+Messages/Mail/Notes for the recency bands and the compact timestamp ladder; the
+grow-to-a-ceiling-then-scroll composer behaviour common to iMessage, WhatsApp and
+Telegram.
+
+**Installed, after MAX-152 merged.** The composer and the transcript's `onChange` handlers
+live in `App/Chat/ChatConversationView.swift`, which MAX-152 held while it was in flight;
+MAX-153 wrote the views against a documented seam and installed them once that file was
+free. What landed in the file:
+
+- The hand-rolled `TextField` + `Image` row and the `.glassChrome(.toolbar)` wrapped round
+  it are gone, replaced by `ChatComposerView`. **The outer glass went with them** —
+  `ChatComposerView` carries its own `GlassEffectContainer`, and a second glass modifier
+  round a view that glasses itself is chrome over chrome.
+- The send control resolves from **MAX-152's `replyPhase`**, not from a boolean:
+  `ChatComposerSendControl.resolve(canSend:replyPhase:)`. `ChatModel.isStreaming` is
+  itself `replyPhase.isLive`, so there is one authority on "a reply is in flight". The
+  composer does not distinguish waiting / streaming / stalled — those are three things to
+  say in the transcript, and `ChatPendingReplyView` says them there.
+- Every unconditional `scrollToBottom` became a `ChatTranscriptFollow` directive, including
+  the focus handler that used to drag a scrolled-up reader to the end.
+- **A third change kind, `.reflow`,** was added for MAX-152's shimmer. The waiting
+  indicator appearing and a stall caption growing both move the content, so a reader at
+  the bottom stays pinned — but neither is a reply, so neither may badge somebody who
+  scrolled away. Telling them "New reply" because a placeholder resized is the app crying
+  wolf about its own layout.
+- `.defaultScrollAnchor(.bottom, for: .initialOffset)` so a thread with history opens at
+  its newest turn. `for: .initialOffset` deliberately: where the scroll view *starts* is
+  the platform's question; what it does when content grows is `ChatTranscriptFollow`'s,
+  and two mechanisms answering one behaviour is how they drift.
+- **Retry is MAX-152's and stays in the transcript**, beside the failure notice that
+  explains what went wrong. The composer offers none — two retry affordances in two
+  registers is worse than either alone.
 
 **Four collisions the overseer must respect.**
 
@@ -2582,6 +2777,152 @@ scope, newest `lastActivityAt` with `id` breaking a tie, the same rule
 
 ---
 
+## MAX-154 — the app-wide error-handling audit
+
+**Scope: every failure path outside chat.** Chat's own failure states are MAX-152/153's
+and were not touched. The audit was a full sweep of `App/` and `Sources/MaximizeCore/`
+for the three defect classes the ticket named: a failure that reaches the person as
+nothing, a failure that reaches them as noise, and a failure the code claims cannot
+happen. **The inventory below is the deliverable, including the rows nothing was done
+to** — an audit whose findings vanish into a diff is not reviewable.
+
+### 1. Failures the code claims cannot happen — the ban holds
+
+Scanned across `App/` and `Sources/MaximizeCore/` (excluding `Tests/`, where these are
+permitted):
+
+| Construct | Count in non-test code | Verdict |
+|---|---|---|
+| Force unwrap (`x!`) | **0** | CLAUDE.md's rule is actually kept, not merely stated |
+| `try!` | **0** | Five source comments *mention* `try!` to explain why a defensive enum case exists instead of one |
+| `fatalError` | **0** | One comment, same shape (`PlanProposalDrafting`) |
+| `as!` | **0** | — |
+| Implicitly-unwrapped optional (`: T!`) | **0** | — |
+| `assertionFailure` | 1 | `Surfaces.swift:252` — the debug-only glass-over-data tripwire, a logged decision, compiles out of release |
+| Array subscripting | 2 | Both guarded: `ScoreCalendarView.door` subscripts `[0]` only inside `where workoutIDs.count == 1`; `DayWorkoutsView.step(by:)` guards on `indices.contains(next)` first |
+
+Nothing in this class needed fixing. Recording it matters anyway: the claim "the ban
+holds" had never been checked, and the checks above are what makes it a fact rather than
+an assumption.
+
+### 2. Failures that reached the person as nothing — fixed
+
+- **The dashboard drew a blank three sections deep.** `DashboardView` rendered
+  `ScoreCalendarView`, `DriftOverlayView` and `TrendTilesView` inside `if let interval =
+  intervalModel.state.interval`, with **no `else`**. When the interval model is `.failed`
+  — a system clock outside `CalendarDay`'s domain — the entire dashboard below the
+  selector was absent, with a one-line caption on a control above it the only hint.
+  Fixed: an `else` branch carrying `FailureCopy.dashboardUnavailableWithoutToday`.
+- **The store failing to open discarded its reason entirely.**
+  `PersistenceComposition.modelContainer` was `try? MaximizeModelContainer.makeOnDisk()`.
+  This is the most consequential failure in the app — every screen degrades, ingestion
+  falls back to the anchor-pinning sink, nothing is written — and the error went nowhere.
+  Fixed: a `do`/`catch` logging `domain` and `code` `.public` and the error itself
+  `.private`, following `IngestionComposition`'s established split for exactly this
+  reason (a Core Data error's `userInfo` can carry stored row values, i.e. health data).
+
+### 3. Failures that reached the person as noise, or as a false claim — fixed
+
+- **A failed Keychain read was reported as "No key is stored."** `SettingsView` held a
+  `Bool` and set it to `false` in the `catch`, so a device that could not be asked stated
+  flatly that nothing was there — and, because the **Clear** button was gated on that
+  flag, the only control that removes a key was withdrawn on exactly the device where one
+  might still be sitting. Fixed: `StoredAPIKeyPresence` is three states
+  (`stored`/`notStored`/`unknown`), `permitsClearing` is true for two of them, and a
+  failed save or clear now re-reads presence rather than leaving the line reading as it
+  did before the attempt.
+- **"No workouts yet." asserted something R10 says the app cannot know.** An empty list
+  and a refused Health *read* are indistinguishable from inside this app. Fixed: the copy
+  states the ordinary reading, then names the other possibility and where to check it —
+  **without** claiming Health is or is not connected, which is the claim R10 forbids. A
+  test asserts the words "connected" and "denied" appear in no Health-related string.
+- **Four verbs for one event.** "Could not load workouts.", "Couldn't load the plan.",
+  "Couldn't load the calendar.", "Couldn't load this plan version.", "Couldn't load the
+  runs in this interval." — five screens, four spellings, none of them the one
+  `ChatConversationCopy.failedToLoad` had already established at MAX-150. Fixed: one verb,
+  asserted against chat's by test, so the app has a single failure voice rather than a
+  chat one and a not-chat one.
+- **Two dozen athlete-facing string literals, across eleven files, were being chosen in
+  `App/` — in `catch` blocks and `switch` arms CI compiles and never runs.** CLAUDE.md is explicit that this is the defect and not the fix: the layer is
+  compiled by CI and never executed (R2, R13), so nothing but a reader could tell whether
+  an edit kept the care the comments described. All of them now read a value from
+  `MaximizeCore.FailureCopy`, which has tests.
+
+### 4. Acceptable with reason — inspected, left alone
+
+Every one of these was read in full and is deliberate. Listing them is the point: a later
+audit should not have to re-derive that they are fine.
+
+- **`AnchoredWorkoutIngester:229` — `try? await anchorStore.clearAnchor()`.** Discarding a
+  clear failure is correct: the fetch is already retrying without an anchor, and failing
+  the pass over a failed *cleanup* would pin the pipeline on the corrupt byte the code is
+  in the middle of routing around.
+- **`WorkoutIngestionPipeline:234, 498` — `try? await scores.ledger(...)`.** A ledger read
+  that fails is not evidence a score is absent, and the pipeline treats "unknown" the same
+  as "present" — it declines to score rather than risking a second auto-score (D8).
+- **`WorkoutIngestionPipeline:636` — `try? await Task.sleep(...)`.** A cancelled sleep
+  means the model already answered. Commented as such.
+- **`MaximizeModelContainer:248, 290` — per-file `try? setAttributes`.** One file in a
+  transient state must not cost every other file its protection class; the enumerator's
+  `errorHandler` returns `true` for the same reason.
+- **`MiscategorisedScoreLabelling:115` — `try? ... else { continue }`.** One unreadable
+  ledger skips one score, not the pass. The pass is idempotent, so the skipped row is
+  labelled on the next launch.
+- **`WorkoutSampleExtractor:343, 435, 495` — `try?` per sample.** Rejecting one implausible
+  reading and keeping the series is the documented policy; a whole-series throw would lose
+  a run's curve permanently.
+- **`SettingsView:196` — `guard let budget = try? RestDayBudget(daysPerWeek:) else
+  { return }`.** Unreachable: the picker offers `0...7` and that is the type's whole
+  permitted domain. A silent `return` on an unreachable branch is preferable to inventing
+  copy for a state that cannot occur.
+- **`ScoringModelError` / `ScoringError` / `DomainError` `description`s.** Diagnostic by
+  design and correctly so — they are read in a debugger, and none reaches a screen. See
+  the finding below for the one place that is *nearly* untrue.
+- **R11's escape is implemented.** `WorkoutIngestionPipeline` reports
+  `.workoutAbandoned(step:)` at both `storingTheWorkout` and `discardingTheWorkout`, and
+  `IngestionComposition` logs it loudly, so a permanently unacceptable workout no longer
+  wedges the pipeline. The audit touched none of it. **The R11 row below still reads
+  "MAX-033 must handle this" and is now stale** — left for whoever owns that row to tick,
+  rather than re-graded by a ticket that only read the code.
+- **`ScoreProposal:75`, `PlanProposal:666`** interpolate a decoding error into a
+  `malformedResponse(reason:)` payload. Developer-facing, never rendered.
+
+### 5. Found, reported, not taken
+
+Each of these is a real finding in a file another ticket in flight owns, or on a surface
+another ticket owns. Per the brief, they are reported rather than taken.
+
+- **A status code can reach the athlete's screen.** `PlanProposalDrafting.description`
+  returns `"The plan could not be drafted. \(error.description)."`, where `error` is a
+  `ScoringModelError` — so "The Anthropic API returned an unexpected status (400)." is
+  rendered verbatim on the plan proposal card. That is defect class 2 exactly: an HTTP
+  status and a vendor name where a description of what happened belongs. **Not taken**:
+  the sentence is displayed on a chat surface and MAX-152 owns chat's failure states.
+  Filed as **MAX-155**.
+- **`ScoringError.description` interpolates a workout UUID and a `CalendarDay`.**
+  `contextAlreadyScored(workoutID:)` renders the identifier; `noPlanInEffect(day:)`
+  renders a date. Neither reaches a screen today, and the one log that could carry them
+  is `.private`, so this is a latent hazard rather than a live leak — but CLAUDE.md rules
+  identifiers and dates out of error strings without a "probably fine" exception, and the
+  distance between this and a leak is one future `.public` log line. Filed as **MAX-156**.
+- **`App/Workouts/WorkoutDetailView.swift:64`** still carries `Text("Could not load this
+  workout.")`, the last view literal of the five. `LoadFailureSurface.workoutDetail` and
+  its sentence are defined and tested; adopting them is one line. **Not taken**:
+  `App/Workouts/*` is MAX-139's.
+- **No surface in the app offers a retry.** Every `.failed` state is terminal until the
+  view is rebuilt, including the ones caused by something that plainly could succeed on a
+  second attempt. New risk row **R15** below.
+
+### What CI proves about this ticket, and what it does not
+
+CI compiles `App/` and runs `FailureCopyTests`. That proves every sentence exists, that no
+two cases share one, that none carries a digit or names a type, and that the Health copy
+claims nothing R10 forbids. **It proves nothing about any of the failures themselves.** CI
+opens no socket, touches no Health store, reads no Keychain and opens no SwiftData store,
+so every path this ticket touches is device-verified only. The PR lists how to provoke each one.
+
+---
+
 ## Risks
 
 | # | Item | Impact | Status |
@@ -2598,6 +2939,7 @@ scope, newest `lastActivityAt` with `id` breaking a tie, the same rule
 | **R9** | **MAX-030 acknowledges every background wake, including failed ones — so iOS never retries.** This is only safe because a missed wake is recovered by the next anchored fetch | If MAX-031 lands a fetch that is not anchored or not idempotent, missed workouts are lost permanently and silently | **Constraint on MAX-031, not a risk to monitor.** The reasoning is documented in `WorkoutObservationCoordinator`; if the anchor guarantee changes, that decision must be revisited |
 | **R11** | **A permanently unacceptable workout wedges the whole pipeline.** If the sink throws deterministically for one workout, the anchor never advances past it, so it is refetched and rethrown on every pass forever — and every later workout queues behind it | Zero-touch capture stops entirely, and the symptom is silence | **MAX-033 must handle this.** Found by MAX-031, which deliberately did not build a poison-pill escape: "give up on this workout" is a data decision belonging to whoever owns the store. The obligation is documented on `WorkoutIngestionSink` |
 | R12 | The anchor write and the workout write are two separate stores, so the window between them exists by construction | A crash between them re-delivers the batch — absorbed by dedupe, so this is the safe side | **Accepted permanently. Do not "fix" this.** ~~MAX-020 can close it by moving the anchor into the same SwiftData transaction~~ — that earlier note was wrong and MAX-020 correctly refused it. See below |
+| **R15** | **No failure state in the app offers a retry, and a whole-store failure is never named as one.** Every `.failed` state is terminal until the view is rebuilt — including the ones a second attempt would plainly clear (a scoring call that timed out, a Keychain read during the moment the device was locked). And when the *store* is what failed, every screen independently says its own content could not be loaded, which reads as five separate problems rather than the one that it is; nothing tells the athlete that nothing at all is being saved | An athlete's only recovery from a transient failure is to guess that backing out and re-entering a screen will help, and their only signal for a permanent one is that the whole app looks broken in five different ways | **Open.** MAX-154 made every failure legible and put the store-open reason in the log (it previously went nowhere), but deliberately did not add controls or an app-level banner — that is a design decision about affordances, not an error-handling audit. Found by MAX-154 |
 | R10 | The app cannot know whether Health *read* access was granted — `authorizationStatus(for:)` reports share status only, by Apple's design | No UI can honestly display "Health connected"; a permission problem is indistinguishable from "no workouts recorded yet" | Accepted, Apple-imposed. Found at MAX-030. Any future settings or onboarding UI must not claim read access it cannot verify |
 
 ## Overseer failure modes

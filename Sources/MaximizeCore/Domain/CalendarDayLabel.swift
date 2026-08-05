@@ -81,4 +81,24 @@ enum CalendarDayLabel {
         default: return ""
         }
     }
+
+    /// "Mon" — the abbreviation a thread-list row uses for something that happened
+    /// within the previous week (`ChatThreadListPresentation.compactTimestamp`).
+    ///
+    /// Written out rather than taken from `DateFormatter.shortWeekdaySymbols` for the
+    /// same reason `shortMonthName` is: this package's tests run on Linux against
+    /// swift-corelibs-foundation, where symbol tables and locale resolution differ from
+    /// Apple's, and a label CI cannot assert is a label that drifts. It is also total —
+    /// `Weekday` is a closed enum, so there is no `default` and no unreachable branch.
+    static func shortWeekdayName(_ weekday: Weekday) -> String {
+        switch weekday {
+        case .monday: return "Mon"
+        case .tuesday: return "Tue"
+        case .wednesday: return "Wed"
+        case .thursday: return "Thu"
+        case .friday: return "Fri"
+        case .saturday: return "Sat"
+        case .sunday: return "Sun"
+        }
+    }
 }

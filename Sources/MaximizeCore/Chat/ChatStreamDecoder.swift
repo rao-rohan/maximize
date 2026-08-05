@@ -195,9 +195,18 @@ public struct ChatStreamDecoder {
         case "error":
             return terminal(.failed(Self.failure(forErrorType: frame.error?.type)))
 
+        case "ping":
+            // MAX-152. Forwarded rather than dropped, which is what it was until this
+            // ticket: a ping is the one frame that means "the connection is open and
+            // nothing is being said", and that is the fact separating a stalled reply
+            // from a working one. What a *number* of them means is
+            // `ChatReplyProgress`'s decision, not this decoder's — this only reports
+            // what arrived, which is the split every other case here keeps.
+            return [.heartbeat]
+
         default:
-            // `message_start`, `content_block_start`, `content_block_stop`, `ping`, and
-            // anything the API adds later.
+            // `message_start`, `content_block_start`, `content_block_stop`, and anything
+            // the API adds later.
             return []
         }
     }
