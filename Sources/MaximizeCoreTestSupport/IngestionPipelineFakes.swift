@@ -15,7 +15,14 @@ import MaximizeCore
 ///
 /// - **Dedupe (FR-0.5)** — `store(_ workout:)` is an upsert keyed on `workoutUUID`.
 /// - **D8** — `recordAutomaticScore` refuses a second automatic score.
-public final class InMemoryWorkoutStore: WorkoutRepository, ScoreRepository, PlanRepository, @unchecked Sendable {
+///
+/// `SettingsRepository` joined the list for MAX-096, for the same "one type rather than
+/// several" reason: a training chat thread's roll-up is a function of the *combination*
+/// of stored workouts, scores, the plan **and** the rest-day budget, and a test asserting
+/// that a bubble and a dashboard tile agree should not have to wire four fakes together
+/// to say so.
+public final class InMemoryWorkoutStore: WorkoutRepository, ScoreRepository, PlanRepository,
+                                         SettingsRepository, @unchecked Sendable {
 
     /// A failure the store can be told to raise, distinct from `DomainError` so a test
     /// can drive both sides of the pipeline's permanent/transient split.
@@ -33,6 +40,7 @@ public final class InMemoryWorkoutStore: WorkoutRepository, ScoreRepository, Pla
     private var scoresByID: [UUID: Score] = [:]
     private var annotationsByID: [UUID: [ScoreAnnotation]] = [:]
     private var calendar: PlanCalendar?
+    private var appSettings: AppSettings = .standard
 
     private var workoutStoreError: Error?
     private var workoutStoreErrorsByID: [UUID: Error] = [:]
@@ -255,6 +263,18 @@ public final class InMemoryWorkoutStore: WorkoutRepository, ScoreRepository, Pla
         versions.append(plan)
         let updated = try PlanCalendar(versions)
         lock.locked { calendar = updated }
+    }
+
+    // MARK: - SettingsRepository
+
+    /// Total, like the real store's: the answer to "what are the settings" before the
+    /// athlete has expressed a preference is `AppSettings.standard`, not nil.
+    public func settings() async throws -> AppSettings {
+        lock.locked { appSettings }
+    }
+
+    public func store(_ settings: AppSettings) async throws {
+        lock.locked { appSettings = settings }
     }
 }
 
