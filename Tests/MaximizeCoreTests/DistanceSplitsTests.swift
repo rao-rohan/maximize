@@ -539,7 +539,7 @@ final class DistanceSplitsTests: XCTestCase {
     /// would, on its own, produce a *different* breakdown. An outdoor run's splits
     /// must not depend on whether a distance series happened to be attached.
     func testRouteWinsOverDistanceSamplesWhenBothArePresent() throws {
-        let workout = try Fixture.workout(distanceMeters: 5_000, durationSeconds: 1_000)
+        let workout = try Fixture.workout(durationSeconds: 1_000, distanceMeters: 5_000)
         let route = try evenRoute(offsets: (0...10).map { Double($0) * 100 }, gpsTotalMeters: 5_000)
         // Same total distance, deliberately different pacing shape: two fast then
         // eight slow segments, so if this source were consulted the splits would not
@@ -564,7 +564,7 @@ final class DistanceSplitsTests: XCTestCase {
     /// points here), the answer is still *no breakdown* — never a silent fall-through
     /// to the distance-sample series.
     func testRoutePresentButUnusableStillRefusesRatherThanFallingBackToDistanceSamples() throws {
-        let workout = try Fixture.workout(distanceMeters: 5_000, durationSeconds: 1_000)
+        let workout = try Fixture.workout(durationSeconds: 1_000, distanceMeters: 5_000)
         let sparseRoute = try Route(
             workoutID: Fixture.workoutID,
             points: [try RoutePoint(offsetSeconds: 0, latitudeDegrees: 0, longitudeDegrees: 0)]
