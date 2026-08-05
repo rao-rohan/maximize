@@ -4,9 +4,9 @@ import MaximizeCore
 /// The workout detail screen (FR-1.1–1.6).
 ///
 /// MAX-041 built the plan-verdict header and the scaffold needed to reach it. MAX-042
-/// adds the HR curve. MAX-043 adds cadence vs. target. Route map (MAX-044), splits
-/// and summary tiles (MAX-045), and the chat entry point (MAX-051) all land as
-/// further siblings inside `content` below — the seam is still this view's body, and
+/// adds the HR curve. MAX-043 adds cadence vs. target. Route map (MAX-044), summary
+/// tiles (MAX-045), the pace splits (MAX-046), and the chat entry point (MAX-051) all
+/// land as further siblings inside `content` below — the seam is still this view's body, and
 /// `WorkoutDetailData` (see `WorkoutDetailModel`) is where each of those adds its
 /// section's data without touching `WorkoutVerdict`.
 struct WorkoutDetailView: View {
@@ -61,6 +61,7 @@ struct WorkoutDetailView: View {
                 HRCurveView(chartData: data.heartRateChart)
                 CadenceBandView(data: data.cadence)
                 RouteMapView(data: data.routeMap)
+                SplitsView(data: data.splits)
                 SummaryTilesView(data: data.summaryTiles)
                 WorkoutChatView(workoutID: workoutID)
             }

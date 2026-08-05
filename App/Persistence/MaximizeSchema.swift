@@ -211,6 +211,27 @@ enum MaximizeSchemaV1: VersionedSchema {
         var averageCadenceStepsPerMinute: Double?
         var gradeAdjustedPaceSecondsPerKilometer: Double?
         var zoneSplitsJSON: Data = Data()
+
+        /// MAX-046's pace breakdown. Optional and default-less on purpose — see
+        /// `StoredDerivedMetrics.distanceSplitsJSON` for the domain half of that choice.
+        ///
+        /// **What this does to a store that already has rows.** Adding a nullable
+        /// attribute is Core Data's canonical lightweight-migration case: existing
+        /// `DerivedMetricsRecord` rows gain the column as NULL, so every run ingested
+        /// before this build reads back with `DerivedMetrics.distanceSplits == nil` and
+        /// says so on screen rather than showing a fabricated breakdown. Nothing is
+        /// rewritten and no value has to be invented for the old rows, which is exactly
+        /// why the attribute is optional rather than a defaulted `Data()`: an empty blob
+        /// would decode to a `DistanceSplits` with no series, a value the domain forbids.
+        ///
+        /// **Why the schema version is unchanged.** `MaximizeSchemaV1` has never been
+        /// promoted to a CloudKit production schema — mirroring is off entirely (A8) —
+        /// so the additive-only immutability rule quoted at the top of this file has not
+        /// started applying. A V2 would mean a second copy of all ten model classes and
+        /// a `MigrationStage` to carry a change SwiftData infers on its own. The version
+        /// bump is what the *first* shape change after promotion has to buy; this one
+        /// does not.
+        var distanceSplitsJSON: Data?
         var planVersionNumber: Int = 1
 
         init(_ stored: StoredDerivedMetrics) {
@@ -222,6 +243,7 @@ enum MaximizeSchemaV1: VersionedSchema {
             averageCadenceStepsPerMinute = stored.averageCadenceStepsPerMinute
             gradeAdjustedPaceSecondsPerKilometer = stored.gradeAdjustedPaceSecondsPerKilometer
             zoneSplitsJSON = stored.zoneSplitsJSON
+            distanceSplitsJSON = stored.distanceSplitsJSON
             planVersionNumber = stored.planVersionNumber
         }
 
@@ -236,6 +258,7 @@ enum MaximizeSchemaV1: VersionedSchema {
                     averageCadenceStepsPerMinute: averageCadenceStepsPerMinute,
                     gradeAdjustedPaceSecondsPerKilometer: gradeAdjustedPaceSecondsPerKilometer,
                     zoneSplitsJSON: zoneSplitsJSON,
+                    distanceSplitsJSON: distanceSplitsJSON,
                     planVersionNumber: planVersionNumber
                 )
             }
@@ -248,6 +271,7 @@ enum MaximizeSchemaV1: VersionedSchema {
                 averageCadenceStepsPerMinute = newValue.averageCadenceStepsPerMinute
                 gradeAdjustedPaceSecondsPerKilometer = newValue.gradeAdjustedPaceSecondsPerKilometer
                 zoneSplitsJSON = newValue.zoneSplitsJSON
+                distanceSplitsJSON = newValue.distanceSplitsJSON
                 planVersionNumber = newValue.planVersionNumber
             }
         }

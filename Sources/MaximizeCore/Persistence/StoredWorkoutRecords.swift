@@ -213,8 +213,8 @@ public struct StoredRoute: Hashable, Sendable {
 ///
 /// D2's "computed once at ingestion and stored" is the reason this is a record at all
 /// rather than something a view recalculates. Each metric is a column so a future
-/// dashboard query can filter on one without decoding a blob; `zoneSplits` is a small
-/// nested value nothing queries into, so it stays JSON.
+/// dashboard query can filter on one without decoding a blob; `zoneSplits` and
+/// `distanceSplits` are small nested values nothing queries into, so they stay JSON.
 ///
 /// `planVersionNumber` is stored beside the numbers because, without it, "time above
 /// cap" is a measurement with no stated cap — and a later plan version would silently
@@ -230,6 +230,22 @@ public struct StoredDerivedMetrics: Hashable, Sendable {
 
     /// A JSON-encoded `ZoneSplits`.
     public var zoneSplitsJSON: Data
+
+    /// A JSON-encoded `DistanceSplits` (MAX-046), or **nil when this run has no pace
+    /// breakdown** — an indoor run, a route that could not be cut up, or a workout whose
+    /// metrics were computed before this column existed.
+    ///
+    /// Optional rather than a defaulted empty blob for two reasons that happen to agree.
+    /// The domain reason: `DerivedMetrics.distanceSplits` is itself optional, and "absent"
+    /// and "empty" are different facts (MAX-010) — `DistanceSplits` cannot hold zero
+    /// series. The schema reason: an optional attribute is the one shape a store already
+    /// holding rows can gain without a value to backfill, and CloudKit accepts it as-is
+    /// (its rule is that a *non*-optional attribute must have a default).
+    ///
+    /// A blob rather than columns, matching `zoneSplitsJSON`: nothing filters, sorts or
+    /// groups by a split, and a row per split would be a dozen records per run to serve a
+    /// query nobody intends to make (the same reasoning D7 applies to the HR series).
+    public var distanceSplitsJSON: Data?
     public var planVersionNumber: Int
 
     public init(
@@ -241,6 +257,7 @@ public struct StoredDerivedMetrics: Hashable, Sendable {
         averageCadenceStepsPerMinute: Double?,
         gradeAdjustedPaceSecondsPerKilometer: Double?,
         zoneSplitsJSON: Data,
+        distanceSplitsJSON: Data?,
         planVersionNumber: Int
     ) {
         self.workoutUUID = workoutUUID
@@ -251,6 +268,7 @@ public struct StoredDerivedMetrics: Hashable, Sendable {
         self.averageCadenceStepsPerMinute = averageCadenceStepsPerMinute
         self.gradeAdjustedPaceSecondsPerKilometer = gradeAdjustedPaceSecondsPerKilometer
         self.zoneSplitsJSON = zoneSplitsJSON
+        self.distanceSplitsJSON = distanceSplitsJSON
         self.planVersionNumber = planVersionNumber
     }
 
@@ -259,6 +277,9 @@ public struct StoredDerivedMetrics: Hashable, Sendable {
             metrics.zoneSplits,
             field: "StoredDerivedMetrics.zoneSplitsJSON"
         )
+        let distanceSplitsJSON = try metrics.distanceSplits.map {
+            try PersistencePayload.encode($0, field: "StoredDerivedMetrics.distanceSplitsJSON")
+        }
         self.init(
             workoutUUID: metrics.workoutID,
             averageHeartRateBPM: metrics.averageHeartRateBPM,
@@ -268,6 +289,7 @@ public struct StoredDerivedMetrics: Hashable, Sendable {
             averageCadenceStepsPerMinute: metrics.averageCadenceStepsPerMinute,
             gradeAdjustedPaceSecondsPerKilometer: metrics.gradeAdjustedPaceSecondsPerKilometer,
             zoneSplitsJSON: zoneSplitsJSON,
+            distanceSplitsJSON: distanceSplitsJSON,
             planVersionNumber: metrics.planVersion.number
         )
     }
@@ -286,6 +308,13 @@ public struct StoredDerivedMetrics: Hashable, Sendable {
                 from: zoneSplitsJSON,
                 field: "StoredDerivedMetrics.zoneSplitsJSON"
             ),
+            distanceSplits: try distanceSplitsJSON.map {
+                try PersistencePayload.decode(
+                    DistanceSplits.self,
+                    from: $0,
+                    field: "StoredDerivedMetrics.distanceSplitsJSON"
+                )
+            },
             planVersion: try PlanVersion(planVersionNumber)
         )
     }

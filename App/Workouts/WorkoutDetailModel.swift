@@ -28,6 +28,11 @@ struct WorkoutDetailData: Equatable {
     /// state.
     let routeMap: RouteMapData
 
+    /// FR-1.5's per-split pace breakdown. Always present, like `routeMap`:
+    /// `SplitsListData.resolve(hasRoute:splits:unit:)` owns the indoor / no-breakdown /
+    /// available branch, so this model only fetches what that decision needs.
+    let splits: SplitsListData
+
     /// FR-1.5. Always present — `SummaryTileData.duration` is never absent (see its
     /// own documentation) — so there is no "nothing to build from" case here either.
     let summaryTiles: SummaryTileData
@@ -130,6 +135,19 @@ final class WorkoutDetailModel {
             // querying the store for every indoor run.
             let route = workout.hasRoute ? try await workoutRepository.route(forWorkout: workoutID) : nil
             let routeMap = RouteMapData.resolve(hasRoute: workout.hasRoute, route: route)
+            // The splits are read from the stored metrics, never derived from the route
+            // fetched above (D2) — `DistanceSplitCalculator` cut them at ingestion.
+            //
+            // `.kilometers` is passed explicitly rather than defaulted: every distance
+            // this app displays is in kilometres today, and `AppSettings.distanceUnit` is
+            // read by nothing. **MAX-047** is the ticket that decides whether that setting
+            // becomes load-bearing or is deleted; this is the one line it changes for this
+            // section, because the stored record already carries both units.
+            let splits = SplitsListData.resolve(
+                hasRoute: workout.hasRoute,
+                splits: metrics?.distanceSplits,
+                unit: .kilometers
+            )
             let summaryTiles = SummaryTileData(workout: workout, metrics: metrics)
 
             state = .loaded(WorkoutDetailData(
@@ -137,6 +155,7 @@ final class WorkoutDetailModel {
                 heartRateChart: chartData,
                 cadence: cadence,
                 routeMap: routeMap,
+                splits: splits,
                 summaryTiles: summaryTiles
             ))
         } catch {
