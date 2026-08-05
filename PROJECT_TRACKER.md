@@ -492,7 +492,7 @@ ticket that could not close it, and each fails quietly rather than loudly.
 |---|---|---|
 | C1 | **Always resolve rest-day budgets over whole Monday-first weeks — never split one week across two calls.** | `RestDayBudgeting` (MAX-016) is a pure function over the days it is handed. Ranking is relative to the misses in a week, so the same day can rank differently in two partial slices of that week. A function taking a day-set cannot tell a partial week from a short one |
 | C2 | **A `WorkoutIngestionSink` must not return before its write is durable.** | MAX-031's no-retry guarantee depends on it: acknowledging a wake whose data was not durably stored loses the workout permanently, and only the implementation knows when its write has landed |
-| C3 | **A caller that knows what day it is must tell `RestDayBudgeting`, via `outcomesUnknownFrom`.** | MAX-105. Forgiving a day that has not happened spends a small weekly budget on a non-event and leaves a real miss earlier in the same week unforgiven — but `RestDayBudgeting` is a pure function of the days it is handed, and a day-set carries no clock. `ScoreCalendar` passes it; `TalliesCalculator` cannot yet (→ MAX-107) |
+| C3 | **A caller that knows what day it is must tell `RestDayBudgeting`, via `outcomesUnknownFrom`.** | MAX-105. Forgiving a day that has not happened spends a small weekly budget on a non-event and leaves a real miss earlier in the same week unforgiven — but `RestDayBudgeting` is a pure function of the days it is handed, and a day-set carries no clock. `ScoreCalendar` and `TalliesCalculator` (MAX-110) both pass it now |
 
 ## Open questions
 
@@ -531,7 +531,7 @@ feature was governed by a plan that could not exist).
 | MAX-087 | A non-hue channel for the year heatmap's 6pt cells | MAX-084 | Sonnet ✅ |
 | MAX-105 | **The plan on the dashboard calendar** — scheduled beneath actual | Owner | **Opus** ✅ |
 | MAX-106 | The UI standard, written into `CLAUDE.md` | Owner | Sonnet ✅ |
-| MAX-107 | Tallies count future scheduled days as missed — effective-day rate and streak | MAX-105 | Sonnet |
+| MAX-110 | Tallies count future scheduled days as missed — effective-day rate and streak | MAX-105 | Sonnet ✅ |
 | MAX-090 | Chat-first product spec: plan generation and Q&A through chat | Owner | **Opus** 🔒 ✅ |
 | MAX-091 | Run both Claude clients on the Sonnet tier at `medium` effort | Owner, cost | Sonnet 🔒 ✅ |
 | MAX-092 … MAX-104 | The chat-first build, decomposed from MAX-090 | MAX-090 | see below |
@@ -695,7 +695,23 @@ enters `EffectiveDayTally.eligibleCount` and drags the rate down, and worse,
 scheduled day it meets — which for the "this month" interval is usually the 31st, so the
 streak tile reads 0 for most of every month. The calendar half is closed by passing
 `RestDayBudgeting`'s new `outcomesUnknownFrom` (now **C3**); the tallies half needs
-`today` on `TalliesInput` and changes numbers on a surface MAX-063 owns. → **MAX-107**.
+`today` on `TalliesInput` and changes numbers on a surface MAX-063 owns. → **MAX-110**.
+
+**MAX-110 closed the tallies half.** `TalliesInput` gained a required `today`
+(never a clock read, matching `ScoreCalendar.resolve`'s own parameter), threaded into
+both places that depend on whether a day's outcome is in yet: `effectiveDayTally` now
+withholds any day on or after `today` from `eligibleCount`, and `resolveRestDayConversions`
+passes `today` through as C3's `outcomesUnknownFrom`. The streak walk's start point was the
+one that needed a real decision — walking back from `through` silently assumed `through`
+was decided, which is false whenever it reaches into the future. It now starts at the later
+of "never" and the most recent day whose outcome is known (the day before `today`, clamped
+to `through`), documented and tested at all three shapes: wholly past (agrees with the
+pre-MAX-110 answer), wholly future (streak `0`, nothing decided), and spanning `today` (the
+defect case — the walk no longer reaches the not-yet-run days at all). A test derives its
+expected `EffectiveDayTally` from `ScoreCalendar.resolve`'s own output over the same
+interval rather than a second hand-worked number, so the two calculators drifting apart
+would fail it even if both suites' hardcoded expectations still looked right.
+`TrendTilesModel` resolves `today` once at init, the same way `ScoreCalendarModel` does.
 
 *Also noticed, not acted on.* `docs/DESIGN-REVIEW.md` §5.4 proposed "a 1pt accent ring on
 the current day" for the missing today-marker. MAX-105 has spent exactly that device on
