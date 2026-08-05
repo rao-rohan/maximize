@@ -36,6 +36,10 @@ enum CornerRadius {
     static let control: CGFloat = 10
     /// Summary tiles and calendar cells.
     static let tile: CGFloat = 12
+    /// A single day's mark in the year heatmap (FR-3.2 at the year span). Small enough
+    /// to read as a square at ~6pt — `tile`'s 12pt on a 6pt mark is a circle, and a grid
+    /// of circles reads as dots rather than as a filled calendar.
+    static let heatmapMark: CGFloat = 1.5
     /// Chart containers and cards.
     static let card: CGFloat = 16
 }
@@ -73,4 +77,19 @@ enum LayoutMetrics {
     /// ragged — a rest day drew visibly smaller than a run. Squaring the box also
     /// keeps a wide glyph from shifting the date above it off-centre.
     static let calendarGlyphSize: CGFloat = 12
+
+    /// Gap between marks in the year heatmap, in both axes.
+    ///
+    /// Not on the `Spacing` ramp, and deliberately below its smallest step: 53 columns
+    /// across a phone's content column leaves roughly six points per mark, so `tight`'s
+    /// 4pt would spend two thirds of the width on gaps. The ramp's own doc comment says a
+    /// gap needing a value that is not on it is probably wrong — this is the exception it
+    /// admits, because the constraint here is a fixed 53 columns rather than a judgement
+    /// about density. The gap still has to exist: without it, adjacent days of the same
+    /// band merge into one block and the week structure disappears.
+    static let heatmapCellSpacing: CGFloat = 1.5
+
+    /// Stroke width for a hollow heatmap mark — a missed day. Heavier than `hairline`,
+    /// which would vanish against a mark this small.
+    static let heatmapMarkStroke: CGFloat = 1
 }

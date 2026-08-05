@@ -124,27 +124,90 @@ final class TrendIntervalTests: XCTestCase {
         assertThrows(.outOfRange, try MonthInterval(year: 2026, month: 0))
     }
 
-    // MARK: - Custom range
+    // MARK: - Year (MAX-083)
 
-    func testCustomRangeAcceptsAStartEqualToEnd() throws {
-        let sameDay = try day("2026-08-04")
-        let range = try CustomDateRange(start: sameDay, end: sameDay)
-        XCTAssertEqual(range.start, sameDay)
-        XCTAssertEqual(range.end, sameDay)
+    func testYearContainingResolvesToJanuaryFirstThroughDecemberThirtyFirst() throws {
+        let year = try YearInterval(containing: day("2026-08-15"))
+        XCTAssertEqual(year.start, try day("2026-01-01"))
+        XCTAssertEqual(year.end, try day("2026-12-31"))
+        XCTAssertEqual(year.year, 2026)
     }
 
-    func testCustomRangeAcceptsAnOrderedRange() throws {
-        let range = try CustomDateRange(start: try day("2026-07-01"), end: try day("2026-08-04"))
-        XCTAssertEqual(range.start, try day("2026-07-01"))
-        XCTAssertEqual(range.end, try day("2026-08-04"))
+    /// The boundary days are themselves in the year they open and close, which is the
+    /// off-by-one a half-open habit invites.
+    func testYearContainingItsOwnBoundaryDaysStaysInThatYear() throws {
+        XCTAssertEqual(try YearInterval(containing: day("2026-01-01")).year, 2026)
+        XCTAssertEqual(try YearInterval(containing: day("2026-12-31")).year, 2026)
     }
 
-    /// The illegal state this whole type exists to make unrepresentable.
-    func testCustomRangeRejectsAnEndBeforeItsStart() throws {
-        assertThrows(
-            .inconsistent,
-            try CustomDateRange(start: try day("2026-08-04"), end: try day("2026-08-03"))
-        )
+    /// A leap year is 366 days and contains February 29th. Both are asserted through
+    /// `CalendarDay`'s own arithmetic rather than a constant, since that is the table
+    /// `YearInterval` deliberately does not duplicate.
+    func testLeapYearCoversThreeHundredAndSixtySixDays() throws {
+        let leap = try YearInterval(year: 2024)
+        XCTAssertEqual(try leap.start.days(until: leap.end), 365) // a difference, so 366 days
+        XCTAssertEqual(try YearInterval(containing: day("2024-02-29")).year, 2024)
+
+        let ordinary = try YearInterval(year: 2026)
+        XCTAssertEqual(try ordinary.start.days(until: ordinary.end), 364)
+    }
+
+    /// A century year divisible by 100 but not 400 is *not* a leap year — the rule
+    /// `CalendarDay.isLeapYear` encodes, checked through this type so a future
+    /// hand-rolled year length here would fail.
+    func testYearLengthFollowsTheGregorianCenturyRule() throws {
+        let nineteenHundred = try YearInterval(year: 1900)
+        XCTAssertEqual(try nineteenHundred.start.days(until: nineteenHundred.end), 364)
+
+        let twoThousand = try YearInterval(year: 2000)
+        XCTAssertEqual(try twoThousand.start.days(until: twoThousand.end), 365)
+    }
+
+    func testYearPreviousAndNextStepWholeYearsAndRoundTrip() throws {
+        let year = try YearInterval(year: 2026)
+        let previous = try year.previous()
+        XCTAssertEqual(previous.year, 2025)
+        XCTAssertEqual(previous.start, try day("2025-01-01"))
+        XCTAssertEqual(previous.end, try day("2025-12-31"))
+
+        let next = try year.next()
+        XCTAssertEqual(next.year, 2027)
+
+        XCTAssertEqual(try previous.next(), year)
+        XCTAssertEqual(try next.previous(), year)
+    }
+
+    /// Stepping in and out of a leap year must not shift a bound: February's length is
+    /// the only thing that changes, and neither bound is in February.
+    func testYearStepsAcrossALeapYearWithoutDisturbingItsBounds() throws {
+        let leap = try YearInterval(year: 2024)
+        XCTAssertEqual(try leap.previous().end, try day("2023-12-31"))
+        XCTAssertEqual(try leap.next().start, try day("2025-01-01"))
+        XCTAssertEqual(try leap.previous().next(), leap)
+    }
+
+    /// `CalendarDay`'s domain is 1...9999, so the ends of it are where `previous()` and
+    /// `next()` run out. They throw rather than clamping — a clamp would silently show
+    /// year 1 twice in a row.
+    func testYearRejectsSteppingOutsideCalendarDaysDomain() throws {
+        assertThrows(.outOfRange, try YearInterval(year: 1).previous())
+        assertThrows(.outOfRange, try YearInterval(year: 9_999).next())
+        assertThrows(.outOfRange, try YearInterval(year: 0))
+        assertThrows(.outOfRange, try YearInterval(year: 10_000))
+    }
+
+    /// Every day of a leap year resolves to that same year, and to a day inside its
+    /// bounds — the exhaustive form of the two assertions above.
+    func testEveryDayOfALeapYearFallsInsideItsOwnYearInterval() throws {
+        let year = try YearInterval(year: 2024)
+        var cursor = year.start
+        var count = 0
+        while cursor <= year.end {
+            XCTAssertEqual(try YearInterval(containing: cursor), year, "\(cursor)")
+            count += 1
+            cursor = try cursor.adding(days: 1)
+        }
+        XCTAssertEqual(count, 366)
     }
 
     // MARK: - TrendInterval bounds
@@ -160,34 +223,45 @@ final class TrendIntervalTests: XCTestCase {
         XCTAssertEqual(month.through, try day("2026-08-31"))
         XCTAssertEqual(month.kind, .month)
 
-        let custom = TrendInterval.custom(
-            try CustomDateRange(start: try day("2026-01-01"), end: try day("2026-01-10"))
-        )
-        XCTAssertEqual(custom.from, try day("2026-01-01"))
-        XCTAssertEqual(custom.through, try day("2026-01-10"))
-        XCTAssertEqual(custom.kind, .custom)
+        let year = try TrendInterval.thisYear(today: day("2026-08-04"))
+        XCTAssertEqual(year.from, try day("2026-01-01"))
+        XCTAssertEqual(year.through, try day("2026-12-31"))
+        XCTAssertEqual(year.kind, .year)
+    }
+
+    /// The selector renders `allCases` directly, so the set of spans and their order are
+    /// stated once. Ascending span, most detail first.
+    func testTrendIntervalKindEnumeratesTheThreeSpansInAscendingOrder() {
+        XCTAssertEqual(TrendIntervalKind.allCases, [.week, .month, .year])
     }
 
     // MARK: - Navigation
 
     func testTrendIntervalPreviousAndNextDelegateToTheUnderlyingCase() throws {
         let week = try TrendInterval.thisWeek(today: day("2026-08-04"))
-        let previousWeek = try XCTUnwrap(week.previous())
-        XCTAssertEqual(previousWeek.from, try day("2026-07-27"))
+        XCTAssertEqual(try week.previous().from, try day("2026-07-27"))
 
         let month = try TrendInterval.thisMonth(today: day("2026-08-04"))
-        let nextMonth = try XCTUnwrap(month.next())
-        XCTAssertEqual(nextMonth.from, try day("2026-09-01"))
+        XCTAssertEqual(try month.next().from, try day("2026-09-01"))
+
+        let year = try TrendInterval.thisYear(today: day("2026-08-04"))
+        XCTAssertEqual(try year.previous().from, try day("2025-01-01"))
+        XCTAssertEqual(try year.previous().through, try day("2025-12-31"))
+        XCTAssertEqual(try year.next().from, try day("2027-01-01"))
     }
 
-    /// A custom range has no natural predecessor or successor — the selection UI is
-    /// expected to ask for a new range rather than this type guessing at one.
-    func testTrendIntervalPreviousAndNextAreNilForCustom() throws {
-        let custom = TrendInterval.custom(
-            try CustomDateRange(start: try day("2026-01-01"), end: try day("2026-01-10"))
-        )
-        XCTAssertNil(try custom.previous())
-        XCTAssertNil(try custom.next())
+    /// Every step preserves the shape it started in — a step never converts a year into
+    /// twelve months or a month into four weeks.
+    func testSteppingPreservesTheIntervalsKind() throws {
+        for interval in [
+            try TrendInterval.thisWeek(today: day("2026-08-04")),
+            try TrendInterval.thisMonth(today: day("2026-08-04")),
+            try TrendInterval.thisYear(today: day("2026-08-04")),
+        ] {
+            XCTAssertEqual(try interval.previous().kind, interval.kind)
+            XCTAssertEqual(try interval.next().kind, interval.kind)
+            XCTAssertEqual(try interval.previous().next(), interval)
+        }
     }
 
     // MARK: - Equality (Hashable/Equatable synthesis sanity)

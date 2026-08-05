@@ -5,13 +5,22 @@ import Observation
 /// Loads and resolves the score-colored calendar (FR-3.2, D4, D9, A6) for a selected
 /// `TrendInterval`. All it does is fetch the records `ScoreCalendar.resolve` needs
 /// and hand them over — see CLAUDE.md's "thin shell": the day-state decision itself
-/// lives entirely in `MaximizeCore.ScoreCalendar`, unit tested there.
+/// lives entirely in `MaximizeCore.ScoreCalendar`, and *where each day goes* in
+/// `MaximizeCore.ScoreCalendarLayout`, both unit tested there.
+///
+/// **What a year costs to load.** 365 days is one workout query, one ledger read per
+/// workout in the range, one plan-calendar read and one settings read — a few hundred
+/// small rows, and no `.externalStorage` blobs: nothing on this surface reads a
+/// heart-rate curve or a GPS track. The day-state resolution itself is a linear pass over
+/// the range. This is the surface a year scales on most easily; the drift section is the
+/// one that needed a different representation to stay affordable (see
+/// `DriftSectionRepresentation.loadsStoredHeartRateCurves`).
 @MainActor
 @Observable
 final class ScoreCalendarModel {
     enum LoadState: Equatable {
         case loading
-        case loaded([ScoreCalendarDay])
+        case loaded(ScoreCalendarLayout)
         /// A store could not be opened, or a read failed. See
         /// `WorkoutsListModel.LoadState.failed` for why this stays one case.
         case failed
@@ -67,13 +76,13 @@ final class ScoreCalendarModel {
             // weeks touching the interval, not merely the interval itself — the same
             // obligation `TalliesInput.workouts` documents, for the identical reason
             // (`RestDayBudgeting` ranks a missed day against the other misses in its
-            // week). Widen to week boundaries, then go through the one supported
-            // `TrendInterval` → `DateInterval` conversion rather than inventing a
-            // second one here.
-            let widenedStart = try interval.from.startOfTrainingWeek()
-            let widenedEnd = try interval.through.startOfTrainingWeek().adding(days: 6)
-            let widenedRange = TrendInterval.custom(try CustomDateRange(start: widenedStart, end: widenedEnd))
-            let workouts = try await workoutRepository.workouts(startingIn: widenedRange.dateInterval(in: timeZone))
+            // week). The widening is `MaximizeCore`'s, not this model's: before MAX-083
+            // it was three lines of date arithmetic here, ending in a throwaway
+            // `.custom` range built only to borrow the one supported day-range → instant
+            // -range conversion.
+            let workouts = try await workoutRepository.workouts(
+                startingIn: interval.trainingWeekAlignedDateInterval(in: timeZone)
+            )
 
             var scoreLedgers: [UUID: ScoreLedger] = [:]
             for workout in workouts {
@@ -94,7 +103,12 @@ final class ScoreCalendarModel {
                 planCalendar: planCalendar,
                 restDayBudget: settings.restDayBudget
             )
-            state = .loaded(days)
+            // Which arrangement this span gets, and the arrangement itself, are both
+            // decided in the core (`DashboardSpanPresentation.swift`,
+            // `ScoreCalendarLayout`). This model picks nothing.
+            state = .loaded(
+                try ScoreCalendarLayout.resolve(days, as: interval.kind.scoreCalendarRepresentation)
+            )
         } catch {
             state = .failed
         }

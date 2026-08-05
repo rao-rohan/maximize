@@ -1,30 +1,59 @@
 import Foundation
 
-/// Presentation-ready summary tiles for a selected `TrendInterval` (FR-3.4): mileage
-/// against the plan's arc, effective days, current streak, average score.
+/// Presentation-ready summary tiles for a selected `TrendInterval` (FR-3.4).
+///
+/// ## Which figures, and why that depends on the span (MAX-083)
+///
+/// FR-3.4 names four figures — mileage against the plan's arc, effective days, current
+/// streak, average score — and they are the right four for a week. Two of them stop
+/// carrying their meaning as the span grows, so the tile set is a function of
+/// `TrendIntervalKind.trendTileSet`:
+///
+/// | | week | month | year |
+/// |---|---|---|---|
+/// | distance | actual / arc target | actual / arc target | total, no target |
+/// | effective days | `4/5` | `18/22` | `68%`, denominator in the caption |
+/// | days run | — | `18` | `212` |
+/// | streak | ✓ | ✓ | ✓ |
+/// | avg score | ✓ | ✓ | ✓ |
+///
+/// `TrendTileSet`'s own documentation carries the argument for each change; the short
+/// version is that a year's arc "target" is a sum over ~52 different weekly asks that the
+/// plan probably did not govern for all of, and that a year's effective-day count is a
+/// ratio you want as a rate.
 ///
 /// ## What this reads versus what it computes
 ///
-/// Three of the four figures are **read, not recomputed**: `effectiveDays`, `streak`
-/// and `averageScore` come straight off a `Tallies` MAX-017 already computed (D2) —
-/// this type never re-derives a streak or an effective-day count itself, for the same
-/// reason `SummaryTileData` never re-derives a metric `DerivedMetrics` already stored.
+/// Four of the five figures are **read, not recomputed**: `effectiveDays`, `workoutDays`,
+/// `streak` and `averageScore` come straight off a `Tallies` MAX-017 already computed
+/// (D2) — this type never re-derives a streak, a workout-day count or an effective-day
+/// count itself, for the same reason `SummaryTileData` never re-derives a metric
+/// `DerivedMetrics` already stored. Changing the *presentation* of a tally with the span
+/// (a count at a week, a rate at a year) is a formatting decision over one stored figure,
+/// not a second measurement of it.
 ///
-/// `mileage` is different: it is not one of MAX-017's five rollups, and FR-3.4 asks for
-/// it against the plan's arc specifically, so it is computed here from two things nothing
-/// else already assembles together — the plan's per-day distance ask
-/// (`PlanCalendar.planDays(from:through:)`, D1: never a hardcoded target) and the
-/// workouts actually recorded in the interval. Both are read from stored records, the
-/// same rule `Tallies` itself follows; nothing here recomputes a metric that already
-/// lives in `DerivedMetrics` or `Tallies`.
+/// The distance figure is different: it is not one of MAX-017's five rollups, so it is
+/// computed here from records nothing else already assembles together — the plan's
+/// per-day distance ask (`PlanCalendar.planDays(from:through:)`, D1: never a hardcoded
+/// target) and the workouts actually recorded in the interval. Both are read from stored
+/// records, the same rule `Tallies` itself follows.
 ///
-/// ## Absent is not zero (rule 3)
+/// ## Absent is not zero (rule 3), at every span
 ///
 /// - `mileage` is nil when no plan governs *any* day in the interval — "no arc to
-///   measure against" is a different fact from "the arc asked for 0 km", and a nil tile
-///   is how that absence is rendered (omitted, never printed as "0.00 / 0.00").
+///   measure against" is a different fact from "the arc asked for 0 km" — and nil at a
+///   year, where the comparison is withheld deliberately rather than for want of data.
+/// - `totalDistance` is nil when the interval contains no workouts at all. A year with no
+///   runs in it has no distance to report; printing "0.00 km" would state a measurement
+///   nobody took. It is *not* nil merely because the runs recorded no distance — a year
+///   of treadmill runs with no distance recorded genuinely totals zero.
 /// - `effectiveDays` is nil exactly when `EffectiveDayTally.rate` is nil — nothing in
 ///   the interval was eligible to be effective at (see that type's own documentation).
+/// - `workoutDays` carries **no denominator**, at either span that shows it. "18 / 31"
+///   invites reading the month as 42% consistent, but the honest denominator is the days
+///   the athlete was training at all, and nothing stored knows that: a year the app was
+///   installed in October is not a year with nine bad months. The eligible-day
+///   denominator that *is* measured stays where it belongs, on `effectiveDays`.
 /// - `streak` is never nil. Zero is a real, measured streak — the day after a miss —
 ///   and omitting the tile would hide exactly the number a streak screen exists to show.
 /// - `averageScore` is nil when `Tallies.averageScore` is nil — nothing in the interval
@@ -36,16 +65,30 @@ public struct TrendTileData: Hashable, Sendable {
     /// without a second tile shape needing to exist.
     public typealias Tile = SummaryTileData.Tile
 
+    /// Which set of figures this was built for.
+    public let tileSet: TrendTileSet
+
     /// Actual distance covered vs. the plan's arc target for the interval, as
-    /// `"<actual> / <target>"` in the athlete's chosen `DistanceUnit` (MAX-047). Nil
-    /// when no plan governs any day in the interval — see the type's own documentation
-    /// for why that is not the same as a zero target.
+    /// `"<actual> / <target>"` in the athlete's chosen `DistanceUnit` (MAX-047). Nil at
+    /// `.annual`, and nil at the other spans when no plan governs any day in the
+    /// interval — see the type's own documentation for why neither is a zero.
     public let mileage: Tile?
 
-    /// `Tallies.effectiveDays`, as `"<effective>/<eligible>"` — the numerator/denominator
-    /// pair `EffectiveDayTally` itself prefers over a bare percentage, so the tile never
-    /// hides "out of how many chances". Nil when nothing was eligible.
+    /// Total distance covered in the interval, with no target beside it. Present only at
+    /// `.annual`, where the arc comparison is dropped. Nil when the interval holds no
+    /// workouts.
+    public let totalDistance: Tile?
+
+    /// `Tallies.effectiveDays`. At `.weekly`/`.monthly`, `"<effective>/<eligible>"` — the
+    /// numerator/denominator pair `EffectiveDayTally` itself prefers over a bare
+    /// percentage. At `.annual`, the rate, with the denominator moved into the caption so
+    /// it is still on screen. Nil when nothing was eligible.
     public let effectiveDays: Tile?
+
+    /// `Tallies.workoutDays` — distinct days with at least one recorded workout, scored
+    /// or not. Present at `.monthly` and `.annual` only, and deliberately without a
+    /// denominator.
+    public let workoutDays: Tile?
 
     /// `Tallies.currentStreak`. Always present — see the type's own documentation for
     /// why zero is a measurement here, not an absence.
@@ -55,6 +98,10 @@ public struct TrendTileData: Hashable, Sendable {
     public let averageScore: Tile?
 
     /// - Parameters:
+    ///   - kind: which span these tiles are for. The tile *set* follows from it via
+    ///     `TrendIntervalKind.trendTileSet` — the single table in
+    ///     `DashboardSpanPresentation.swift` — rather than being chosen at the call site,
+    ///     so the dashboard cannot show one span's calendar beside another span's tiles.
     ///   - tallies: MAX-017's rollup for this exact interval (`tallies.from`...
     ///     `tallies.through` is treated as the interval's own bounds — the caller is
     ///     expected to have built it from the same `TrendInterval` this displays).
@@ -74,42 +121,82 @@ public struct TrendTileData: Hashable, Sendable {
     ///     `SummaryTileData`'s initializer: every call site must say explicitly which
     ///     unit it means.
     public init(
+        kind: TrendIntervalKind,
         tallies: Tallies,
         workouts: [Workout],
         timeZone: TimeZone,
         planCalendar: PlanCalendar?,
         distanceUnit: DistanceUnit
     ) throws {
-        var planDays: [PlanDay] = []
-        if let planCalendar {
-            planDays = try planCalendar.planDays(from: tallies.from, through: tallies.through)
-        }
-        if planDays.isEmpty {
-            mileage = nil
-        } else {
-            let targetMeters = planDays.reduce(into: 0.0) { total, planDay in
-                total += planDay.scheduledSession.distanceMeters ?? 0
-            }
-            var actualMeters = 0.0
-            for workout in workouts {
-                let day = try workout.calendarDay(in: timeZone)
-                guard day >= tallies.from, day <= tallies.through else { continue }
-                actualMeters += workout.distanceMeters ?? 0
-            }
-            mileage = Tile(
-                value: "\(Self.formattedDistance(actualMeters, unit: distanceUnit)) / "
-                    + "\(Self.formattedDistance(targetMeters, unit: distanceUnit))",
-                caption: "\(distanceUnit.abbreviation) vs. arc"
-            )
+        let tileSet = kind.trendTileSet
+        self.tileSet = tileSet
+
+        // One pass over the widened input, narrowed to the interval's own days.
+        var actualMeters = 0.0
+        var workoutsInInterval = 0
+        for workout in workouts {
+            let day = try workout.calendarDay(in: timeZone)
+            guard day >= tallies.from, day <= tallies.through else { continue }
+            workoutsInInterval += 1
+            actualMeters += workout.distanceMeters ?? 0
         }
 
-        if tallies.effectiveDays.eligibleCount > 0 {
-            effectiveDays = Tile(
-                value: "\(tallies.effectiveDays.effectiveCount)/\(tallies.effectiveDays.eligibleCount)",
-                caption: "effective days"
-            )
+        switch tileSet {
+        case .weekly, .monthly:
+            var planDays: [PlanDay] = []
+            if let planCalendar {
+                planDays = try planCalendar.planDays(from: tallies.from, through: tallies.through)
+            }
+            if planDays.isEmpty {
+                mileage = nil
+            } else {
+                let targetMeters = planDays.reduce(into: 0.0) { total, planDay in
+                    total += planDay.scheduledSession.distanceMeters ?? 0
+                }
+                mileage = Tile(
+                    value: "\(Self.formattedDistance(actualMeters, unit: distanceUnit)) / "
+                        + "\(Self.formattedDistance(targetMeters, unit: distanceUnit))",
+                    caption: "\(distanceUnit.abbreviation) vs. arc"
+                )
+            }
+            totalDistance = nil
+
+        case .annual:
+            // The plan is deliberately not read at this span: there is no arc comparison
+            // to make, so there is no reason to resolve 365 plan days to build a tile
+            // that would not be shown.
+            mileage = nil
+            totalDistance = workoutsInInterval == 0
+                ? nil
+                : Tile(
+                    value: Self.formattedDistance(actualMeters, unit: distanceUnit),
+                    caption: "\(distanceUnit.abbreviation) total"
+                )
+        }
+
+        let tally = tallies.effectiveDays
+        if let rate = tally.rate {
+            switch tileSet {
+            case .weekly, .monthly:
+                effectiveDays = Tile(
+                    value: "\(tally.effectiveCount)/\(tally.eligibleCount)",
+                    caption: "effective days"
+                )
+            case .annual:
+                effectiveDays = Tile(
+                    value: Self.formattedRate(rate),
+                    caption: "effective, of \(tally.eligibleCount) eligible days"
+                )
+            }
         } else {
             effectiveDays = nil
+        }
+
+        switch tileSet {
+        case .weekly:
+            workoutDays = nil
+        case .monthly, .annual:
+            workoutDays = Tile(value: "\(tallies.workoutDays)", caption: "days run")
         }
 
         streak = Tile(value: "\(tallies.currentStreak)", caption: "day streak")
@@ -119,10 +206,11 @@ public struct TrendTileData: Hashable, Sendable {
         }
     }
 
-    /// Every present tile, in FR-3.4's own order: mileage vs. arc, effective days,
-    /// streak, average score.
+    /// Every present tile, in FR-3.4's own order — the distance figure, then
+    /// effectiveness, then consistency, then streak, then average score — with the tiles
+    /// this span does not carry simply absent.
     public var tiles: [Tile] {
-        [mileage, effectiveDays, streak, averageScore].compactMap { $0 }
+        [mileage, totalDistance, effectiveDays, workoutDays, streak, averageScore].compactMap { $0 }
     }
 
     // MARK: - Formatting
@@ -134,9 +222,18 @@ public struct TrendTileData: Hashable, Sendable {
     /// printed here and one printed on the per-workout tiles must never round
     /// differently, and must convert to the same unit the same way. Delegated rather
     /// than duplicated (both live in `MaximizeCore`, so the internal helper is directly
-    /// reachable).
+    /// reachable). A year's total is a wide number in this format and stays in it
+    /// anyway: one rounding rule for distance across the whole app is worth more than a
+    /// shorter string on one tile.
     private static func formattedDistance(_ meters: Double, unit: DistanceUnit) -> String {
         SummaryTileData.formattedDistance(meters, unit: unit)
+    }
+
+    /// A whole-percent rate. No decimal: at a year the denominator is in the hundreds, so
+    /// a tenth of a percent is a fraction of one day and reads as precision nobody
+    /// measured.
+    private static func formattedRate(_ rate: Double) -> String {
+        "\(Int((rate * 100).rounded()))%"
     }
 
     private static func formattedAverageScore(_ score: Double) -> String {

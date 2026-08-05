@@ -5,30 +5,44 @@ import MaximizeCore
 ///
 /// Mirrors `WorkoutDisplayFormatting`'s own doc comment: which shape a `TrendInterval`
 /// is, and its bounds, are already decided by `MaximizeCore`; this only turns them
-/// into copy, so there is exactly one place the selector and any future consumer
-/// (MAX-061/062/063 sections showing "which interval am I looking at") can drift on
-/// wording, and it is this file.
+/// into copy, so there is exactly one place the selector and every dashboard section
+/// showing "which interval am I looking at" can drift on wording, and it is this file.
 enum TrendIntervalFormatting {
 
-    /// "Aug 3 – Aug 9" for a week or custom range, "Aug 3, 2025 – Jan 2, 2026" when the
-    /// range crosses a year boundary, "August 2026" for a month.
+    /// The segment title and the noun in "Previous week" / "Next year".
+    static func name(for kind: TrendIntervalKind) -> String {
+        switch kind {
+        case .week: return "Week"
+        case .month: return "Month"
+        case .year: return "Year"
+        }
+    }
+
+    /// "Aug 3 – Aug 9" for a week, "Aug 3, 2025 – Jan 2, 2026" when the week crosses a
+    /// year boundary, "August 2026" for a month, "2026" for a year.
     static func label(for interval: TrendInterval) -> String {
         switch interval {
+        case .year(let year):
+            return String(year.year)
         case .month(let month):
             return monthFormatter.string(from: date(for: month.start))
         case .week(let week):
             return rangeLabel(from: week.start, through: week.end)
-        case .custom(let range):
-            return rangeLabel(from: range.start, through: range.end)
         }
+    }
+
+    /// "Aug" — the month ticks along the top of the year heatmap
+    /// (`ScoreCalendarHeatmap.Column.monthStart`).
+    static func shortMonthName(for day: CalendarDay) -> String {
+        shortMonthFormatter.string(from: date(for: day))
     }
 
     private static func rangeLabel(from start: CalendarDay, through end: CalendarDay) -> String {
         if start.year == end.year {
             return "\(dayFormatter.string(from: date(for: start))) – \(dayFormatter.string(from: date(for: end)))"
         }
-        // Crossing a year boundary (a week spanning New Year's, or a custom range) —
-        // spell out both years so the label is never ambiguous about which one.
+        // Crossing a year boundary (a week spanning New Year's) — spell out both years so
+        // the label is never ambiguous about which one.
         let startText = "\(dayFormatter.string(from: date(for: start))), \(start.year)"
         let endText = "\(dayFormatter.string(from: date(for: end))), \(end.year)"
         return "\(startText) – \(endText)"
@@ -40,12 +54,10 @@ enum TrendIntervalFormatting {
     /// device's own time zone.
     ///
     /// This is a one-way bridge for *display only* — its result is fed straight to a
-    /// `DateFormatter` and never read back into a `CalendarDay`. `TrendIntervalSelectionModel`
-    /// has its own near-identical helper for seeding its `DatePicker`s rather than
-    /// reusing this one, precisely because *that* result **is** read back (when the
-    /// athlete edits the picker) and must round-trip through the model's real
-    /// `timeZone`, not GMT — see that type's own documentation for why reusing this
-    /// one there would be a latent bug in an extreme-offset zone.
+    /// `DateFormatter` and never read back into a `CalendarDay`. Nothing in the app
+    /// round-trips a picked date any more: MAX-083 removed the custom range, which was
+    /// the only control that did, along with the near-identical seeding helper
+    /// `TrendIntervalSelectionModel` kept for it.
     private static func date(for day: CalendarDay) -> Date {
         var components = DateComponents()
         components.year = day.year
@@ -64,6 +76,13 @@ enum TrendIntervalFormatting {
     private static let monthFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "LLLL yyyy"
+        formatter.timeZone = .gmt
+        return formatter
+    }()
+
+    private static let shortMonthFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "LLL"
         formatter.timeZone = .gmt
         return formatter
     }()

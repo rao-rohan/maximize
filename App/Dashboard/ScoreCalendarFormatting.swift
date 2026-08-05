@@ -60,7 +60,20 @@ enum ScoreCalendarFormatting {
     /// - Parameter date: for the leading "day N" clause; the state describes the
     ///   rest of the sentence.
     static func accessibilityLabel(for state: ScoreCalendarDayState, on date: CalendarDay) -> String {
-        let dayText = "Day \(date.day)"
+        label(for: state, prefixedBy: "Day \(date.day)")
+    }
+
+    /// The same sentence, dated with its month.
+    ///
+    /// The year heatmap's cells carry no printed date at all, so "Day 14" would name one
+    /// of twelve possible days — VoiceOver is the *only* channel that can disambiguate a
+    /// heatmap cell, which makes it the one place the extra words are worth their
+    /// length. See `ScoreCalendarRepresentation.weekColumnHeatmap`.
+    static func heatmapAccessibilityLabel(for state: ScoreCalendarDayState, on date: CalendarDay) -> String {
+        label(for: state, prefixedBy: "\(TrendIntervalFormatting.shortMonthName(for: date)) \(date.day)")
+    }
+
+    private static func label(for state: ScoreCalendarDayState, prefixedBy dayText: String) -> String {
         switch state {
         case .scored(let band, let activityType):
             return "\(dayText): \(WorkoutDisplayFormatting.describe(activityType)), \(bandLabel(band))."

@@ -5,7 +5,8 @@ import Observation
 /// Loads `TrendTileData` (FR-3.4) for the dashboard's selected `TrendInterval`. All of
 /// this class does is fetch the records `TalliesCalculator` and `TrendTileData` need
 /// and hand the result to the view — see CLAUDE.md's "thin shell": no date arithmetic,
-/// no tallying, no formatting happens here.
+/// no tallying, no formatting happens here, and since MAX-083 no choice about *which*
+/// figures the span calls for either.
 @MainActor
 @Observable
 final class TrendTilesModel {
@@ -62,16 +63,13 @@ final class TrendTilesModel {
             // `TalliesInput.workouts` must cover the whole Monday-first weeks touching
             // the interval, not merely the interval itself (C1, see that type's own
             // documentation) — so the fetch is widened to those weeks before anything
-            // else runs. Routed through `TrendInterval.dateInterval(in:)`, the single
-            // sanctioned conversion (MAX-060 follow-up), rather than a second one built
-            // here: wrapping the widened bounds back into a `TrendInterval` costs
-            // nothing and keeps every day-range-to-instant-range conversion in the app
-            // going through the same door.
-            let expandedStart = try interval.from.startOfTrainingWeek()
-            let expandedEnd = try interval.through.startOfTrainingWeek().adding(days: 6)
-            let expandedRange = try CustomDateRange(start: expandedStart, end: expandedEnd)
-            let expandedDateInterval = try TrendInterval.custom(expandedRange).dateInterval(in: timeZone)
-            let workouts = try await workoutRepository.workouts(startingIn: expandedDateInterval)
+            // else runs. The widening lives in `MaximizeCore` (MAX-083); before that it
+            // was three lines of date arithmetic here, ending in a throwaway `.custom`
+            // range built only to borrow the one sanctioned day-range → instant-range
+            // conversion.
+            let workouts = try await workoutRepository.workouts(
+                startingIn: interval.trainingWeekAlignedDateInterval(in: timeZone)
+            )
 
             var scoreLedgers: [UUID: ScoreLedger] = [:]
             for workout in workouts {
@@ -95,6 +93,10 @@ final class TrendTilesModel {
             // `tallies.from...tallies.through` itself (see its own documentation), so
             // it is handed the same set rather than a second, narrower fetch.
             let tileData = try TrendTileData(
+                // Which figures this span's tiles measure follows from the kind, through
+                // the one table in `DashboardSpanPresentation.swift`. This model does not
+                // choose a tile set — passing the kind is the whole of its involvement.
+                kind: interval.kind,
                 tallies: tallies,
                 workouts: workouts,
                 timeZone: timeZone,

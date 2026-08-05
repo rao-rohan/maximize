@@ -1,14 +1,16 @@
 import SwiftUI
 import MaximizeCore
 
-/// FR-3.4: the interval-scoped summary tiles — mileage vs. arc, effective days,
-/// streak, average score — for the dashboard's selected `TrendInterval`.
+/// FR-3.4: the interval-scoped summary tiles for the dashboard's selected
+/// `TrendInterval`.
 ///
 /// ## What this view does and does not decide
 ///
 /// Every string here is precomputed by `MaximizeCore.TrendTileData` (MAX-063): which
-/// figures are present, their FR-3.4 order, and every formatted value and caption. This
-/// view only lays `TrendTileData.tiles` out in a grid on design-system tokens, mirroring
+/// figures are present — **including which ones this span measures at all**, which
+/// changes between a week, a month and a year (MAX-083, see `TrendTileSet`) — their
+/// FR-3.4 order, and every formatted value and caption. This view is unchanged by that:
+/// it lays `TrendTileData.tiles` out in a grid on design-system tokens, mirroring
 /// `SummaryTilesView`'s (MAX-045) tile shape and layout so the two read as one visual
 /// language rather than two competing ones — no rounding, no unit conversion, no
 /// threshold comparison happens here.

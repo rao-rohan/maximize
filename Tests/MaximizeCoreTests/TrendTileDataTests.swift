@@ -33,6 +33,7 @@ final class TrendTileDataTests: XCTestCase {
     private func tallies(
         from: String,
         through: String,
+        workoutDays: Int = 0,
         effectiveDays: EffectiveDayTally? = nil,
         averageScore: Double? = nil,
         currentStreak: Int = 0
@@ -41,7 +42,7 @@ final class TrendTileDataTests: XCTestCase {
         return try Tallies(
             from: start,
             through: try day(through),
-            workoutDays: 0,
+            workoutDays: workoutDays,
             effectiveDays: try effectiveDays ?? EffectiveDayTally(effectiveCount: 0, eligibleCount: 0),
             averageScore: averageScore,
             currentStreak: currentStreak,
@@ -69,7 +70,8 @@ final class TrendTileDataTests: XCTestCase {
         ]
 
         let data = try TrendTileData(
-            tallies: tallies, workouts: workouts, timeZone: .gmt, planCalendar: calendar, distanceUnit: .kilometers
+            kind: .week, tallies: tallies,
+            workouts: workouts, timeZone: .gmt, planCalendar: calendar, distanceUnit: .kilometers
         )
 
         XCTAssertEqual(data.mileage?.value, "25.50 / 40.00")
@@ -89,7 +91,8 @@ final class TrendTileDataTests: XCTestCase {
         ]
 
         let data = try TrendTileData(
-            tallies: tallies, workouts: workouts, timeZone: .gmt, planCalendar: calendar, distanceUnit: .miles
+            kind: .week, tallies: tallies,
+            workouts: workouts, timeZone: .gmt, planCalendar: calendar, distanceUnit: .miles
         )
 
         XCTAssertEqual(data.mileage?.value, "15.84 / 24.85")
@@ -103,7 +106,8 @@ final class TrendTileDataTests: XCTestCase {
         let tallies = try tallies(from: "2026-01-05", through: "2026-01-11")
 
         let data = try TrendTileData(
-            tallies: tallies, workouts: [], timeZone: .gmt, planCalendar: calendar, distanceUnit: .kilometers
+            kind: .week, tallies: tallies,
+            workouts: [], timeZone: .gmt, planCalendar: calendar, distanceUnit: .kilometers
         )
 
         XCTAssertEqual(data.mileage?.value, "0.00 / 40.00")
@@ -115,7 +119,8 @@ final class TrendTileDataTests: XCTestCase {
         let tallies = try tallies(from: "2026-01-05", through: "2026-01-11")
 
         let data = try TrendTileData(
-            tallies: tallies, workouts: [], timeZone: .gmt, planCalendar: nil, distanceUnit: .kilometers
+            kind: .week, tallies: tallies,
+            workouts: [], timeZone: .gmt, planCalendar: nil, distanceUnit: .kilometers
         )
 
         XCTAssertNil(data.mileage)
@@ -129,7 +134,8 @@ final class TrendTileDataTests: XCTestCase {
         let tallies = try tallies(from: "2025-12-01", through: "2025-12-07")
 
         let data = try TrendTileData(
-            tallies: tallies, workouts: [], timeZone: .gmt, planCalendar: calendar, distanceUnit: .kilometers
+            kind: .week, tallies: tallies,
+            workouts: [], timeZone: .gmt, planCalendar: calendar, distanceUnit: .kilometers
         )
 
         XCTAssertNil(data.mileage)
@@ -149,7 +155,8 @@ final class TrendTileDataTests: XCTestCase {
         ]
 
         let data = try TrendTileData(
-            tallies: tallies, workouts: workouts, timeZone: .gmt, planCalendar: calendar, distanceUnit: .kilometers
+            kind: .week, tallies: tallies,
+            workouts: workouts, timeZone: .gmt, planCalendar: calendar, distanceUnit: .kilometers
         )
 
         XCTAssertEqual(data.mileage?.value, "8.00 / 40.00")
@@ -165,7 +172,8 @@ final class TrendTileDataTests: XCTestCase {
         )
 
         let data = try TrendTileData(
-            tallies: tallies, workouts: [], timeZone: .gmt, planCalendar: nil, distanceUnit: .kilometers
+            kind: .week, tallies: tallies,
+            workouts: [], timeZone: .gmt, planCalendar: nil, distanceUnit: .kilometers
         )
 
         XCTAssertEqual(data.effectiveDays?.value, "3/5")
@@ -180,7 +188,8 @@ final class TrendTileDataTests: XCTestCase {
         )
 
         let data = try TrendTileData(
-            tallies: tallies, workouts: [], timeZone: .gmt, planCalendar: nil, distanceUnit: .kilometers
+            kind: .week, tallies: tallies,
+            workouts: [], timeZone: .gmt, planCalendar: nil, distanceUnit: .kilometers
         )
 
         XCTAssertNil(data.effectiveDays)
@@ -192,7 +201,8 @@ final class TrendTileDataTests: XCTestCase {
         let tallies = try tallies(from: "2026-01-05", through: "2026-01-11", currentStreak: 0)
 
         let data = try TrendTileData(
-            tallies: tallies, workouts: [], timeZone: .gmt, planCalendar: nil, distanceUnit: .kilometers
+            kind: .week, tallies: tallies,
+            workouts: [], timeZone: .gmt, planCalendar: nil, distanceUnit: .kilometers
         )
 
         XCTAssertEqual(data.streak.value, "0")
@@ -203,7 +213,8 @@ final class TrendTileDataTests: XCTestCase {
         let tallies = try tallies(from: "2026-01-05", through: "2026-01-11", currentStreak: 7)
 
         let data = try TrendTileData(
-            tallies: tallies, workouts: [], timeZone: .gmt, planCalendar: nil, distanceUnit: .kilometers
+            kind: .week, tallies: tallies,
+            workouts: [], timeZone: .gmt, planCalendar: nil, distanceUnit: .kilometers
         )
 
         XCTAssertEqual(data.streak.value, "7")
@@ -215,7 +226,8 @@ final class TrendTileDataTests: XCTestCase {
         let tallies = try tallies(from: "2026-01-05", through: "2026-01-11", averageScore: 82.456)
 
         let data = try TrendTileData(
-            tallies: tallies, workouts: [], timeZone: .gmt, planCalendar: nil, distanceUnit: .kilometers
+            kind: .week, tallies: tallies,
+            workouts: [], timeZone: .gmt, planCalendar: nil, distanceUnit: .kilometers
         )
 
         XCTAssertEqual(data.averageScore?.value, "82.5")
@@ -226,7 +238,8 @@ final class TrendTileDataTests: XCTestCase {
         let tallies = try tallies(from: "2026-01-05", through: "2026-01-11", averageScore: nil)
 
         let data = try TrendTileData(
-            tallies: tallies, workouts: [], timeZone: .gmt, planCalendar: nil, distanceUnit: .kilometers
+            kind: .week, tallies: tallies,
+            workouts: [], timeZone: .gmt, planCalendar: nil, distanceUnit: .kilometers
         )
 
         XCTAssertNil(data.averageScore)
@@ -247,7 +260,7 @@ final class TrendTileDataTests: XCTestCase {
         )
 
         let data = try TrendTileData(
-            tallies: tallies,
+            kind: .week, tallies: tallies,
             workouts: [try workout(on: "2026-01-06", distanceMeters: 8_000)],
             timeZone: .gmt,
             planCalendar: calendar,
@@ -263,9 +276,191 @@ final class TrendTileDataTests: XCTestCase {
         let tallies = try tallies(from: "2026-01-05", through: "2026-01-11", averageScore: 70, currentStreak: 1)
 
         let data = try TrendTileData(
-            tallies: tallies, workouts: [], timeZone: .gmt, planCalendar: nil, distanceUnit: .kilometers
+            kind: .week, tallies: tallies,
+            workouts: [], timeZone: .gmt, planCalendar: nil, distanceUnit: .kilometers
         )
 
         XCTAssertEqual(data.tiles.map(\.caption), ["day streak", "avg score"])
+    }
+
+    // MARK: - The tile set follows the span (MAX-083)
+
+    /// The single table in `DashboardSpanPresentation.swift`, pinned. A view choosing a
+    /// tile set for itself is exactly what this mapping exists to prevent.
+    func testEachSpanMapsToItsOwnTileSet() {
+        XCTAssertEqual(TrendIntervalKind.week.trendTileSet, .weekly)
+        XCTAssertEqual(TrendIntervalKind.month.trendTileSet, .monthly)
+        XCTAssertEqual(TrendIntervalKind.year.trendTileSet, .annual)
+    }
+
+    /// A month keeps the arc comparison and gains a consistency figure.
+    func testAMonthAddsDaysRunAndKeepsTheArcComparison() throws {
+        let calendar = try PlanCalendar([try Fixture.plan()])
+        let tallies = try tallies(
+            from: "2026-01-01",
+            through: "2026-01-31",
+            workoutDays: 18,
+            effectiveDays: try EffectiveDayTally(effectiveCount: 12, eligibleCount: 20),
+            averageScore: 74,
+            currentStreak: 3
+        )
+
+        let data = try tileData(
+            kind: .month,
+            workouts: [try workout(on: "2026-01-06", distanceMeters: 8_000)],
+            tallies: tallies,
+            planCalendar: calendar
+        )
+
+        XCTAssertNotNil(data.mileage)
+        XCTAssertNil(data.totalDistance)
+        XCTAssertEqual(data.effectiveDays?.value, "12/20")
+        XCTAssertEqual(data.workoutDays?.value, "18")
+        XCTAssertEqual(data.workoutDays?.caption, "days run")
+        XCTAssertEqual(
+            data.tiles.map(\.caption),
+            ["km vs. arc", "effective days", "days run", "day streak", "avg score"]
+        )
+    }
+
+    /// A week does **not** get the days-run tile: four days out of seven is already
+    /// legible in the calendar row directly above the tiles.
+    func testAWeekDoesNotCarryTheDaysRunTile() throws {
+        let tallies = try tallies(from: "2026-01-05", through: "2026-01-11", workoutDays: 4)
+
+        let data = try TrendTileData(
+            kind: .week, tallies: tallies,
+            workouts: [], timeZone: .gmt,
+            planCalendar: nil, distanceUnit: .kilometers
+        )
+
+        XCTAssertNil(data.workoutDays)
+    }
+
+    /// The year drops the arc comparison for a bare total, and reports effectiveness as
+    /// a rate with its denominator moved into the caption.
+    func testAYearReportsTotalsAndRatesInsteadOfArcComparisons() throws {
+        let calendar = try PlanCalendar([try Fixture.plan()])
+        let tallies = try tallies(
+            from: "2026-01-01",
+            through: "2026-12-31",
+            workoutDays: 212,
+            effectiveDays: try EffectiveDayTally(effectiveCount: 211, eligibleCount: 310),
+            averageScore: 79.44,
+            currentStreak: 5
+        )
+
+        let data = try tileData(
+            kind: .year,
+            workouts: [
+                try workout(on: "2026-01-06", distanceMeters: 8_000),
+                try workout(on: "2026-07-19", distanceMeters: 21_097),
+            ],
+            tallies: tallies,
+            planCalendar: calendar
+        )
+
+        // Withheld even though a plan governs part of the year — see `TrendTileSet.annual`.
+        XCTAssertNil(data.mileage)
+        XCTAssertEqual(data.totalDistance?.value, "29.10")
+        XCTAssertEqual(data.totalDistance?.caption, "km total")
+        // 211/310 = 68.06%.
+        XCTAssertEqual(data.effectiveDays?.value, "68%")
+        XCTAssertEqual(data.effectiveDays?.caption, "effective, of 310 eligible days")
+        XCTAssertEqual(data.workoutDays?.value, "212")
+        XCTAssertEqual(
+            data.tiles.map(\.caption),
+            ["km total", "effective, of 310 eligible days", "days run", "day streak", "avg score"]
+        )
+    }
+
+    /// Absent is not zero at a year either: a year holding no runs has no distance to
+    /// report, and "0.00 km" would state a measurement nobody took.
+    func testAYearWithNoRunsHasNoTotalDistanceTile() throws {
+        let tallies = try tallies(from: "2026-01-01", through: "2026-12-31")
+
+        let data = try tileData(kind: .year, workouts: [], tallies: tallies, planCalendar: nil)
+
+        XCTAssertNil(data.totalDistance)
+        XCTAssertNil(data.mileage)
+    }
+
+    /// A year of runs that recorded no distance is a genuine zero — the distinction the
+    /// test above depends on. Treadmill runs with no distance sample are the real case.
+    func testAYearOfDistancelessRunsTotalsZeroRatherThanBeingAbsent() throws {
+        let tallies = try tallies(from: "2026-01-01", through: "2026-12-31")
+
+        let data = try tileData(
+            kind: .year,
+            workouts: [try workout(on: "2026-03-02", distanceMeters: nil)],
+            tallies: tallies,
+            planCalendar: nil
+        )
+
+        XCTAssertEqual(data.totalDistance?.value, "0.00")
+    }
+
+    /// The C1 widening applies at every span: a workout in the trailing partial week of
+    /// December must not be counted into the year's total.
+    func testAYearsTotalExcludesWorkoutsOutsideItsOwnDays() throws {
+        let tallies = try tallies(from: "2026-01-01", through: "2026-12-31")
+
+        let data = try tileData(
+            kind: .year,
+            workouts: [
+                try workout(on: "2026-06-01", distanceMeters: 10_000), // inside
+                try workout(on: "2025-12-29", distanceMeters: 50_000), // widened week before
+                try workout(on: "2027-01-02", distanceMeters: 50_000), // widened week after
+            ],
+            tallies: tallies,
+            planCalendar: nil
+        )
+
+        XCTAssertEqual(data.totalDistance?.value, "10.00")
+    }
+
+    /// A rate rounds to the nearest whole percent — no decimal, since at a year's
+    /// denominator a tenth of a percent is a fraction of a day.
+    func testTheAnnualEffectiveRateRoundsToAWholePercent() throws {
+        let tallies = try tallies(
+            from: "2026-01-01",
+            through: "2026-12-31",
+            effectiveDays: try EffectiveDayTally(effectiveCount: 2, eligibleCount: 3)
+        )
+
+        let data = try tileData(kind: .year, workouts: [], tallies: tallies, planCalendar: nil)
+
+        XCTAssertEqual(data.effectiveDays?.value, "67%")
+    }
+
+    /// Nothing eligible is still an absence at a year — never "0%", which would read as
+    /// "you failed every session" rather than "there was nothing to judge".
+    func testTheAnnualEffectiveTileIsAbsentWhenNothingWasEligible() throws {
+        let tallies = try tallies(
+            from: "2026-01-01",
+            through: "2026-12-31",
+            effectiveDays: try EffectiveDayTally(effectiveCount: 0, eligibleCount: 0)
+        )
+
+        let data = try tileData(kind: .year, workouts: [], tallies: tallies, planCalendar: nil)
+
+        XCTAssertNil(data.effectiveDays)
+    }
+
+    /// Convenience for the span tests: the two parameters they never vary.
+    private func tileData(
+        kind: TrendIntervalKind,
+        workouts: [Workout],
+        tallies: Tallies,
+        planCalendar: PlanCalendar?
+    ) throws -> TrendTileData {
+        try TrendTileData(
+            kind: kind,
+            tallies: tallies,
+            workouts: workouts,
+            timeZone: .gmt,
+            planCalendar: planCalendar,
+            distanceUnit: .kilometers
+        )
     }
 }
