@@ -497,7 +497,7 @@ feature was governed by a plan that could not exist).
 | MAX-084 | Fix score-band and chart contrast; resolve A7 | MAX-082 | Sonnet ✅ |
 | MAX-085 | **The tab bar, once**: Plan becomes a third tab, iOS 26 `Tab` builder, `.tint()`, surface elevation, Liquid Glass chrome | MAX-082, Owner | **Opus** |
 | MAX-086 | Wire `AppearancePreference` — a setting that silently does nothing | MAX-082 | Sonnet ✅ |
-| MAX-087 | A non-hue channel for the year heatmap's 6pt cells | MAX-084 | Sonnet |
+| MAX-087 | A non-hue channel for the year heatmap's 6pt cells | MAX-084 | Sonnet ✅ |
 | MAX-105 | **The plan on the dashboard calendar** — scheduled beneath actual | Owner | **Opus** |
 | MAX-106 | The UI standard, written into `CLAUDE.md` | Owner | Sonnet ✅ |
 | MAX-090 | Chat-first product spec: plan generation and Q&A through chat | Owner | **Opus** 🔒 ✅ |
@@ -543,6 +543,24 @@ while streaming, which silently resigned focus and dropped the keyboard on every
 Chat moved to its own sheet with the composer as a bottom `safeAreaInset`. **None of it
 is verified** — CI has no simulator and cannot observe an interaction; see the PR's device
 list.
+
+**MAX-087.** The design review's T6, and MAX-084's own doc comments predicted it: the
+corner pip MAX-084 added to close `.effective`/`.marginal` at 1.02:1 needs a cell large
+enough to hold a corner, and the year heatmap's mark is ~6pt with a ~1.5pt gap to its
+neighbour — no corner to spare. `ScoreBand.heatmapMark` (new, beside `ScoreBand.mark` in
+`Sources/MaximizeCore/Accessibility/`) gives each band a size instead of a shape: a
+scored day's fill draws at a fraction of the mark's footprint rather than always edge to
+edge, `.effective` full, `.marginal` and `.ineffective` progressively smaller. Chosen
+over a lightness/saturation channel because that one is a colour value and Increase
+Contrast is specifically the thing this ticket has to survive; chosen over a shape
+channel (rounded square vs. circle) because a corner-radius difference is expected to
+erode faster than an area difference once anti-aliasing gets involved at this size —
+though nobody working the ticket had a device to confirm either judgement.
+`WCAGContrastTests.testNoTwoScoreBandsAreDistinguishedByHueAlone` was extended, not
+duplicated: it now checks both `ScoreBandMark` (day grid) and `ScoreBandHeatmapMark`
+(year heatmap) as two representations of the same rule. **Needs device verification** —
+see the PR: whether a ~2.4pt inset mark actually reads as smaller rather than as noise
+is the one thing here only a phone can answer.
 
 **MAX-086 is split, and what remains is a real defect rather than polish.** It was filed
 off the design review as "absence-string voice; wire `AppearancePreference`" — two

@@ -174,49 +174,76 @@ final class DesignPaletteContrastTests: XCTestCase {
     /// all three bands land within 1.04:1 of each other.
     ///
     /// The rule asserted here is the one FR-3.2's calendar actually needs: **no two
-    /// bands may be left distinguishable by hue alone.** A pair passes if either its
-    /// fills separate by WCAG 1.4.11's 3:1 non-text minimum — enough that luminance
-    /// alone tells them apart — or the two carry different `ScoreBandMark`s. Today
-    /// every pair passes on the mark, in all four appearances; that is precisely the
-    /// point of the mark. A future edit that collapses two bands onto one mark, or that
-    /// adds a fourth band without one, fails here rather than waiting for a reviewer
-    /// with a colour-blindness filter.
+    /// bands may be left distinguishable by hue alone, at the size they are actually
+    /// drawn.** A pair passes at a given representation if either its fills separate by
+    /// WCAG 1.4.11's 3:1 non-text minimum — enough that luminance alone tells them apart
+    /// — or the two carry different non-colour marks *for that representation*. Today
+    /// every pair passes on its mark, in every representation and every appearance;
+    /// that is precisely the point of the mark. A future edit that collapses two bands
+    /// onto one mark, or that adds a fourth band without one, fails here rather than
+    /// waiting for a reviewer with a colour-blindness filter.
+    ///
+    /// **Two representations, not one**, since MAX-087: `ScoreBandMark` (MAX-084) is
+    /// what `ScoreCalendarDayCell` actually draws in the day grid (week and month
+    /// spans); `ScoreBandHeatmapMark` (MAX-087) is what `ScoreCalendarHeatmapCell`
+    /// actually draws at year density, where there is no room for a corner pip. Testing
+    /// only the day grid's mark here — as this suite did before MAX-087 — would let the
+    /// heatmap's channel silently disappear (or silently collapse two bands onto the
+    /// same size) with nothing to catch it, exactly the gap that shipped in MAX-083 and
+    /// this ticket exists to close.
+    private var representations: [(name: String, marksDiffer: (ScoreBand, ScoreBand) -> Bool)] {
+        [
+            ("day grid, corner pip (MAX-084)", { $0.mark != $1.mark }),
+            ("year heatmap, inset size (MAX-087)", { $0.heatmapMark != $1.heatmapMark }),
+        ]
+    }
+
     func testNoTwoScoreBandsAreDistinguishedByHueAlone() {
         let bands = ScoreBand.allCases
-        for (indexA, bandA) in bands.enumerated() {
-            for bandB in bands[(indexA + 1)...] {
-                let inkA = ink(for: bandA)
-                let inkB = ink(for: bandB)
-                for appearance in Appearance.allCases {
-                    let ratio = WCAGContrast.contrastRatio(
-                        appearance.token(inkA),
-                        appearance.token(inkB)
-                    )
-                    let separatedByLuminance = WCAGContrast.meetsAA(ratio, .largeTextOrNonText)
-                    let separatedByShape = bandA.mark != bandB.mark
-                    XCTAssertTrue(
-                        separatedByLuminance || separatedByShape,
-                        """
-                        \(bandA.rawValue) and \(bandB.rawValue) measure \
-                        \(String(format: "%.2f", ratio)):1 against each other \
-                        [\(appearance.rawValue)] and share the mark \
-                        \(bandA.mark.rawValue) — nothing but hue tells them apart.
-                        """
-                    )
+        for representation in representations {
+            for (indexA, bandA) in bands.enumerated() {
+                for bandB in bands[(indexA + 1)...] {
+                    let inkA = ink(for: bandA)
+                    let inkB = ink(for: bandB)
+                    for appearance in Appearance.allCases {
+                        let ratio = WCAGContrast.contrastRatio(
+                            appearance.token(inkA),
+                            appearance.token(inkB)
+                        )
+                        let separatedByLuminance = WCAGContrast.meetsAA(ratio, .largeTextOrNonText)
+                        let separatedByShape = representation.marksDiffer(bandA, bandB)
+                        XCTAssertTrue(
+                            separatedByLuminance || separatedByShape,
+                            """
+                            \(bandA.rawValue) and \(bandB.rawValue) measure \
+                            \(String(format: "%.2f", ratio)):1 against each other \
+                            [\(appearance.rawValue), \(representation.name)] — \
+                            nothing but hue tells them apart.
+                            """
+                        )
+                    }
                 }
             }
         }
     }
 
-    /// The mark is only a channel if the three values are actually different. Stated
-    /// separately from the rule above so a regression reads as "two bands share a mark"
-    /// rather than as a contrast failure.
+    /// A mark is only a channel if the three values it can take are actually
+    /// different — stated separately from the rule above, for both representations, so
+    /// a regression reads as "two bands share a mark" rather than as a contrast
+    /// failure.
     func testEveryScoreBandCarriesItsOwnMark() {
         let marks = ScoreBand.allCases.map(\.mark)
         XCTAssertEqual(
             Set(marks).count,
             ScoreBand.allCases.count,
-            "Two bands share a mark: \(marks.map(\.rawValue))"
+            "Two bands share a corner-pip mark: \(marks.map(\.rawValue))"
+        )
+
+        let heatmapMarks = ScoreBand.allCases.map(\.heatmapMark)
+        XCTAssertEqual(
+            Set(heatmapMarks).count,
+            ScoreBand.allCases.count,
+            "Two bands share a heatmap mark: \(heatmapMarks.map(\.rawValue))"
         )
     }
 

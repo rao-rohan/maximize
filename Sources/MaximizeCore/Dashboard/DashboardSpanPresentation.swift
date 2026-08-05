@@ -88,13 +88,15 @@ public enum ScoreCalendarRepresentation: Hashable, Sendable, CaseIterable {
     /// which separates it from `.ineffective` without hue, and every cell keeps its
     /// full-sentence VoiceOver label, dated with its month.
     ///
-    /// `.effective` versus `.marginal` is carried by hue alone here — but note that
-    /// `docs/DESIGN-REVIEW.md` §8.1 measured the same gap in the *day grid*, where those
-    /// two fills contrast at 1.02:1 and the glyph encodes activity rather than band. So
-    /// this is a pre-existing gap the heatmap inherits, not one it introduces, and the
-    /// remedy is the review's T6 (a third non-hue channel) rather than switching span.
-    /// Whether the marks are legible at six points at all is the one thing in MAX-083
-    /// that only a device can answer.
+    /// `.effective` versus `.marginal` was carried by hue alone here — `docs/DESIGN-
+    /// REVIEW.md` §8.1 measured the same gap in the *day grid*, where those two fills
+    /// contrast at 1.02:1 and the glyph encodes activity rather than band, so this was a
+    /// pre-existing gap the heatmap inherited rather than one it introduced. MAX-087
+    /// (the review's T6) closed it: `ScoreBand.heatmapMark` sizes a scored day's fill
+    /// within the mark's footprint instead of always drawing it edge to edge, and that
+    /// mapping is asserted alongside the day grid's corner-pip mapping in
+    /// `WCAGContrastTests`. Whether the resulting marks are legible at six points on an
+    /// actual phone is the one thing about that fix that only a device can answer.
     case weekColumnHeatmap
 }
 

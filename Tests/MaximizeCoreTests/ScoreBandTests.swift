@@ -52,3 +52,16 @@ final class ScoreBandMarkTests: XCTestCase {
         XCTAssertNil(ScoreCalendarDayState.unplanned.scoredBand)
     }
 }
+
+/// MAX-087's non-colour channel for the year heatmap, where there is no room for
+/// `ScoreBandMark`'s corner pip. The mapping itself is asserted here, mirroring
+/// `ScoreBandMarkTests` above; that the three values are *distinct*, which is what
+/// keeps the bands separable at heatmap density at all, is asserted in
+/// `WCAGContrastTests` alongside `ScoreBandMark`'s own distinctness check.
+final class ScoreBandHeatmapMarkTests: XCTestCase {
+    func testHeatmapMarkMapping() {
+        XCTAssertEqual(ScoreBand.effective.heatmapMark, .fullBleed)
+        XCTAssertEqual(ScoreBand.marginal.heatmapMark, .majorInset)
+        XCTAssertEqual(ScoreBand.ineffective.heatmapMark, .minorInset)
+    }
+}
