@@ -202,20 +202,12 @@ public struct PlanDraft: Hashable, Sendable {
         /// fact a scannable week view leads with, before either slot's own detail
         /// (MAX-137: "a person checking seven days of two slots wants to see the week
         /// at once").
-        public enum ObligationSummary: Hashable, Sendable {
-            case rest
-            case runOnly
-            case liftOnly
-            case both
-        }
-
+        ///
+        /// The shared `ObligationSummary`, not a nested twin: a week mid-edit and a
+        /// stored governing week answer the same question, and MAX-138 unified the two
+        /// so they cannot drift.
         public var obligationSummary: ObligationSummary {
-            switch (kind != .rest, liftKind != .rest) {
-            case (false, false): return .rest
-            case (true, false): return .runOnly
-            case (false, true): return .liftOnly
-            case (true, true): return .both
-            }
+            ObligationSummary(runKind: kind, liftKind: liftKind)
         }
     }
 
