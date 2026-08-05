@@ -47,21 +47,30 @@ enum MaximizeModelContainer {
 
     /// The on-disk container the app runs against.
     ///
-    /// ## CloudKit mirroring (MAX-021, D6)
+    /// ## CloudKit mirroring (MAX-021, D6) — **currently off**
     ///
-    /// Defaults to `.automatic` — mirror to the private database of whichever iCloud
-    /// container `project.yml`'s entitlement names — rather than a literal container
-    /// identifier. `.automatic` reads that container out of the app's own entitlements
-    /// at runtime, so this file never duplicates the container ID string that
-    /// `project.yml` already owns; the two cannot drift apart because there is only one
-    /// copy. The schema was already built to CloudKit's restrictions by MAX-020 — no
-    /// unique constraints, no relationships, defaults on every non-optional property —
-    /// so turning this on is configuration, not a redesign.
+    /// **Read the parameter documentation below first: `cloudKitDatabase` defaults to
+    /// `.none`, so nothing in this store leaves the device.** A8 deferred mirroring
+    /// after the iCloud entitlements were removed from `project.yml`. The rest of this
+    /// section describes what mirroring *would* do, and is kept because re-enabling it
+    /// is a two-line change whose consequences should not have to be re-derived — but
+    /// none of it is true of the app as it ships today. Corrected at MAX-072, where the
+    /// prose still read as though `.automatic` were the default; a reader auditing
+    /// "does health data leave the device" got the wrong answer from it.
     ///
-    /// **What this puts in the user's private CloudKit database:** every record in
+    /// The argument to pass is `.automatic` — mirror to the private database of
+    /// whichever iCloud container `project.yml`'s entitlement names — rather than a
+    /// literal container identifier. `.automatic` reads that container out of the app's
+    /// own entitlements at runtime, so this file never duplicates the container ID
+    /// string that `project.yml` already owns; the two cannot drift apart because there
+    /// is only one copy. The schema was already built to CloudKit's restrictions by
+    /// MAX-020 — no unique constraints, no relationships, defaults on every non-optional
+    /// property — so turning it back on is configuration, not a redesign.
+    ///
+    /// **What mirroring would put in the user's private CloudKit database:** every record in
     /// `MaximizeSchemaV1.models` — workouts, HR curves, routes, derived metrics, scores,
-    /// annotations, chat threads, the plan, rest-day overrides, and settings. That is
-    /// health data leaving the device. It is *not* the same exposure as a third-party
+    /// annotations, chat threads, the plan, rest-day overrides, and settings. That would
+    /// be health data leaving the device. It is *not* the same exposure as a third-party
     /// server (CLAUDE.md's "Health and privacy" section): it is the user's own private
     /// CloudKit database, under their Apple ID, encrypted in transit and at rest by
     /// Apple's iCloud infrastructure, and never visible to this app's developer or
@@ -166,11 +175,22 @@ enum MaximizeModelContainer {
     /// Sets the protection class on the store and the two sidecar files SQLite keeps
     /// beside it.
     ///
+    /// **These three are not every file holding data.** Three models carry
+    /// `@Attribute(.externalStorage)` — `HeartRateSeriesRecord.samplesJSON`,
+    /// `RouteRecord.pointsJSON`, `ChatThreadRecord.messagesJSON` — and Core Data writes
+    /// those bytes to its own support directory beside the store rather than into the
+    /// SQLite row. Between them that is the HR curve, the GPS track and the chat
+    /// transcript: the most sensitive content in the store, and none of it is named
+    /// below. What covers it is the *directory* attribute set in `prepareStoreURL`,
+    /// which iOS applies as the default class for files created underneath it. So the
+    /// belt is doing the real work here and the braces are the incomplete half —
+    /// stated explicitly at MAX-072, because the previous wording read as though this
+    /// list were exhaustive and it is not.
+    ///
     /// Failures are swallowed on purpose. A file that does not exist yet is the normal
     /// case on first launch, and refusing to start the app because a protection
     /// attribute could not be set on a not-yet-created write-ahead log would trade a
-    /// working app for no app. The directory attribute set in `prepareStoreURL` is the
-    /// belt to this pair of braces.
+    /// working app for no app.
     private static func applyFileProtection(around storeURL: URL) {
         let fileManager = FileManager.default
         let paths = [
