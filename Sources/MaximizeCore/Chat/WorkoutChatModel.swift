@@ -248,8 +248,15 @@ public final class WorkoutChatModel {
                 existingScore: ledger.automatic
             )
 
-            let storedThread = try await chatThreadRepository.thread(forWorkout: workoutID)
-            let thread = try storedThread ?? ChatThread(id: UUID(), workoutID: workoutID)
+            // MAX-092: the thread is resolved from its subject rather than looked up by
+            // workout. A minted thread is not written here — it reaches disk on the
+            // first completed turn, per this type's "Only completed turns are
+            // persisted".
+            let thread = try await chatThreadRepository.thread(
+                for: .workout(workoutID),
+                newThreadID: UUID(),
+                at: now()
+            )
 
             self.context = context
             self.thread = thread

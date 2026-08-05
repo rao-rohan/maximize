@@ -26,13 +26,28 @@ final class ChatThreadTests: XCTestCase {
             try message(.user, "Why did my HR drift at mile 3?", at: 60),
             try message(.assistant, "Your second half averaged 8 bpm higher.", at: 30),
         ]
-        assertThrows(.outOfOrder, try ChatThread(id: threadID, workoutID: Fixture.workoutID, messages: messages))
+        assertThrows(
+            .outOfOrder,
+            try Fixture.thread(id: threadID, messages: messages, lastActivityAt: Fixture.at(60))
+        )
+    }
+
+    /// A thread whose newest turn postdates its own "last activity" would sort a live
+    /// conversation to the bottom of §2.3's list.
+    func testRejectsLastActivityEarlierThanTheLastTurn() throws {
+        assertThrows(
+            .inconsistent,
+            try Fixture.thread(
+                id: threadID,
+                messages: [try message(.user, "Was that on plan?", at: 600)],
+                lastActivityAt: Fixture.at(60)
+            )
+        )
     }
 
     func testAppendingRejectsATurnFromThePast() throws {
-        let thread = try ChatThread(
+        let thread = try Fixture.thread(
             id: threadID,
-            workoutID: Fixture.workoutID,
             messages: [try message(.user, "Why did my HR drift?", at: 60)]
         )
         assertThrows(.outOfOrder, try thread.appending(message(.assistant, "Because…", at: 30)))
@@ -40,18 +55,29 @@ final class ChatThreadTests: XCTestCase {
     }
 
     func testAppendingReturnsANewThreadAndLeavesTheOldOneAlone() throws {
-        let thread = try ChatThread(id: threadID, workoutID: Fixture.workoutID)
-        let extended = try thread.appending(message(.user, "How was that run?", at: 0))
+        let thread = try Fixture.thread(id: threadID)
+        let extended = try thread.appending(message(.user, "How was that run?", at: 30))
         XCTAssertEqual(thread.messages.count, 0)
         XCTAssertEqual(extended.messages.count, 1)
         XCTAssertEqual(extended.id, thread.id)
+        XCTAssertEqual(extended.subject, thread.subject)
+    }
+
+    /// A thread only ever moves *up* the list.
+    func testAppendingAdvancesLastActivityAndNeverRewindsIt() throws {
+        let thread = try Fixture.thread(id: threadID, lastActivityAt: Fixture.at(600))
+        let laterTurn = try thread.appending(message(.user, "And after that?", at: 900))
+        XCTAssertEqual(laterTurn.lastActivityAt, Fixture.at(900))
+
+        // A thread minted now and seeded with an older turn keeps the later of the two.
+        let earlierTurn = try thread.appending(message(.user, "Backfilled", at: 300))
+        XCTAssertEqual(earlierTurn.lastActivityAt, Fixture.at(600))
     }
 
     /// The context-builder seed (FR-2.1) is part of the thread but is not a bubble.
     func testSeedContextIsNotAVisibleTurn() throws {
-        let thread = try ChatThread(
+        let thread = try Fixture.thread(
             id: threadID,
-            workoutID: Fixture.workoutID,
             messages: [
                 try message(.system, "Workout context: 10km easy, avg HR 142…", at: 0),
                 try message(.user, "Was that on plan?", at: 10),
@@ -63,21 +89,42 @@ final class ChatThreadTests: XCTestCase {
         XCTAssertFalse(thread.isEmpty)
     }
 
+    /// The seed is a `.system` turn, so "the first thing the athlete said" is not "the
+    /// first message" — which matters, because a training thread is titled from it.
+    func testFirstUserMessageSkipsTheSeed() throws {
+        let thread = try Fixture.thread(
+            id: threadID,
+            messages: [
+                try message(.system, "Workout context: 10km easy, avg HR 142…", at: 0),
+                try message(.user, "Was that on plan?", at: 10),
+                try message(.assistant, "Yes — Tuesday is an 8 km easy run.", at: 20),
+            ]
+        )
+        XCTAssertEqual(thread.firstUserMessage?.content, "Was that on plan?")
+        XCTAssertEqual(thread.lastVisibleMessage?.content, "Yes — Tuesday is an 8 km easy run.")
+    }
+
     func testSimultaneousTurnsAreAllowed() throws {
         let messages = [
             try message(.user, "Ping", at: 60),
             try message(.assistant, "Pong", at: 60),
         ]
-        XCTAssertNoThrow(try ChatThread(id: threadID, workoutID: Fixture.workoutID, messages: messages))
+        XCTAssertNoThrow(try Fixture.thread(id: threadID, messages: messages))
     }
 
     func testRoundTripsThroughJSON() throws {
-        let thread = try ChatThread(
+        let workoutThread = try Fixture.thread(
             id: threadID,
-            workoutID: Fixture.workoutID,
             messages: [try message(.user, "Was that on plan?", at: 0)]
         )
-        XCTAssertEqual(try roundTripped(thread), thread)
+        XCTAssertEqual(try roundTripped(workoutThread), workoutThread)
+
+        let trainingThread = try Fixture.thread(
+            id: threadID,
+            subject: .training(try Fixture.scope(from: (2026, 8, 1), through: (2026, 8, 31))),
+            messages: [try message(.user, "Has my drift flattened?", at: 0)]
+        )
+        XCTAssertEqual(try roundTripped(trainingThread), trainingThread)
     }
 }
 

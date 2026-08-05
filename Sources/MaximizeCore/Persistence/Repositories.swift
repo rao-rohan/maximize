@@ -148,13 +148,98 @@ public protocol PlanRepository: Sendable {
     func store(_ plan: Plan) async throws
 }
 
-/// Per-workout conversations (D6, FR-2.3).
+/// Conversations, keyed on their own identifier and carrying a subject (A11, FR-2.3).
+///
+/// ## What MAX-092 changed, and what it deliberately did not
+///
+/// Until A11 this protocol had two methods and thread identity was the workout, so
+/// "which thread" was never a question. Now it is, and the protocol grew the four
+/// operations a thread list needs: enumerate, fetch one, resolve a subject to one, and
+/// delete one.
+///
+/// **MAX-048's determinism survives, generalised.** MAX-048 fixed a real bug: the store
+/// fetched a workout's thread with no sort, so two records left by a CloudKit sync race
+/// resolved to whichever row came back first, and the thread the athlete saw depended on
+/// fetch order. Its fix was an explicit `(createdAt, threadUUID)` ordering. That
+/// reasoning is not weakened by keying on the thread's own id — it is *promoted*, from a
+/// tiebreak between records that should not both exist into `mostRecentThread(for:)`'s
+/// ordering rule, which is now load-bearing for a subject that legitimately has several
+/// threads. The difference worth noting: MAX-048's rule lives in `MaximizeStore`, which
+/// CI compiles and never runs; this one is a protocol contract that
+/// `FakeChatThreadRepository` implements and `ChatThreadRepositoryTests` exercises on
+/// every commit.
 public protocol ChatThreadRepository: Sendable {
-    func thread(forWorkout id: UUID) async throws -> ChatThread?
 
-    /// Inserts or replaces the thread for its workout. Threads are written whole —
-    /// `ChatThread` is a value that grows by returning a new thread, not by mutation.
+    /// Every stored thread as a list row, **newest activity first** (§2.3).
+    ///
+    /// Summaries rather than threads: a list of twenty conversations does not need
+    /// twenty transcripts decoded to render twenty single lines, and health data should
+    /// not be in memory for a screen that shows none of it.
+    ///
+    /// Ordering is the implementation's obligation, not the caller's, because it is the
+    /// one thing that has to be total — `ChatThreadSummary.sortedByActivity(_:)` is the
+    /// shared rule, tiebreak included.
+    func threadSummaries() async throws -> [ChatThreadSummary]
+
+    /// The thread with this identifier, or nil.
+    func thread(id: UUID) async throws -> ChatThread?
+
+    /// The most recently active thread with this subject, or nil.
+    ///
+    /// This is "which thread opens" (§2.2): tapping Ask on a workout screen lands in
+    /// that run's conversation, and tapping it on the dashboard lands in the newest
+    /// thread for the interval on screen — never in whatever was open last regardless of
+    /// subject.
+    ///
+    /// **Must be deterministic**: newest `lastActivityAt`, `id` breaking a tie. See this
+    /// protocol's note on MAX-048 for why an unordered answer is a bug rather than a
+    /// tidiness question.
+    func mostRecentThread(for subject: ChatSubject) async throws -> ChatThread?
+
+    /// Inserts or replaces the thread, keyed on its own `id`. Threads are written whole
+    /// — `ChatThread` is a value that grows by returning a new thread, not by mutation.
+    ///
+    /// **One thread per workout is a policy this method keeps, not a shape the type
+    /// forbids** (§12, question 3). An implementation upserts a workout-subject thread
+    /// onto the existing one for that workout; if the owner ever wants several, that is
+    /// a change here and not a migration.
     func store(_ thread: ChatThread) async throws
+
+    /// Deletes the thread with this identifier — §2.3's swipe.
+    ///
+    /// A no-op for an identifier that was never stored, matching
+    /// `WorkoutRepository.deleteWorkout(id:)`: a row deleted on another device and again
+    /// here is an ordinary race, not a failure.
+    func deleteThread(id: UUID) async throws
+}
+
+extension ChatThreadRepository {
+
+    /// Create-or-fetch: the thread the Ask button opens for a subject (§2.2).
+    ///
+    /// **"Create" means minted, not written.** A new thread is returned unstored, and
+    /// reaches disk only when a completed turn is appended and `store(_:)` is called —
+    /// the rule MAX-050 already follows ("only completed turns are persisted"). Writing
+    /// on open would fill §2.3's list with empty threads from every stray tap of a
+    /// button that is, after this pivot, on every screen.
+    ///
+    /// - Parameters:
+    ///   - newThreadID: used only if nothing exists yet. Passed in rather than minted
+    ///     here so a test can pin it, matching how `now` is injected everywhere else in
+    ///     this package.
+    ///   - instant: `lastActivityAt` for a thread with nothing in it yet, so a
+    ///     just-opened conversation sorts to the top of the list before the athlete has
+    ///     typed anything.
+    public func thread(
+        for subject: ChatSubject,
+        newThreadID: UUID,
+        at instant: Date
+    ) async throws -> ChatThread {
+        if let existing = try await mostRecentThread(for: subject) {
+            return existing
+        }
+        return try ChatThread(id: newThreadID, subject: subject, lastActivityAt: instant)
+    }
 }
 
 /// Missed-day → rest conversions against the weekly budget (D9, A6).

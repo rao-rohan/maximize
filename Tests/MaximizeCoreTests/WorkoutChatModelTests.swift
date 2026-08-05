@@ -131,7 +131,7 @@ final class WorkoutChatModelTests: XCTestCase {
     /// is never shown as a bubble.
     func testReadyRestoresAnExistingThreadsVisibleMessages() async throws {
         let threadRepository = FakeChatThreadRepository()
-        var thread = try ChatThread(id: UUID(), workoutID: Fixture.workoutID)
+        var thread = try Fixture.thread(subject: .workout(Fixture.workoutID))
         thread = try thread.appending(
             ChatMessage(id: UUID(), role: .system, content: "seed", timestamp: Fixture.epoch)
         )

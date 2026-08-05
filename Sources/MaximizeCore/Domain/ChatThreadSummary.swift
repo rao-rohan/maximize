@@ -1,0 +1,229 @@
+import Foundation
+
+/// The two facts a workout thread's title is made of (§2.4).
+///
+/// A `ChatSubject.workout` carries an identifier and nothing else — deliberately, since
+/// duplicating a run's date onto the thread would create a second copy of it to drift
+/// (D2). So the run's own facts are supplied by whoever holds the workout when a summary
+/// is built.
+///
+/// Two fields, not a whole `Workout`: a summary is a list row, and handing a title
+/// deriver an entire workout record invites the next ticket to put a distance or a score
+/// in the title, which §2.4 rules out for a reason — a workout thread's title has to
+/// identify the *run*, and only these two do that.
+public struct WorkoutThreadFacts: Hashable, Sendable {
+    public let day: CalendarDay
+    public let activityType: ActivityType
+
+    public init(day: CalendarDay, activityType: ActivityType) {
+        self.day = day
+        self.activityType = activityType
+    }
+}
+
+/// How a thread gets its name (§2.4).
+///
+/// ## A model call to title a thread is rejected
+///
+/// The spec states it and this type is where it is enforced by construction: titling is
+/// a pure function of stored data, so there is nowhere for a network call to go. The
+/// reasoning, from §2.4 — one call per conversation for a string nobody reads twice,
+/// against a key the owner pays for (§8), and a *second place that decides what a
+/// conversation is about*, which is the same drift A12 spends its length preventing at
+/// the context boundary.
+///
+/// Renaming by hand is a later ticket, not a v1 gap.
+public enum ChatThreadTitle {
+
+    /// The longest a derived title may be, in characters.
+    ///
+    /// A list row shows one line; the value is a budget for that line rather than a
+    /// measurement of one, since the core cannot see a font. Truncation happens on a
+    /// word boundary (`truncated(_:to:)`), so the real ceiling is this less the length
+    /// of the last word dropped.
+    public static let maximumLength = 48
+
+    /// A run's date and activity type — "3 Aug 2026 · Running".
+    ///
+    /// Not the conversation's opening line, unlike a training thread: there is one
+    /// thread per run (§12, question 3), so its title has to identify the run rather
+    /// than what was asked about it.
+    ///
+    /// - Parameter facts: nil when the run cannot be resolved. In practice unreachable —
+    ///   deleting a workout deletes its thread (`WorkoutAttachedRecord.chatThread`) — so
+    ///   the fallback is an honest placeholder for a store that has drifted, not a state
+    ///   the product has.
+    public static func workout(_ facts: WorkoutThreadFacts?) -> String {
+        guard let facts else { return "Workout" }
+        return "\(CalendarDayLabel.full(facts.day)) · \(facts.activityType.displayName)"
+    }
+
+    /// The athlete's opening question, truncated on a word boundary; before there is
+    /// one, the frozen scope's label.
+    ///
+    /// The fallback is a label rather than "New chat" because it is the more useful of
+    /// the two — a list of threads all called "New chat" distinguishes nothing, and the
+    /// window is exactly what distinguishes two training threads (§3.4). It also means
+    /// an empty thread already states its scope, which is §3.6(b)'s obligation.
+    ///
+    /// The spec names `TrendIntervalFormatting.label(for:)` as the fallback's source.
+    /// That function labels a `TrendInterval`, and a scope has deliberately forgotten
+    /// which interval produced it (see `TrainingScope`), so the label is derived from
+    /// the resolved days instead — "1 – 31 Aug 2026" where the interval selector would
+    /// have said "August 2026". Same window, stated from what the thread actually
+    /// stores rather than from a rule it must not keep.
+    public static func training(scope: TrainingScope, firstUserMessage: String?) -> String {
+        guard let firstUserMessage else { return scope.label }
+        let collapsed = SingleLineText.collapsed(firstUserMessage)
+        guard !collapsed.isEmpty else { return scope.label }
+        return SingleLineText.truncated(collapsed, to: maximumLength)
+    }
+
+    /// The title for a thread, dispatching on its subject.
+    ///
+    /// - Parameter workoutFacts: ignored for a training subject, so a caller that cannot
+    ///   cheaply resolve a run may pass nil for every thread and still get correct
+    ///   training titles.
+    public static func derive(for thread: ChatThread, workoutFacts: WorkoutThreadFacts?) -> String {
+        switch thread.subject {
+        case .workout:
+            return Self.workout(workoutFacts)
+        case let .training(scope):
+            return Self.training(scope: scope, firstUserMessage: thread.firstUserMessage?.content)
+        }
+    }
+}
+
+/// What a thread-list row renders from (§2.3).
+///
+/// A value, not a view model: the row shows a title, a subject glyph, a relative
+/// timestamp and one line of the last message, and every one of those is decided here
+/// where CI can see it. The view's job is to draw five fields.
+///
+/// It deliberately does **not** carry the transcript. A list of twenty threads holding
+/// twenty full conversations is twenty JSON blobs decoded to render twenty single lines,
+/// and — the reason that matters more — health data in memory for a screen that shows
+/// none of it.
+public struct ChatThreadSummary: Hashable, Sendable, Identifiable {
+    /// The thread's own identifier — what `ChatThreadRepository.thread(id:)` and
+    /// `deleteThread(id:)` take, so a row can open or delete itself without the list
+    /// holding anything more.
+    public let id: UUID
+
+    public let subject: ChatSubject
+
+    /// Derived, never generated. See `ChatThreadTitle`.
+    public let title: String
+
+    public let lastActivityAt: Date
+
+    /// One line of the last visible turn, whitespace collapsed and truncated. Nil for a
+    /// thread nobody has spoken in yet — an absence the row states rather than a blank
+    /// it renders.
+    public let preview: String?
+
+    /// The longest a preview may be, in characters. Longer than a title's budget
+    /// because a preview is allowed to trail off; a title is a name.
+    public static let maximumPreviewLength = 100
+
+    public init(
+        id: UUID,
+        subject: ChatSubject,
+        title: String,
+        lastActivityAt: Date,
+        preview: String?
+    ) {
+        self.id = id
+        self.subject = subject
+        self.title = title
+        self.lastActivityAt = lastActivityAt
+        self.preview = preview
+    }
+
+    /// - Parameter workoutFacts: the run's facts for a workout subject; see
+    ///   `WorkoutThreadFacts`. Ignored for a training subject.
+    public init(_ thread: ChatThread, workoutFacts: WorkoutThreadFacts? = nil) {
+        // `ChatMessage` already rejects whitespace-only content, so an empty result here
+        // is unreachable; it is mapped back to nil anyway so that "no preview" has one
+        // representation rather than two the view would have to test for separately.
+        var preview: String?
+        if let last = thread.lastVisibleMessage {
+            let line = SingleLineText.truncated(
+                SingleLineText.collapsed(last.content),
+                to: Self.maximumPreviewLength
+            )
+            preview = line.isEmpty ? nil : line
+        }
+        self.init(
+            id: thread.id,
+            subject: thread.subject,
+            title: ChatThreadTitle.derive(for: thread, workoutFacts: workoutFacts),
+            lastActivityAt: thread.lastActivityAt,
+            preview: preview
+        )
+    }
+
+    /// Newest activity first — the order §2.3's list is specified in.
+    ///
+    /// The tiebreak on `id` is not decoration. Two threads can share a `lastActivityAt`
+    /// (an empty thread minted in the same second as another's last turn, or a store
+    /// whose rows all carry the same default — the situation MAX-048 was filed for), and
+    /// a sort with no total order lets the list reshuffle between two reads of identical
+    /// data.
+    ///
+    /// Compared as `uuidString` rather than through `UUID: Comparable`: this package's
+    /// tests run on Linux against swift-corelibs-foundation (CI's core job), and a
+    /// conformance whose availability differs between that and Apple's Foundation is not
+    /// worth depending on for a tiebreak. Any total order does the job, and the
+    /// canonical uppercase-hex form is one on both.
+    public static func sortedByActivity(_ summaries: [ChatThreadSummary]) -> [ChatThreadSummary] {
+        summaries.sorted { left, right in
+            if left.lastActivityAt != right.lastActivityAt {
+                return left.lastActivityAt > right.lastActivityAt
+            }
+            return left.id.uuidString < right.id.uuidString
+        }
+    }
+}
+
+/// Turning a turn of a conversation into one line of a list row.
+///
+/// Internal: this is how `ChatThreadTitle` and `ChatThreadSummary` shorten text, not a
+/// general-purpose string utility for the package to accumulate cases in.
+enum SingleLineText {
+
+    /// Every run of whitespace — including the newlines a multi-paragraph reply is full
+    /// of — becomes one space, and the ends are trimmed.
+    ///
+    /// Done before truncation, not after: truncating first would spend a row's whole
+    /// budget on the leading blank lines of a reply that happens to start with one.
+    static func collapsed(_ text: String) -> String {
+        text
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+    }
+
+    /// Shortens to `limit` characters on a word boundary, marking the cut with an
+    /// ellipsis.
+    ///
+    /// A word boundary rather than a hard cut because the alternative reads as a typo:
+    /// "Why did my heart rate cli…" looks broken in a way "Why did my heart rate…" does
+    /// not. A word longer than the whole budget still has to be cut somewhere, so it is
+    /// cut hard — the rule degrades rather than returning something over budget.
+    ///
+    /// The ellipsis is a single `…` character, so a truncated result is `limit + 1`
+    /// characters at most.
+    static func truncated(_ text: String, to limit: Int) -> String {
+        guard limit > 0 else { return "" }
+        guard text.count > limit else { return text }
+
+        let head = text.prefix(limit)
+        if let lastSpace = head.lastIndex(of: " ") {
+            let word = head[head.startIndex..<lastSpace]
+            if !word.isEmpty {
+                return "\(word)…"
+            }
+        }
+        return "\(head)…"
+    }
+}

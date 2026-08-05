@@ -539,23 +539,13 @@ final class StoredRecordRoundTripTests: XCTestCase {
     }
 
     func testChatThreadRoundTripsUnchanged() throws {
-        let thread = try ChatThread(
+        let thread = try Fixture.thread(
             id: Fixture.otherWorkoutID,
-            workoutID: Fixture.workoutID,
+            subject: .workout(Fixture.workoutID),
             messages: [
-                ChatMessage(id: UUID(), role: .system, content: "Context", timestamp: Fixture.epoch),
-                ChatMessage(
-                    id: UUID(),
-                    role: .user,
-                    content: "Why was this scored 62?",
-                    timestamp: Fixture.epoch.addingTimeInterval(5)
-                ),
-                ChatMessage(
-                    id: UUID(),
-                    role: .assistant,
-                    content: "Your average HR was above the cap.",
-                    timestamp: Fixture.epoch.addingTimeInterval(9)
-                ),
+                try Fixture.message(.system, "Context", at: 0),
+                try Fixture.message(.user, "Why was this scored 62?", at: 5),
+                try Fixture.message(.assistant, "Your average HR was above the cap.", at: 9),
             ]
         )
         let restored = try StoredChatThread(thread, createdAt: Fixture.epoch).toDomain()
@@ -566,7 +556,7 @@ final class StoredRecordRoundTripTests: XCTestCase {
     }
 
     func testEmptyChatThreadRoundTrips() throws {
-        let thread = try ChatThread(id: UUID(), workoutID: Fixture.workoutID)
+        let thread = try Fixture.thread(lastActivityAt: Fixture.epoch)
         let restored = try StoredChatThread(thread, createdAt: Fixture.epoch).toDomain()
         XCTAssertEqual(restored, thread)
         XCTAssertTrue(restored.isEmpty)
@@ -574,9 +564,7 @@ final class StoredRecordRoundTripTests: XCTestCase {
 
     func testChatMessageTimestampsSurviveExactly() throws {
         let precise = Fixture.epoch.addingTimeInterval(0.123456)
-        let thread = try ChatThread(
-            id: UUID(),
-            workoutID: Fixture.workoutID,
+        let thread = try Fixture.thread(
             messages: [ChatMessage(id: UUID(), role: .user, content: "hi", timestamp: precise)]
         )
         XCTAssertEqual(
@@ -585,27 +573,60 @@ final class StoredRecordRoundTripTests: XCTestCase {
         )
     }
 
-    /// MAX-048: `createdAt` is storage-only bookkeeping for duplicate resolution, not
-    /// domain data — `ChatThread` has no timestamp of its own to carry it. What CI can
-    /// verify here is that `StoredChatThread` carries exactly the value its caller
-    /// gave it, and that the value cannot leak into the domain type because there is
-    /// no field for it to leak into. The rule for *which* value `MaximizeStore` passes
-    /// — the existing record's `createdAt` on an update, `Date()` on first insert, and
-    /// the sort in `threadRecords(for:)` that makes the tiebreak matter — lives in
+    /// MAX-092: the record has no `lastActivityAt` column yet (MAX-093 adds one), so
+    /// `toDomain()` derives it from what the record does hold. This pins the derivation,
+    /// because it is what MAX-093 has to backfill existing rows with.
+    ///
+    /// For a thread anybody has spoken in, the value is not a guess at all — every turn
+    /// carries its own timestamp, so the last one *is* the last activity.
+    func testLastActivityIsDerivedFromTheLastTurn() throws {
+        let thread = try Fixture.thread(
+            messages: [
+                try Fixture.message(.user, "Was that on plan?", at: 0),
+                try Fixture.message(.assistant, "Yes.", at: 90),
+            ],
+            lastActivityAt: Fixture.at(90)
+        )
+        let restored = try StoredChatThread(thread, createdAt: Fixture.at(-1_000)).toDomain()
+        XCTAssertEqual(restored.lastActivityAt, Fixture.at(90))
+        XCTAssertEqual(restored, thread)
+    }
+
+    /// MAX-048: `createdAt` is storage bookkeeping for duplicate resolution, and
+    /// `MaximizeStore` still sorts on it. MAX-092 gives it one further job — an empty
+    /// thread has no turn to date it by, so `createdAt` is what a just-created
+    /// conversation sorts by until somebody speaks in it.
+    ///
+    /// The rule for *which* value `MaximizeStore` passes — the existing record's
+    /// `createdAt` on an update, `Date()` on first insert, and the sort in
+    /// `threadRecords(for:)` that makes the tiebreak matter — lives in
     /// `App/Persistence/MaximizeStore.swift`, which CI never executes (no simulator or
     /// device in this pipeline — tracker R2).
-    func testChatThreadCreatedAtIsStorageOnlyBookkeeping() throws {
-        let thread = try ChatThread(id: UUID(), workoutID: Fixture.workoutID)
+    func testCreatedAtDatesAThreadNobodyHasSpokenIn() throws {
         let createdAt = Fixture.epoch.addingTimeInterval(42)
+        let thread = try Fixture.thread(lastActivityAt: createdAt)
 
         let stored = try StoredChatThread(thread, createdAt: createdAt)
         XCTAssertEqual(stored.createdAt, createdAt)
+        XCTAssertEqual(try stored.toDomain().lastActivityAt, createdAt)
 
-        // Two stored records for the same thread that differ only in `createdAt` must
-        // round-trip to the identical domain value — there is nowhere on `ChatThread`
-        // for the difference to surface.
-        let otherStored = try StoredChatThread(thread, createdAt: createdAt.addingTimeInterval(3_600))
-        XCTAssertEqual(try stored.toDomain(), try otherStored.toDomain())
+        let later = try StoredChatThread(thread, createdAt: createdAt.addingTimeInterval(3_600))
+        XCTAssertEqual(
+            try later.toDomain().lastActivityAt,
+            createdAt.addingTimeInterval(3_600),
+            "with no turn to date it by, the record's own timestamp is the only answer"
+        )
+    }
+
+    /// A11 gives a thread a subject; the columns for the training case are MAX-093's.
+    /// Until they exist the record refuses one rather than silently storing it as some
+    /// workout's conversation.
+    func testATrainingThreadCannotYetBeStored() throws {
+        let thread = try Fixture.thread(
+            subject: .training(try Fixture.scope(from: (2026, 8, 1), through: (2026, 8, 31))),
+            messages: [try Fixture.message(.user, "Has my drift flattened?", at: 0)]
+        )
+        assertThrows(.inconsistent, try StoredChatThread(thread, createdAt: Fixture.epoch))
     }
 
     func testAppSettingsRoundTripUnchanged() throws {
