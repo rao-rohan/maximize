@@ -51,6 +51,53 @@ enum PlanFormatting {
         PlanAuthoringFormatting.distance(meters, unit: unit)
     }
 
+    // MARK: - A weekday's two asks (MAX-138)
+
+    /// The **run** slot's ask — kind, distance and note, exactly the string this
+    /// screen printed for a weekday before this ticket. Unchanged byte-for-byte so a
+    /// run-only plan (every lift slot rest — which is every plan authored before
+    /// MAX-129, and every plan an athlete simply chose not to schedule lifting in)
+    /// keeps reading exactly as it always has.
+    static func runAsk(_ day: PlanDisplayData.WeekdayRow, unit: DistanceUnit) -> String {
+        var text = sessionKind(day.kind)
+        if let meters = day.distanceMeters {
+            text += " · " + distance(meters, unit: unit)
+        }
+        if let note = day.note, !note.isEmpty {
+            text += " · " + note
+        }
+        return text
+    }
+
+    /// The **lift** slot's ask. Calls straight through to
+    /// `PlanAuthoringFormatting.describeLiftSession` (MAX-137) — the authoring
+    /// screen's own preview and this read-only row say a lift the same way, always.
+    static func liftAsk(_ session: ScheduledSession) -> String {
+        PlanAuthoringFormatting.describeLiftSession(session)
+    }
+
+    /// The lines a weekday's row should show: one for a day with a single ask (rest,
+    /// run only, or lift only), two only for a day carrying both. `obligationSummary`
+    /// is `WeekdayRow`'s own decision (A17/MAX-137's shared vocabulary) about which of
+    /// those four shapes a day is — this reads it rather than re-deriving it from
+    /// `kind` and `liftSession` a second time.
+    ///
+    /// A day whose lift slot is rest never gets a "Rest" line of its own here, on
+    /// either branch: that is what keeps a run-only week — pre-MAX-129 or simply
+    /// unscheduled, the two are indistinguishable on disk and the copy does not
+    /// pretend otherwise (see `PlanDisplayData.WeekdayRow`) — visually identical to
+    /// the run-only screen this ticket found.
+    static func weekdayLines(_ day: PlanDisplayData.WeekdayRow, unit: DistanceUnit) -> [String] {
+        switch day.obligationSummary {
+        case .rest, .runOnly:
+            return [runAsk(day, unit: unit)]
+        case .liftOnly:
+            return [liftAsk(day.liftSession)]
+        case .both:
+            return [runAsk(day, unit: unit), liftAsk(day.liftSession)]
+        }
+    }
+
     static func threshold(effective: ScoreValue, marginal: ScoreValue) -> String {
         "Effective at \(effective.description) · Marginal at \(marginal.description)"
     }

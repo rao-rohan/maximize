@@ -17,13 +17,16 @@ import Foundation
 ///    type's or a view's. So "actual" is a fact this type resolves by looking at
 ///    whether a `ScoreLedger` exists, not something a view should infer by checking
 ///    optionals in the right order.
-/// 2. **Is this workout waiting for a score, never getting one, or on a day no plan
-///    governs?** All three are real, distinct states — see `Scoring.awaitingScore`,
-///    `Scoring.noVerdict` and `scheduledSession == nil` — and conflating any of them
-///    with "loading" or "nothing to show" would misrepresent the workout on screen.
-///    The second was added by MAX-126: MAX-111 stopped non-runs being scored, and until
-///    it had a case of its own the header promised every lift a verdict that was never
-///    going to arrive.
+/// 2. **Is this workout waiting for a score, waiting on the athlete, never getting one,
+///    or on a day no plan governs?** All four are real, distinct states — see
+///    `Scoring.awaitingScore`, `Scoring.awaitingMuscleGroups`, `Scoring.noVerdict` and
+///    `scheduledSession == nil` — and conflating any of them with "loading" or "nothing
+///    to show" would misrepresent the workout on screen. The third was added by
+///    MAX-126: MAX-111 stopped non-runs being scored, and until it had a case of its
+///    own the header promised every lift a verdict that was never going to arrive. The
+///    second was added by MAX-145 (A22), and it is the opposite correction: a lift the
+///    athlete has not described yet is not permanently unscoreable — the app is waiting
+///    on an answer it has asked for.
 ///
 /// A view observes this, renders it, and forwards nothing (there is no user intent to
 /// forward yet) — CLAUDE.md's "thin shell" rule applied to a header that has more than
@@ -64,6 +67,33 @@ public struct WorkoutVerdict: Hashable, Sendable {
         /// is exactly why it had to stop being the only one.
         case awaitingScore
 
+        /// A strength session the athlete has not said what they trained yet, so
+        /// nothing can judge it — **awaiting the athlete**, not awaiting a model (A22,
+        /// MAX-145).
+        ///
+        /// A22's load-bearing consequence, stated as a state. D2 computes derived
+        /// metrics once when a workout arrives and D8 makes an auto-score immutable,
+        /// but the muscle groups arrive *later*, whenever the detail screen is opened.
+        /// A lift scored at ingestion would have been judged against information nobody
+        /// had, and revising it afterwards is exactly what D8 forbids. So the lift
+        /// waits.
+        ///
+        /// **The difference from `.awaitingScore` is who is being waited on**, and it
+        /// changes what a surface may show. A run waiting on the scorer changes by
+        /// itself, so a spinner is honest there. This one changes only when the athlete
+        /// answers, so a spinner would be the app pretending to work on something it
+        /// has not been given — a view rendering this asks the question instead
+        /// (`MuscleGroupEntryCopy.awaitingEntryHeadline`). That prompt is also how the
+        /// field is discovered at all, which is why the state is worth having rather
+        /// than folding into either neighbour.
+        ///
+        /// **The difference from `.noVerdict` is tense.** `.noVerdict` says no verdict
+        /// is coming; this says one cannot be reached *yet*, for a reason the athlete
+        /// can remove. Nothing scores a lift today either way — the lift rubric is
+        /// MAX-131/132 — but what the app is waiting for is now something it knows and
+        /// can say.
+        case awaitingMuscleGroups
+
         /// No automatic score has been recorded for this workout and **none ever will
         /// be**: the plan scores runs (D1), and this was a lift, a ride, a hike or a
         /// walk (MAX-111).
@@ -90,6 +120,14 @@ public struct WorkoutVerdict: Hashable, Sendable {
     }
     public let scoring: Scoring
 
+    /// What the athlete has said this session worked, or nil if they have not said
+    /// (A22). Only ever non-nil on a lift — nothing asks a run the question.
+    ///
+    /// Carried here rather than looked up separately by each surface so that the
+    /// header's copy and the section's copy are reading one fact, and so `scoring`
+    /// above can be resolved from it in one place.
+    public let muscleGroupEntry: MuscleGroupEntry?
+
     /// - Parameters:
     ///   - workout: the captured record. Only its `activityType` is read here (for
     ///     the unscored `.actual` case); everything else about the run belongs to the
@@ -98,8 +136,24 @@ public struct WorkoutVerdict: Hashable, Sendable {
     ///     (`PlanCalendar.planDay(on:)`), or nil if no plan governs it.
     ///   - ledger: the workout's score ledger (`ScoreRepository.ledger(forWorkout:)`),
     ///     or nil if scoring has not produced one.
-    public init(workout: Workout, planDay: PlanDay?, ledger: ScoreLedger?) {
+    ///   - muscleGroups: this workout's muscle-group log
+    ///     (`MuscleGroupEntryRepository.muscleGroupLog(forWorkout:)`), A22/MAX-145.
+    ///
+    ///     **Nil means "this caller did not look", not "the athlete has not said"** —
+    ///     the two are different and only the second may produce
+    ///     `.awaitingMuscleGroups`. An *empty* log is the athlete not having said; nil
+    ///     resolves exactly as this initializer did before A22. That is what lets a
+    ///     caller with no muscle-group repository to hand (the context builder, today)
+    ///     keep its existing answer rather than assert a state it has not read, and it
+    ///     is why the default is nil rather than an empty log.
+    public init(
+        workout: Workout,
+        planDay: PlanDay?,
+        ledger: ScoreLedger?,
+        muscleGroups: MuscleGroupLog? = nil
+    ) {
         self.scheduledSession = planDay?.scheduledSession
+        self.muscleGroupEntry = muscleGroups?.current
         if let ledger {
             self.actual = .classified(ledger.automatic.actualClassification)
             self.scoring = .scored(automatic: ledger.automatic, annotation: ledger.currentAnnotation)
@@ -109,7 +163,24 @@ public struct WorkoutVerdict: Hashable, Sendable {
             // declines to score on and `WorkoutClassifier` short-circuits on, on
             // purpose: one notion of "is this a run" in the core, not a third that can
             // drift from the two that decide whether a score is ever attempted.
-            self.scoring = workout.activityType.isRun ? .awaitingScore : .noVerdict
+            if workout.activityType.isRun {
+                self.scoring = .awaitingScore
+            } else if workout.activityType.discipline == .lift,
+                      let muscleGroups,
+                      muscleGroups.isAwaitingEntry {
+                // A22. Read through `Discipline` rather than compared to an activity
+                // type, so a strength type mapped later is asked the same question —
+                // and `MuscleGroupEntryData.resolve` uses the same predicate, so the
+                // header's state and the section's cannot disagree about whether this
+                // workout is one the app asks.
+                //
+                // The ledger branch above is what keeps D8 intact here: a lift that was
+                // already scored as a run (A21/MAX-143) never reaches this line, so no
+                // existing score changes state because of this ticket.
+                self.scoring = .awaitingMuscleGroups
+            } else {
+                self.scoring = .noVerdict
+            }
         }
     }
 }

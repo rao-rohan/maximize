@@ -1390,14 +1390,14 @@ is the overseer's, not a ticket's — flagged here rather than done.
 | MAX-135 | The calendar's mixed day | 134, **105** | **Opus** |
 | MAX-136 | Context and fact sheet learn discipline | 129, 130 | **Opus** 🔒 |
 | MAX-137 | Plan authoring for two slots | 129 | Sonnet ✅ |
-| MAX-138 | The plan screen shows both | 129 | Sonnet |
+| MAX-138 | The plan screen shows both | 129 | Sonnet ✅ |
 | MAX-139 | Workout detail for a lift | 130, 133 | Sonnet |
 | MAX-140 | Trend tiles, honestly ("days run", the effective denominator) | 134 | Sonnet |
 | MAX-141 | `PlanProposal` covers lift days | 129, **099** | Sonnet 🔒 |
 | MAX-142 | `TrainingContext` is per-session, not per-run | 129, **095** | **Opus** 🔒 |
 | MAX-143 | **Decide what to do with lifts already scored as runs** | 128 | Owner / overseer |
 | MAX-144 | ~~How adherence to a muscle-group prescription is judged~~ — **decided (A22)** | 129 | Owner ✅ |
-| MAX-145 | **Enter muscle groups on a strength workout's detail screen** (A22) | 129, 144 | **Opus** |
+| MAX-145 | **Enter muscle groups on a strength workout's detail screen** (A22) | 129, 144 | **Opus** ✅ |
 
 **Four collisions the overseer must respect.**
 
@@ -1480,7 +1480,7 @@ lift slot — but each currently answers about the day's *run* while calling it 
 | `ScoreCalendar.dayState` / `agreement` | the day's single prescribed kind | MAX-135 |
 | `TrainingFactSheet` / `WorkoutFactSheet` | `entry.session`, `planDay.scheduledSession` | MAX-136 |
 | `PlanDraft` setters, `PlanAuthoringError` | ~~the run slot only~~ **both, as of MAX-137** | MAX-137 ✅ |
-| `PlanDisplayData.WeekdayRow` | one kind/distance/note per weekday | MAX-138 |
+| `PlanDisplayData.WeekdayRow` | ~~one kind/distance/note per weekday~~ **both slots, as of MAX-138** | MAX-138 ✅ |
 | `TrendTileData` planned mileage | sums `planDay.scheduledSession.distanceMeters` | MAX-140 |
 | `PlanProposal` (MAX-099) | validates the same shape `PlanAuthoringSession` does | MAX-141 |
 
@@ -1550,6 +1550,12 @@ scope to build that.
   (rest/runOnly/liftOnly/both) is the caption a scanning eye reads above each day's two
   pickers — "checking seven days of two slots" per the ticket's brief — computed once, under
   test, rather than a view re-deriving "does this day have anything" from two kinds.
+  **MAX-138 moved the enum itself out of `DayDraft` to a top-level `ObligationSummary` in
+  `Domain/ScheduledSession.swift`** — `PlanDisplayData.WeekdayRow` needed the identical
+  decision off the identical two `ScheduledSessionKind` values, and a second enum with the
+  same four cases is exactly the drift this file's `MuscleGroup`/`LiftPrescriptionSummary`
+  entries keep warning about. `DayDraft.obligationSummary` is unchanged at the call site —
+  it now returns the shared type rather than a nested one.
 - **The preview section shows both slots per day**, `describeBothSessions(_:unit:)`, so "the
   first week this version governs" is seven rows again, not fourteen.
 - **A run-only plan is unaffected.** Every lift setter clears itself back to `.rest` /
@@ -1559,6 +1565,42 @@ scope to build that.
 - **`PlanAuthoringError` gained one belt-and-braces case**, `liftSessionInvalid`, for the
   combination the new setters cannot actually produce — the same reasoning
   `wouldRewriteHistory` already documents for why a real case beats a `try!`.
+
+**MAX-138 — the read-only plan screen shows both slots.** `PlanDisplayData.WeekdayRow`
+carries the lift slot's full `ScheduledSession` alongside the run fields it already had, plus
+`obligationSummary` (the shared `ObligationSummary` — see the MAX-137 note above on why it
+moved out of `DayDraft`). `PlanDetailSections`' weekly-template card stays **one row per
+weekday**, not fourteen: this was the ticket's judgement call to make, and the reasoning is
+inline on `weekCard`'s own doc comment. A day's *value* text grows a second line only when it
+actually carries two asks (`PlanFormatting.weekdayLines`, switching on `obligationSummary`);
+rest-on-both — the common case — stays the one short line it always was, so a busy week reads
+visibly busier than a quiet one without a fourth visual channel. `.accessibilityElement(children:
+.combine)` makes a two-line day one VoiceOver stop, not two disconnected fragments.
+
+- **A run-only plan reads exactly as before, byte for byte.** `PlanFormatting.runAsk` is the
+  same kind/distance/note string `weekdayValue` computed before this ticket, moved rather than
+  rewritten, and `weekdayLines` returns exactly that one string for `.rest` and `.runOnly` —
+  the two cases every plan on disk today falls into.
+- **A pre-MAX-129 plan and a plan that deliberately schedules no lifting are indistinguishable
+  on disk** — `WeeklyTemplate.Entry`'s own decoding makes "absent" and "rest" the same bytes
+  (A17 §2.3), so there is no bit anywhere in a stored `Plan` recording which one happened. This
+  ticket's brief asked for the pre-lifting case to read as "predates lifting" rather than
+  "every day is rest"; given the two are provably the same fact on disk, the screen renders
+  both the one honest way available — the lift line is simply absent, never a second "Rest" —
+  rather than fabricating a distinction the type system cannot support. Recorded here rather
+  than silently decided: if the owner wants the two cases to read differently, that needs a new
+  signal written at authoring time (e.g. a plan-level flag), not something this ticket could
+  infer from an existing stored plan.
+- **`describeLiftSession` and `describeBothSessions` are unchanged, reused as-is.** No second
+  copy of "what a lift session says" or "how a two-slot day joins" was written — the read-only
+  row calls `PlanAuthoringFormatting.describeLiftSession` directly for its lift line, and
+  `describe(_ summary: ObligationSummary)` picked up the shared type without any call site
+  needing to change (the property `obligationSummary` still just returns *a* value; nothing
+  spells out the type name at the call site).
+- **Rest-day-budget caption (LIFTING-SPEC §6.4/§15 Q9, "what does the budget count now") was
+  not taken.** It is not in this ticket's brief, and MAX-104 already owns the app's
+  absence/copy pass; flagged here rather than done, per CLAUDE.md's rule for out-of-scope
+  work found mid-ticket.
 
 **MAX-130 — a lift's metrics are decided, not merely withheld.** MAX-111 put `if isRun` in
 front of three expressions in `DerivedMetricsCalculator`. That fixed the three metrics that
@@ -1650,6 +1692,44 @@ The two that were not are now `RubricCondition.actualDiscipline(oneOf:)` and
   tests distance only, so an HR-only treadmill fragment still reaches the scorer.
   LIFTING-SPEC §9.2 wants a duration floor there; the plan can now express one, and
   changing the classifier is a behaviour change this ticket's brief forbade.
+
+**MAX-145 — the athlete says what a lift worked, and the app learns to wait for it.**
+A22 built. The picker is the small half; the two consequences the amendment named are the
+change:
+
+- **A lift's absent score has a third name now.** `WorkoutVerdict.Scoring
+  .awaitingMuscleGroups` sits beside `.awaitingScore` (awaiting a *model*) and MAX-126's
+  `.noVerdict` (no verdict is coming). The verdict header renders it with no spinner and no
+  future tense — a spinner would announce the app as busy with something it has not been
+  given — and with the same question the section below it asks, in the same words, from one
+  core copy type. **Nothing scores a lift yet either way** (that is MAX-131/132); what
+  changed is that the app now knows *what it is waiting for*, and says so.
+- **The entry is a record beside the workout, not a field on it.** `MuscleGroupEntry` is
+  `ScoreAnnotation`'s shape applied to an input: its own identifier, timestamped, additive.
+  Changing an answer appends; `MuscleGroupLog` resolves the latest as the one in force and
+  keeps the rest. `Workout` was not touched, which is what stops A22's narrow manual-entry
+  permission leaking into "the app can edit a captured session."
+- **"I have not told you yet" is unrepresentable as "I trained nothing."** An entry with an
+  empty group set throws at the initializer, at decode, and at the picker's Save button —
+  absence is the *absence of an entry*, and only that prompts.
+- **A run is untouched, and no stored score moved (D8).** No run is ever asked the
+  question; a ride, hike or walk still lands on `.noVerdict`; and a lift already carrying an
+  auto-score from the running rubric (A21/MAX-143) still reports it, because the ledger
+  branch is read before any of this. `WorkoutVerdictTests` pins all four.
+- **`WorkoutVerdict`'s new parameter distinguishes "not looked" from "not told".** It takes
+  a `MuscleGroupLog?`, where nil means the caller did not read one — so `ContextBuilder`,
+  which does not, resolves byte-identically to before A22 rather than asserting a state it
+  never read. The single compiler-forced line in `Context/TrainingFactSheet` is the new
+  case's switch arm, unreachable today.
+- **No migration.** `MuscleGroupEntryRecord` is a *new* record type: SwiftData creates its
+  table and no existing row is read, rewritten or re-typed. Every property is non-optional
+  with a default, no `@Attribute(.unique)`, no relationship (A8's rules kept), and
+  `MaximizeSchemaV1`'s version does not move — `distanceSplitsJSON`'s reasoning. Deletion
+  cascades via a new `WorkoutAttachedRecord.muscleGroupEntries`, which is how the compiler
+  made this ticket decide.
+- **Not verified by CI beyond compilation.** The picker, the sheet and the persistence are
+  App-layer (tracker R2, R13). See the PR's **Needs device verification** section — set
+  groups, force-quit, reopen.
 
 **MAX-093 landed the stored record.** `StoredChatThread` is columnar —
 `subjectKindRawValue`, `workoutUUID` (a fixed sentinel for a training row),

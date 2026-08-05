@@ -37,6 +37,12 @@ struct WorkoutDetailData: Equatable {
     /// own documentation) — so there is no "nothing to build from" case here either.
     let summaryTiles: SummaryTileData
 
+    /// A22/MAX-145. What the athlete has said this session worked, and — for a lift they
+    /// have not answered for — the prompt that asks. `.notALift` on every run, which is
+    /// what keeps the section off a screen it has no business being on;
+    /// `MuscleGroupEntryData.resolve` is where that is decided.
+    let muscleGroups: MuscleGroupEntryData
+
     /// MAX-047. The athlete's chosen `DistanceUnit`, threaded down to every section on
     /// this screen that shows a distance — `summaryTiles` already carries it into
     /// `SummaryTileData`'s own formatting, and `VerdictHeaderView` needs it separately
@@ -68,6 +74,14 @@ final class WorkoutDetailModel {
     private let scoreRepository: (any ScoreRepository)?
     private let planRepository: (any PlanRepository)?
     private let settingsRepository: (any SettingsRepository)?
+    private let muscleGroupRepository: (any MuscleGroupEntryRepository)?
+
+    /// Mints the identifier and the timestamp for a new muscle-group entry (A22).
+    /// Injected for the reason `WorkoutIngestionPipeline` injects `now`: a record is
+    /// then a pure function of its inputs, and a future test can assert on the whole of
+    /// it rather than on everything except two fields.
+    private let newEntryID: @Sendable () -> UUID
+    private let now: @Sendable () -> Date
 
     /// The zone the athlete's day boundary is drawn in. `Workout.calendarDay(in:)`
     /// requires one rather than guessing (see its doc comment); `.current` is the
@@ -86,7 +100,10 @@ final class WorkoutDetailModel {
         scoreRepository: (any ScoreRepository)? = nil,
         planRepository: (any PlanRepository)? = nil,
         settingsRepository: (any SettingsRepository)? = nil,
-        timeZone: TimeZone = .current
+        muscleGroupRepository: (any MuscleGroupEntryRepository)? = nil,
+        timeZone: TimeZone = .current,
+        newEntryID: @escaping @Sendable () -> UUID = { UUID() },
+        now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.workoutID = workoutID
         if let workoutRepository {
@@ -109,11 +126,20 @@ final class WorkoutDetailModel {
         } else {
             self.settingsRepository = PersistenceComposition.store
         }
+        if let muscleGroupRepository {
+            self.muscleGroupRepository = muscleGroupRepository
+        } else {
+            self.muscleGroupRepository = PersistenceComposition.store
+        }
         self.timeZone = timeZone
+        self.newEntryID = newEntryID
+        self.now = now
     }
 
     func load() async {
-        guard let workoutRepository, let scoreRepository, let planRepository, let settingsRepository else {
+        guard let workoutRepository, let scoreRepository, let planRepository, let settingsRepository,
+              let muscleGroupRepository
+        else {
             state = .failed
             return
         }
@@ -133,7 +159,21 @@ final class WorkoutDetailModel {
             // per screen load, never re-fetched (let alone recomputed) per section.
             let metrics = try await workoutRepository.derivedMetrics(forWorkout: workoutID)
 
-            let verdict = WorkoutVerdict(workout: workout, planDay: planDay, ledger: ledger)
+            // A22: read once, here, and handed to both surfaces that speak about it —
+            // the verdict header's waiting state and the section that answers it. Two
+            // reads could disagree; one cannot.
+            let muscleGroupLog = try await muscleGroupRepository.muscleGroupLog(forWorkout: workoutID)
+
+            let verdict = WorkoutVerdict(
+                workout: workout,
+                planDay: planDay,
+                ledger: ledger,
+                muscleGroups: muscleGroupLog
+            )
+            let muscleGroups = MuscleGroupEntryData.resolve(
+                activityType: workout.activityType,
+                entry: muscleGroupLog.current
+            )
             let chartData = try await heartRateChart(
                 workoutRepository: workoutRepository,
                 planCalendar: planCalendar,
@@ -171,6 +211,7 @@ final class WorkoutDetailModel {
                 routeMap: routeMap,
                 splits: splits,
                 summaryTiles: summaryTiles,
+                muscleGroups: muscleGroups,
                 distanceUnit: distanceUnit
             ))
         } catch {
@@ -213,6 +254,41 @@ final class WorkoutDetailModel {
     /// is cheaper than a rule for when to skip it.
     func scoreIfNeeded() async {
         await IngestionComposition.completeIngestion(forWorkout: workoutID)
+        await load()
+    }
+
+    /// A22: records what the athlete says this session worked.
+    ///
+    /// **Additive.** This appends an entry; it never edits one, because
+    /// `MuscleGroupEntryRepository` offers no path that could. Changing the answer later
+    /// appends again and the earlier answer stays on file — `ScoreAnnotation`'s
+    /// discipline, applied to an input.
+    ///
+    /// Goes through `MuscleGroupEntry`'s validating initializer, so an empty set cannot
+    /// reach storage even though the picker's Save button is already disabled for one:
+    /// "I trained nothing" is not a thing this record may say, and the type is what says
+    /// so rather than the button.
+    ///
+    /// Reloads afterwards, because the header's waiting state and the section's copy
+    /// both change the moment this lands. A failed write leaves the screen showing what
+    /// is actually stored, which is the honest outcome — the athlete sees the prompt
+    /// still asking rather than an answer that was never recorded.
+    func setMuscleGroups(_ groups: Set<MuscleGroup>) async {
+        guard let muscleGroupRepository else { return }
+        do {
+            let entry = try MuscleGroupEntry(
+                id: newEntryID(),
+                workoutID: workoutID,
+                groups: groups,
+                recordedAt: now()
+            )
+            try await muscleGroupRepository.record(entry)
+        } catch {
+            // Nothing useful to say here that reloading does not say better: the section
+            // will render whatever is actually on file. A thrown `DomainError` means an
+            // empty set got past the picker, which is a programming error, not a state
+            // to narrate at the athlete.
+        }
         await load()
     }
 }

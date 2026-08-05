@@ -278,3 +278,28 @@ extension ScheduledSession {
         LiftPrescriptionSummary(kind: kind, muscleGroups: muscleGroups)
     }
 }
+
+/// Whether a weekday carries a run ask, a lift ask, both, or neither (A17) — the fact
+/// a scannable week view leads with, before either slot's own detail.
+///
+/// Shared, deliberately, between `PlanDraft.DayDraft` (MAX-137: the week an athlete is
+/// mid-edit on) and `PlanDisplayData.WeekdayRow` (MAX-138: the week a stored, governing
+/// plan already carries). Both answer the identical question — "what does this weekday
+/// ask of the two slots" — off the identical two `ScheduledSessionKind` values, so it
+/// is one type with one initializer rather than two enums that happen to have the same
+/// four cases today and nothing stopping them drifting apart tomorrow.
+public enum ObligationSummary: Hashable, Sendable {
+    case rest
+    case runOnly
+    case liftOnly
+    case both
+
+    public init(runKind: ScheduledSessionKind, liftKind: ScheduledSessionKind) {
+        switch (runKind != .rest, liftKind != .rest) {
+        case (false, false): self = .rest
+        case (true, false): self = .runOnly
+        case (false, true): self = .liftOnly
+        case (true, true): self = .both
+        }
+    }
+}

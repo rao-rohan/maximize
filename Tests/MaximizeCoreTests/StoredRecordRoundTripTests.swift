@@ -804,7 +804,69 @@ final class StoredRecordRoundTripTests: XCTestCase {
     func testEveryAttachedRecordKindIsAccountedFor() {
         XCTAssertEqual(
             Set(WorkoutAttachedRecord.allCases),
-            [.heartRateSeries, .route, .derivedMetrics, .automaticScore, .scoreAnnotations, .chatThread]
+            [
+                .heartRateSeries, .route, .derivedMetrics, .automaticScore, .scoreAnnotations,
+                .chatThread, .muscleGroupEntries,
+            ]
         )
+    }
+
+    // MARK: - Muscle-group entries (A22)
+
+    func testMuscleGroupEntryRoundTripsUnchanged() throws {
+        let entry = try MuscleGroupEntry(
+            id: Fixture.muscleGroupEntryID,
+            workoutID: Fixture.workoutID,
+            groups: [.chest, .shoulders, .arms],
+            recordedAt: Fixture.at(60)
+        )
+        XCTAssertEqual(try StoredMuscleGroupEntry(entry).toDomain(), entry)
+    }
+
+    /// The groups are stored as a canonically ordered array so an unchanged entry
+    /// re-encodes to identical bytes — `PersistencePayload`'s reason, and the same
+    /// property `ScheduledSession.muscleGroups` already relies on.
+    func testMuscleGroupEntryEncodesGroupsInACanonicalOrder() throws {
+        let one = try MuscleGroupEntry(
+            id: Fixture.muscleGroupEntryID,
+            workoutID: Fixture.workoutID,
+            groups: [.legs, .core, .back],
+            recordedAt: Fixture.at(60)
+        )
+        let other = try MuscleGroupEntry(
+            id: Fixture.muscleGroupEntryID,
+            workoutID: Fixture.workoutID,
+            groups: [.back, .legs, .core],
+            recordedAt: Fixture.at(60)
+        )
+        XCTAssertEqual(try StoredMuscleGroupEntry(one).groupsJSON, try StoredMuscleGroupEntry(other).groupsJSON)
+    }
+
+    /// `MuscleGroup` is closed, so an unrecognised raw value is a corrupted record
+    /// rather than a variant to tolerate — decoding a *subset* of what the athlete said
+    /// would silently misreport the session.
+    func testMuscleGroupEntryRejectsAnUnknownGroup() throws {
+        let stored = StoredMuscleGroupEntry(
+            entryUUID: Fixture.muscleGroupEntryID,
+            workoutUUID: Fixture.workoutID,
+            groupsJSON: Data(#"["chest","forearms"]"#.utf8),
+            recordedAt: Fixture.at(60)
+        )
+        XCTAssertThrowsError(try stored.toDomain())
+    }
+
+    /// An entry with no groups is not a thing the domain can represent — see
+    /// `MuscleGroupEntry`, and A22's "I have not told you yet" versus "I trained
+    /// nothing". Storage must not be a way around that.
+    func testStoredMuscleGroupEntryWithNoGroupsFailsToDecode() throws {
+        let stored = StoredMuscleGroupEntry(
+            entryUUID: Fixture.muscleGroupEntryID,
+            workoutUUID: Fixture.workoutID,
+            groupsJSON: Data("[]".utf8),
+            recordedAt: Fixture.at(60)
+        )
+        XCTAssertThrowsError(try stored.toDomain()) { error in
+            XCTAssertEqual(error as? DomainError, .empty(field: "MuscleGroupEntry.groups"))
+        }
     }
 }

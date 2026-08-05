@@ -5,15 +5,18 @@ import MaximizeCore
 /// effectiveness score, whether it was effective, and the one-line rationale — or the
 /// honest absence of a score.
 ///
-/// ## Both scoreless states are first-class, and they are not the same state
+/// ## All three scoreless states are first-class, and no two are the same state
 ///
-/// A workout with no score is ordinary here, and there are two ways to be one.
+/// A workout with no score is ordinary here, and there are three ways to be one.
 /// `awaitingScoreSection` is a run whose score has not landed yet — seconds after a
 /// run finishes, or indefinitely with no API key and no network — and it says so with a
 /// spinner, because the screen really will change. `noVerdictSection` (MAX-126) is a
-/// lift, a ride or a hike: MAX-111 stopped the running rubric being applied to those, so
+/// ride or a hike: MAX-111 stopped the running rubric being applied to those, so
 /// no score is coming, ever, and a spinner there is the app promising something it
 /// cannot deliver. It carries no spinner and no future tense.
+/// `awaitingMuscleGroupsSection` (MAX-145, A22) is a lift the athlete has not described
+/// yet: the wait is real but it is on *them*, so the state asks a question instead of
+/// either promising or refusing a number.
 ///
 /// Neither is a dimmed or empty copy of the scored layout: each has its own copy on its
 /// own neutral surface, and each carries **none** of the three saturated score-band
@@ -84,6 +87,8 @@ struct VerdictHeaderView: View {
         switch verdict.scoring {
         case .awaitingScore:
             awaitingScoreSection
+        case .awaitingMuscleGroups:
+            awaitingMuscleGroupsSection
         case .noVerdict:
             noVerdictSection
         case let .scored(automatic, annotation):
@@ -124,6 +129,31 @@ struct VerdictHeaderView: View {
             scorelessCopy(
                 headline: "Recorded, not scored",
                 detail: "The plan scores runs, so there's no score for this workout."
+            )
+            Spacer(minLength: 0)
+        }
+        .contentSurface(.inset)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// A lift nobody has said anything about yet (A22, MAX-145).
+    ///
+    /// **No spinner, for the opposite reason `noVerdictSection` has none.** There the
+    /// spinner was lying about a process that was not running; here it would be lying
+    /// about *who is working*: this state changes when the athlete answers and at no
+    /// other moment, so an indeterminate progress indicator would announce the app as
+    /// busy with something it has not been given. What stands in its place is the
+    /// question itself — the copy is `MuscleGroupEntryCopy`, shared with the section
+    /// below, so the screen asks once in one voice rather than twice in two.
+    ///
+    /// The same neutral surface and the same two-line shape as the other two scoreless
+    /// states, combined into one accessibility element for the reason
+    /// `noVerdictSection` gives.
+    private var awaitingMuscleGroupsSection: some View {
+        HStack(spacing: Spacing.compact) {
+            scorelessCopy(
+                headline: MuscleGroupEntryCopy.awaitingEntryHeadline,
+                detail: MuscleGroupEntryCopy.awaitingEntryVerdictDetail
             )
             Spacer(minLength: 0)
         }

@@ -102,6 +102,119 @@ final class WorkoutVerdictTests: XCTestCase {
         XCTAssertEqual(verdict.actual, .classified(automatic.actualClassification))
     }
 
+    // MARK: Awaiting the athlete — a lift nobody has described yet (A22, MAX-145)
+
+    private func log(
+        _ groups: Set<MuscleGroup>? = nil,
+        workoutID: UUID = Fixture.workoutID
+    ) throws -> MuscleGroupLog {
+        guard let groups else { return try MuscleGroupLog(workoutID: workoutID) }
+        return try MuscleGroupLog(
+            workoutID: workoutID,
+            entries: [
+                try MuscleGroupEntry(
+                    id: Fixture.muscleGroupEntryID,
+                    workoutID: workoutID,
+                    groups: groups,
+                    recordedAt: Fixture.at(60)
+                )
+            ]
+        )
+    }
+
+    /// The state A22 forces into existence. A lift cannot be scored at ingestion because
+    /// the groups arrive later (D2 computes once, D8 forbids revising), so the app waits
+    /// — on the athlete, not on a model.
+    func testALiftWithAnEmptyMuscleGroupLogIsAwaitingTheAthlete() throws {
+        let workout = try Fixture.workout(activityType: .traditionalStrengthTraining)
+
+        let verdict = WorkoutVerdict(
+            workout: workout,
+            planDay: nil,
+            ledger: nil,
+            muscleGroups: try log()
+        )
+
+        XCTAssertEqual(verdict.scoring, .awaitingMuscleGroups)
+        XCTAssertNil(verdict.muscleGroupEntry)
+        XCTAssertEqual(verdict.actual, .unclassified(.traditionalStrengthTraining))
+    }
+
+    /// Once the athlete has answered, the prompt stops. Nothing scores a lift yet — the
+    /// rubric is MAX-131/132 — so the honest state is the one that says no verdict is
+    /// coming, not a spinner.
+    func testALiftTheAthleteHasDescribedNoLongerPrompts() throws {
+        let workout = try Fixture.workout(activityType: .traditionalStrengthTraining)
+
+        let verdict = WorkoutVerdict(
+            workout: workout,
+            planDay: nil,
+            ledger: nil,
+            muscleGroups: try log([.chest, .shoulders])
+        )
+
+        XCTAssertEqual(verdict.scoring, .noVerdict)
+        XCTAssertEqual(verdict.muscleGroupEntry?.groups, [.chest, .shoulders])
+    }
+
+    /// **A run is untouched by all of this.** No run is ever asked what muscles it
+    /// worked, so a log passed for one cannot change its state — not even an empty one.
+    func testARunIsUnaffectedByTheMuscleGroupLog() throws {
+        for activityType: ActivityType in [.running, .treadmillRunning] {
+            let verdict = WorkoutVerdict(
+                workout: try Fixture.workout(activityType: activityType),
+                planDay: nil,
+                ledger: nil,
+                muscleGroups: try log()
+            )
+            XCTAssertEqual(verdict.scoring, .awaitingScore, "\(activityType)")
+        }
+    }
+
+    /// A ride, a hike and a walk are not lifts, so they are not asked either — their
+    /// absence of a score is permanent (MAX-126), not a question waiting for an answer.
+    func testANonRunThatIsNotALiftIsNeverAwaitingTheAthlete() throws {
+        for activityType: ActivityType in [.cycling, .hiking, .walking, .other] {
+            let verdict = WorkoutVerdict(
+                workout: try Fixture.workout(activityType: activityType),
+                planDay: nil,
+                ledger: nil,
+                muscleGroups: try log()
+            )
+            XCTAssertEqual(verdict.scoring, .noVerdict, "\(activityType)")
+        }
+    }
+
+    /// Nil is "this caller did not look", not "the athlete has not said". A call site
+    /// with no muscle-group log to hand — `ContextBuilder`, today — must resolve exactly
+    /// as it did before A22 rather than assert a state it never read.
+    func testACallerThatSuppliesNoLogResolvesExactlyAsBeforeA22() throws {
+        let verdict = WorkoutVerdict(
+            workout: try Fixture.workout(activityType: .traditionalStrengthTraining),
+            planDay: nil,
+            ledger: nil
+        )
+        XCTAssertEqual(verdict.scoring, .noVerdict)
+        XCTAssertNil(verdict.muscleGroupEntry)
+    }
+
+    /// D8, restated for this ticket: a lift already carrying an immutable auto-score
+    /// (A21/MAX-143's history) keeps reporting it, whatever the athlete has or has not
+    /// said about muscle groups. The entry is additive information, never a reason to
+    /// revisit a verdict.
+    func testAnAlreadyScoredLiftIsNotMovedIntoTheWaitingState() throws {
+        let automatic = try Fixture.score(points: 30)
+
+        let verdict = WorkoutVerdict(
+            workout: try Fixture.workout(activityType: .traditionalStrengthTraining),
+            planDay: nil,
+            ledger: try ScoreLedger(automatic: automatic),
+            muscleGroups: try log()
+        )
+
+        XCTAssertEqual(verdict.scoring, .scored(automatic: automatic, annotation: nil))
+    }
+
     // MARK: Scored
 
     /// Once a ledger exists, "actual" switches to the stored classification rather

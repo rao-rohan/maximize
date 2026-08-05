@@ -274,6 +274,12 @@ extension TrainingContext {
         switch session.verdict.scoring {
         case .awaitingScore:
             return "Score: no verdict yet — this run has not been scored"
+        // Unreachable from here today, and required by the compiler: `ContextBuilder`
+        // passes no muscle-group log, and `WorkoutVerdict` will not assert a state a
+        // caller has not read (A22, MAX-145). The wording is here so the state has an
+        // honest sentence the day a builder does supply one.
+        case .awaitingMuscleGroups:
+            return "Score: none yet — this lift is not scored until its muscle groups are set"
         case .noVerdict:
             return "Score: none — the plan's rubric scores runs, so this session is not scored"
         case let .scored(automatic, annotation):

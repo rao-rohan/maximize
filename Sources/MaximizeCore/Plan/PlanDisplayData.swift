@@ -50,7 +50,34 @@ public enum PlanDisplayData: Hashable, Sendable {
     }
 
     /// One weekday's ask, resolved off the stored `WeeklyTemplate` (Monday-first,
-    /// matching `Weekday`'s own ordering).
+    /// matching `Weekday`'s own ordering) — **both slots** (A17, MAX-138).
+    ///
+    /// `kind` / `distanceMeters` / `note` stay the **run** slot's fields, unqualified,
+    /// for the same reason `PlanDay.scheduledSession` kept its name: every existing
+    /// reader of this type meant the run ask, and still does. `liftSession` is the new
+    /// half.
+    ///
+    /// ## What an empty lift slot reads as, and why that is not decided in a view
+    ///
+    /// `liftSession.isRest` is true for two facts that must never blur into one: a
+    /// plan that deliberately prescribes no lifting on this weekday, and a plan
+    /// authored before MAX-129 gave the lift slot a wire format to be absent *from*.
+    /// `WeeklyTemplate.Entry`'s own decoding makes those two facts byte-identical on
+    /// disk (A17 §2.3's "no migration" claim) — there is no bit left over, anywhere in
+    /// a stored `Plan`, that says which one happened. So this type does not attempt to
+    /// tell them apart; both read as "no lift asked here," which is the one thing they
+    /// both are actually true of. What a view must **not** do is render that as though
+    /// the plan had actively scheduled rest for the lift the way it can for the run —
+    /// see `obligationSummary` and `PlanFormatting.weekdayLines`, which omit the lift
+    /// line entirely rather than printing a second "Rest," so a run-only week (whether
+    /// because it predates lifting or because nothing was ever prescribed) reads
+    /// exactly as it did before this ticket, not as a week of explicit lift rest days.
+    ///
+    /// A **stated** lift with no muscle groups named is the other empty state, and it
+    /// is a real, different fact — `LiftPrescriptionSummary.unstatedGroups`, reached
+    /// through `liftSession.liftPrescriptionSummary`. `PlanAuthoringFormatting`
+    /// already renders it as "Lift · groups not stated" (MAX-137); this type carries
+    /// the session that makes that reachable rather than re-deriving the distinction.
     public struct WeekdayRow: Hashable, Sendable, Identifiable {
         public var id: Weekday { weekday }
         public let weekday: Weekday
@@ -58,6 +85,34 @@ public enum PlanDisplayData: Hashable, Sendable {
         /// Metres, matching storage (D2) — the view converts for display.
         public let distanceMeters: Double?
         public let note: String?
+
+        /// The **lift** slot's ask (A17). The full session, not a decomposed
+        /// kind/groups pair, so the one shared formatter
+        /// (`PlanAuthoringFormatting.describeLiftSession`) renders it identically to
+        /// the authoring screen's own preview — nothing about a lift's copy is
+        /// re-derived here.
+        public let liftSession: ScheduledSession
+
+        /// Whether this weekday carries a run ask, a lift ask, both, or neither —
+        /// computed once, here, from the same two slots `PlanDraft.DayDraft` reads, so
+        /// a governed week and the draft that produced it never disagree about which
+        /// days are "busy."
+        public let obligationSummary: ObligationSummary
+
+        public init(
+            weekday: Weekday,
+            kind: ScheduledSessionKind,
+            distanceMeters: Double?,
+            note: String?,
+            liftSession: ScheduledSession = .rest
+        ) {
+            self.weekday = weekday
+            self.kind = kind
+            self.distanceMeters = distanceMeters
+            self.note = note
+            self.liftSession = liftSession
+            self.obligationSummary = ObligationSummary(runKind: kind, liftKind: liftSession.kind)
+        }
     }
 
     /// One row of the long-run arc.
@@ -204,15 +259,16 @@ public enum PlanDisplayData: Hashable, Sendable {
         today: CalendarDay
     ) throws -> VersionDetail {
         let week = Weekday.allCases.sorted().map { weekday -> WeekdayRow in
-            // The run slot only. Showing the lift slot beside it is MAX-138's ticket —
-            // this file builds rows a screen renders, and a row nothing draws is a row
-            // nobody checks.
+            // Both slots (A17) — `WeeklyTemplate.session(on:for:)` is total in
+            // `discipline`, so the lift half always has an answer, and rest is one.
             let session = plan.weeklyTemplate.session(on: weekday, for: .run)
+            let liftSession = plan.weeklyTemplate.session(on: weekday, for: .lift)
             return WeekdayRow(
                 weekday: weekday,
                 kind: session.kind,
                 distanceMeters: session.distanceMeters,
-                note: session.note
+                note: session.note,
+                liftSession: liftSession
             )
         }
 
