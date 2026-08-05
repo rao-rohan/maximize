@@ -16,6 +16,19 @@ import Observation
 @MainActor
 @Observable
 final class SettingsModel {
+    /// The instance the settings sheet and the app root share (MAX-086).
+    ///
+    /// `AppearancePreference` has to be applied from somewhere that hosts the whole
+    /// window — `MaximizeApp` — and has to update the moment `SettingsView` saves a
+    /// new value, with no relaunch. Giving each its own `SettingsModel` would read the
+    /// same `PersistenceComposition.store` record but not observe each other's writes,
+    /// which is exactly the "two notions of the current appearance" D2/D3 exist to
+    /// rule out, just at view-model scale instead of data-model scale. One instance,
+    /// read by both, is the fix: a save in the sheet mutates `state` on the same
+    /// `@Observable` object the app root reads, so SwiftUI re-renders it without any
+    /// extra plumbing.
+    static let shared = SettingsModel()
+
     enum LoadState: Equatable {
         case loading
         case loaded(AppSettings)
