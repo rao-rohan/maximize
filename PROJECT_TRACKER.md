@@ -500,6 +500,9 @@ feature was governed by a plan that could not exist).
 | MAX-087 | A non-hue channel for the year heatmap's 6pt cells | MAX-084 | Sonnet ✅ |
 | MAX-105 | **The plan on the dashboard calendar** — scheduled beneath actual | Owner | **Opus** |
 | MAX-106 | The UI standard, written into `CLAUDE.md` | Owner | Sonnet ✅ |
+| MAX-107 | Name the frame that broke a chat stream | Device report | Sonnet 🔒 |
+| MAX-108 | Tap a calendar day → its workouts; swipe between two on one day | Owner | Sonnet |
+| MAX-109 | **Plans cover lifting as well as running** — spec first | Owner | **Opus** |
 | MAX-090 | Chat-first product spec: plan generation and Q&A through chat | Owner | **Opus** 🔒 ✅ |
 | MAX-091 | Run both Claude clients on the Sonnet tier at `medium` effort | Owner, cost | Sonnet 🔒 ✅ |
 | MAX-092 … MAX-104 | The chat-first build, decomposed from MAX-090 | MAX-090 | see below |
@@ -561,6 +564,52 @@ duplicated: it now checks both `ScoreBandMark` (day grid) and `ScoreBandHeatmapM
 (year heatmap) as two representations of the same rule. **Needs device verification** —
 see the PR: whether a ~2.4pt inset mark actually reads as smaller rather than as noise
 is the one thing here only a phone can answer.
+
+**MAX-107 — name the frame that broke a chat stream.** From the device: chat fails with
+*"The response was not a recognizable streaming reply"* — `ChatStreamError
+.unreadableResponse`, meaning the API returned 200 and streamed, and a frame failed to
+decode. The error says a frame broke and **not which one**, so the failure cannot be
+diagnosed from the screen, and the decoder is not the obvious culprit: it ignores unknown
+event types, handles CRLF, and every field on its `Frame` is already optional.
+
+The fix is to carry the offending frame's `type` token in the error. `AnthropicStreamingChatClient`
+is right that server prose must never be surfaced — but a frame type is protocol metadata,
+the same category as the HTTP status codes `unexpectedStatus` and `serverUnavailable`
+already carry safely. It is 🔒 because it touches what a chat failure is allowed to reveal.
+**Distinguish the two causes while in there:** a `data:` payload that is not JSON at all
+and JSON that is not the expected shape are different faults wearing one name.
+
+**MAX-108 — the calendar's days should be doors.** From the owner. Tapping a day in the
+week or month view goes to that day's workouts; where a day holds two, a swipe moves
+between them rather than making the athlete go back and re-enter.
+
+Worth doing properly rather than as a segue: the calendar is the app's main index of the
+past, and it is currently read-only, so every trip from "that Tuesday looks wrong" to the
+run itself goes through the workouts list. The two-workout case is the interesting half —
+a day with two runs is exactly the day you most want to compare, and back-out-and-re-enter
+is the interaction that makes comparison not worth doing. A day with **no** workout still
+needs an answer; it should not be a dead tap that looks broken.
+
+**MAX-109 — plans cover lifting as well as running. Spec first, and it is bigger than it
+sounds.** From the owner. Every layer below the plan currently assumes running: §10.2's
+classification reads a heart-rate profile against pace, the derived metrics are HR drift,
+cadence and grade-adjusted pace, the plan's weekly template prescribes sessions with a
+*distance* arc, and the rubric scores against a distance and an HR cap. A lifting session
+has no distance, no pace, and a heart-rate curve that means something else entirely.
+
+So this is a PRD-level change, not a feature ticket, and it gets the MAX-090 treatment: an
+Opus spec that answers the load-bearing questions before any code moves. At minimum —
+does a lifting session get its own metric set and its own rubric, or a shared one with
+absent fields? Does D1's plan record grow a second arc, or does "the plan" become two
+plans under one version? What is a *day* that prescribes both? And what does an effective
+day mean when the two disciplines disagree — which is D9's rest-day budget and the streak
+tallies both needing an answer.
+
+**The user's fourth item is not filed here, on purpose.** *"We shouldn't show red for
+future days"* is a live defect in the calendar's day-state model, and MAX-105 is in that
+exact file right now with the future-versus-missed distinction already in its brief. It
+has been relayed to that ticket as a confirmed hardware observation rather than opened as
+a parallel ticket that would collide with it.
 
 **MAX-086 is split, and what remains is a real defect rather than polish.** It was filed
 off the design review as "absence-string voice; wire `AppearancePreference`" — two
