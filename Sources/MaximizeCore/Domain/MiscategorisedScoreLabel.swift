@@ -221,4 +221,32 @@ public enum MiscategorisedScoreCopy {
     /// labels — the treatment `MuscleGroupEntryData.accessibilityLabel` already gives.
     public static let labelledAccessibilitySuffix =
         "This score was assigned before the plan distinguished lifting."
+
+    /// What the athlete's own average says when `TalliesCalculator` (MAX-160) left one or
+    /// more labelled scores out of it. Lives beside `labelledDetail` for the identical
+    /// reason: a string a person or Claude reads is a product decision, not a view's or a
+    /// fact sheet's to invent separately, and the two surfaces that read this — the trend
+    /// tile's caption and `TrainingFactSheet`'s prose — must give the athlete the same
+    /// reason for the same missing points (A12 rule 3) rather than two that could drift.
+    ///
+    /// Nil when nothing was excluded, so a caller appends a parenthetical only when there
+    /// is one to append rather than branching on a magic zero itself.
+    public static func averageExclusionNote(excludedCount: Int) -> String? {
+        guard excludedCount > 0 else { return nil }
+        return excludedCount == 1
+            ? "excludes 1 score from before the plan distinguished lifting"
+            : "excludes \(excludedCount) scores from before the plan distinguished lifting"
+    }
+
+    /// The whole sentence for when *every* scored workout in a window was labelled, so
+    /// `Tallies.averageScore` is nil for a reason other than "nothing has been scored."
+    /// That is a designed state (MAX-160), not the ordinary absence — the window has
+    /// verdicts, they are just not evidence about the athlete's training — so it gets its
+    /// own wording rather than reusing "nothing in this window has been scored yet."
+    public static func onlyExcludedScoresAverageLine(excludedCount: Int) -> String {
+        let scores = excludedCount == 1 ? "score" : "scores"
+        return "Average score: every \(scores) in this window (\(excludedCount)) was judged "
+            + "before the plan distinguished lifting, so none of them count toward an average. "
+            + "That is an exclusion, not the same as nothing having been scored."
+    }
 }

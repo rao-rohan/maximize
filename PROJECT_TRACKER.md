@@ -1959,6 +1959,7 @@ free. What landed in the file:
 | MAX-159 | **A recorded-but-unjudged workout outranks another obligation's settled miss** — a Tuesday whose lift was recorded but unscored and whose run was missed draws `.noVerdict`, and its sentence names neither. §7.2's principle says change it, but the same ordering governs single-obligation days shipped since MAX-061, so it moves historical cells and wants a designed state | 135 | **Opus** |
 | MAX-160 | **Should a labelled miscategorised score leave the athlete's own average?** MAX-143 excluded it from the scorer-quality metric only; MAX-140 confirmed the average stays per-workout and declined to widen. A product decision, then a `Tallies` change | 143, 140 | Owner / overseer |
 | MAX-170 | **The stall detector's ping assumption had never met the live API** — MAX-152's two-beat threshold rested on an unverified claim about ping cadence that the API's own documentation contradicts. The rule now calibrates against what each stream demonstrates rather than against a constant | 152 | **Opus** ✅ — see the MAX-170 section below for what was established, what could not be, and how the design tolerates being wrong |
+| MAX-160 | ~~Should a labelled miscategorised score leave the athlete's own average?~~ **Owner decided: yes.** `TalliesCalculator.computeAverageScore` now skips a labelled score; the caption says when one was excluded and a fact-sheet line says why nothing is left when every scored workout was. See the MAX-160 note below | 143, 140 | Sonnet ✅ |
 
 **Four collisions the overseer must respect.**
 
@@ -3602,6 +3603,150 @@ transcript, and CI already asserts the string it contains.
 comments, both call sites still take the same two `Int`s they took before, and the touched
 test file's assertions were re-read line by line against the new strings. That is "reads
 correctly and should compile," not "compiles" — stated at that strength deliberately.
+
+---
+
+## MAX-160 — a labelled miscategorised score leaves the athlete's own average
+
+**The owner's decision, taken.** MAX-143 excluded a labelled score from PRD §2's
+scorer-quality metric only, and reported — deliberately, twice, in MAX-134's own tracker
+note and again in MAX-140's — that whether it should also leave the athlete's own average
+was a live, undecided question belonging to `Tallies`/`TalliesCalculator`. The owner
+decided: yes. The reasoning this ticket built against: the average answers "how am I
+training," and a score produced by asking the wrong question is not evidence about the
+athlete's training any more than it is evidence about the scorer — it is noise from a bug.
+Excluding it from an aggregate is not rewriting history (D8): the score stays on the
+workout, visible, with its rationale and `MiscategorisedScoreCopy.labelledDetail`'s
+explanation. Only what `Tallies.averageScore` reads changed.
+
+**The shared-predicate question, answered: `ScoreLedger.isMiscategorised`, not
+`countsTowardScorerQuality`.** MAX-143 exposed `countsTowardScorerQuality` explicitly so a
+future aggregate would filter on it rather than re-derive the rule, and this is that
+aggregate. But `countsTowardScorerQuality` (`!isMiscategorised`, today) answers "is this
+evidence about the scorer" — PRD §2's question — and this ticket's question is "is this
+evidence about the athlete's training." The two happen to agree on every score in the
+codebase right now, because labelling is the only thing either predicate currently reacts
+to. They are not, on inspection, the same question: a future reason to exclude a score
+from PRD §2's signal that has nothing to do with whether it honestly measures the athlete
+(a scorer-model version bump invalidating old rationales, say) would, if this ticket had
+coupled the average to `countsTowardScorerQuality`, silently move the athlete's average
+for a reason that has nothing to do with them — a latent bug that would be correct today
+and wrong the day the two questions actually diverge. `computeAverageScore` reads
+`ScoreLedger.isMiscategorised` directly instead, which states the one fact this exclusion
+is actually about. See `TalliesCalculator`'s own documentation, right beside the function,
+for the same argument in place.
+
+**A label excludes the whole workout, correction or not.** The ticket's instruction was
+literal — "skip a score carrying a `MiscategorisedScoreLabel`" — and this ticket followed
+it without carving out an exception for a workout the athlete has since corrected by hand.
+`ScoreLedger.wasCorrected` and `.effectiveValue` are unaffected by labelling (MAX-143's own
+rule, restated in `Score.swift`), so the correction still stands and still shows on the
+workout — it is simply never summed into this particular average, because the workout it
+came from was never judged against its own discipline's ask in the first place.
+`testALabelledAndCorrectedScoreIsStillExcludedFromTheAverage` pins this.
+
+**The designed state: "no scores to average," not zero.** When every scored workout in an
+interval is labelled, `Tallies.averageScore` stays nil — the same "honest absence" the
+type already gave "nothing scored yet" — rather than resolving to `0.0`, which would read
+as "you scored zero" instead of "nothing here counts as evidence." The two nils are told
+apart by the new `averageScoreExcludedMiscategorisedCount`, which is `0` for the ordinary
+absence and the excluded count for this one. `testAnAverageOverOnlyLabelledScoresIsNilRatherThanZero`
+pins the value; `testALabelledScoreLeavesNoAverageAndTheFactSheetSaysWhy`
+(`TrainingContextAgreementTests`) pins that the two nils say different things on the one
+surface that can say anything about an absent tile — the fact sheet, which is prose, not a
+value/caption pair. The dashboard tile itself cannot: `TrendTileData.averageScore` is
+`nil` either way, because there is no value left to caption a reason onto — documented in
+place rather than solved by inventing a value-less tile, which no other absence in that
+type does either.
+
+**The caption, where there is a value to caption.** `TrendTileData.averageScore`'s caption
+is `"avg score"` unchanged when nothing was excluded — the property that keeps a
+single-discipline history's tile byte-identical — and `"avg score (excludes N score(s) from
+before the plan distinguished lifting)"` when `averageScoreExcludedMiscategorisedCount` is
+positive. `TrainingFactSheet`'s "Average score" line folds in the identical parenthetical
+when there is still a figure to report, and prints
+`MiscategorisedScoreCopy.onlyExcludedScoresAverageLine` instead of the ordinary absence
+sentence when there is not. Both surfaces call through one pair of functions —
+`MiscategorisedScoreCopy.averageExclusionNote`/`.onlyExcludedScoresAverageLine`, beside
+MAX-143's `labelledDetail` — so the wording cannot drift apart the way MAX-140 and MAX-157
+each found it already had (A12 rule 3).
+
+**Copy lives in `MiscategorisedScoreLabel.swift`, extending `MiscategorisedScoreCopy`
+rather than a new type.** That enum is already "what a surface showing a labelled score
+says about it," and the average's copy is exactly that question asked of an aggregate
+instead of a single workout. `Domain/Score.swift` was read and not touched — this ticket's
+brief named it MAX-143's, and nothing about the average's exclusion needed a change to
+`Score` or `ScoreLedger` themselves; `isMiscategorised` and `effectiveValue` already said
+everything `computeAverageScore` needed to read.
+
+**Swept every other aggregate over scores; changed one, reported the rest.**
+
+- **`Tallies.averageScore` — changed.** This ticket's whole scope.
+- **`Tallies.effectiveDays` (`EffectiveObligationTally`) — unchanged, and a labelled score
+  still counts.** `DayObligationResolver`/`DayObligations.swift` reads `ScoreLedger
+  .isEffective` with no label filter anywhere in the resolution — `bestScored(_:)` and
+  `resolutions.filter { $0.outcome.isEffective }` take every scored workout of the right
+  discipline as-is. A lift mis-scored against the running rubric before MAX-133 today still
+  counts toward, or against, the plan-adherence ratio exactly as an honestly-scored one
+  would. **Not changed here**: this ticket's scope was named as `Tallies.averageScore`
+  specifically, and MAX-140 already declined to widen the analogous question once. Filed as
+  a candidate follow-up — "exclude a labelled score from `EffectiveObligationTally` too" —
+  rather than picked up.
+- **`Tallies.currentStreak` — unchanged, and a labelled score still can extend or break
+  it.** The streak walks `DayObligationResolver`'s same per-day roll-up
+  (`DayObligations.streakContribution`), so whatever is true of `effectiveDays` above is
+  true here too: a labelled score is ordinary evidence to the streak walk today. Same
+  disposition — reported, not touched.
+- **`Dashboard/ScoreCalendar.swift` — read, not touched (MAX-159's file, off-limits to this
+  ticket).** `bestScoredPair` resolves a calendar day's cell from every scored workout with
+  no label filter either, so a labelled score paints the calendar exactly as an unlabelled
+  one would. Same finding as the two above, on a different surface; reported for whoever
+  next owns that file.
+- **`TrendTileData.workoutDays`/`.mileage`/`.totalDistance`/`.streak` (as a tile) — not
+  score-based**, so labelling has no surface here to reach. Checked, not changed.
+- **`Context/TrainingFactSheet.swift`'s other lines — checked.** "Days with at least one
+  workout," "Effective sessions" and "Current streak" all read `Tallies` fields this ticket
+  did not touch, so they carry the same labelled-score exposure as their `Tallies`
+  counterparts above and no new one. The per-session lines (`sessionLines`) already show
+  each session's own verdict — including, for a labelled score, nothing extra today; MAX-143
+  did not add a per-session label sentence to the fact sheet and this ticket does not add
+  one either, being out of scope.
+
+**In one sentence: this ticket makes the athlete's average stop counting a category error
+against them; it deliberately leaves the plan-adherence ratio, the streak and the calendar
+still counting one, and says so rather than quietly narrowing what "excluded" means.**
+
+**Tests** (all in `MaximizeCoreTests`, all touching only files this ticket owns):
+`TalliesTests` gains `testALabelledScoreIsExcludedFromTheAverageAndAnUnlabelledOneIsNot`,
+`testAnAverageOverOnlyLabelledScoresIsNilRatherThanZero`,
+`testALabelledAndCorrectedScoreIsStillExcludedFromTheAverage`,
+`testASingleDisciplineHistoryLeavesTheAverageAndItsExcludedCountUnchanged` (the
+byte-identical fixture) and a validation test for the new field's non-negativity.
+`TrendTileDataTests` gains three caption tests (none excluded, one excluded, several
+excluded — plural wording). `MiscategorisedScoreLabelTests` pins the two new copy
+functions' wording and voice, the same way it already pins `labelledDetail`.
+`TrainingContextAgreementTests` gains `testALabelledScoreLeavesNoAverageAndTheFactSheetSaysWhy`,
+the tile/fact-sheet agreement property extended to the all-excluded case.
+
+**What CI can and cannot prove.** CI can prove: the package compiles, every new and
+existing `TalliesTests`/`TrendTileDataTests`/`MiscategorisedScoreLabelTests`/
+`TrainingContextAgreementTests` assertion passes, and — because the new parameter carries a
+default of `0` — every pre-existing direct `Tallies(...)` construction in the test suite
+keeps compiling unchanged, which is itself evidence the change is additive rather than a
+signature break threaded everywhere. CI cannot prove the longer caption
+("avg score (excludes 1 score from before the plan distinguished lifting)") lays out well
+inside `TrendTilesView`'s two-column grid tile at large Dynamic Type sizes — that view was
+not touched, takes whatever caption `MaximizeCore` hands it, and has no `.lineLimit()` set,
+so the caption should wrap rather than truncate, but only a device can confirm it reads
+well rather than merely wrapping. **Needs device verification**: open the dashboard with a
+history containing at least one labelled score (none is known to exist on this account
+yet) and confirm the average-score tile's longer caption is legible at the default and a
+large Dynamic Type size, on both the weekly and monthly/annual tile sets.
+
+**`swift build`/`swift test` were not run.** There is no Swift toolchain in this container
+(R1); CI is the actual compiler. Every new test was reasoned by hand against the exact
+arithmetic `computeAverageScore` now runs and the exact strings `MiscategorisedScoreCopy`
+now returns — reads correctly and should compile and pass, not confirmed to.
 
 ---
 
