@@ -1772,7 +1772,7 @@ is the overseer's, not a ticket's — flagged here rather than done.
 | MAX-147 | The scorer's task text learns discipline (source: MAX-133) | 133, 136 | Sonnet ✅ |
 | MAX-148 | A lift's duration and note become editable, proposable, and type-safe | 137, 141 | Sonnet ✅ |
 | MAX-149 | Duration floor for fragments — **the classifier half of gap P3**; not yet wired to any author | 013, 131 | Sonnet ✅ |
-| MAX-151 | **Author the duration floor** — `StandardPlanSeed` states one, the authoring screen edits it, `PlanProposal` can propose it. Without this MAX-149 never fires | 149, 146, 148 | Sonnet |
+| MAX-151 | **Author the duration floor** — `StandardPlanSeed` states one, the authoring screen edits it, `PlanProposal` can propose it. Without this MAX-149 never fires. (Depended on 146 only for file ownership of `StandardPlanSeed`, which is now released) | 149, 148 | Sonnet |
 | MAX-153 | **The chat shell: composer, thread list, sheet chrome** — the design pass MAX-092–103 never had over the shell its features sit in | Owner, 092–103 | **Opus** |
 
 **MAX-153 — what was decided, what was rejected, and what it is blocked on.**
@@ -2331,7 +2331,9 @@ rather than building it, because its brief forbade a behaviour change.
   `PlanDraft`, and `PlanDraft`/`PlanAuthoring.swift` are owned by MAX-148, in flight in
   parallel — out of this ticket's scope to touch. So a plan revision saved through the
   authoring screen today always produces `minimumSessionDurationSeconds == nil`, same as
-  `StandardPlanSeed` (MAX-146, also out of scope here) never setting one. The domain type
+  `StandardPlanSeed` (owned by MAX-146 at the time, and out of scope here) never setting
+  one — **authoring the floor is MAX-151, not MAX-146**, which was the `rest.ranAnyway`
+  shadow and is now merged. The domain type
   and the classifier are ready; nothing in this build can author a floor yet. That is
   follow-on ticket work, the same shape MAX-131 left `durationSeconds` in before MAX-137
   gave it an editor.
