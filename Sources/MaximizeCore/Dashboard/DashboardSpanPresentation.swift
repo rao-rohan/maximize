@@ -242,7 +242,7 @@ public enum TrendTileSet: Hashable, Sendable, CaseIterable {
     /// - **Effective days as a percentage.** At a week, "4/5" is the readable form and
     ///   the denominator is the point. At a year, "211/310" is two numbers to divide in
     ///   your head; the rate is the signal. The denominator does not disappear — it
-    ///   moves into the caption, because `EffectiveDayTally`'s own documentation is
+    ///   moves into the caption, because `EffectiveObligationTally`'s own documentation is
     ///   right that a bare percentage hiding its denominator is how a training log
     ///   lies.
     case annual

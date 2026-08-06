@@ -34,7 +34,7 @@ final class TrendTileDataTests: XCTestCase {
         from: String,
         through: String,
         workoutDays: Int = 0,
-        effectiveDays: EffectiveDayTally? = nil,
+        effectiveDays: EffectiveObligationTally? = nil,
         averageScore: Double? = nil,
         currentStreak: Int = 0
     ) throws -> Tallies {
@@ -43,7 +43,7 @@ final class TrendTileDataTests: XCTestCase {
             from: start,
             through: try day(through),
             workoutDays: workoutDays,
-            effectiveDays: try effectiveDays ?? EffectiveDayTally(effectiveCount: 0, eligibleCount: 0),
+            effectiveDays: try effectiveDays ?? EffectiveObligationTally(effectiveCount: 0, eligibleCount: 0),
             averageScore: averageScore,
             currentStreak: currentStreak,
             currentWeek: try TrainingWeek(
@@ -168,7 +168,7 @@ final class TrendTileDataTests: XCTestCase {
         let tallies = try tallies(
             from: "2026-01-05",
             through: "2026-01-11",
-            effectiveDays: try EffectiveDayTally(effectiveCount: 3, eligibleCount: 5)
+            effectiveDays: try EffectiveObligationTally(effectiveCount: 3, eligibleCount: 5)
         )
 
         let data = try TrendTileData(
@@ -184,7 +184,7 @@ final class TrendTileDataTests: XCTestCase {
         let tallies = try tallies(
             from: "2026-01-05",
             through: "2026-01-11",
-            effectiveDays: try EffectiveDayTally(effectiveCount: 0, eligibleCount: 0)
+            effectiveDays: try EffectiveObligationTally(effectiveCount: 0, eligibleCount: 0)
         )
 
         let data = try TrendTileData(
@@ -254,7 +254,7 @@ final class TrendTileDataTests: XCTestCase {
         let tallies = try tallies(
             from: "2026-01-05",
             through: "2026-01-11",
-            effectiveDays: try EffectiveDayTally(effectiveCount: 2, eligibleCount: 4),
+            effectiveDays: try EffectiveObligationTally(effectiveCount: 2, eligibleCount: 4),
             averageScore: 88,
             currentStreak: 3
         )
@@ -300,7 +300,7 @@ final class TrendTileDataTests: XCTestCase {
             from: "2026-01-01",
             through: "2026-01-31",
             workoutDays: 18,
-            effectiveDays: try EffectiveDayTally(effectiveCount: 12, eligibleCount: 20),
+            effectiveDays: try EffectiveObligationTally(effectiveCount: 12, eligibleCount: 20),
             averageScore: 74,
             currentStreak: 3
         )
@@ -347,7 +347,7 @@ final class TrendTileDataTests: XCTestCase {
             from: "2026-01-01",
             through: "2026-12-31",
             workoutDays: 212,
-            effectiveDays: try EffectiveDayTally(effectiveCount: 211, eligibleCount: 310),
+            effectiveDays: try EffectiveObligationTally(effectiveCount: 211, eligibleCount: 310),
             averageScore: 79.44,
             currentStreak: 5
         )
@@ -427,7 +427,7 @@ final class TrendTileDataTests: XCTestCase {
         let tallies = try tallies(
             from: "2026-01-01",
             through: "2026-12-31",
-            effectiveDays: try EffectiveDayTally(effectiveCount: 2, eligibleCount: 3)
+            effectiveDays: try EffectiveObligationTally(effectiveCount: 2, eligibleCount: 3)
         )
 
         let data = try tileData(kind: .year, workouts: [], tallies: tallies, planCalendar: nil)
@@ -441,7 +441,7 @@ final class TrendTileDataTests: XCTestCase {
         let tallies = try tallies(
             from: "2026-01-01",
             through: "2026-12-31",
-            effectiveDays: try EffectiveDayTally(effectiveCount: 0, eligibleCount: 0)
+            effectiveDays: try EffectiveObligationTally(effectiveCount: 0, eligibleCount: 0)
         )
 
         let data = try tileData(kind: .year, workouts: [], tallies: tallies, planCalendar: nil)

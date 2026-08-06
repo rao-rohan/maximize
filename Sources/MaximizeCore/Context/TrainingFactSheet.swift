@@ -154,7 +154,7 @@ extension TrainingContext {
 
         let effective = tallies.effectiveDays
         if effective.rate == nil {
-            // `EffectiveDayTally` refuses to report 0 for an empty denominator, and the
+            // `EffectiveObligationTally` refuses to report 0 for an empty denominator, and the
             // prompt must not turn that refusal back into a zero: "nothing was eligible"
             // and "you failed every session" are opposite statements.
             lines.append("Effective days: nothing in this window was eligible — the plan asked "

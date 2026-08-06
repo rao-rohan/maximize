@@ -1717,8 +1717,15 @@ The three decisions worth knowing without reading all of it:
   lift is two obligations; meeting one is not meeting the day. Two *attempts at one*
   obligation still resolve generously (the warm-up-jog reasoning is untouched). The
   landable property is that on a day prescribing at most one session the two countings are
-  identical — so **no historical figure moves**, and that is an acceptance criterion with
-  fixtures behind it.
+  identical — so **almost no historical figure moves**, and that is an acceptance criterion
+  with fixtures behind it. **Corrected by MAX-134, which built it:** the unqualified claim
+  is false, because §6.2 also resolves each obligation *against the workouts of its own
+  discipline*, and a scheduled run day whose only recorded workout was a lift therefore
+  moves from "recorded but unscored" (neutral, excluded) to a genuine miss. That is A19's
+  own argument arriving from the other side — a lift silently covering a skipped run — so
+  it is a correction, taken deliberately. The accurate statement of the criterion is **no
+  historical day moves whose recorded workouts all belong to the discipline that day
+  prescribed**, and that is the property MAX-134's sweep pins.
 - **Lifting is scored on adherence, not volume (A20).** HealthKit has no sets, reps or
   load, so the alternative is manual entry — PRD §3's *"the thing being killed"*. The
   non-goal is **not** spent. The honest cost is stated: adherence cannot tell a hard
@@ -1748,7 +1755,7 @@ is the overseer's, not a ticket's — flagged here rather than done.
 | MAX-131 | Rubric vocabulary for lifts — **closes gap P3** | 128 | **Opus** ✅ |
 | MAX-132 | Seed bands for lift days; the `easy.wellOverCap` shadow | 131 | Sonnet ✅ |
 | MAX-133 | Match a workout to its own discipline's ask | 129, 131 | **Opus** ✅ |
-| MAX-134 | Obligations, not days: tallies, streak, rest-day budget | 129, 133 | **Opus** |
+| MAX-134 | Obligations, not days: tallies, streak, rest-day budget | 129, 133 | **Opus** ✅ |
 | MAX-135 | The calendar's mixed day | 134, **105** | **Opus** |
 | MAX-136 | Context and fact sheet learn discipline | 129, 130 | **Opus** ✅ |
 | MAX-137 | Plan authoring for two slots | 129 | Sonnet ✅ |
@@ -1931,7 +1938,7 @@ lift slot — but each currently answers about the day's *run* while calling it 
 | Reader | What it reads | Ticket |
 |---|---|---|
 | `RubricEvaluator.evaluate` | ~~`planDay.scheduledSession.kind` picks the bands~~ **the workout's own discipline's ask, as of MAX-133** | MAX-133 ✅ |
-| `RestDayBudgeting` / `TalliesCalculator` | `PlanDay.canBeMissed`, `costTier` | MAX-134 |
+| `RestDayBudgeting` / `TalliesCalculator` | ~~`PlanDay.canBeMissed`, `costTier`~~ **each day's obligations, as of MAX-134** | MAX-134 ✅ |
 | `ScoreCalendar.dayState` / `agreement` | the day's single prescribed kind | MAX-135 |
 | `WorkoutFactSheet` | ~~`planDay.scheduledSession`~~ **the workout's own slot, as of MAX-136** | MAX-136 ✅ |
 | `TrainingFactSheet` plan block | `entry.session` — the lift slot is still unrendered | **open, see MAX-136** |
@@ -2433,6 +2440,81 @@ is never shown an easy-run day's bands, whatever conditions that band carries.
   band. The comment at the gate now states this reason rather than the mechanism this
   ticket removed, and a test pins that a lift under a rubric with no band for it is
   *refused* rather than mis-scored.
+
+**MAX-134 — the unit of account is the obligation.** A19/LIFTING-SPEC §6. A Tuesday asking
+for a run *and* a lift is two obligations: it contributes two to the effective ratio's
+denominator, both must be met for the day to extend the streak, and the rest-day budget
+forgives one of them at a time rather than converting the whole day. Two *attempts at one*
+obligation are untouched and still resolve best-of — §5's warm-up jog — which is
+deliberately the opposite rule, because "was every attempt at my run good" and "did I do
+everything the plan asked today" are different questions.
+
+- **The shared roll-up §7.3 demands is `DayObligationResolver.resolve`, returning
+  `DayObligations`.** One core function answering "what did this day come to", read by the
+  tallies and the streak here and by the calendar's mixed day next. **MAX-135 calls
+  `DayObligationResolver.resolve(date:planDay:workouts:scoreLedgers:convertedObligations:outcomeIsKnown:)`
+  and maps the result to a `ScoreCalendarDayState`** — it must not compute a roll-up of its
+  own, which is the whole reason §6 and §7 were decided together. `DayObligations` gives it
+  `resolutions` (ordered run-then-lift), `metObligations`, `unmetObligations`, `isFullyMet`
+  and `streakContribution`; each `ObligationResolution` carries the outcome, the ask, the
+  band and the deciding workout's id — the three facts §7.2's `partiallyMet` state is built
+  from. **No verdict enum and no severity ordering were shipped**: §7.2 says in terms that
+  it is not specifying the visual, so this ticket fixed the arithmetic and left the state
+  to the ticket that can see a pixel.
+- **Two reads are carried side by side on purpose.** `outcome` uses
+  `ScoreLedger.isEffective` (the annotation where one exists, §8); `band` uses
+  `automatic.band` of the best-banded workout (D1/D4/D8 — the calendar never colours from a
+  correction). They can legitimately disagree, and collapsing them would have silently
+  broken whichever surface lost. `ScoreCalendar.bestScoredPair` now delegates to the
+  resolver's `bestScored`, so "the day's best session" is one implementation, not two.
+- **The budget converts obligations; `costTier` was not touched.** A19 names reordering the
+  tiers as the trap, so the function is byte-for-byte what MAX-128 left — the change is
+  entirely in *what is offered* to the ranking. Adjacency generalises per discipline's own
+  row (§6.4): a missed lift is framed by the lift slot's neighbours, not the run slot's.
+  N stays N conversions per week, so a two-obligation day can consume a budget of 1 and
+  leave its other half missed. `RestDayOverride` (the stored §8 record) is untouched; the
+  budget now returns `ConvertedObligation`, which is not persisted and nothing writes.
+- **One class of historical day moves, deliberately — the A19 paragraph above is corrected
+  to say so.** §6.2 resolves each obligation against the workouts of *its own discipline*,
+  so a scheduled run day whose only recorded workout was a lift is now a miss, where the
+  old discipline-blind "was anything recorded" test left it neutral and excluded from both
+  sides of the ratio. Preserving that would have preserved a bug: a lift silently covering
+  a skipped run is exactly the failure A19 exists to name, in mirror image. **How much this
+  affects, measured rather than guessed:** zero days in the existing tallies and budgeting
+  fixtures have this shape (every workout in both suites is a run), and the one instance in
+  `ScoreCalendarTests` asserts a cell state that a recorded workout still wins, so it is
+  unmoved. On real data it affects only days where the athlete lifted *instead of* running
+  on a prescribed run day. A ride, walk or hike is unaffected — `ActivityType.discipline`
+  makes `.run` the residual (A17), so only strength training is attributed elsewhere.
+- **The regression evidence is a reference implementation, not hand-picked numbers.**
+  `legacyDayCounting` and `legacyConversions` in `ObligationTalliesTests` are the
+  pre-MAX-134 rules transcribed, and the sweep runs **every** combination of outcomes over
+  a run-only week — nothing recorded / recorded-unscored / scored-effective /
+  scored-ineffective on each of five prescribed days, against two budgets, 2,048 weeks —
+  asserting eligible, effective and streak agree exactly. The budget gets the same
+  treatment over every subset of the week. 2,048 hand-worked weeks is not something anyone
+  would write or trust; a transcribed oracle is.
+- **`EffectiveDayTally` is now `EffectiveObligationTally`**, as §6.2 asks. Field names are
+  unchanged and `Tallies.effectiveDays` keeps its name — the tile that reads `4/5` today
+  and `6/8` on a week with three lifts needs one line of copy saying the denominator is
+  sessions, and **that copy is MAX-140's**, not this ticket's.
+- **`PlanDay.canBeMissed` was deliberately not widened.** It is also the calendar's
+  predicate (`.scheduledRest`, `prescribesASession`), so widening it would have changed
+  what a cell draws without a designed state — MAX-135's job. The obligation-level question
+  is `prescribedDisciplines` / `hasObligations` instead. The two agree on every day either
+  has seen, because every plan on disk rests its lift slot.
+- **`ScoreCalendar` changed by the minimum the shared budget forces.** It reads the run
+  slot's conversions only (a forgiven *lift* has no cell state until MAX-135) and builds
+  the same `workoutDisciplines` mapping the tallies do, so the two cannot disagree about
+  what the budget was offered — D2's drift with a colour attached is exactly what §7.3 is
+  about.
+- **Reported, not done: whether a miscategorised score should leave the athlete's own
+  averages.** MAX-143 added `ScoreLedger.countsTowardScorerQuality` and explicitly left
+  this open, flagging it as MAX-134's. It was **not taken**: `Tallies.averageScore` is a
+  mean over scored workouts and has no unit of account to change, so deciding it here would
+  have mixed a second, unrelated judgement into this PR. The question is live and worth a
+  ticket — a lift scored 25 against a running rubric currently drags the athlete's average
+  down, and A21 says that score was the answer to the wrong question.
 - **No existing run's score moves, proven with fixtures rather than by argument.** Ten
   historical (day, execution) rows — every scheduled kind the fixture week prescribes and
   every row of §10.3's ladder — are scored through the new routing and compared against the
