@@ -10,6 +10,27 @@ import MaximizeCore
 /// `WorkoutDetailData` (see `WorkoutDetailModel`) is where each of those adds its
 /// section's data without touching `WorkoutVerdict`.
 ///
+/// ## MAX-139: a lift does not compose the run-only sections
+///
+/// Cadence, the route map and the pace splits describe a running prescription
+/// (LIFTING-SPEC §10.1) — a cadence target is steps against a running gait, a route and
+/// its splits assume a distance — and none belongs on a lift's screen, not even in its
+/// own "no data" state. `SummaryTileData.showsRunOnlySections` is where that is decided
+/// and tested (`Sources/MaximizeCore/Metrics/SummaryTileData.swift`); this view reads
+/// the one flag rather than comparing a discipline itself, so the rule cannot drift
+/// between what the tests pin and what the screen actually composes. `RouteMapView` and
+/// `SplitsView` already render nothing for an indoor workout on their own account
+/// (`hasRoute == false`, true of every lift), so the flag here is belt-and-braces for
+/// them and does the entire job for `CadenceBandView`, which — unlike those two — still
+/// draws a full "no cadence data" card when its average is absent for any reason.
+///
+/// `SummaryTilesView` renders `SummaryTileData.disciplineNote` in the same pass — the
+/// one sentence standing in for the sections this view leaves out, rather than a blank
+/// where they used to be (CLAUDE.md: absence is a designed state). The HR curve stays
+/// for every discipline (a heart rate measured during a lift is still a heart rate);
+/// only its cap line is discipline-gated, and that happens in `WorkoutDetailModel`,
+/// where the cap value is assembled from the plan.
+///
 /// ## MAX-098: this screen tells the Ask button what it is looking at
 ///
 /// The persistent chat control is subject-aware (§2.1): on this screen it reads "Ask
@@ -61,7 +82,7 @@ struct WorkoutDetailView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.top, Spacing.hero)
         case .failed:
-            Text("Could not load this workout.")
+            Text(FailureCopy.couldNotLoad(.workoutDetail))
                 .font(.bodyCopy)
                 .foregroundStyle(Color.textSecondary)
                 .frame(maxWidth: .infinity)
@@ -75,10 +96,18 @@ struct WorkoutDetailView: View {
                 MuscleGroupEntryView(data: data.muscleGroups) { groups in
                     Task { await model.setMuscleGroups(groups) }
                 }
+                // A heart rate measured during a lift is still a heart rate — this stays
+                // for every discipline. Only its cap line is gated, in
+                // `WorkoutDetailModel`, against the plan's *run* cap.
                 HRCurveView(chartData: data.heartRateChart)
-                CadenceBandView(data: data.cadence)
-                RouteMapView(data: data.routeMap)
-                SplitsView(data: data.splits)
+                // MAX-139: the three sections that describe a running prescription.
+                // `showsRunOnlySections` is `SummaryTileData`'s decision, not this
+                // view's — see the type doc comment above.
+                if data.summaryTiles.showsRunOnlySections {
+                    CadenceBandView(data: data.cadence)
+                    RouteMapView(data: data.routeMap)
+                    SplitsView(data: data.splits)
+                }
                 SummaryTilesView(data: data.summaryTiles)
                 WorkoutChatSectionView(workoutID: workoutID)
             }

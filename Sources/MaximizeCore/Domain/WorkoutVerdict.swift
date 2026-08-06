@@ -147,6 +147,17 @@ public struct WorkoutVerdict: Hashable, Sendable {
     /// above can be resolved from it in one place.
     public let muscleGroupEntry: MuscleGroupEntry?
 
+    /// Set when the auto-score exists and was written against the wrong discipline's
+    /// ask (A21/MAX-143), read straight off the ledger — never re-derived here, since
+    /// `ScoreLedger.isMiscategorised` is already the one place that judgement is made
+    /// and stored. Nil whenever there is no score yet and nil for an ordinary one.
+    ///
+    /// Carried beside `scoring` rather than folded into `.scored`'s associated values:
+    /// the label is additional information about an unchanged score (MAX-143's whole
+    /// point — nothing about the score's own presentation moves), not a fourth scoring
+    /// outcome, so it does not belong in the enum that names outcomes.
+    public let miscategorisationLabel: MiscategorisedScoreLabel?
+
     /// - Parameters:
     ///   - workout: the captured record. Only its `activityType` is read here (for
     ///     the unscored `.actual` case); everything else about the run belongs to the
@@ -175,6 +186,7 @@ public struct WorkoutVerdict: Hashable, Sendable {
         self.discipline = discipline
         self.scheduledSession = planDay?.scheduledSession(for: discipline)
         self.muscleGroupEntry = muscleGroups?.current
+        self.miscategorisationLabel = ledger?.miscategorisationLabel
         if let ledger {
             self.actual = .classified(ledger.automatic.actualClassification)
             self.scoring = .scored(automatic: ledger.automatic, annotation: ledger.currentAnnotation)
