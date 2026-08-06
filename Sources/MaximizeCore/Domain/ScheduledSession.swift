@@ -82,9 +82,12 @@ public enum WorkoutClassification: String, Hashable, Sendable, Codable, CaseIter
     /// `ScheduledSessionKind.lift` is.
     ///
     /// Nothing produces one yet: `WorkoutClassifier` still answers `.other` for every
-    /// non-run, and MAX-111's gate leaves a lift unscored, so no stored `Score` can
-    /// carry this. It exists so the rest of the lifting build has a word for what a
-    /// lift *is* — and because expressing one as `.other` is backwards, per A17.
+    /// non-run, so a lift scored under MAX-168's opened gate stores `.other` as its
+    /// classification while being judged by a band that names `.lift` — the rubric reads
+    /// the *discipline*, a fact, and never this, a judgement (see
+    /// `RubricCondition.actualDiscipline`). Teaching the classifier to answer `.lift` is
+    /// its own ticket. The case exists so the rest of the lifting build has a word for
+    /// what a lift *is* — and because expressing one as `.other` is backwards, per A17.
     case lift
 
     /// Drift is "near-meaningless on interval/hard runs" (§9), so it is surfaced

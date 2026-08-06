@@ -75,9 +75,14 @@ public enum ChatConversationCopy {
         "This run hasn't been scored yet — chat opens once it has a score."
 
     /// `ChatModel.LoadState.noVerdict` (MAX-126) — the opposite tense of `notYetScored`:
-    /// a lift is never scored (MAX-111), so there is no score coming for chat to wait on.
+    /// a ride, a hike or a walk is never scored, so there is no score coming for chat to
+    /// wait on. **Not a lift, since MAX-168** — that one waits, and reads `notYetScored`.
+    ///
+    /// The sentence stopped saying *"the plan scores runs"* for the same reason: it is now
+    /// the wrong half of the truth, since the plan also scores lifts. What it says instead
+    /// is the thing that is actually true of every workout that reaches this state.
     public static let noVerdict =
-        "The plan scores runs, so there's no score for this workout — and chat starts from one."
+        "The plan has no rule for this kind of workout, so there's no score — and chat starts from one."
 
     // MARK: - MAX-150: `ChatModel.DisplayMessage`'s two flags
 

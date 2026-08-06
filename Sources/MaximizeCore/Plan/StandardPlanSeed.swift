@@ -192,6 +192,12 @@ public enum StandardPlanSeed {
     /// unscored under MAX-111's ingestion gate until MAX-133 landed, exactly as before
     /// this change. That was expected, not a bug in this ticket.
     ///
+    /// **The gate is open as of MAX-168, and these bands are what it opens onto.** A lift
+    /// is scored only when the band it matches names `.lift` — in this rubric, one of the
+    /// three below — so a plan version that reaches them judges a lift, and one that
+    /// cannot (a day prescribing no lift, or a rubric saved before this change) leaves the
+    /// session captured and unscored rather than judged by a rule written about running.
+    ///
     /// ## `rest.ranAnyway`, and the shadow one band down (MAX-146)
     ///
     /// MAX-133's per-discipline routing closed `easy.wellOverCap` from the other side —
@@ -221,10 +227,14 @@ public enum StandardPlanSeed {
     ///
     /// **This seed change reaches a stored plan only the way the paragraph above
     /// describes** — by authoring a new version that adopts it (MAX-173), never by a
-    /// rewrite of one already saved. Lifts already recorded with
-    /// `rest.ranAnyway`'s rationale — which, per MAX-111's gate, is none yet, since a
-    /// lift is not scored at all until that gate opens — stay however they were scored
-    /// (D8). What to do about any that exist is MAX-143's, not this ticket's.
+    /// rewrite of one already saved. **And a stored rubric that has not adopted it cannot
+    /// stamp a lift with this band's words either**, because MAX-168's gate refuses to
+    /// score a lift whose matched band does not name `.lift`, and the unconditional form
+    /// of this one does not. So the two halves of the fix are: the seed says the right
+    /// thing to every plan authored from here, and the scoring path declines to write a
+    /// permanent score wherever the plan in force still says the old thing. Lifts scored
+    /// against the running rubric before any of this stay exactly as they were scored
+    /// (D8); what to do about those is MAX-143's, not this ticket's.
     public static func rubricBands() throws -> [RubricBand] {
         [
             try RubricBand(

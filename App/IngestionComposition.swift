@@ -62,6 +62,11 @@ enum IngestionComposition {
             workouts: workoutStore,
             scores: workoutStore,
             plans: workoutStore,
+            // MAX-168/A22: the pipeline asks whether the athlete has said what a lift
+            // worked before it scores one. Supplied here rather than defaulted to nil,
+            // because nil means "cannot look" and a pipeline that cannot look never
+            // scores a lift at all.
+            muscleGroups: workoutStore,
             samples: HealthKitWorkoutSampleFetcher(healthStore: healthStore),
             // MAX-023's real transport. It reads the key from Keychain on each call and
             // throws `ScoringModelError.noAPIKeyStored` when there is none — which the
@@ -86,12 +91,21 @@ enum IngestionComposition {
                     ingestionLog.notice("Workout's samples stored without derived metrics (\(String(describing: reason), privacy: .public)).")
                 case let .enrichmentFailed(stage):
                     ingestionLog.error("Enrichment failed at \(String(describing: stage), privacy: .public); the workout is stored and can be completed later.")
-                case .leftUnscored(reason: .workoutIsNotARun):
-                    // MAX-111. Split out because the line below would be a lie here:
-                    // this one is not retried and is not waiting on anything. The plan
-                    // scores runs, so a lift is captured, kept, and left without a
-                    // verdict until MAX-109 gives lifting a plan of its own.
-                    ingestionLog.notice("Workout stored unscored: not a run, and the plan only scores runs.")
+                case .leftUnscored(reason: .workoutIsNeitherARunNorALift):
+                    // MAX-111, narrowed by MAX-168. Split out because the line below would
+                    // be a lie here: this one is not retried and is not waiting on
+                    // anything. A ride, a hike or a walk is captured, kept, and left
+                    // without a verdict, because no band in any rubric describes one.
+                    ingestionLog.notice("Workout stored unscored: the plan has no rule for this kind of workout.")
+                case .leftUnscored(reason: .liftAwaitingMuscleGroups):
+                    // A22/MAX-168. Also not retried by a later launch — it is waiting on
+                    // the athlete, and answering on the detail screen is what unblocks it.
+                    ingestionLog.notice("Lift stored unscored: waiting for the muscle groups it worked.")
+                case .leftUnscored(reason: .noLiftBandMatched):
+                    // MAX-168. Waiting on a plan version — one that prescribes a lift on
+                    // the day, or whose rubric carries the lift bands (MAX-173) — rather
+                    // than on a retry, so it says so rather than promising first view.
+                    ingestionLog.notice("Lift stored unscored: the plan in effect has no lift rule for that day.")
                 case let .leftUnscored(reason):
                     ingestionLog.notice("Workout stored but unscored (\(String(describing: reason), privacy: .public)); scoring is retried on first view.")
                 case let .workoutAbandoned(step):

@@ -228,17 +228,22 @@ final class WorkoutIngestionPipelineTests: XCTestCase {
         XCTAssertEqual(harness.samples.stepCountRequestCount, 1, "a deduped workout is not extracted again")
     }
 
-    // MARK: - MAX-111: the plan scores runs, and only runs
+    // MARK: - MAX-111/MAX-168: what the plan can judge, and under what conditions
 
-    /// The defect, end to end.
+    /// The A21 defect, end to end, and still closed after MAX-168 opened the gate.
     ///
     /// `Fixture.epoch` is a Thursday, which the fixture week prescribes as an easy 8 km.
     /// A lift on that day selected the `.easy` rubric bands — `RubricEvaluator` filters by
     /// the **scheduled** kind — and then cleared `easy.wellOverCap`, whose only condition
-    /// is an average heart rate above the cap + 8 and which says nothing about what was
+    /// was an average heart rate above the cap + 8 and which said nothing about what was
     /// actually performed. 170 bpm against the fixture's 150 cap clears it comfortably, so
     /// the session was scored 20–45 with the rationale "Well above the easy cap for the
     /// whole run", and D8 made that permanent.
+    ///
+    /// Three separate things now stop that, and this test asserts the first of them: the
+    /// athlete has not said what the session worked, so A22's wait comes before anything
+    /// else happens (MAX-168). The other two — per-discipline routing (MAX-133) and the
+    /// band-names-its-discipline guard — are asserted below.
     func testAStrengthSessionOnAnEasyDayIsCapturedAndLeftUnscored() async throws {
         let harness = try Harness(
             activityType: .traditionalStrengthTraining,
@@ -255,10 +260,11 @@ final class WorkoutIngestionPipelineTests: XCTestCase {
         XCTAssertNotNil(harness.store.storedMetrics(forWorkout: harness.workout.id))
 
         XCTAssertNil(harness.store.storedScore(forWorkout: harness.workout.id))
-        XCTAssertEqual(harness.diagnostics.reported, [.leftUnscored(reason: .workoutIsNotARun)])
+        XCTAssertEqual(harness.diagnostics.reported, [.leftUnscored(reason: .liftAwaitingMuscleGroups)])
 
-        // The model is never asked, so nothing about a lift is assembled into a prompt —
-        // the gate sits before `WorkoutContextBuilder` runs at all.
+        // The model is never asked, and — the property MAX-111's gate had, which MAX-168
+        // keeps for the state that replaces it — nothing about the lift is assembled into
+        // a prompt: the A22 check sits before `WorkoutContextBuilder` runs at all.
         XCTAssertEqual(harness.model.callCount, 0)
     }
 
@@ -301,7 +307,7 @@ final class WorkoutIngestionPipelineTests: XCTestCase {
         XCTAssertEqual(score.actualClassification, .easy)
 
         XCTAssertNil(harness.store.storedScore(forWorkout: harness.workout.id))
-        XCTAssertEqual(harness.diagnostics.reported, [.leftUnscored(reason: .workoutIsNotARun)])
+        XCTAssertEqual(harness.diagnostics.reported, [.leftUnscored(reason: .liftAwaitingMuscleGroups)])
     }
 
     func testANonRunIsNotGivenAFabricatedCadence() async throws {
@@ -347,7 +353,10 @@ final class WorkoutIngestionPipelineTests: XCTestCase {
         XCTAssertNil(harness.store.storedScore(forWorkout: harness.workout.id))
         XCTAssertEqual(
             harness.diagnostics.reported,
-            [.leftUnscored(reason: .workoutIsNotARun), .leftUnscored(reason: .workoutIsNotARun)]
+            [
+                .leftUnscored(reason: .liftAwaitingMuscleGroups),
+                .leftUnscored(reason: .liftAwaitingMuscleGroups),
+            ]
         )
     }
 
@@ -368,6 +377,230 @@ final class WorkoutIngestionPipelineTests: XCTestCase {
 
         XCTAssertEqual(harness.store.storedScore(forWorkout: harness.workout.id), alreadyRecorded)
         XCTAssertTrue(harness.diagnostics.reported.isEmpty, "an already-scored replay is silent, not a gap")
+    }
+
+    // MARK: - MAX-168: the three conditions a lift is scored under
+
+    /// **The ticket, in one test.** A Thursday prescribing a 45-minute lift, a rubric
+    /// carrying MAX-132's adherence bands, and an athlete who has said what the session
+    /// worked: the lift is scored, against `lift.completed`, in the range that band
+    /// permits — never against a run's rule and never against the catch-all.
+    func testALiftOnADayPrescribingOneIsScoredAgainstTheAdherenceBands() async throws {
+        let harness = try Harness(
+            activityType: .traditionalStrengthTraining,
+            hasRoute: false,
+            beatsPerMinute: 170,
+            plan: try LiftFixture.plan(rubric: try LiftFixture.currentRubric(), liftOnThursday: true),
+            muscleGroups: [.chest, .shoulders]
+        )
+
+        try await harness.recordMuscleGroupsThenIngest()
+
+        let score = try XCTUnwrap(harness.store.storedScore(forWorkout: harness.workout.id))
+        XCTAssertEqual(score.rubricBandIdentifier, "lift.completed")
+        XCTAssertEqual(score.scheduledSession.kind, .lift)
+        XCTAssertEqual(score.value.points, 92)
+        XCTAssertEqual(score.band, .effective)
+        // A21's label, from the other side: this score was judged against the *lift* ask,
+        // so it is not one of MAX-143's miscategorised ones and must not be labelled.
+        XCTAssertFalse(
+            MiscategorisedScoreLabel.isMiscategorised(score, workoutDiscipline: .lift),
+            "a lift judged against the lift slot is exactly what MAX-143's label means it is not"
+        )
+        XCTAssertTrue(harness.diagnostics.reported.isEmpty)
+    }
+
+    /// The second adherence band, so the pair proves the *rubric* is being read rather
+    /// than one row happening to match: the same lift against a two-hour ask is short of
+    /// 70% of it and lands in 40–74.
+    func testALiftShortOfThePrescribedLengthTakesTheShortBand() async throws {
+        let harness = try Harness(
+            activityType: .traditionalStrengthTraining,
+            hasRoute: false,
+            plan: try LiftFixture.plan(
+                rubric: try LiftFixture.currentRubric(),
+                liftOnThursday: true,
+                liftDurationSeconds: 7_200
+            ),
+            muscleGroups: [.legs]
+        )
+        harness.model.setReply(FakeScoringModel.acceptableReply(score: 60))
+
+        try await harness.recordMuscleGroupsThenIngest()
+
+        let score = try XCTUnwrap(harness.store.storedScore(forWorkout: harness.workout.id))
+        XCTAssertEqual(score.rubricBandIdentifier, "lift.short")
+        XCTAssertEqual(score.value.points, 60)
+        XCTAssertEqual(score.band, .marginal)
+    }
+
+    /// **A lift the plan asked nothing of is left unscored**, under a rubric that is
+    /// entirely up to date.
+    ///
+    /// The band that matches is `fallback.recorded` — the seed's "no specific rule for
+    /// this session", which is an honest answer for a *run* the rubric has no row for and
+    /// is not an opinion about unscheduled lifting. MAX-146 considered writing that
+    /// opinion and declined, because choosing its score range is a product decision
+    /// nobody has made; scoring here would make the unmade decision permanent (D8) on
+    /// every lift the athlete does outside their plan.
+    func testALiftOnADayPrescribingNoneIsLeftUnscored() async throws {
+        let harness = try Harness(
+            activityType: .traditionalStrengthTraining,
+            hasRoute: false,
+            plan: try LiftFixture.plan(rubric: try LiftFixture.currentRubric(), liftOnThursday: false),
+            muscleGroups: [.chest]
+        )
+
+        try await harness.recordMuscleGroupsThenIngest()
+
+        XCTAssertNil(harness.store.storedScore(forWorkout: harness.workout.id))
+        XCTAssertEqual(harness.diagnostics.reported, [.leftUnscored(reason: .noLiftBandMatched)])
+        XCTAssertEqual(harness.model.callCount, 0, "the model is never asked about a session no band describes")
+
+        // What the guard refused, stated rather than implied.
+        let matched = try await harness.matchedBandIdentifier()
+        XCTAssertEqual(matched, "fallback.recorded")
+    }
+
+    /// **The guard MAX-173 made necessary, and the reason this ticket was blocked once.**
+    ///
+    /// D1 makes the rubric versioned data, so MAX-146's fix — `.actualDiscipline([.run])`
+    /// on `rest.ranAnyway` — reaches no plan that already exists. Under such a plan the
+    /// band still matches any discipline routed to it, which every unprescribed lift is,
+    /// and scoring would stamp a strength session *"Ran on a scheduled rest day."* at
+    /// 50–75, permanently.
+    ///
+    /// The band that would have matched is asserted directly, so this test fails loudly if
+    /// the shape of the hazard ever changes rather than quietly passing for a new reason.
+    func testALiftUnderAStaleRubricIsLeftUnscoredRatherThanCalledARun() async throws {
+        let harness = try Harness(
+            activityType: .traditionalStrengthTraining,
+            hasRoute: false,
+            plan: try LiftFixture.plan(rubric: try LiftFixture.strandedRubric(), liftOnThursday: false),
+            muscleGroups: [.back]
+        )
+
+        try await harness.recordMuscleGroupsThenIngest()
+
+        XCTAssertNil(harness.store.storedScore(forWorkout: harness.workout.id))
+        XCTAssertEqual(harness.diagnostics.reported, [.leftUnscored(reason: .noLiftBandMatched)])
+
+        let matched = try await harness.matchedBand()
+        XCTAssertEqual(matched.identifier, "rest.ranAnyway")
+        XCTAssertEqual(matched.rationale, "Ran on a scheduled rest day.")
+        XCTAssertFalse(matched.names(.lift), "the whole hazard: this band says nothing about lifting")
+    }
+
+    /// The same stale plan with the lift day *prescribed*: the rubric has no `lift.*` rows
+    /// at all, so what matches is the catch-all and the lift is still left unscored. A
+    /// plan that asks for a session it cannot judge is answered by a new plan version
+    /// (MAX-173's adoption), never by a score written against a rule that is not there.
+    func testAPrescribedLiftUnderARubricWithNoLiftRowsIsLeftUnscored() async throws {
+        let harness = try Harness(
+            activityType: .traditionalStrengthTraining,
+            hasRoute: false,
+            plan: try LiftFixture.plan(rubric: try LiftFixture.strandedRubric(), liftOnThursday: true),
+            muscleGroups: [.back]
+        )
+
+        try await harness.recordMuscleGroupsThenIngest()
+
+        XCTAssertNil(harness.store.storedScore(forWorkout: harness.workout.id))
+        XCTAssertEqual(harness.diagnostics.reported, [.leftUnscored(reason: .noLiftBandMatched)])
+
+        let matched = try await harness.matchedBandIdentifier()
+        XCTAssertEqual(matched, "fallback.recorded", "the rubric has no lift row for the day to reach")
+    }
+
+    /// A22, honoured by the pipeline (MAX-168) and not only stated by the header: the lift
+    /// waits for the athlete, and answering is what unblocks it. The recovery route is the
+    /// one that already exists — `completeIngestion(forWorkout:)`, which the detail screen
+    /// calls on appear — so nothing here is a rescoring pass.
+    func testALiftIsNotScoredUntilTheAthleteSaysWhatItWorkedAndThenIs() async throws {
+        let harness = try Harness(
+            activityType: .traditionalStrengthTraining,
+            hasRoute: false,
+            plan: try LiftFixture.plan(rubric: try LiftFixture.currentRubric(), liftOnThursday: true),
+            muscleGroups: [.chest, .back]
+        )
+
+        try await harness.pipeline.ingest(harness.workout)
+
+        XCTAssertNil(harness.store.storedScore(forWorkout: harness.workout.id))
+        XCTAssertEqual(harness.diagnostics.reported, [.leftUnscored(reason: .liftAwaitingMuscleGroups)])
+        XCTAssertEqual(harness.model.callCount, 0)
+
+        try await harness.recordMuscleGroups()
+        await harness.pipeline.completeIngestion(forWorkout: harness.workout.id)
+
+        let score = try XCTUnwrap(harness.store.storedScore(forWorkout: harness.workout.id))
+        XCTAssertEqual(score.rubricBandIdentifier, "lift.completed")
+    }
+
+    /// "Cannot tell" resolves the same way as "not yet", because D8 makes the alternative
+    /// permanent. A read that fails is not durable either: the next pass asks again.
+    func testAMuscleGroupReadThatFailsLeavesTheLiftUnscored() async throws {
+        let harness = try Harness(
+            activityType: .traditionalStrengthTraining,
+            hasRoute: false,
+            plan: try LiftFixture.plan(rubric: try LiftFixture.currentRubric(), liftOnThursday: true),
+            muscleGroups: [.chest]
+        )
+        try await harness.recordMuscleGroups()
+        harness.store.failMuscleGroupReads(with: InMemoryWorkoutStore.Failure.storageUnavailable)
+
+        try await harness.pipeline.ingest(harness.workout)
+
+        XCTAssertNil(harness.store.storedScore(forWorkout: harness.workout.id))
+        XCTAssertEqual(harness.diagnostics.reported, [.leftUnscored(reason: .liftAwaitingMuscleGroups)])
+
+        harness.store.stopFailing()
+        await harness.pipeline.completeIngestion(forWorkout: harness.workout.id)
+
+        XCTAssertNotNil(harness.store.storedScore(forWorkout: harness.workout.id))
+    }
+
+    /// What MAX-168 deliberately did **not** open. A ride occupies the run slot by A17
+    /// without being a run, `Discipline` is closed at two cases, and no band naming one
+    /// can be authored — so its absence of a score is settled, exactly as MAX-111 left it.
+    func testARideIsStillNeverScored() async throws {
+        for activityType: ActivityType in [.cycling, .hiking, .walking] {
+            let harness = try Harness(
+                activityType: activityType,
+                hasRoute: false,
+                plan: try LiftFixture.plan(rubric: try LiftFixture.currentRubric(), liftOnThursday: true)
+            )
+
+            try await harness.pipeline.ingest(harness.workout)
+
+            XCTAssertNil(harness.store.storedScore(forWorkout: harness.workout.id), "\(activityType)")
+            XCTAssertEqual(
+                harness.diagnostics.reported,
+                [.leftUnscored(reason: .workoutIsNeitherARunNorALift)],
+                "\(activityType)"
+            )
+            XCTAssertEqual(harness.model.callCount, 0, "\(activityType)")
+        }
+    }
+
+    /// **The run path is byte-identical.** The same easy Thursday, now under the shipped
+    /// rubric and with a lift prescribed alongside the run, produces the run score this
+    /// file has asserted since MAX-033: same band, same number, same classification. A
+    /// lift ask on the day changes nothing about the run, and neither does anything in
+    /// this ticket.
+    func testARunIsScoredExactlyAsBeforeOnADayThatAlsoPrescribesALift() async throws {
+        let harness = try Harness(
+            plan: try LiftFixture.plan(rubric: try LiftFixture.currentRubric(), liftOnThursday: true)
+        )
+
+        try await harness.pipeline.ingest(harness.workout)
+
+        let score = try XCTUnwrap(harness.store.storedScore(forWorkout: harness.workout.id))
+        XCTAssertEqual(score.rubricBandIdentifier, "easy.onCap.lowDrift")
+        XCTAssertEqual(score.value.points, 92)
+        XCTAssertEqual(score.actualClassification, .easy)
+        XCTAssertEqual(score.scheduledSession.kind, .easy)
+        XCTAssertTrue(harness.diagnostics.reported.isEmpty)
     }
 
     // MARK: - Scoring failure is not ingestion failure
@@ -794,6 +1027,45 @@ final class WorkoutIngestionPipelineTests: XCTestCase {
         let pipeline: WorkoutIngestionPipeline
         let workout: Workout
 
+        /// A22's answer, when the test asked for one. Recorded by `recordMuscleGroups()`
+        /// rather than in the initializer, so a test can also record it *after* a first
+        /// pass has left the lift unscored — which is the real sequence on a device.
+        let muscleGroupEntry: MuscleGroupEntry?
+
+        func recordMuscleGroups() async throws {
+            guard let muscleGroupEntry else { return }
+            try await store.record(muscleGroupEntry)
+        }
+
+        /// Records A22's answer, if this harness was built with one, and then ingests.
+        func recordMuscleGroupsThenIngest() async throws {
+            try await recordMuscleGroups()
+            try await pipeline.ingest(workout)
+        }
+
+        /// The band `RubricEvaluator` matches for this workout under the stored plan —
+        /// i.e. the band the pipeline saw before it decided. Read through the same
+        /// builder and evaluator the pipeline uses, from the metrics the pipeline stored,
+        /// so a test asserting "this is what the guard refused" is asserting the real
+        /// thing rather than a reconstruction of it.
+        func matchedBand() async throws -> RubricBand {
+            let metrics = try XCTUnwrap(store.storedMetrics(forWorkout: workout.id))
+            let storedCalendar = try await store.planCalendar()
+            let zone = TimeZone(identifier: "UTC") ?? .gmt
+            let context = try WorkoutContextBuilder.build(
+                workout: workout,
+                on: try workout.calendarDay(in: zone),
+                metrics: metrics,
+                classification: .other,
+                planCalendar: try XCTUnwrap(storedCalendar)
+            )
+            return try RubricEvaluator.evaluate(context).band
+        }
+
+        func matchedBandIdentifier() async throws -> String {
+            try await matchedBand().identifier
+        }
+
         /// `Fixture.epoch` is 2026-01-01, a Thursday, which `Fixture.weeklyTemplate()`
         /// prescribes as an easy 8 km — so the run below is an easy run on an easy day,
         /// the ordinary case §10.3's worked example is written around.
@@ -807,14 +1079,33 @@ final class WorkoutIngestionPipelineTests: XCTestCase {
             routePoints: Int = 0,
             // MAX-066: a treadmill run has no route, so this and `routePoints` are
             // mutually exclusive in practice — set at most one per test.
-            treadmillDistanceSamples: Int = 0
+            treadmillDistanceSamples: Int = 0,
+            // MAX-168: nil keeps `ScoringFixture.plan()`, the §10.3 worked example every
+            // run test in this file is written around. Pass a plan to drive the lift gate,
+            // whose answer is a function of the rubric and of the day's ask.
+            plan: Plan? = nil,
+            // MAX-168/A22: what the athlete has recorded for this workout, or nil for the
+            // ordinary state of a lift nobody has answered for yet.
+            muscleGroups: Set<MuscleGroup>? = nil,
+            durationSeconds: Double = 3_600
         ) throws {
             let capturedWorkout = try Fixture.workout(
                 activityType: activityType
                     ?? (treadmillDistanceSamples > 0 ? .treadmillRunning : .running),
+                durationSeconds: durationSeconds,
                 hasRoute: hasRoute ?? (treadmillDistanceSamples == 0)
             )
-            let workoutStore = InMemoryWorkoutStore(planCalendar: try PlanCalendar([ScoringFixture.plan()]))
+            let workoutStore = InMemoryWorkoutStore(
+                planCalendar: try PlanCalendar([plan ?? ScoringFixture.plan()])
+            )
+            muscleGroupEntry = try muscleGroups.map { groups in
+                try MuscleGroupEntry(
+                    id: Fixture.muscleGroupEntryID,
+                    workoutID: capturedWorkout.id,
+                    groups: groups,
+                    recordedAt: Fixture.at(60)
+                )
+            }
             let sampleFetcher = FakeWorkoutSampleFetcher()
             let scoringModel = FakeScoringModel()
             let recorder = IngestionPipelineDiagnosticRecorder()
@@ -873,6 +1164,10 @@ final class WorkoutIngestionPipelineTests: XCTestCase {
                 workouts: workoutStore,
                 scores: workoutStore,
                 plans: workoutStore,
+                // Wired the way the app wires it (MAX-168): the store answers every
+                // repository, so "has the athlete described this lift" is read from the
+                // place the detail screen writes it.
+                muscleGroups: workoutStore,
                 samples: sampleFetcher,
                 model: scoringModel,
                 policy: policy,
@@ -883,6 +1178,92 @@ final class WorkoutIngestionPipelineTests: XCTestCase {
                 report: recorder.handler()
             )
         }
+    }
+}
+
+/// The two rubrics MAX-168's gate has to tell apart, and the plans that carry them.
+///
+/// Both are *authored by this file*, which is the only way a test may state a threshold
+/// (D1: no number on the scoring path lives in `Sources/`). The current one is assembled
+/// from `StandardPlanSeed` exactly as `StandardPlanSeed.draft()` does, so it keeps
+/// describing what this build ships as the seed goes on changing; the stranded one is
+/// **derived from it** by undoing precisely the two changes a pre-MAX-132/146 plan is
+/// missing, for the same reason — what is under test is the *difference*, not a
+/// transcription that would stop being one.
+private enum LiftFixture {
+
+    /// The rubric this build ships, as a plan would carry it.
+    static func currentRubric() throws -> ScoringRubric {
+        try ScoringRubric(
+            effectiveThreshold: ScoreValue(StandardPlanSeed.effectiveThresholdPoints),
+            marginalThreshold: ScoreValue(StandardPlanSeed.marginalThresholdPoints),
+            bands: StandardPlanSeed.rubricBands()
+        )
+    }
+
+    /// The rubric a plan saved before MAX-132 and MAX-146 carries: no `lift.*` rows, and
+    /// no discipline condition on the two bands that acquired one. The same fixture
+    /// `RubricAdoptionTests` builds, for the same reason.
+    static func strandedRubric() throws -> ScoringRubric {
+        var bands: [RubricBand] = []
+        for band in try StandardPlanSeed.rubricBands() {
+            switch band.identifier {
+            case "lift.completed", "lift.short", "lift.happened":
+                continue
+            case "rest.ranAnyway", "easy.wellOverCap":
+                bands.append(
+                    try RubricBand(
+                        identifier: band.identifier,
+                        appliesTo: band.appliesTo,
+                        conditions: band.conditions.filter { condition in
+                            if case .actualDiscipline = condition { return false }
+                            return true
+                        },
+                        scoreRange: band.scoreRange,
+                        rationale: band.rationale
+                    )
+                )
+            default:
+                bands.append(band)
+            }
+        }
+        return try ScoringRubric(
+            effectiveThreshold: ScoreValue(StandardPlanSeed.effectiveThresholdPoints),
+            marginalThreshold: ScoreValue(StandardPlanSeed.marginalThresholdPoints),
+            bands: bands
+        )
+    }
+
+    /// A plan over `Fixture.weeklyTemplate()`, whose Thursday — `Fixture.epoch`, the day
+    /// every workout in this file falls on — optionally prescribes a lift.
+    ///
+    /// The run slot is untouched either way: Thursday still asks for an easy 8 km, which
+    /// is what lets one fixture serve both the lift tests and the run regression.
+    static func plan(
+        rubric: ScoringRubric,
+        liftOnThursday: Bool,
+        liftDurationSeconds: Double = 2_700
+    ) throws -> Plan {
+        var lift: [Weekday: ScheduledSession] = [:]
+        if liftOnThursday {
+            lift[.thursday] = try ScheduledSession(kind: .lift, durationSeconds: liftDurationSeconds)
+        }
+        return try Plan(
+            version: PlanVersion(1),
+            effectiveFrom: CalendarDay(iso8601: "2026-01-01"),
+            weeklyTemplate: Fixture.weeklyTemplate(lift: lift),
+            longRunArc: LongRunArc(weeks: [
+                LongRunArc.Week(index: 1, distanceMeters: 16_000),
+                LongRunArc.Week(index: 2, distanceMeters: 18_000),
+            ]),
+            heartRateCapBPM: StandardPlanSeed.heartRateCapBPM,
+            cadenceTarget: CadenceBand(
+                lowStepsPerMinute: StandardPlanSeed.cadenceLowStepsPerMinute,
+                highStepsPerMinute: StandardPlanSeed.cadenceHighStepsPerMinute
+            ),
+            rubric: rubric,
+            goals: PlanGoals(statements: ["Run a sub-4:00 marathon"])
+        )
     }
 }
 

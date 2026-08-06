@@ -57,7 +57,7 @@ final class TrainingContextAgreementTests: XCTestCase {
 
     /// - Parameter sessions: `(day, score, correction)`. A nil score is a recorded but
     ///   unscored session — the state of every workout between capture and scoring, and
-    ///   the permanent state of every non-run since MAX-111.
+    ///   the permanent state of a ride, a hike or a walk (MAX-111, narrowed by MAX-168).
     private func stored(_ sessions: [(day: String, points: Int?, correctedTo: Int?)]) throws -> StoredRecords {
         var workouts: [Workout] = []
         var ledgers: [UUID: ScoreLedger] = [:]

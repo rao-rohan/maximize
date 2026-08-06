@@ -288,8 +288,9 @@ final class ContextBuilderTests: XCTestCase {
 
     // MARK: - Absence is first-class (MAX-111, A18)
 
-    /// MAX-111 leaves every non-run unscored **by design**, permanently. A line for one
-    /// must read as a verdict that was never going to exist, not as a missing value.
+    /// A session can be unscored **by design** — permanently for a ride or a hike, and
+    /// until a plan version can judge it for a lift (MAX-111, MAX-168). A line for one
+    /// must read as a verdict that is not there, not as a missing value.
     func testAnUnscoredSessionReadsAsNoVerdict() throws {
         let unscoredRun = UUID()
         let lift = UUID()
@@ -312,8 +313,12 @@ final class ContextBuilderTests: XCTestCase {
         let sheet = try trainingContext(records: records, planCalendar: try calendar()).factSheet()
 
         XCTAssertTrue(sheet.contains("Score: no verdict yet — this run has not been scored"), sheet)
+        // MAX-168: a lift is no longer unscoreable in principle — it is *awaiting* the
+        // muscle groups A22 asks the athlete for. The old sentence still belongs to a
+        // session the plan genuinely cannot judge, such as a ride; it is asserted for a
+        // lift no longer.
         XCTAssertTrue(
-            sheet.contains("Score: none — the plan's rubric scores runs, so this session is not scored"),
+            sheet.contains("Score: none yet — this lift is not scored until its muscle groups are set"),
             sheet
         )
         // Never a bare gap, and never a zero.

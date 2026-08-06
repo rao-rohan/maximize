@@ -19,8 +19,9 @@ extension TrainingContext {
     /// **stated once, in the sessions preamble**: a field missing from a line was not
     /// recorded for that session (A18's rule at the scale of a line). What is never
     /// omitted is the verdict — an unscored session says *"no verdict"* in words, because
-    /// a silently missing score reads as a zero, and MAX-111 leaves every non-run unscored
-    /// by design.
+    /// a silently missing score reads as a zero, and a session can be unscored by design
+    /// — permanently for a ride or a hike, and for as long as the plan has no rule for it
+    /// in the case of a lift (MAX-111, MAX-168).
     ///
     /// ## Deterministic by construction
     ///
@@ -291,9 +292,10 @@ extension TrainingContext {
     /// The verdict, or the word for its absence.
     ///
     /// Never omitted, unlike every other field on the line. A missing score reads as a
-    /// zero or as a gap in the record, and it is usually neither: MAX-111 leaves every
-    /// non-run unscored **by design**, permanently, because no band in the plan's rubric
-    /// measures anything but a run. Those two absences are worded apart for the same
+    /// zero or as a gap in the record, and it is usually neither: a ride, a hike and a
+    /// walk are unscored **by design**, permanently, because no band in the plan's rubric
+    /// measures one (MAX-111; MAX-168 narrowed that set to exclude a lift, which the
+    /// rubric can describe). Those two absences are worded apart for the same
     /// reason `WorkoutFactSheet` words its three split absences apart.
     ///
     /// This ticket originally drew that distinction here, by asking the session whether

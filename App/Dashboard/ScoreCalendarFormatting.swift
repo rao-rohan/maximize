@@ -110,7 +110,7 @@ enum ScoreCalendarFormatting {
             // is minutes away, and the athlete would be waiting on nothing. The reason is
             // one short clause because a calendar is read cell after cell.
             return "\(dayText): \(WorkoutDisplayFormatting.describe(activityType)), "
-                + "recorded. Not scored — the plan scores runs."
+                + "recorded. Not scored — the plan has no rule for it."
         case .missedWithUnjudgedSession(let scheduledKind, let recorded):
             // Composed in the core for the reason the mixed day is (MAX-159): this cell
             // draws one fill and one mark, so the sentence is the only channel that can

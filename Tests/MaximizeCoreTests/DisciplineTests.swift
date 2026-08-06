@@ -78,9 +78,10 @@ final class DisciplineTests: XCTestCase {
         }
     }
 
-    /// MAX-128 changes no behaviour, and `isRun` is the predicate MAX-111's scoring gate
-    /// gets its answer from. Rewriting it in terms of `discipline` must not have moved
-    /// a single answer.
+    /// MAX-128 changed no behaviour, and `isRun` was the predicate MAX-111's scoring gate
+    /// got its answer from (MAX-168 moved the gate to `isScoreable`; `isRun` still means
+    /// what it always meant, which is what these rows pin). Rewriting it in terms of
+    /// `discipline` must not have moved a single answer.
     func testIsRunAnswersExactlyWhatItAnsweredBefore() {
         XCTAssertTrue(ActivityType.running.isRun)
         XCTAssertTrue(ActivityType.treadmillRunning.isRun)
@@ -90,6 +91,34 @@ final class DisciplineTests: XCTestCase {
         XCTAssertFalse(ActivityType.traditionalStrengthTraining.isRun)
         XCTAssertFalse(ActivityType.other.isRun)
         XCTAssertFalse(ActivityType(rawValue: "paddleboarding").isRun)
+    }
+
+    // MARK: - `isScoreable`: what a rubric can describe at all (MAX-168)
+
+    /// The predicate the ingestion gate, the verdict header, the calendar and chat all
+    /// read. Stated as a table for the reason the discipline mapping above is: a type
+    /// added without a decision about whether any band could describe it shows up here.
+    func testIsScoreableIsExactlyRunsAndLifts() {
+        XCTAssertTrue(ActivityType.running.isScoreable)
+        XCTAssertTrue(ActivityType.treadmillRunning.isScoreable)
+        XCTAssertTrue(ActivityType.traditionalStrengthTraining.isScoreable)
+        XCTAssertFalse(ActivityType.walking.isScoreable)
+        XCTAssertFalse(ActivityType.hiking.isScoreable)
+        XCTAssertFalse(ActivityType.cycling.isScoreable)
+        XCTAssertFalse(ActivityType.other.isScoreable)
+        XCTAssertFalse(ActivityType(rawValue: "paddleboarding").isScoreable)
+    }
+
+    /// The containment that keeps the two predicates from becoming three notions of the
+    /// same thing: every run is scoreable, and so is everything in the lift discipline.
+    /// The converse fails on exactly the set MAX-168 left outside — a ride is `.run` by
+    /// slot, and no band describes one.
+    func testIsScoreableContainsEveryRunAndEveryLift() {
+        for (type, discipline) in Self.namedTypes {
+            if type.isRun { XCTAssertTrue(type.isScoreable, "\(type)") }
+            if discipline == .lift { XCTAssertTrue(type.isScoreable, "\(type)") }
+            if !type.isRun && discipline == .run { XCTAssertFalse(type.isScoreable, "\(type)") }
+        }
     }
 
     // MARK: - The closed set

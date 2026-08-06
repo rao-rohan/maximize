@@ -284,10 +284,17 @@ final class WorkoutDetailModel {
     /// "I trained nothing" is not a thing this record may say, and the type is what says
     /// so rather than the button.
     ///
-    /// Reloads afterwards, because the header's waiting state and the section's copy
-    /// both change the moment this lands. A failed write leaves the screen showing what
-    /// is actually stored, which is the honest outcome — the athlete sees the prompt
-    /// still asking rather than an answer that was never recorded.
+    /// **Scores afterwards, not merely reloads** (MAX-168). A22 says a lift waits for the
+    /// athlete, and the pipeline now honours that: until this entry exists,
+    /// `completeIngestion(forWorkout:)` leaves the lift unscored
+    /// (`UnscoredReason.liftAwaitingMuscleGroups`). So the answer is what unblocks the
+    /// score, and going through `scoreIfNeeded()` is what makes the screen say so on this
+    /// visit rather than the next one. It is the same unconditional call the screen makes
+    /// on appear — the decision about whether anything needs doing stays in the core.
+    ///
+    /// A failed write leaves the screen showing what is actually stored, which is the
+    /// honest outcome — the athlete sees the prompt still asking rather than an answer
+    /// that was never recorded.
     func setMuscleGroups(_ groups: Set<MuscleGroup>) async {
         guard let muscleGroupRepository else { return }
         do {
@@ -304,6 +311,6 @@ final class WorkoutDetailModel {
             // empty set got past the picker, which is a programming error, not a state
             // to narrate at the athlete.
         }
-        await load()
+        await scoreIfNeeded()
     }
 }

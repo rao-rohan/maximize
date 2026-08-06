@@ -183,23 +183,68 @@ public enum IngestionPipelineDiagnostic: Hashable, Sendable {
     }
 
     public enum UnscoredReason: Hashable, Sendable {
-        /// MAX-111: the workout is not a run, and the plan only knows how to score runs.
+        /// The workout is a ride, a hike, a walk or an activity type nobody has mapped —
+        /// something the plan has no vocabulary for (MAX-111, narrowed by MAX-168).
         ///
         /// Not a failure and not a gap in the capture — the workout is stored, its
         /// heart-rate series is stored, and it shows up in the app. What it does not have
-        /// is a verdict, because every band in `StandardPlanSeed`'s rubric measures a run
-        /// — against the plan's heart-rate cap, or against a prescribed running distance
-        /// — and the last one matches unconditionally. A strength session judged against
-        /// those gets a confident number that means nothing, and D8 would then make that
-        /// number permanent.
+        /// is a verdict, because every band in `StandardPlanSeed`'s rubric measures either
+        /// a run — against the plan's heart-rate cap, or against a prescribed running
+        /// distance — or a lift, and the last one matches unconditionally. A ride judged
+        /// against those gets a confident number that means nothing, and D8 would then
+        /// make that number permanent.
+        ///
+        /// **This case stopped covering lifts in MAX-168** and now means what its name
+        /// says. A lift is a discipline the plan can prescribe (A17) and the rubric can
+        /// judge (MAX-131/132), so it is offered the scoring path; the two ways it can
+        /// still come back unscored have their own reasons below. Nothing else moved:
+        /// `ActivityType.isScoreable` is what splits them, and a ride is `false` there
+        /// permanently, since `Discipline` is closed at two cases and no band naming a
+        /// ride can be authored.
         ///
         /// Distinct from `rubricCouldNotBeApplied`, which says the rubric was applied and
         /// nothing matched. Here the rubric is never consulted at all, so nothing about
         /// the workout is assembled into a prompt either.
+        case workoutIsNeitherARunNorALift
+
+        /// A22/MAX-145: the lift is scoreable, and the athlete has not yet said what it
+        /// worked (MAX-168).
         ///
-        /// Permanent under this plan model: the lazy path re-reaches the same conclusion
-        /// every time, and it should. Giving a lift a plan of its own is MAX-109's.
-        case workoutIsNotARun
+        /// The amendment's own words — *"a lift cannot be scored at ingestion any more …
+        /// a lift waits: not awaiting a model, not permanently unscoreable, but awaiting
+        /// the athlete"*. HealthKit records that a session happened and never what it
+        /// worked, so the one input a lift's judgement could grow beyond its clock is one
+        /// only the athlete can supply. D2 computes metrics once and D8 makes an
+        /// auto-score permanent, so a lift scored before the answer arrives is a lift
+        /// judged without it, forever — and no later ticket that teaches the prompt or the
+        /// rubric to read the groups can go back and re-judge it.
+        ///
+        /// Resolved by the athlete answering, on the screen that asks
+        /// (`MuscleGroupEntryCopy.awaitingEntryHeadline`); `completeIngestion(forWorkout:)`
+        /// is what scores it afterwards. Nothing about the workout reaches a prompt while
+        /// this is the state — the check sits before the context is built.
+        case liftAwaitingMuscleGroups
+
+        /// The rubric was applied to a lift and the band it matched is not a band about
+        /// lifting (MAX-168) — see `RubricBand.names(_:)`.
+        ///
+        /// Two shapes reach here, and both are the plan's answer rather than a defect:
+        ///
+        /// - **The day prescribed no lift.** `PlanDay.scheduledSession(for:)` answers
+        ///   `.rest`, the day's lift bands are not in scope, and what matches is the
+        ///   rubric's unconditional catch-all. A20 judges a lift on adherence to an ask,
+        ///   and there was no ask — so scoring it would be inventing an opinion about
+        ///   unscheduled lifting that MAX-146 explicitly declined to write.
+        /// - **The plan version predates the lift bands.** D1 makes a rubric versioned
+        ///   data, so a plan saved before MAX-132/MAX-146 carries neither the `lift.*`
+        ///   rows nor the discipline condition that stops `rest.ranAnyway` stamping a lift
+        ///   *"Ran on a scheduled rest day."* Merging those fixes changed no stored plan
+        ///   and never could; adopting them is authoring a revision (MAX-173).
+        ///
+        /// Both are resolved by a **new plan version** — prescribe the lift day, adopt the
+        /// current rubric, or both — which is D1's own mechanism, and the lazy path scores
+        /// the workout the next time its screen is opened under a version that answers.
+        case noLiftBandMatched
         /// The rubric could not be applied: no band matched what happened, or the
         /// context and the evaluation did not describe the same run. Deterministic in
         /// the plan data, so the lazy path will fail the same way until a new plan
