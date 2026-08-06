@@ -186,7 +186,9 @@ final class TrainingContextAgreementTests: XCTestCase {
         // …and the rendered figures are the tiles' own strings, so they cannot differ in
         // shape or in rounding either (§3.6(c)).
         let effectiveDays = try XCTUnwrap(tiles.effectiveDays)
-        XCTAssertTrue(sheet.contains("Effective days: \(effectiveDays.value)"), sheet)
+        // MAX-157: the fact sheet's label is "Effective sessions", not "Effective days" —
+        // since MAX-134 the denominator counts prescribed obligations, not calendar days.
+        XCTAssertTrue(sheet.contains("Effective sessions: \(effectiveDays.value)"), sheet)
 
         let averageScore = try XCTUnwrap(tiles.averageScore)
         XCTAssertTrue(sheet.contains("Average score: \(averageScore.value)"), sheet)
@@ -290,8 +292,11 @@ final class TrainingContextAgreementTests: XCTestCase {
         XCTAssertNil(context.tallies.effectiveDays.rate)
 
         let sheet = context.factSheet()
-        XCTAssertTrue(sheet.contains("Effective days: nothing in this window was eligible"), sheet)
-        XCTAssertFalse(sheet.contains("Effective days: 0/0"), sheet)
+        // MAX-157: same label fix as the populated case above, and the same absence
+        // wording either way — a mislabelled unit is no less wrong when the count is zero.
+        XCTAssertTrue(sheet.contains("Effective sessions: nothing in this window was eligible"), sheet)
+        XCTAssertFalse(sheet.contains("Effective sessions: 0/0"), sheet)
+        XCTAssertFalse(sheet.contains("Effective days:"), sheet)
     }
 
     /// MAX-110's rule, arriving in a prompt: a window reaching into the future must not

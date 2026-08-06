@@ -558,6 +558,7 @@ feature was governed by a plan that could not exist).
 | MAX-155 | **An HTTP status code reaches the athlete's screen** — `PlanDraftingFailure.description` interpolates `PlanProposalModelError.description` in `ChatModel.noteDraftingFailure`, so "…returned an unexpected status (400)." renders on the plan proposal card. **MAX-152 has landed and did not fix this** — its `ChatFailureNotice` covers `ChatStreamError`, and the drafting path is a separate error type. Route it through `ChatFailureNotice`'s no-default, no-numerals, nothing-interpolated discipline | MAX-154 | Sonnet |
 | MAX-156 | **`ScoringError.description` interpolates a workout identifier and a date** — latent, not leaking today, and one `.public` log line away from being a real one | MAX-154 | Sonnet |
 | MAX-153 | **The chat shell** — composer, thread list, sheet chrome. The design pass the chat's *shell* never had | Owner | **Opus** |
+| MAX-157 | **The fact sheet tells Claude "days" over a count of obligations** — `TrainingFactSheet`'s "Effective days" line is the same MAX-134 caption bug one layer into the prompt, not just on screen | MAX-140 | Sonnet ✅ |
 
 **MAX-066.** Splits currently need a GPS track, so a treadmill run has none — correctly
 rendered as an absence rather than fabricated. `distanceWalkingRunning` is already
@@ -2980,6 +2981,99 @@ two cases share one, that none carries a digit or names a type, and that the Hea
 claims nothing R10 forbids. **It proves nothing about any of the failures themselves.** CI
 opens no socket, touches no Health store, reads no Keychain and opens no SwiftData store,
 so every path this ticket touches is device-verified only. The PR lists how to provoke each one.
+
+---
+
+## MAX-157 — the fact sheet counts sessions, not days
+
+**Source: MAX-140's report.** MAX-140 fixed `TrendTileData`'s on-screen "effective days"
+caption to "effective sessions" and found, in passing, that `Context/TrainingFactSheet.swift`
+prints the identical mislabelled string straight from the same `EffectiveObligationTally` —
+one layer deeper, in what Claude is told rather than what the athlete reads. Since MAX-134
+(A19/LIFTING-SPEC §6.2), that count is prescribed *obligations*: a Tuesday asking for a run
+and a lift contributes two. A prompt that hands Claude a number and calls it "days" invites
+Claude to reason and answer in days, to the athlete, about a figure that is not days — worse
+than a wrong on-screen caption, because the athlete has no label in front of them to correct
+for it.
+
+**The fix: two lines relabelled, in `TrainingFactSheet.talliesLines`.** Both branches of the
+`effective.rate == nil` check now read "Effective sessions" instead of "Effective days" —
+the populated case (`"Effective sessions: \(effectiveCount)/\(eligibleCount)"`) and the
+absence case (`"Effective sessions: nothing in this window was eligible — …"`). "Sessions"
+rather than "obligations", matching LIFTING-SPEC §6.2's and `PlanFormatting`'s own word, and
+the exact word MAX-140 gives the dashboard tile for the same reason. No arithmetic moved —
+`effective.effectiveCount`/`effective.eligibleCount` are read from the `EffectiveObligationTally`
+`Tallies` already computed (D2); only the label changed.
+
+**Prompt text, before and after** (for the security review this PR carries):
+
+```
+- Effective days: 4/5
++ Effective sessions: 4/5
+
+- Effective days: nothing in this window was eligible — the plan asked for rest, no plan
+-     governed these days, or their outcome is not yet known.
++ Effective sessions: nothing in this window was eligible — the plan asked for rest, no
++     plan governed these days, or their outcome is not yet known.
+```
+
+**No new field of health data enters the prompt.** This changes two words on two lines
+that were already there; the numbers, their source (`Tallies.effectiveDays`), and every
+other line of the fact sheet are unchanged.
+
+**Swept the whole file for the same class of drift, not just the two named lines:**
+
+- **"Days with at least one workout: N" (`tallies.workoutDays`) — left alone.** `workoutDays`
+  counts distinct calendar days with at least one recorded workout of any discipline
+  (`Tallies`'s own doc comment); a day carrying both a run and a lift still counts once.
+  MAX-134 never touched this figure, so "days" is still its true unit. A comment now says
+  so in place, so the next sweep does not have to re-derive it.
+- **"Current streak: N days" (`tallies.currentStreak`) — left alone, and this is the one
+  worth explaining rather than just checking.** LIFTING-SPEC §6.3 rolls a day's obligations
+  up with AND *before* the streak ever sees it — a day extends the streak only if it had at
+  least one obligation and every obligation on it was met. So what the streak walks is one
+  entry per calendar day regardless of how many sessions that day prescribed, and its unit
+  of account is genuinely the day. Relabelling this line would have been the same defect in
+  the opposite direction — stating an obligation count in day words is wrong, but so is
+  stating a genuine day count in some other word to look consistent. A comment now says why
+  it stays "days," so a future editor does not "fix" it back into the same class of bug.
+- **The rest-day budget — no line to fix.** `TrainingFactSheet.swift` does not render a
+  rest-day-budget figure at all (checked: no "budget" line anywhere in the file or in
+  `TrainingContext.swift`). `ContextBuilder.Inputs.restDayBudget` reaches the training
+  context's tallies computation but nothing prints the budget itself or its conversions
+  today, so there is nothing here mislabelled and nothing to add — adding one would be a
+  new field of prompt content, which this ticket's brief rules out.
+- **The per-session lines already say "session," not "day."** `sessionLines`' preamble
+  ("One line per session — per session, not per day, because a day can hold both a run and
+  a lift and the plan asks for each separately") and every per-session field were already
+  discipline- and session-aware as of MAX-095/MAX-136. Read, left untouched.
+- **The window and plan blocks — no obligation counts to mislabel.** `windowLines` and
+  `planLines` state calendar-day spans and plan settings, never a count of obligations, so
+  none of A19's unit change reaches them.
+
+**Tests.** `Tests/MaximizeCoreTests/TrainingContextAgreementTests.swift` pinned the old
+"Effective days" wording in two places — `testEveryTalliedFigureAgreesWithTheDashboardsOwn`
+(the populated case, against the tile's own value) and
+`testAnEmptyEffectiveDayRatioIsWithheldOnBothSurfaces` (the absence case, and the "not 0/0"
+negative assertion). Both updated in place to assert "Effective sessions" instead, and the
+absence-case test gained an explicit `XCTAssertFalse(sheet.contains("Effective days:"))` so
+a regression back to the old label fails even if a future rewrite stops matching the exact
+absence sentence.
+
+**What CI can and cannot prove.** CI can prove: the package compiles and
+`TrainingContextAgreementTests` — including the two updated assertions — passes, which
+pins the corrected wording as a literal string a future edit cannot silently drift. CI
+cannot prove anything about how Claude actually reasons over the corrected label; that is
+inherent to prompt-wording changes and not something a unit test can close. **Needs device
+verification: none** — this ticket touches no view, no gesture and no HealthKit path; the
+only way to observe the change is to read a rendered fact sheet or a training-thread
+transcript, and CI already asserts the string it contains.
+
+**`swift build`/`swift test` were not run.** There is no Swift toolchain in this container
+(R1); CI is the actual compiler. The change is two string literals and their surrounding
+comments, both call sites still take the same two `Int`s they took before, and the touched
+test file's assertions were re-read line by line against the new strings. That is "reads
+correctly and should compile," not "compiles" — stated at that strength deliberately.
 
 ---
 
