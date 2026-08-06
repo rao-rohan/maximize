@@ -315,4 +315,73 @@ final class TrainingContextAgreementTests: XCTestCase {
         XCTAssertEqual(context.tallies.effectiveDays.eligibleCount, 1)
         XCTAssertEqual(context.tallies.effectiveDays.effectiveCount, 1)
     }
+
+    // MARK: - MAX-160: a labelled score, on both surfaces
+
+    /// Built by hand rather than through `stored()` — that helper has no way to attach a
+    /// `MiscategorisedScoreLabel`, and widening its tuple would force every call site above
+    /// to spell out a fourth field it does not care about.
+    private func storedWithLabel(
+        workoutID: UUID,
+        on dayText: String,
+        points: Int
+    ) throws -> StoredRecords {
+        let recorded = try workout(id: workoutID, on: dayText)
+        let score = try Fixture.score(points: points, workoutID: workoutID)
+        let label = try MiscategorisedScoreLabel(
+            id: UUID(),
+            workoutID: workoutID,
+            judgedAgainst: score.scheduledSession.kind,
+            actualDiscipline: .lift,
+            recordedAt: Fixture.epoch
+        )
+        let ledger = try ScoreLedger(automatic: score, labels: [label])
+        return StoredRecords(
+            workouts: [recorded],
+            ledgers: [workoutID: ledger],
+            records: [
+                try ContextInputs.WorkoutRecord(
+                    workout: recorded,
+                    metrics: try DerivedMetrics(
+                        workoutID: workoutID,
+                        averageHeartRateBPM: 142,
+                        maximumHeartRateBPM: 160,
+                        timeAboveCapSeconds: 250,
+                        heartRateDriftFraction: 0.032,
+                        planVersion: PlanVersion(1)
+                    ),
+                    ledger: ledger
+                ),
+            ]
+        )
+    }
+
+    /// The one scored workout in the window carries a label, so `TrendTileData` withholds
+    /// the tile entirely (MAX-160: no value to caption a reason onto) while the fact sheet
+    /// — which is prose, not a value/caption pair — can and does say which kind of "no
+    /// average" this is. Both paths must still agree it is *not* the ordinary "nothing has
+    /// been scored yet" absence.
+    func testALabelledScoreLeavesNoAverageAndTheFactSheetSaysWhy() throws {
+        let workoutID = UUID()
+        let stored = try storedWithLabel(workoutID: workoutID, on: "2026-01-06", points: 30)
+
+        let context = try rollUp(stored, from: "2026-01-05", through: "2026-01-11")
+        let tallies = try dashboardTallies(stored, from: "2026-01-05", through: "2026-01-11")
+        let tiles = try dashboardTiles(stored, kind: .week, tallies: tallies)
+
+        XCTAssertEqual(context.tallies, tallies)
+        XCTAssertNil(tiles.averageScore, "the only scored workout is labelled, so nothing is left to average")
+        XCTAssertEqual(tallies.averageScoreExcludedMiscategorisedCount, 1)
+
+        let sheet = context.factSheet()
+        XCTAssertTrue(
+            sheet.contains("Average score: every score in this window (1) was judged before the plan "
+                + "distinguished lifting"),
+            sheet
+        )
+        XCTAssertFalse(
+            sheet.contains("Average score: nothing in this window has been scored yet"),
+            "a verdict does exist here — it was excluded, which is a different fact — \(sheet)"
+        )
+    }
 }

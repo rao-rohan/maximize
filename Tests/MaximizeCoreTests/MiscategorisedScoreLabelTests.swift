@@ -487,6 +487,39 @@ final class MiscategorisedScoreLabelTests: XCTestCase {
         }
     }
 
+    // MARK: - MAX-160: the average's own copy
+
+    func testAverageExclusionNoteIsNilWhenNothingWasExcluded() {
+        XCTAssertNil(MiscategorisedScoreCopy.averageExclusionNote(excludedCount: 0))
+    }
+
+    func testAverageExclusionNoteNamesTheCountAndPluralisesCorrectly() {
+        XCTAssertEqual(
+            MiscategorisedScoreCopy.averageExclusionNote(excludedCount: 1),
+            "excludes 1 score from before the plan distinguished lifting"
+        )
+        XCTAssertEqual(
+            MiscategorisedScoreCopy.averageExclusionNote(excludedCount: 2),
+            "excludes 2 scores from before the plan distinguished lifting"
+        )
+    }
+
+    /// Same voice discipline as `labelledDetail`: says what happened, not what the
+    /// athlete did wrong, and never promises the correction D8 forbids.
+    func testTheOnlyExcludedScoresLineExplainsItselfWithoutPromisingACorrection() {
+        for count in [1, 2] {
+            let line = MiscategorisedScoreCopy.onlyExcludedScoresAverageLine(excludedCount: count)
+            XCTAssertFalse(line.isEmpty)
+            XCTAssertFalse(line.contains("\n"))
+            XCTAssertTrue(line.hasPrefix("Average score:"))
+            XCTAssertTrue(line.lowercased().contains("distinguished lifting"))
+            XCTAssertFalse(
+                line.lowercased().contains("nothing in this window has been scored"),
+                "this is a different absence from the ordinary unscored one"
+            )
+        }
+    }
+
     // MARK: - The pass
 
     private static func lift(

@@ -176,10 +176,29 @@ extension TrainingContext {
             lines.append("Effective sessions: \(effective.effectiveCount)/\(effective.eligibleCount)")
         }
 
+        // MAX-160: a score labelled miscategorised (A21) is excluded from the average —
+        // see `Tallies.averageScore`'s own documentation for why. Three states follow,
+        // and the model must be told which one it is looking at rather than left to guess
+        // from a bare number or a bare absence.
+        let excludedCount = tallies.averageScoreExcludedMiscategorisedCount
         if let averageScore = tallies.averageScore {
             // Through the tile's own formatter — §3.6(c): where a figure appears in both a
             // tile and a fact sheet, the fact sheet renders it at the tile's precision.
-            lines.append("Average score: \(TrendTileData.formattedAverageScore(averageScore))")
+            var line = "Average score: \(TrendTileData.formattedAverageScore(averageScore))"
+            // Same wording the dashboard tile's caption uses (`TrendTileData
+            // .averageScoreCaption`), through the one function that decides it
+            // (`MiscategorisedScoreCopy.averageExclusionNote`) — §3.6(a): a figure and its
+            // caveat must not disagree in shape between the two surfaces.
+            if let note = MiscategorisedScoreCopy.averageExclusionNote(excludedCount: excludedCount) {
+                line += " (\(note))"
+            }
+            lines.append(line)
+        } else if excludedCount > 0 {
+            // Every scored workout in the window was labelled — a designed state distinct
+            // from "nothing has been scored," not a fabricated zero and not the ordinary
+            // absence line below (see `TrendTileData`'s own documentation for why the tile
+            // cannot say this but the fact sheet can).
+            lines.append(MiscategorisedScoreCopy.onlyExcludedScoresAverageLine(excludedCount: excludedCount))
         } else {
             lines.append("Average score: nothing in this window has been scored yet, so there is "
                 + "no average. That is an absence of verdicts, not a low one.")

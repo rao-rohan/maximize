@@ -102,10 +102,36 @@ public struct Tallies: Hashable, Sendable {
     public let effectiveDays: EffectiveObligationTally
 
     /// Mean of `ScoreLedger.effectiveValue` — the manual correction where one exists,
-    /// else the auto-score (§8) — over every *scored* workout in the interval. Nil
-    /// when nothing in the interval has been scored yet, which is an honest "no data
-    /// yet," not a zero.
+    /// else the auto-score (§8) — over every *scored* workout in the interval **that
+    /// is not labelled miscategorised** (A21, MAX-160). Nil when nothing eligible in
+    /// the interval has been scored yet, which is an honest "no data yet," not a
+    /// zero — see `averageScoreExcludedMiscategorisedCount` for the state where that
+    /// nil is instead every score having been excluded.
+    ///
+    /// **Why a labelled score is skipped rather than averaged in.** MAX-143 marks a
+    /// score written against the wrong discipline's ask — a lift judged by the
+    /// running rubric before the plan told the two apart — because the model was
+    /// handed a category error, not evidence about the athlete's training. The
+    /// average answers "how am I training"; a score answering the wrong question is
+    /// noise from a bug, not a data point about the athlete, so it is left out here
+    /// exactly as it is already left out of PRD §2's scorer-quality signal. The score
+    /// itself is untouched (D8) and still visible on the workout with its rationale
+    /// and `MiscategorisedScoreCopy`'s explanation — only this aggregate's read of it
+    /// changes.
     public let averageScore: Double?
+
+    /// How many scored workouts in the interval were left out of `averageScore`
+    /// because their `ScoreLedger.isMiscategorised` (MAX-160). Zero whenever nothing
+    /// in the interval carries a label — in particular, always zero for a
+    /// single-discipline history, which is what keeps `averageScore` byte-identical
+    /// to its pre-MAX-160 value there.
+    ///
+    /// Carried as a count, not just a bool, so a caption can say *how many* points
+    /// were withheld rather than only that some were — the same reasoning
+    /// `EffectiveObligationTally` gives for a numerator/denominator pair over a bare
+    /// rate: a reader who can see the exclusion can also judge how much it might
+    /// matter.
+    public let averageScoreExcludedMiscategorisedCount: Int
 
     /// See `TalliesCalculator` for the exact definition and why converted rest days
     /// and unscored workouts neither extend nor break it.
@@ -119,6 +145,7 @@ public struct Tallies: Hashable, Sendable {
         workoutDays: Int,
         effectiveDays: EffectiveObligationTally,
         averageScore: Double?,
+        averageScoreExcludedMiscategorisedCount: Int = 0,
         currentStreak: Int,
         currentWeek: TrainingWeek
     ) throws {
@@ -129,6 +156,10 @@ public struct Tallies: Hashable, Sendable {
         }
         try Validate.nonNegative(Double(workoutDays), "Tallies.workoutDays")
         try Validate.nonNegative(Double(currentStreak), "Tallies.currentStreak")
+        try Validate.nonNegative(
+            Double(averageScoreExcludedMiscategorisedCount),
+            "Tallies.averageScoreExcludedMiscategorisedCount"
+        )
         if let averageScore {
             try Validate.finite(averageScore, "Tallies.averageScore")
         }
@@ -137,6 +168,7 @@ public struct Tallies: Hashable, Sendable {
         self.workoutDays = workoutDays
         self.effectiveDays = effectiveDays
         self.averageScore = averageScore
+        self.averageScoreExcludedMiscategorisedCount = averageScoreExcludedMiscategorisedCount
         self.currentStreak = currentStreak
         self.currentWeek = currentWeek
     }

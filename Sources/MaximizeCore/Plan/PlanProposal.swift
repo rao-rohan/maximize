@@ -29,11 +29,25 @@ import Foundation
 ///
 /// ## What these never carry
 ///
-/// The athlete's fact sheet, and the model's raw reply. `description` is appended to a
-/// retry instruction (§4.5) *and* shown on screen, so it is read by both the model and
-/// the athlete — but it is assembled from this enum's own payloads, which are bounded
-/// values (a field name, a weekday, a week index) and never a block of text something
-/// else wrote. `ScoreProposal.parse` holds the same line for the same reason.
+/// The athlete's fact sheet, and the model's raw reply. `description` is assembled from
+/// this enum's own payloads, which are bounded values (a field name, a weekday, a week
+/// index) and never a block of text something else wrote. `ScoreProposal.parse` holds
+/// the same line for the same reason.
+///
+/// ## `description` is correction text, not screen text (MAX-158)
+///
+/// `description` is appended to a retry instruction (§4.5,
+/// `PlanProposalInstruction(retryingAfter:)`) and is written for that reader: a model
+/// told *"the reply left out `liftKind`, which the plan schema requires"* can act on it,
+/// because the sentence names the exact key a retry has to add. It used to also be
+/// carried straight onto the plan proposal card, unchanged, which was the wrong reader
+/// for the same words — an athlete cannot do anything with a field name or the word
+/// "schema". `PlanProposalErrorNotice` (`Plan/PlanProposalErrorNotice.swift`) is what the
+/// screen reads now, the same split `PlanDraftingNotice` already draws between
+/// `PlanProposalModelError.description` (a debugger's diagnostic) and its own athlete
+/// sentences. `description` keeps every case's precise field name, weekday and index —
+/// rewriting it would be the functional regression of degrading the one channel that
+/// makes the retry worth attempting.
 public enum PlanProposalError: Error, Hashable, Sendable, CustomStringConvertible {
 
     // MARK: - The reply was not a proposal at all

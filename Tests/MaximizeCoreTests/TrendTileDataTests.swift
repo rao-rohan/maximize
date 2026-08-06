@@ -36,6 +36,7 @@ final class TrendTileDataTests: XCTestCase {
         workoutDays: Int = 0,
         effectiveDays: EffectiveObligationTally? = nil,
         averageScore: Double? = nil,
+        averageScoreExcludedMiscategorisedCount: Int = 0,
         currentStreak: Int = 0
     ) throws -> Tallies {
         let start = try day(from)
@@ -45,6 +46,7 @@ final class TrendTileDataTests: XCTestCase {
             workoutDays: workoutDays,
             effectiveDays: try effectiveDays ?? EffectiveObligationTally(effectiveCount: 0, eligibleCount: 0),
             averageScore: averageScore,
+            averageScoreExcludedMiscategorisedCount: averageScoreExcludedMiscategorisedCount,
             currentStreak: currentStreak,
             currentWeek: try TrainingWeek(
                 start: start.startOfTrainingWeek(),
@@ -246,6 +248,63 @@ final class TrendTileDataTests: XCTestCase {
         )
 
         XCTAssertNil(data.averageScore)
+    }
+
+    // MARK: - MAX-160: the average score's caption says when scores were excluded
+
+    /// The value is untouched — `Tallies.averageScore` already reflects the exclusion
+    /// (D2) — but the caption now says one was left out and how many, so the athlete can
+    /// tell this figure apart from an ordinary mean without opening the workout.
+    func testAverageScoreCaptionNamesOneExcludedScore() throws {
+        let tallies = try tallies(
+            from: "2026-01-05", through: "2026-01-11",
+            averageScore: 82.456, averageScoreExcludedMiscategorisedCount: 1
+        )
+
+        let data = try TrendTileData(
+            kind: .week, tallies: tallies,
+            workouts: [], timeZone: .gmt, planCalendar: nil, distanceUnit: .kilometers
+        )
+
+        XCTAssertEqual(data.averageScore?.value, "82.5", "the value itself is unaffected by the caption")
+        XCTAssertEqual(
+            data.averageScore?.caption,
+            "avg score (excludes 1 score from before the plan distinguished lifting)"
+        )
+    }
+
+    /// The plural, so "1 score" never reads as "1 scores."
+    func testAverageScoreCaptionPluralisesMoreThanOneExcludedScore() throws {
+        let tallies = try tallies(
+            from: "2026-01-05", through: "2026-01-11",
+            averageScore: 70, averageScoreExcludedMiscategorisedCount: 3
+        )
+
+        let data = try TrendTileData(
+            kind: .week, tallies: tallies,
+            workouts: [], timeZone: .gmt, planCalendar: nil, distanceUnit: .kilometers
+        )
+
+        XCTAssertEqual(
+            data.averageScore?.caption,
+            "avg score (excludes 3 scores from before the plan distinguished lifting)"
+        )
+    }
+
+    /// The ordinary caption, unchanged, when nothing was excluded — the property that
+    /// keeps a single-discipline history's tile byte-identical to its pre-MAX-160 self.
+    func testAverageScoreCaptionIsUnchangedWhenNothingWasExcluded() throws {
+        let tallies = try tallies(
+            from: "2026-01-05", through: "2026-01-11",
+            averageScore: 70, averageScoreExcludedMiscategorisedCount: 0
+        )
+
+        let data = try TrendTileData(
+            kind: .week, tallies: tallies,
+            workouts: [], timeZone: .gmt, planCalendar: nil, distanceUnit: .kilometers
+        )
+
+        XCTAssertEqual(data.averageScore?.caption, "avg score")
     }
 
     // MARK: - Tile ordering

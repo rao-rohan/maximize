@@ -592,11 +592,29 @@ but is dated before its effective date is permanently unscorable, and nothing te
 | MAX-165 | **The first plan's effective date** — default covers what is captured; the excluded-workout count on screen. Revisions unchanged | MAX-161 | **Opus** ✅ **built ahead of the rest of this set** — see the MAX-165 section below |
 | MAX-166 | The conversational route to a first plan, offered from the authoring screen. Droppable | MAX-161 | Sonnet |
 | MAX-167 | The API key section's purpose footer — what the key is for, what it costs, where it lives | MAX-161 | Sonnet 🔒 ✅ |
+| MAX-172 | **The consolidated device-verification checklist** — every *Needs device verification* item from #101–#157, reordered into the sequence a person would actually run them in and ranked by risk, instead of thirty scattered PR sections | Owner | Sonnet ✅ |
 
 Order: **165 alone first**, then 162 → (163 ‖ 164). 167 parallelises with everything; 166
 last or never. **164 was built and first opened for review before 163 merged**; it has
 since been updated to read 163's device-lifetime recording — see the MAX-164 section
 below.
+
+**MAX-172.** [docs/DEVICE-CHECKS.md](./docs/DEVICE-CHECKS.md). 92 checks gathered from 32
+merged PRs (#101–#157), cross-checked against this document's own per-ticket sections.
+Organised by the order a person actually works through them — first launch, ingestion and
+scoring, chat, the screens, accessibility, then relaunch behaviour — rather than by ticket
+number, and led by an eight-item "Run these first" section ranked against what the
+tickets themselves flagged as highest-risk: R13 (app-layer wiring that compiles but never
+executes, already responsible for two real defects), the every-launch Health nag three
+separate tickets warned about, the store opening against two new SwiftData record types
+for the first time, `tabViewBottomAccessory`'s first real use, chat's stall indicator (which
+may not be reachable at all — see below), R16's silent-data-loss default, plan drafting's
+storage boundary, and the mixed-day calendar glyph's own author calling its legibility "a
+judgement nobody without a phone can make." A closing section records what a device visit
+will not settle regardless of how carefully it's done: R10 (HealthKit read access can
+never be confirmed), background-delivery timing, whether the Anthropic API emits `ping`
+frames during a stall, prompt-cache engagement, and Keychain retention across a reinstall.
+No source was changed — this is a document only.
 
 **MAX-167.** One sentence, `FailureCopy.apiKeyPurpose`, shown as a footer under Settings'
 existing "Anthropic API key" section — no new entry point, no test-the-key button, no
@@ -1937,9 +1955,11 @@ free. What landed in the file:
   explains what went wrong. The composer offers none — two retry affordances in two
   registers is worse than either alone.
 | MAX-151 | **Author the duration floor** — `StandardPlanSeed` states one (600s), the authoring screen edits it, `PlanProposal` can propose it. **Closes gap P3 for real** | 149, 148 | Sonnet ✅ |
-| MAX-158 | **Schema vocabulary reaches the athlete on a rejected proposal** — `PlanProposalError.description` says things like *"The reply left out `liftKind`, which the plan schema requires."* No PII and no status code, so not a privacy defect; but it names wire fields at a person who cannot act on them. MAX-155/156 left it deliberately (MAX-151 owned the file) | 155 | Sonnet |
+| MAX-158 | **Schema vocabulary reaches the athlete on a rejected proposal** — `PlanProposalError.description` says things like *"The reply left out `liftKind`, which the plan schema requires."* No PII and no status code, so not a privacy defect; but it names wire fields at a person who cannot act on them. MAX-155/156 left it deliberately (MAX-151 owned the file) — see write-up below | 155 | Sonnet ✅ |
 | MAX-159 | **A recorded-but-unjudged workout outranks another obligation's settled miss** — a Tuesday whose lift was recorded but unscored and whose run was missed draws `.noVerdict`, and its sentence names neither. §7.2's principle says change it, but the same ordering governs single-obligation days shipped since MAX-061, so it moves historical cells and wants a designed state | 135 | **Opus** |
 | MAX-160 | **Should a labelled miscategorised score leave the athlete's own average?** MAX-143 excluded it from the scorer-quality metric only; MAX-140 confirmed the average stays per-workout and declined to widen. A product decision, then a `Tallies` change | 143, 140 | Owner / overseer |
+| MAX-170 | **The stall detector's ping assumption had never met the live API** — MAX-152's two-beat threshold rested on an unverified claim about ping cadence that the API's own documentation contradicts. The rule now calibrates against what each stream demonstrates rather than against a constant | 152 | **Opus** ✅ — see the MAX-170 section below for what was established, what could not be, and how the design tolerates being wrong |
+| MAX-160 | ~~Should a labelled miscategorised score leave the athlete's own average?~~ **Owner decided: yes.** `TalliesCalculator.computeAverageScore` now skips a labelled score; the caption says when one was excluded and a fact-sheet line says why nothing is left when every scored workout was. See the MAX-160 note below | 143, 140 | Sonnet ✅ |
 | MAX-168 | **Open MAX-111's lift ingestion gate** — stop refusing to score a lift now that the vocabulary (131), the seed bands (132), the routing (133) and the copy (147) are all in place. **Was blocked on MAX-173** and found the gap that became it: it refused to open because no stored plan could reach MAX-132's or MAX-146's corrected bands, so opening the gate would have scored real lifts against a rubric that calls them runs. **Unblocked by MAX-173 — conditionally.** MAX-173 ships the *mechanism*; the gate is only safe once a plan version carrying the corrected bands is actually **in effect on the device**, which is an owner action (Plan → revise → Save). MAX-168 must check for that condition rather than assume it, and must say in its PR what happens to a lift ingested under a plan version that still carries the old bands | 111, 132, 133, 146, **173** | **Opus** |
 | MAX-173 | **A rubric fix can reach a stored plan** — authoring a revision adopts the bands this build ships, stated on screen and declinable, as a **new plan version**. Closes the D1 gap that made every seed-side rubric correction unreachable on a device with a plan. **Unblocks MAX-168.** Opens **R17** | 080, 132, 146 | **Opus** |
 
@@ -3588,6 +3608,150 @@ correctly and should compile," not "compiles" — stated at that strength delibe
 
 ---
 
+## MAX-160 — a labelled miscategorised score leaves the athlete's own average
+
+**The owner's decision, taken.** MAX-143 excluded a labelled score from PRD §2's
+scorer-quality metric only, and reported — deliberately, twice, in MAX-134's own tracker
+note and again in MAX-140's — that whether it should also leave the athlete's own average
+was a live, undecided question belonging to `Tallies`/`TalliesCalculator`. The owner
+decided: yes. The reasoning this ticket built against: the average answers "how am I
+training," and a score produced by asking the wrong question is not evidence about the
+athlete's training any more than it is evidence about the scorer — it is noise from a bug.
+Excluding it from an aggregate is not rewriting history (D8): the score stays on the
+workout, visible, with its rationale and `MiscategorisedScoreCopy.labelledDetail`'s
+explanation. Only what `Tallies.averageScore` reads changed.
+
+**The shared-predicate question, answered: `ScoreLedger.isMiscategorised`, not
+`countsTowardScorerQuality`.** MAX-143 exposed `countsTowardScorerQuality` explicitly so a
+future aggregate would filter on it rather than re-derive the rule, and this is that
+aggregate. But `countsTowardScorerQuality` (`!isMiscategorised`, today) answers "is this
+evidence about the scorer" — PRD §2's question — and this ticket's question is "is this
+evidence about the athlete's training." The two happen to agree on every score in the
+codebase right now, because labelling is the only thing either predicate currently reacts
+to. They are not, on inspection, the same question: a future reason to exclude a score
+from PRD §2's signal that has nothing to do with whether it honestly measures the athlete
+(a scorer-model version bump invalidating old rationales, say) would, if this ticket had
+coupled the average to `countsTowardScorerQuality`, silently move the athlete's average
+for a reason that has nothing to do with them — a latent bug that would be correct today
+and wrong the day the two questions actually diverge. `computeAverageScore` reads
+`ScoreLedger.isMiscategorised` directly instead, which states the one fact this exclusion
+is actually about. See `TalliesCalculator`'s own documentation, right beside the function,
+for the same argument in place.
+
+**A label excludes the whole workout, correction or not.** The ticket's instruction was
+literal — "skip a score carrying a `MiscategorisedScoreLabel`" — and this ticket followed
+it without carving out an exception for a workout the athlete has since corrected by hand.
+`ScoreLedger.wasCorrected` and `.effectiveValue` are unaffected by labelling (MAX-143's own
+rule, restated in `Score.swift`), so the correction still stands and still shows on the
+workout — it is simply never summed into this particular average, because the workout it
+came from was never judged against its own discipline's ask in the first place.
+`testALabelledAndCorrectedScoreIsStillExcludedFromTheAverage` pins this.
+
+**The designed state: "no scores to average," not zero.** When every scored workout in an
+interval is labelled, `Tallies.averageScore` stays nil — the same "honest absence" the
+type already gave "nothing scored yet" — rather than resolving to `0.0`, which would read
+as "you scored zero" instead of "nothing here counts as evidence." The two nils are told
+apart by the new `averageScoreExcludedMiscategorisedCount`, which is `0` for the ordinary
+absence and the excluded count for this one. `testAnAverageOverOnlyLabelledScoresIsNilRatherThanZero`
+pins the value; `testALabelledScoreLeavesNoAverageAndTheFactSheetSaysWhy`
+(`TrainingContextAgreementTests`) pins that the two nils say different things on the one
+surface that can say anything about an absent tile — the fact sheet, which is prose, not a
+value/caption pair. The dashboard tile itself cannot: `TrendTileData.averageScore` is
+`nil` either way, because there is no value left to caption a reason onto — documented in
+place rather than solved by inventing a value-less tile, which no other absence in that
+type does either.
+
+**The caption, where there is a value to caption.** `TrendTileData.averageScore`'s caption
+is `"avg score"` unchanged when nothing was excluded — the property that keeps a
+single-discipline history's tile byte-identical — and `"avg score (excludes N score(s) from
+before the plan distinguished lifting)"` when `averageScoreExcludedMiscategorisedCount` is
+positive. `TrainingFactSheet`'s "Average score" line folds in the identical parenthetical
+when there is still a figure to report, and prints
+`MiscategorisedScoreCopy.onlyExcludedScoresAverageLine` instead of the ordinary absence
+sentence when there is not. Both surfaces call through one pair of functions —
+`MiscategorisedScoreCopy.averageExclusionNote`/`.onlyExcludedScoresAverageLine`, beside
+MAX-143's `labelledDetail` — so the wording cannot drift apart the way MAX-140 and MAX-157
+each found it already had (A12 rule 3).
+
+**Copy lives in `MiscategorisedScoreLabel.swift`, extending `MiscategorisedScoreCopy`
+rather than a new type.** That enum is already "what a surface showing a labelled score
+says about it," and the average's copy is exactly that question asked of an aggregate
+instead of a single workout. `Domain/Score.swift` was read and not touched — this ticket's
+brief named it MAX-143's, and nothing about the average's exclusion needed a change to
+`Score` or `ScoreLedger` themselves; `isMiscategorised` and `effectiveValue` already said
+everything `computeAverageScore` needed to read.
+
+**Swept every other aggregate over scores; changed one, reported the rest.**
+
+- **`Tallies.averageScore` — changed.** This ticket's whole scope.
+- **`Tallies.effectiveDays` (`EffectiveObligationTally`) — unchanged, and a labelled score
+  still counts.** `DayObligationResolver`/`DayObligations.swift` reads `ScoreLedger
+  .isEffective` with no label filter anywhere in the resolution — `bestScored(_:)` and
+  `resolutions.filter { $0.outcome.isEffective }` take every scored workout of the right
+  discipline as-is. A lift mis-scored against the running rubric before MAX-133 today still
+  counts toward, or against, the plan-adherence ratio exactly as an honestly-scored one
+  would. **Not changed here**: this ticket's scope was named as `Tallies.averageScore`
+  specifically, and MAX-140 already declined to widen the analogous question once. Filed as
+  a candidate follow-up — "exclude a labelled score from `EffectiveObligationTally` too" —
+  rather than picked up.
+- **`Tallies.currentStreak` — unchanged, and a labelled score still can extend or break
+  it.** The streak walks `DayObligationResolver`'s same per-day roll-up
+  (`DayObligations.streakContribution`), so whatever is true of `effectiveDays` above is
+  true here too: a labelled score is ordinary evidence to the streak walk today. Same
+  disposition — reported, not touched.
+- **`Dashboard/ScoreCalendar.swift` — read, not touched (MAX-159's file, off-limits to this
+  ticket).** `bestScoredPair` resolves a calendar day's cell from every scored workout with
+  no label filter either, so a labelled score paints the calendar exactly as an unlabelled
+  one would. Same finding as the two above, on a different surface; reported for whoever
+  next owns that file.
+- **`TrendTileData.workoutDays`/`.mileage`/`.totalDistance`/`.streak` (as a tile) — not
+  score-based**, so labelling has no surface here to reach. Checked, not changed.
+- **`Context/TrainingFactSheet.swift`'s other lines — checked.** "Days with at least one
+  workout," "Effective sessions" and "Current streak" all read `Tallies` fields this ticket
+  did not touch, so they carry the same labelled-score exposure as their `Tallies`
+  counterparts above and no new one. The per-session lines (`sessionLines`) already show
+  each session's own verdict — including, for a labelled score, nothing extra today; MAX-143
+  did not add a per-session label sentence to the fact sheet and this ticket does not add
+  one either, being out of scope.
+
+**In one sentence: this ticket makes the athlete's average stop counting a category error
+against them; it deliberately leaves the plan-adherence ratio, the streak and the calendar
+still counting one, and says so rather than quietly narrowing what "excluded" means.**
+
+**Tests** (all in `MaximizeCoreTests`, all touching only files this ticket owns):
+`TalliesTests` gains `testALabelledScoreIsExcludedFromTheAverageAndAnUnlabelledOneIsNot`,
+`testAnAverageOverOnlyLabelledScoresIsNilRatherThanZero`,
+`testALabelledAndCorrectedScoreIsStillExcludedFromTheAverage`,
+`testASingleDisciplineHistoryLeavesTheAverageAndItsExcludedCountUnchanged` (the
+byte-identical fixture) and a validation test for the new field's non-negativity.
+`TrendTileDataTests` gains three caption tests (none excluded, one excluded, several
+excluded — plural wording). `MiscategorisedScoreLabelTests` pins the two new copy
+functions' wording and voice, the same way it already pins `labelledDetail`.
+`TrainingContextAgreementTests` gains `testALabelledScoreLeavesNoAverageAndTheFactSheetSaysWhy`,
+the tile/fact-sheet agreement property extended to the all-excluded case.
+
+**What CI can and cannot prove.** CI can prove: the package compiles, every new and
+existing `TalliesTests`/`TrendTileDataTests`/`MiscategorisedScoreLabelTests`/
+`TrainingContextAgreementTests` assertion passes, and — because the new parameter carries a
+default of `0` — every pre-existing direct `Tallies(...)` construction in the test suite
+keeps compiling unchanged, which is itself evidence the change is additive rather than a
+signature break threaded everywhere. CI cannot prove the longer caption
+("avg score (excludes 1 score from before the plan distinguished lifting)") lays out well
+inside `TrendTilesView`'s two-column grid tile at large Dynamic Type sizes — that view was
+not touched, takes whatever caption `MaximizeCore` hands it, and has no `.lineLimit()` set,
+so the caption should wrap rather than truncate, but only a device can confirm it reads
+well rather than merely wrapping. **Needs device verification**: open the dashboard with a
+history containing at least one labelled score (none is known to exist on this account
+yet) and confirm the average-score tile's longer caption is legible at the default and a
+large Dynamic Type size, on both the weekly and monthly/annual tile sets.
+
+**`swift build`/`swift test` were not run.** There is no Swift toolchain in this container
+(R1); CI is the actual compiler. Every new test was reasoned by hand against the exact
+arithmetic `computeAverageScore` now runs and the exact strings `MiscategorisedScoreCopy`
+now returns — reads correctly and should compile and pass, not confirmed to.
+
+---
+
 ## MAX-104 — copy and absence voice: the plan and workout screens
 
 **MAX-150's accurate remainder.** MAX-150 took the chat and dashboard half of the
@@ -3779,6 +3943,99 @@ change; every touched call site was re-read line by line against its new signatu
 is "reads correctly and should compile, and ten tests are written to prove the strings
 once it does" — not "compiles," stated at that strength deliberately, per CLAUDE.md's own
 distinction between the two sentences.
+
+---
+
+## MAX-158 — a rejected proposal stops speaking schema
+
+**The defect, restated precisely.** `PlanProposalError.description` is written for two
+readers at once: `PlanProposalInstruction(retryingAfter:)` appends it to the retry as a
+correction, and `PlanDraftingNotice`'s `.rejected` case — MAX-155's own documented,
+deliberate exception — carried it straight onto the plan proposal card. The words that
+make the retry work ("the reply left out `liftKind`, which the plan schema requires")
+are exactly the words an athlete cannot act on: nothing on their screen is called
+`liftKind`, and they have never seen a schema.
+
+**Decision: two renderings, one error — a type, not a second property.**
+`PlanProposalError.description` is untouched, payload and all, and stays the correction
+channel. `PlanProposalErrorNotice` (`Sources/MaximizeCore/Plan/PlanProposalErrorNotice.swift`)
+is the new sibling, same shape as `ChatFailureNotice` and `PlanDraftingNotice`: a
+`message`, a private initialiser, and one exhaustive `static func notice(for:)` with no
+`default`. A second `String` property sitting next to `description` on the same enum was
+considered and rejected — a naming convention is exactly what let the original defect
+happen (`PlanDraftingNotice` reading `error.description` as though it were already
+screen-safe), and a second property is still a naming convention: nothing stops a future
+call site from reaching for the wrong one by habit. A distinct type is not a habit — a
+caller wanting athlete-facing text has exactly one type here that offers any.
+
+**Fourteen cases get a new, constant sentence; one case is left alone, on purpose.**
+`.rejectedByAuthoring(PlanAuthoringError)` is not rewritten. `PlanAuthoringError` was
+built for this exact readership — its own doc comment says its cases "say what the
+athlete did and what to do instead," and `FailureCopy.planCouldNotBePrepared`'s doc
+comment independently calls it "already athlete-facing." It never carries a field name,
+"JSON," or "schema." Writing a second sentence for it would be two descriptions of the
+same plan-authoring rule, free to drift the moment one is edited and the other is not —
+the same argument D2/D3 make for one context builder rather than two notions of what a
+workout is. So `PlanProposalErrorNotice` delegates that one case to
+`authoringError.description` verbatim, and says explicitly why doing so is not the
+naming-convention trap the rest of the type exists to close: `PlanAuthoringError` is a
+type of its own, switched on by name, not a same-shaped property assumed safe by
+proximity.
+
+The other fourteen cases (`malformedResponse`, `missingField`, `forbiddenField`,
+`unknownSessionKind`, `unknownWeekday`, `unknownLiftKind`, `unknownMuscleGroup`,
+`weekIsNotOneSessionPerWeekday`, `restDayIsNotEmpty`, `liftRestDayIsNotEmpty`,
+`malformedGoalTargetDay`, `longRunArcIsEmpty`, `longRunArcWeekNotPositive`,
+`longRunArcOutOfOrder`) each get one constant sentence, matching
+`PlanDraftingNotice.transportMessage`'s rule: nothing here is interpolated, so a
+payload (a field name, a weekday, a week index) cannot slip through by accident. Each
+sentence says what is wrong with the *plan*, in `PlanCopy`'s vocabulary — a run kind, a
+lift kind, a muscle group, a rest day, a long-run week — rather than what was wrong with
+the *reply*.
+
+**`PlanDraftingNotice`'s `.rejected` case is the one line that changed.** It now reads
+`PlanProposalErrorNotice.notice(for: error).message` instead of `error.description`
+directly; the surrounding "Claude's plan was not one this app could use, twice: … Nothing
+has changed — say what you want and ask again." sentence is unchanged, since that framing
+was never the leak. `ChatModel.noteDraftingFailure` needed no change — it already read
+`PlanDraftingNotice`, never `PlanProposalError.description` directly.
+
+**The retry is unweakened.** `PlanProposalInstruction`, `PlanProposalDrafting`, and
+`PlanProposalError.description` itself are untouched. `PlanProposalDraftingTests`'
+`testAnUnusableReplyIsAskedAgainOnceWithTheReason` still asserts the retry's `task`
+contains `PlanAuthoringError.heartRateCapImplausible(...).description` verbatim, and
+`PlanProposalTests.testAStringWhereANumberBelongsIsRefusedNotCoerced` still asserts
+`description` names the field. Neither was touched; both still pass by inspection.
+
+**Tests:** `Tests/MaximizeCoreTests/PlanProposalErrorNoticeTests.swift`, exhaustive over
+all fifteen `PlanProposalError` cases — every case a distinct, non-empty sentence; no
+message contains a quotation mark (every field name and value `description` names is
+quoted, so a surviving quote is itself a leak detector); a banned-token list catches
+"JSON", "schema", and the specific field names this ticket's brief named; the fourteen
+model-boundary cases are asserted to differ from their own `description`, and two
+instances of the same case with different payloads are asserted to read identically,
+confirming nothing is interpolated; `.rejectedByAuthoring` is asserted to equal
+`PlanAuthoringError.description` verbatim, pinning the one deliberate exception; and the
+correction channel is asserted, separately, to still name the precise field for every
+case that has one. `PlanDraftingNoticeTests` gained three tests replacing the one that
+used to assert the bug (`testARejectedProposalCarriesTheCorrectionTextVerbatim`, which
+asserted the card *did* contain `error.description` — now asserting the opposite) and
+confirming the `.rejectedByAuthoring` case still reads its one shared sentence through
+`PlanDraftingNotice` end to end.
+
+**Scope discipline.** `Dashboard/ScoreCalendar.swift` and `App/Dashboard/ScoreCalendar*`
+(MAX-159's files) were not touched. No file outside `Sources/MaximizeCore/Plan/` and its
+tests was edited.
+
+### What CI can and cannot prove
+
+CI proves: the package compiles; every `PlanProposalError` case maps to a distinct,
+non-empty, quotation-mark-free sentence with no `default` branch to fall through to; the
+correction channel (`description`) still names the precise field for every case that has
+one; and the `.rejected` path of `PlanDraftingNotice` reads the new type rather than the
+old one. It cannot prove the plan proposal card actually renders this text on a device,
+or that a real rejected proposal from Anthropic reaches this path the way the tests
+simulate it. See the PR's **Needs device verification**.
 
 ---
 
@@ -4264,6 +4521,118 @@ changed; `swift test` was not re-run to confirm the unmodified suite still passe
 
 ---
 
+## MAX-170 — the stall detector stops depending on the ping cadence
+
+**MAX-152's threshold rested on a claim about the API that nobody had checked, and the
+API's own documentation contradicts it.** `ChatReplyProgress.heartbeatsBeforeStall` was
+two, justified as: "the API is documented as free to send a `ping` at any time … two in a
+row with no token between them will not happen to a stream that is producing text." The
+first half is right and the second half was an assumption.
+
+### What was established
+
+Read from the current Messages API streaming documentation, which is authoritative here:
+
+- **Pings carry no cadence guarantee of any kind.** The whole of what is specified is
+  that event streams "may also include **any number** of `ping` events" and that "there
+  may be `ping` events **dispersed throughout the response**". No interval, no frequency,
+  no upper or lower bound, no statement that the rate is stable across models, effort
+  levels or load.
+- **Pings during ordinary generation are the documented shape, not an edge case.** The
+  published streaming examples place a `ping` *between two consecutive `text_delta`
+  events*, and another between `content_block_start` and the first delta. So a healthy,
+  actively-producing stream demonstrably emits pings mid-reply.
+- **The stream's shape is explicitly not frozen.** The versioning policy reserves the
+  right to add event types and instructs clients to tolerate unknown ones, so even a
+  cadence measured today is an implementation detail rather than a contract.
+- **The failure mode was live, not theoretical.** Community reports against the Anthropic
+  TypeScript SDK (anthropics/anthropic-sdk-typescript#998, and the Claude Code hang it
+  cites) describe pings as a roughly fifteen-to-thirty-second liveness signal, and
+  separately describe high-effort Opus replies going quiet for sixty to a hundred and
+  twenty seconds between deltas during a thinking pass. Those two figures together put a
+  perfectly healthy reply at somewhere between two and eight consecutive quiet beats —
+  the low end of which is exactly MAX-152's threshold. **A slow reply rendering as
+  stalled was not a remote possibility; it was the expected case.**
+
+### What could not be established, and it is the important half
+
+**Nothing about the real cadence.** It is not documented, the numbers above are
+third-party observations with no Anthropic confirmation, and the SDK issue that reports
+them proposes that the server should start advertising its own next-ping interval —
+which is an admission by its author that the interval varies and cannot be assumed. CI
+opens no sockets, so nothing in this repo can measure it either. **Any constant chosen
+here is a guess, and choosing a larger one would only have moved the guess.**
+
+### How the design tolerates being wrong
+
+The rule no longer asks how many beats mean a stall in general. It asks how many beats
+mean a stall *on this stream*, and lets the stream answer.
+
+- **Every quiet run that ends in a token is evidence.** It proves this connection goes
+  that quiet while healthy. `longestHealthyQuietRun` records the largest such run, and
+  the bar (`heartbeatsRequiredForStall`) sits a margin above it. A chatty-ping stream
+  teaches the machine to expect chatty pings.
+- **Beats before the first token calibrate it too**, which is the case that matters most.
+  A long thinking pass is precisely when the cadence is measurable and precisely what the
+  old rule would have mistaken for a stall; now the token that ends the pause records the
+  whole run as normal.
+- **Calibration is a `max`, so it only ever raises the bar.** No stream can make the
+  machine more trigger-happy than the floor.
+- **It cannot be talked out of firing.** `longestHealthyQuietRun` moves only on
+  `.textArrived`, so once text genuinely stops the bar is frozen while the quiet run
+  grows without limit. Every dead stream crosses it. That termination property is tested
+  across every calibration level rather than asserted.
+- **Being wrong stays cheap in the direction it can still be wrong.** The floor is the
+  one remaining guess. Too high only delays an advisory line. Too low shows that line
+  early on a working reply — and the rung is withdrawn by the very next token, its copy
+  ("Still connected — nothing new for a moment.") says the connection is fine rather than
+  that anything broke, and surviving one stall raises the bar so the same reply is not
+  accused twice. A wrong floor produces a true sentence slightly early, not a healthy
+  reply presenting as a dead one.
+
+**Which side of MAX-152's line this falls on.** MAX-152 rejected deciding a stall *by*
+elapsed time, and that still stands: there is no clock, no `Task.sleep`, no injected date,
+and the machine remains a pure fold over stream events that CI runs in microseconds. This
+change only *refuses to declare* a stall until the stream has produced more silence than
+it has ever produced while working. Counting rule, not timing rule.
+
+### The MAX-152 tests that were deliberately changed
+
+None were weakened; four stopped pinning a number this ticket deliberately moved.
+`testASingleQuietBeatMidReplyIsStillStreaming` asserted the constant equals two and now
+asserts it exceeds one — the property that actually makes the case meaningful.
+`testAStalledReplyGoesBackToStreamingWhenTextResumes`,
+`testWaitingStreamingAndStalledAreThreeDistinctStates` and
+`testAStalledReplyCanStillCompleteNormally` each built a stall by writing two heartbeats
+literally; they now read the bar from the type, and the first and third gained an explicit
+assertion that the premise holds (that the reply really is stalled before the thing under
+test happens), which the old versions never checked.
+
+**The recovery bug the ticket asked about does not exist.** `.textArrived` guards on
+`phase.isLive`, `.stalled` is live, so text after a stall already returned the reply to
+`.streaming`, and MAX-152 had a test for it. Verified rather than assumed; the coverage is
+now extended to a stall that resumes, keeps streaming and then completes.
+
+### Reported, not done — a pinging-but-dead stream never terminates
+
+MAX-152 stated its cost as "a connection that hangs and sends no pings stays `.streaming`
+until the client's own idle timeout turns it into `.failed(.interrupted)`". **The mirror
+image is worse and was unstated.** `AnthropicStreamingChatClient.idleTimeout` is a
+`URLRequest.timeoutInterval` on a streaming response — a *byte-level* inactivity timer
+that resets whenever data arrives. A ping is data. So a connection that has died on the
+model's side while its keep-alives continue **never trips that timeout at all**: the
+request is held open indefinitely by the very frames that prove nothing is being said.
+
+For that stream `.stalled` is the only signal the app has, and it is not a terminal
+state — the reply stays live, the composer stays blocked, and nothing ever resolves. That
+is why the bar above must stay finite, and it is why the honest fix is a turn-level budget
+in the app layer (a cap on total quiet beats, or on wall time, that produces a real
+terminal failure) rather than anything else this ticket could do in the core. **Outside
+MAX-170's scope and outside `MaximizeCore` — reported here for its own ticket.**
+
+**`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
+The change is pure core logic, so CI proves the rule end to end; what CI cannot prove is
+the live cadence the floor is calibrated against. See the PR's "Needs device verification".
 ## MAX-173 — a rubric fix can reach a stored plan
 
 **The gap, and why it was invisible.** `PlanAuthoringSession` reached
