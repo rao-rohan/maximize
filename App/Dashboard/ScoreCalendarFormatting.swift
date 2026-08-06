@@ -182,9 +182,8 @@ enum ScoreCalendarFormatting {
         case .hard: return "hard session"
         case .other: return "session"
         case .rest: return "rest day" // unreachable — `PlanDay.canBeMissed` excludes it.
-        // Unreachable until a template can prescribe one (MAX-111). Reads correctly in
-        // every sentence this feeds: "missed lift", "lift scheduled, not yet due",
-        // "As planned: lift."
+        // Reachable as of MAX-135, on a day whose lift slot is prescribed: "missed lift",
+        // "lift scheduled, not yet due", "rest — converted from a missed lift".
         case .lift: return "lift"
         }
     }
@@ -198,10 +197,14 @@ enum ScoreCalendarFormatting {
         case .long: return "long"
         case .hard: return "hard"
         case .other: return "something else"
-        // Unreachable: no stored `Score` carries `.lift`, so `planClause`'s "…; ran
-        // \(classificationLabel(performed))." cannot be built from one yet. The verb in
-        // that sentence stops being right the day it can be, and rewording it needs the
-        // mixed-day cell it belongs to — MAX-117, with MAX-104's copy pass behind it.
+        // Still unreachable, and MAX-135 narrowed the path rather than opening it. It
+        // takes a `.divergent` agreement whose performance is a lift, and `agreement` now
+        // compares a scored workout against **its own slot's** ask: a lift is compared
+        // with the lift ask, which `ScheduledSessionKind.liftPrescribable` allows to be
+        // only `.lift` or `.rest` — so a scored lift is either `.asPrescribed` or, on a
+        // rested slot, `.unprescribed`, and never "planned X; ran a lift". The verb here
+        // would still be wrong if that ever changed; rewording it belongs with MAX-104's
+        // copy pass over the lifting surfaces.
         case .lift: return "a lift"
         }
     }

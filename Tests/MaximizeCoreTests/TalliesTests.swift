@@ -676,6 +676,15 @@ final class TalliesTests: XCTestCase {
             case .scored(let band, _):
                 expectedEligible += 1
                 if band == .effective { expectedEffective += 1 }
+            case .partiallyMet:
+                // MAX-135. Unreachable under this run-only fixture, and mapped rather
+                // than lumped in with the neutral states because the state's own
+                // definition fixes the arithmetic: it takes one met obligation and one
+                // unmet one, so the day it describes contributes exactly two decided
+                // chances of which one was taken. If the cell and the tile ever disagree
+                // about that, this is where it shows.
+                expectedEligible += 2
+                expectedEffective += 1
             case .awaitingScore, .noVerdict, .convertedRest, .scheduledRest, .forthcoming, .unplanned:
                 // `.noVerdict` (MAX-126) joins `.awaitingScore` here for the reason it is
                 // a separate state everywhere else and the same one here: a day with no
@@ -716,6 +725,12 @@ final class TalliesTests: XCTestCase {
                         return streak // breaks — matches `TalliesCalculator`'s own rule
                     }
                 case .missed:
+                    return streak // breaks
+                case .partiallyMet:
+                    // §6.3's all-of: a day that dropped one of its two asks did not do
+                    // everything the plan asked, so it breaks the streak exactly as a
+                    // whole miss does — which is the rule `DayObligations
+                    // .streakContribution` applies and this reconstruction must mirror.
                     return streak // breaks
                 case .awaitingScore, .noVerdict, .convertedRest, .scheduledRest, .forthcoming, .unplanned:
                     // `.noVerdict` is neutral for the same reason `.awaitingScore` is: the
