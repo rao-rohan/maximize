@@ -66,6 +66,35 @@ final class FailureCopyTests: XCTestCase {
         return entries
     }
 
+    /// Every string `FirstRunCopy` can produce (MAX-162).
+    ///
+    /// Deliberately **not** folded into `allCopy`: the whole-set properties above are
+    /// about failure sentences, and a first-run card is headings and button titles as well
+    /// as sentences — "No plan yet" and "Continue" are correct copy and would fail
+    /// `testEverySentenceIsRealCopy`'s full stop. What the two sets do share is the one
+    /// rule neither may break, and `testNoHealthCopyClaimsAccessWasGrantedOrRefused` runs
+    /// over both.
+    private var allFirstRunCopy: [Entry] {
+        var entries: [Entry] = []
+        for state in FirstRunCardState.allCases {
+            let copy = FirstRunCopy.card(state)
+            entries.append(Entry(label: "card(.\(state.rawValue)).heading", text: copy.heading))
+            entries.append(Entry(label: "card(.\(state.rawValue)).body", text: copy.body))
+            if let detail = copy.detail {
+                entries.append(Entry(label: "card(.\(state.rawValue)).detail", text: detail))
+            }
+            if let actionLabel = copy.actionLabel {
+                entries.append(Entry(label: "card(.\(state.rawValue)).action", text: actionLabel))
+            }
+        }
+        let cover = FirstRunCopy.cover
+        entries.append(Entry(label: "cover.title", text: cover.title))
+        entries.append(Entry(label: "cover.health", text: cover.health))
+        entries.append(Entry(label: "cover.privacy", text: cover.privacy))
+        entries.append(Entry(label: "cover.continueLabel", text: cover.continueLabel))
+        return entries
+    }
+
     /// The enums are the inventory. If a case is added and this count is not updated,
     /// the author has been made to look at whether the new case needs its own sentence —
     /// which is the whole point of enumerating them.
@@ -74,7 +103,15 @@ final class FailureCopyTests: XCTestCase {
         XCTAssertEqual(StoredAPIKeyPresence.allCases.count, 3)
         XCTAssertEqual(APIKeyStatusMessage.allCases.count, 6)
         XCTAssertEqual(HealthAccessState.allCases.count, 4)
+        // 28, not 27: MAX-167 added the API key section's purpose footer.
         XCTAssertEqual(allCopy.count, 28)
+
+        // MAX-162's inventory, counted for the same reason: six card states, each with a
+        // heading and a sentence, one second paragraph, four buttons, and the cover's
+        // four strings.
+        XCTAssertEqual(FirstRunCardState.allCases.count, 6)
+        XCTAssertEqual(FirstRunStep.allCases.count, 3)
+        XCTAssertEqual(allFirstRunCopy.count, 21)
     }
 
     // MARK: - No case falls through to a generic fallback
@@ -181,17 +218,38 @@ final class FailureCopyTests: XCTestCase {
     /// Tracker R10: `HKHealthStore.authorizationStatus(for:)` reports share status only.
     /// The app cannot establish that Health *read* access was granted or refused, so no
     /// state may be worded as though it had.
+    ///
+    /// **Extended by MAX-162 over `FirstRunCopy` rather than copied into a second test**
+    /// (FIRST-RUN-SPEC §9.3). First run is where this rule is under the most pressure —
+    /// the athlete has just answered a permission sheet and a setup card is the natural
+    /// place to tick it off — and it is also the least-exercised surface in the app, so a
+    /// wrong word there would survive a long time. Two tests asserting one rule drift, and
+    /// the one that drifts is the one nobody remembers to update; this is the one.
     func testNoHealthCopyClaimsAccessWasGrantedOrRefused() {
         let claims = [
             "connected", "granted access", "access granted", "denied", "refused",
             "not connected", "you have granted", "permission granted",
+            // MAX-162: each of these is a phrase a well-meaning first-run edit reaches
+            // for. The last is the sharpest, because FIRST-RUN-SPEC's own §5.2 draft
+            // reached for it — "Runs are being captured" asserts that capture is
+            // happening, which is exactly what iOS never tells this app. The shipped
+            // wording says workouts are stored *as they arrive*, which is true whatever
+            // iOS decided.
+            "you're all set", "you are all set", "health is on", "reading your workouts",
+            "being captured",
         ]
-        for state in HealthAccessState.allCases {
-            let lowered = FailureCopy.healthAccess(state).lowercased()
+
+        var entries = HealthAccessState.allCases.map {
+            Entry(label: "healthAccess(\($0))", text: FailureCopy.healthAccess($0))
+        }
+        entries += allFirstRunCopy
+
+        for entry in entries {
+            let lowered = entry.text.lowercased()
             for claim in claims {
                 XCTAssertFalse(
                     lowered.contains(claim),
-                    "healthAccess(\(state)) claims read access it cannot verify: \"\(claim)\""
+                    "\(entry.label) claims read access it cannot verify: \"\(claim)\""
                 )
             }
         }
