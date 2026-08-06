@@ -146,12 +146,46 @@ public enum StandardPlanSeed {
     /// unfixed bands stay scored that way (D8) — that is §11.4's escalation, tracked as
     /// MAX-143 and explicitly not this ticket's to resolve.
     ///
-    /// **Nothing routes a workout to these bands yet.** `RubricEvaluator` still reads
-    /// `planDay.scheduledSession` — the **run** slot — for every workout, regardless of
-    /// the workout's own discipline; matching a workout to the ask of its own
-    /// discipline is MAX-133, not yet landed. So a lift stays unscored under MAX-111's
-    /// ingestion gate until MAX-133 lands, exactly as before this change. That is
-    /// expected, not a bug in this ticket.
+    /// **Nothing routed a workout to these bands at the time this was written.**
+    /// `RubricEvaluator` still read `planDay.scheduledSession` — the **run** slot — for
+    /// every workout, regardless of the workout's own discipline; matching a workout to
+    /// the ask of its own discipline was MAX-133, landed afterward. So a lift stayed
+    /// unscored under MAX-111's ingestion gate until MAX-133 landed, exactly as before
+    /// this change. That was expected, not a bug in this ticket.
+    ///
+    /// ## `rest.ranAnyway`, and the shadow one band down (MAX-146)
+    ///
+    /// MAX-133's per-discipline routing closed `easy.wellOverCap` from the other side —
+    /// a lift is now shown only the day's *lift* ask — and in doing so exposed the next
+    /// one down. `PlanDay.scheduledSession(for:)` answers `.rest` for a discipline the
+    /// day prescribes nothing for, which is the plan's own honest answer, not a gap. But
+    /// no plan on disk, and no seeded weekday (`weeklySessions()` above), prescribes a
+    /// lift, so a real lift resolves to `.rest` as a matter of course — and used to land
+    /// on `rest.ranAnyway`, which carried no condition at all and read **"Ran on a
+    /// scheduled rest day"** for a session that was not a run. Same shape of shadow as
+    /// A21: a band whose only reach is the *scheduled* side, unconditional, matching any
+    /// discipline that got routed to it.
+    ///
+    /// `.actualDiscipline(oneOf: [.run])` is the fix, for the same reason it was the fix
+    /// for `easy.wellOverCap`: the band already meant "ran on a day that asked for
+    /// rest", the condition is what makes that its actual meaning instead of an
+    /// accident of unconditional placement. The alternative — a new band naming the
+    /// lift-on-an-unprescribed-day case — was considered and rejected: it would need its
+    /// own score range, and choosing one is a product opinion about how much an
+    /// unscheduled lift should count for, which is not this ticket's to make. What this
+    /// band's own condition change leaves behind for a lift is `fallback.recorded`, the
+    /// seed's last row (see its own note below) — unconditional, honest
+    /// ("Recorded, but the plan has no specific rule for this session"), and already the
+    /// seed's designed answer for exactly this shape of gap, not a `noBandMatched`
+    /// refusal. See `LiftRubricVocabularyTests` for the pinned regression and the
+    /// fixture proving the fallback lands.
+    ///
+    /// **This seed change cannot reach a stored plan, and does not try to,** for the
+    /// identical D1 reason the paragraph above states: it is the first version a plan
+    /// starts from, never a rewrite of one already saved. Lifts already recorded with
+    /// `rest.ranAnyway`'s rationale — which, per MAX-111's gate, is none yet, since a
+    /// lift is not scored at all until that gate opens — stay however they were scored
+    /// (D8). What to do about any that exist is MAX-143's, not this ticket's.
     public static func rubricBands() throws -> [RubricBand] {
         [
             try RubricBand(
@@ -347,9 +381,21 @@ public enum StandardPlanSeed {
                 scoreRange: ScoreRange(lowest: 70, highest: 95),
                 rationale: "Lifted as scheduled; the plan named no target length."
             ),
+            // MAX-146: this band used to carry no condition at all, so it matched any
+            // discipline whose own slot resolved to `.rest` — which every unprescribed
+            // lift does, since no seeded weekday and no plan on disk prescribes one. A
+            // lift then landed here permanently, labelled "Ran on a scheduled rest day"
+            // for a session that was not a run. `.actualDiscipline(oneOf: [.run])`
+            // closes it the same way MAX-132 closed `easy.wellOverCap`: the band now
+            // says what it always meant — a run on a day that asked for rest — and an
+            // unprescribed lift falls through to `fallback.recorded` instead, which is
+            // already the seed's honest answer for a session it has no specific rule
+            // for. See the type note above for the full account and why a dedicated
+            // lift band was considered and rejected.
             try RubricBand(
                 identifier: "rest.ranAnyway",
                 appliesTo: [.rest],
+                conditions: [.actualDiscipline(oneOf: [.run])],
                 scoreRange: ScoreRange(lowest: 50, highest: 75),
                 rationale: "Ran on a scheduled rest day."
             ),
