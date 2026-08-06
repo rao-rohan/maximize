@@ -345,7 +345,8 @@ final class PlanAuthoringModel {
         proposal = nil
         await load()
         guard case .editing(var reloaded) = state else { return }
-        reloaded.confirmation = "Saved plan \(saved.version), effective from \(saved.effectiveFrom)."
+        reloaded.confirmation =
+            "Saved plan \(saved.version), effective from \(PlanFormatting.dayLabel(saved.effectiveFrom))."
         state = .editing(reloaded)
     }
 }

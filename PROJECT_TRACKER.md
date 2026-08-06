@@ -1,6 +1,6 @@
 # Maximize — Project Tracker
 
-**Last updated:** 2026-08-05
+**Last updated:** 2026-08-06
 **Status: every PRD ticket is merged.** FR-0 through FR-4 are built and CI-green; the
 capture-to-score loop is confirmed working on a real iPhone. What remains is device
 verification of the surfaces nobody has looked at yet, and the post-PRD backlog below.
@@ -555,8 +555,8 @@ feature was governed by a plan that could not exist).
 | MAX-150 | **Copy and absence voice: the chat and dashboard surfaces** — split from MAX-104 so the finished half does not wait behind the lifting build | MAX-104, split | Sonnet ✅ |
 | MAX-152 | **The chat's waiting and streaming states** — the full ladder between "sent" and "answered", and every stream failure as a designed state with words | Owner | **Opus** |
 | MAX-154 | **Error handling, audited app-wide** — every failure path outside chat swept as a set, the failure-to-copy mapping moved into the core, and the inventory recorded below | Owner | **Opus** |
-| MAX-155 | **An HTTP status code reaches the athlete's screen** — `PlanDraftingFailure.description` interpolates `PlanProposalModelError.description` in `ChatModel.noteDraftingFailure`, so "…returned an unexpected status (400)." renders on the plan proposal card. **MAX-152 has landed and did not fix this** — its `ChatFailureNotice` covers `ChatStreamError`, and the drafting path is a separate error type. Route it through `ChatFailureNotice`'s no-default, no-numerals, nothing-interpolated discipline | MAX-154 | Sonnet |
-| MAX-156 | **`ScoringError.description` interpolates a workout identifier and a date** — latent, not leaking today, and one `.public` log line away from being a real one | MAX-154 | Sonnet |
+| MAX-155 | **An HTTP status code reaches the athlete's screen** — `PlanDraftingFailure.description` interpolates `PlanProposalModelError.description` in `ChatModel.noteDraftingFailure`, so "…returned an unexpected status (400)." renders on the plan proposal card. Fixed with a sibling to `ChatFailureNotice` (`PlanDraftingNotice`) rather than a case added to it — see write-up below | MAX-154 | Sonnet ✅ |
+| MAX-156 | **`ScoringError.description` interpolates a workout identifier and a date** — latent, not leaking today, and one `.public` log line away from being a real one. Fixed: the two payloads are gone from `description`; the enum's own associated values are the deliberate channel a caller reaches for instead — see write-up below | MAX-154 | Sonnet ✅ |
 | MAX-153 | **The chat shell** — composer, thread list, sheet chrome. The design pass the chat's *shell* never had | Owner | **Opus** |
 | MAX-157 | **The fact sheet tells Claude "days" over a count of obligations** — `TrainingFactSheet`'s "Effective days" line is the same MAX-134 caption bug one layer into the prompt, not just on screen | MAX-140 | Sonnet ✅ |
 
@@ -1070,7 +1070,7 @@ twelve and is dispatchable immediately.
 | MAX-101 | Conversational plan authoring; proposal card; handoff | 098, 100 | **Opus** ✅ |
 | MAX-102 | **The read-only plan screen with version history** | — | Sonnet ✅ |
 | MAX-103 | "Runs in this conversation" strip | 098 | Sonnet ✅ |
-| MAX-104 | Copy and absence voice, **app-wide** — absorbs MAX-086's other half | 098, 102 | Sonnet |
+| MAX-104 | Copy and absence voice, **app-wide** — absorbs MAX-086's other half | 098, 102 | Sonnet ✅ |
 | MAX-150 | **Split from MAX-104**: the chat and dashboard half, taken now because those two surfaces are finished and drifting while lifting is still being built | 098, 102, 103 | Sonnet ✅ |
 
 Three collisions the spec calls out and the overseer must respect: **094 lands before 095**
@@ -1772,6 +1772,7 @@ is the overseer's, not a ticket's — flagged here rather than done.
 | MAX-147 | The scorer's task text learns discipline (source: MAX-133) | 133, 136 | Sonnet ✅ |
 | MAX-148 | A lift's duration and note become editable, proposable, and type-safe | 137, 141 | Sonnet ✅ |
 | MAX-149 | Duration floor for fragments — **the classifier half of gap P3**; not yet wired to any author | 013, 131 | Sonnet ✅ |
+| MAX-151 | **Author the duration floor** — `StandardPlanSeed` states one, the authoring screen edits it, `PlanProposal` can propose it. Without this MAX-149 never fires. (Depended on 146 only for file ownership of `StandardPlanSeed`, which is now released) | 149, 148 | Sonnet |
 | MAX-151 | **Author the duration floor** — `StandardPlanSeed` states one, the authoring screen edits it, `PlanProposal` can propose it. Without this MAX-149 never fires — **closes gap P3 for real** | 149, 146, 148 | Sonnet ✅ |
 | MAX-153 | **The chat shell: composer, thread list, sheet chrome** — the design pass MAX-092–103 never had over the shell its features sit in | Owner, 092–103 | **Opus** |
 
@@ -2331,7 +2332,9 @@ rather than building it, because its brief forbade a behaviour change.
   `PlanDraft`, and `PlanDraft`/`PlanAuthoring.swift` are owned by MAX-148, in flight in
   parallel — out of this ticket's scope to touch. So a plan revision saved through the
   authoring screen today always produces `minimumSessionDurationSeconds == nil`, same as
-  `StandardPlanSeed` (MAX-146, also out of scope here) never setting one. The domain type
+  `StandardPlanSeed` (owned by MAX-146 at the time, and out of scope here) never setting
+  one — **authoring the floor is MAX-151, not MAX-146**, which was the `rest.ranAnyway`
+  shadow and is now merged. The domain type
   and the classifier are ready; nothing in this build can author a floor yet. That is
   follow-on ticket work, the same shape MAX-131 left `durationSeconds` in before MAX-137
   gave it an editor.
@@ -3284,6 +3287,130 @@ so every path this ticket touches is device-verified only. The PR lists how to p
 
 ---
 
+## MAX-155/156 — error descriptions stop leaking codes and identifiers
+
+Both filed by MAX-154's audit (§5, "found, reported, not taken"), both fixed the same
+shift: a `description` that used to double as screen or log text now stays a debugger
+diagnostic on the type that already had one, and a new, narrower channel carries the
+words that are actually safe to show or store. **Corrected from the tracker rows that
+filed them:** MAX-155's row names `PlanProposalDrafting.description` interpolating a
+`ScoringModelError` — that description lives on `PlanDraftingFailure`
+(`Plan/PlanProposalDrafting.swift`), and the interpolated type is `PlanProposalModelError`,
+not `ScoringModelError`. Trusted the code over the row, per the ticket's own instruction.
+
+### MAX-155 — the plan proposal card
+
+**Decision: a sibling to `ChatFailureNotice`, not a case added to it.**
+`ChatFailureNotice` maps exactly one input type (`ChatStreamError`) and its own doc
+comment states that as the reason its exhaustiveness claim is meaningful.
+`PlanDraftingFailure` wraps two types `ChatStreamError` knows nothing about
+(`PlanProposalModelError` for a transport failure, `PlanProposalError` for a rejected
+proposal), so folding it in would mean either widening `ChatFailureNotice`'s signature
+to a third, unrelated error type, or bolting a second entry point onto a type whose
+whole design is "one mapping, one input." `PlanDraftingNotice`
+(`Sources/MaximizeCore/Plan/PlanDraftingNotice.swift`) is the sibling instead, same
+shape, same rules, its own exhaustive `switch` with no `default`.
+
+**A 400 from the drafting endpoint and a 400 from the stream get the same words, by
+different code.** Both `unexpectedStatus` cases mean the same thing to an athlete —
+"this app built a request Anthropic rejected, and asking again will not help" — so the
+sentences read alike on purpose. But `ChatStreamError.unexpectedStatus` and
+`PlanProposalModelError.unexpectedStatus` are different types, so the sentence is
+written twice, once per `switch`, the same way each type already writes its own
+`.noAPIKeyStored` sentence rather than sharing a helper across two enums that happen to
+share a case name.
+
+**`PlanDraftingFailure.description` is unchanged**, payload and all — it still
+interpolates `PlanProposalModelError.description`, status codes included. That is
+deliberate, not an oversight: `ChatStreamError.description` was already accepted as a
+developer diagnostic before MAX-152, on the reasoning `FailureCopy` states explicitly
+("`ScoringModelError.description` and friends stay as they are ... written for a
+developer reading a debugger"). Rewriting `PlanDraftingFailure.description` in place
+would only be right if nothing else read it; something did —
+`ChatModel.noteDraftingFailure` — and that is the one line this ticket changed, to read
+`PlanDraftingNotice.notice(for:).message` instead. The doc comment that used to claim
+`description` was screen-safe (the actual bug — see MAX-154's finding) is corrected to
+say the opposite and point at the new type.
+
+**`.rejected(PlanProposalError)` is the deliberate, documented exception** to "nothing
+here is interpolated": `PlanProposalError.description` is correction text, not a wire
+diagnostic — the same string `PlanProposalInstruction(retryingAfter:)` already puts in
+front of the model, and MAX-101's own documentation calls it "the one the athlete should
+read verbatim." It is carried into `PlanDraftingNotice` unchanged. Rewriting it would be
+a second opinion about a file this ticket does not own (`Plan/PlanProposal.swift`,
+MAX-151) — flagged, not touched, per this ticket's scope discipline.
+
+**Retry: no new flag.** `ChatFailureNotice.offersRetry` gates `ChatModel.canRetry`, but
+nothing gates "Draft a plan from this conversation" on the failure kind — the same
+button that failed is the only affordance for every case, and tapping it is what asks
+again. That already satisfies MAX-152's rule (a button, never an automatic policy)
+without a property, so `PlanDraftingNotice` does not add one; adding a flag nothing
+reads would be a second, unenforced decision.
+
+**Tests:** `Tests/MaximizeCoreTests/PlanDraftingNoticeTests.swift`, exhaustive over
+`PlanProposalModelError` — every case a distinct, non-empty sentence, no digit anywhere
+(the exact MAX-155 regression, checked by name for 400 and every other status this
+client can receive), no wire vocabulary, no case name. Plus
+`ChatPlanDraftingTests.testAnUnexpectedStatusNeverReachesTheTranscriptAsANumber`, driving
+the failure through `ChatModel.draftPlan()` end to end. One existing assertion was
+updated rather than left to rot:
+`ChatPlanDraftingTests.testEveryFailureGetsASentenceInTheTranscript`'s `.requestFailed`
+fragment moved from "connectivity" (a wire word that reached the screen by the bug this
+ticket fixes) to "connection" (what the transcript now actually says) — documented in
+place, not silently changed. `PlanProposalDraftingTests`' two assertions against
+`.description` directly (`testTwoUnusableRepliesStopRatherThanLooping`,
+`testTheNoKeySentencePointsAtTheFix`) were left untouched, because `.description`'s
+behaviour for those two cases is unchanged.
+
+### MAX-156 — `ScoringError.description`
+
+**Decision: delete the payload from the two affected sentences; no new property.**
+`noPlanInEffect(day:)` and `contextAlreadyScored(workoutID:)` no longer interpolate
+their associated values into `description` — full stop, not "unless the caller is
+`.private`". CLAUDE.md's health-and-privacy rule has no "the current caller happens to
+be careful" clause, and a `description` is a plain `String`: nothing stops a future
+`.public` log call, a screen, or a crash reporter from reading it, so the fix had to
+make the leak structurally impossible rather than rely on today's one call site staying
+careful.
+
+**No second "diagnostic" channel was added, because one already exists.** The ticket
+brief allows for "a separate non-`description` channel that callers must reach for
+deliberately" if a diagnostic genuinely needs the value. It does not: the day and the
+workout ID are still sitting on the case as ordinary associated values, and a caller
+that wants one switches on `.noPlanInEffect(let day)` or
+`.contextAlreadyScored(let workoutID)` directly — already deliberate, already typed,
+and adding a mirrored property would only duplicate a channel the enum already provides
+for free.
+
+**The other five cases were left alone.** `noBandMatched` interpolates a
+`ScheduledSessionKind` and `WorkoutClassification` raw value ("easy", "hard") — plan
+vocabulary, not an identifier or a date — and the model-fault cases
+(`malformedResponse`, `scoreOutOfPermittedRange`, `scoreOutsideBand`,
+`rationaleRejected`) interpolate a score, a range, or a caller-supplied reason string,
+none of which name a specific workout. MAX-156's brief is the identifier and the date
+specifically; widening the diagnostic-copy rewrite to every case was not asked for and
+was not done.
+
+**Tests:** `Tests/MaximizeCoreTests/ScoringErrorPrivacyTests.swift`, one instance of
+every `ScoringError` case built with a distinctive UUID and `CalendarDay`, asserting
+`description` contains neither the identifier's `uuidString` nor the date's ISO string
+(nor its bare year) for any of the seven cases — not just the two that used to leak. A
+companion test confirms the two affected sentences still say something a debugger reader
+can act on, and another confirms the day and workout ID are still reachable by matching
+the specific case, which is the "separate channel" this decision relies on.
+
+### What CI can and cannot prove, for both
+
+CI proves: every notice/description exists, is non-empty, is distinct from its
+siblings, and — mechanically, by regex over the rendered strings — carries no digit and
+none of the banned wire/enum tokens. It cannot prove the two athlete-facing surfaces
+(the plan proposal card, and anything that ever renders a `ScoringError` — nothing does
+today) look right, or that provoking a real 400 from `AnthropicPlanProposalClient`
+against a live server produces exactly the case this ticket assumes. See the PR's
+**Needs device verification**.
+
+---
+
 ## MAX-157 — the fact sheet counts sessions, not days
 
 **Source: MAX-140's report.** MAX-140 fixed `TrendTileData`'s on-screen "effective days"
@@ -3374,6 +3501,200 @@ transcript, and CI already asserts the string it contains.
 comments, both call sites still take the same two `Int`s they took before, and the touched
 test file's assertions were re-read line by line against the new strings. That is "reads
 correctly and should compile," not "compiles" — stated at that strength deliberately.
+
+---
+
+## MAX-104 — copy and absence voice: the plan and workout screens
+
+**MAX-150's accurate remainder.** MAX-150 took the chat and dashboard half of the
+app-wide copy pass early and left `App/Plan/*` and `App/Workouts/*` in full for this
+ticket, plus one already-checked item (`ChatEntryPoint`'s workout-subject strings — see
+MAX-150's own note). By the time this ticket ran, the lifting build (128–150) had landed
+across both directories, so the brief was not just "match MAX-150's voice" but "check
+what the lifting build left wrong" — MAX-139 and MAX-134/140/157 each reported or implied
+a specific defect in a file they were not allowed to touch.
+
+**The voice is MAX-150's, unchanged, not re-derived:** say what's true, in one plain
+sentence, using the noun the underlying data actually counts; absence gets a real
+sentence naming what's missing and why; two different facts stay two different sentences;
+never restate a fact the surface already stated a few lines away.
+
+### Inventory
+
+Every string in `App/Plan/*` and `App/Workouts/*` was traced to its source and
+classified. Most of both directories was already correct: `SummaryTilesView`,
+`WorkoutChatSectionView`, `MuscleGroupEntryView`, `CadenceBandView`, `SplitsView`,
+`WorkoutRow`, `DayWorkoutsView`, `WorkoutsListModel`, `PlanView`, `PlanDetailSections`,
+`PlanVersionDetailView`, `PlanViewModel` read every string off a core type MAX-095–150
+already got right, and `CadenceBandView`/`SplitsView`/`RouteMapView`'s own "no plan
+governs this day" / "no splits" / "no route" sentences are true exactly because those
+three sections are gated off a lift's screen entirely
+(`SummaryTileData.showsRunOnlySections`, MAX-139) — a run-only view speaking in run
+vocabulary is not a bug. Four things were not fine:
+
+1. **`App/Workouts/WorkoutDetailView.swift`'s failure literal — already fixed.** MAX-154
+   reported this as the one un-adopted `LoadFailureSurface.workoutDetail` call site, but
+   MAX-139 landed touching this exact file in between and adopted it
+   (`Text(FailureCopy.couldNotLoad(.workoutDetail))` is already the `.failed` case's
+   body). Checked, confirmed, no action — recorded here so the next reader does not
+   re-open it.
+2. **`HRCurveView`'s cap-absence sentence conflated two different facts (MAX-139's
+   report).** "No plan governs this day, so there's no cap to compare against." was
+   shown whenever `capBPM` was nil — for a run with no governing plan, correctly, and
+   for **every lift**, incorrectly: `Plan.heartRateCapBPM` is the easy-run ceiling and is
+   withheld from a lift's curve regardless of whether a plan governs the day
+   (`WorkoutDetailModel.heartRateChart`). A lift on a plan-governed day was told a false
+   thing about its own plan. Fixed — see below.
+3. **Two spots had drifted onto `CalendarDay.description`'s bare `YYYY-MM-DD` wire
+   format** instead of the plan screens' own "Aug 5, 2026" (`PlanFormatting.dayLabel`,
+   established at MAX-102): `PlanAuthoringView`'s governed-day preview row
+   (`planDay.date.description`) and `PlanAuthoringModel`'s save confirmation
+   (`"…effective from \(saved.effectiveFrom)."`). Neither is new to the lifting build —
+   both predate it — but both are exactly CLAUDE.md's "one consistent voice," broken on
+   the one screen whose whole job is showing dates.
+4. **The same wire-format leak was inside a core-declared error message.**
+   `PlanAuthoringError.effectiveFromTooEarly`'s `description` interpolated
+   `\(earliest)` directly — a `CalendarDay`, which is `.description`'s bare wire
+   format — so the athlete-facing validation message read "…take effect is
+   2026-06-02." on the one screen everything else calls "Jun 2, 2026." A core file's
+   own string had the same bug the App layer did.
+
+**Two more, not wrong, but not where MAX-150's own rule says they belong:**
+
+5. **`RouteMapView`'s and `SplitsView`'s `.unavailable` sentences were view literals
+   selected by a case of a core-declared enum** (`RouteMapData`, `SplitsListData`) —
+   exactly the shape MAX-150 wrote down as its rule for what moves to the core ("a
+   string whose selection is driven by a case of a core-declared type belongs beside
+   that type"). Neither sentence was factually wrong; both were in the wrong layer for
+   CI to pin them against a future edit to either enum.
+
+### What changed
+
+**HR curve (`Sources/MaximizeCore/Metrics/HeartRateChartData.swift`).** Added
+`discipline: Discipline` to the initializer (no default — every call site says
+explicitly which discipline this is, `SummaryTileData`'s own convention) and a computed
+`capAbsenceReason: CapAbsenceReason?` (`.notApplicableToDiscipline` / `.noPlanForDay`),
+resolved from `discipline` and `capBPM` so the two can never disagree — a cap present
+and a reason for its absence is not a state the type can represent. `HRCurveView` now
+reads the computed `capAbsenceExplanation: String?` instead of hand-testing `capBPM ==
+nil` and printing one hard-coded sentence. `WorkoutDetailModel`'s one call site passes
+`discipline:`, which it already had in scope. Four new tests in
+`HeartRateChartDataTests.swift` pin both sentences, that they differ, and that a present
+cap yields neither.
+
+**Plan-screen dates.** Moved the "Aug 5, 2026" formatter itself from
+`App/Plan/PlanFormatting.swift` down to `PlanCopy.day(_:)` (core) — GMT-pinned,
+unchanged algorithm — so a core-declared error and every plan view read a date the same
+way. `PlanFormatting.dayLabel` now calls straight through, matching every other function
+in that file. `PlanAuthoringError.effectiveFromTooEarly` and the two drifted call sites
+(`PlanAuthoringView`'s preview row, `PlanAuthoringModel`'s confirmation) now go through
+`PlanCopy.day(_:)` / `PlanFormatting.dayLabel(_:)`. While in the file, also moved
+`PlanAuthoringError`'s three weekday interpolations off `String(describing: weekday)
+.capitalized` (a second, reflection-based spelling of the same vocabulary
+`PlanCopy.weekday(_:)` already owns) onto `PlanCopy.weekday(_:)` directly — output
+unchanged, one fewer place the weekday's name could drift. `PlanCopyTests.swift` (new)
+pins `day(_:)` against a mid-month date, a year boundary, and the exact wire-format
+regression this ticket found. `PlanAuthoringTests.swift`'s
+`testBackDatingErrorNamesTheEarliestPermittedDay` — the one test that had pinned the old
+`2026-06-02` wire format as the *expected* value — updated to assert `"Jun 2, 2026"` and
+assert the wire format is now absent.
+
+**Route and splits absence text.** `RouteMapData.unavailableExplanation` and
+`SplitsListData.unavailableExplanation` (both core, both `public static let`) now own
+the sentences `RouteMapView` and `SplitsView` used to hard-code. Each has a test
+(`RouteMapDataTests`, `SplitsListDataTests`) pinning the exact string.
+
+### `session`/`day` sweep
+
+Checked every "day"/"days" occurrence in both directories against what it counts, per
+MAX-134/140/157's own concern. All of them are calendar-day references (a weekday-picker
+label, a plan's effective-from date, `WorkoutDisplayFormatting`'s "Rest day") rather than
+a *count* of something MAX-134 redefined the unit of — neither directory renders a
+tally-style figure (an "N days"/"N sessions" count) at all; those live on the dashboard,
+which is MAX-150's and MAX-157's. Nothing to relabel here.
+
+### Reviewed and left alone, on purpose
+
+- **`WorkoutDisplayFormatting.swift`'s switches on `ActivityType`/`WorkoutClassification`
+  /`ScheduledSession` (all core-declared types) stay in the App layer**, the same
+  exception MAX-150 recorded for `ScoreCalendarFormatting.swift`: it predates MAX-150's
+  own "belongs beside the core type" rule, every string in it is correct today, and
+  relocating a formatter this central (read by `WorkoutRow`, `VerdictHeaderView`, and
+  `PlanFormatting`'s own weekday-line rendering) is an architecture change, not a copy
+  fix. Flagged rather than silently left, per MAX-150's own precedent.
+- **`PlanAuthoringFormatting.describe(_ mode:)`/`.explain(_ mode:)`** switch on
+  `PlanAuthoringSession.Mode`, a core-declared type, and by MAX-150's rule belong beside
+  it — but MAX-101 already gave a reasoned, deliberate account for keeping them in the
+  App layer ("so this file stays the one place the authoring screen's own copy is
+  written"), the text is correct, and there are exactly two call sites, both already
+  reading through this one function (no duplication risk to close). Not moved; noted so
+  a future copy pass does not have to re-discover the tension between the two rules.
+- **`PlanAuthoringFormatting.explain(.firstPlan)`'s "runs are captured but not measured
+  against anything"** — checked against whether a first-plan's consequences read
+  correctly now that lifts exist. It still does: a lift is never scored regardless of
+  whether a plan exists (MAX-111), and the sentence is specifically about what a first
+  plan unlocks for scoring, which is unchanged. Not a finding.
+- **`VerdictHeaderView`'s `awaitingScoreSection`/`noVerdictSection` run-vocabulary
+  strings** ("Scoring runs automatically once the run is captured.", "The plan scores
+  runs, so there's no score for this workout.") — checked against `WorkoutVerdict.init`:
+  `.awaitingScore` is reachable only when `activityType.isRun`, and `.noVerdict` only for
+  a non-run, non-lift discipline still classified `.other` (a ride, a hike). Both
+  sentences are true of every workout that can reach them. Not a finding.
+- **`CadenceBandView`/`SplitsView`/`RouteMapView`'s own run-vocabulary absence
+  sentences** — all three sections are omitted from a lift's screen entirely
+  (`SummaryTileData.showsRunOnlySections`, MAX-139), so "no plan governs this day, so
+  there's no target band to compare against" and "no splits/route recorded for this
+  run" are never shown for anything but a run. Not a finding — this is the one place
+  "no plan governs this day" is still the correct, undifferentiated sentence, because
+  the discipline ambiguity `HRCurveView` had cannot arise here.
+
+### Tests
+
+`HeartRateChartDataTests.swift` (4 new), `PlanCopyTests.swift` (new file, 3 tests),
+`RouteMapDataTests.swift` (1 new), `SplitsListDataTests.swift` (1 new),
+`PlanAuthoringTests.swift` (1 updated to assert the corrected wording and the absence of
+the old wire format). Every new or changed string with a data dependency has a test
+asserting its exact value, following `FailureCopy`/`PlanCopy`'s own bar.
+
+### What CI can and cannot prove
+
+CI can prove: the package compiles, and the ten new/updated tests above pass, pinning
+both `HeartRateChartData` absence sentences (and that they differ), `PlanCopy.day(_:)`'s
+formatting including the year-boundary case, and the two moved absence sentences on
+`RouteMapData`/`SplitsListData`. CI cannot prove that `HRCurveView` actually renders the
+right sentence for a real lift on a real device, that `PlanAuthoringView`'s governed-day
+preview reads correctly against Dynamic Type, or anything about how either screen looks —
+see CLAUDE.md's own distinction.
+
+**Needs device verification:**
+- Open a lift's workout detail screen on a day a plan governs (any weekday with a lift
+  prescribed and rest on the run slot) and confirm the HR curve's note reads "This is a
+  lift, not a run, so there's no heart-rate cap to compare against." — not "No plan
+  governs this day."
+- Open a run's workout detail on a day no plan governs (before the plan's
+  `effectiveFrom`, if reachable, or by design a run with no stored plan) and confirm the
+  HR curve still reads "No plan governs this day, so there's no cap to compare against."
+- Open the plan-authoring screen (Plan tab → Author a revision), scroll to "The first
+  week this version governs," and confirm each row's date reads "Aug 5, 2026" style, not
+  "2026-08-05".
+- Save a plan revision and confirm the on-screen confirmation ("Saved plan v_N_,
+  effective from …") reads the same date style.
+- Trigger the back-dating rejection (attempt to set "Takes effect" earlier than
+  permitted, if the picker's own bound can be bypassed, or read the message on a device
+  where it fires) and confirm the earliest-permitted date reads "Aug 5, 2026" style.
+- An outdoor run with a `hasRoute` flag but no stored route, and an outdoor run with no
+  stored splits breakdown — confirm both still read exactly as before ("This run's route
+  could not be loaded.", "No splits recorded for this run."); this is a pure relocation,
+  not a wording change, and worth a device glance since neither test suite renders a
+  view.
+
+**`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1);
+CI is the actual compiler. Every change is a string relocation, a new computed property
+resolved from existing stored data, or a wording fix with no branch or control-flow
+change; every touched call site was re-read line by line against its new signature. That
+is "reads correctly and should compile, and ten tests are written to prove the strings
+once it does" — not "compiles," stated at that strength deliberately, per CLAUDE.md's own
+distinction between the two sentences.
 
 ---
 

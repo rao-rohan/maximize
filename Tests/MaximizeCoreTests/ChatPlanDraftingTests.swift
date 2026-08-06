@@ -317,10 +317,16 @@ final class ChatPlanDraftingTests: XCTestCase {
 
     /// §4.5 step 2 and the ticket's "failure is a state": every failure gets one honest
     /// sentence in the transcript, as a notice — never written to the thread.
+    ///
+    /// MAX-155: the fragments read `PlanDraftingNotice`'s words now, not
+    /// `PlanDraftingFailure.description`'s — `.requestFailed`'s fragment moved from
+    /// "connectivity" (a wire diagnostic that reached the screen by mistake) to
+    /// "connection" (what `PlanDraftingNotice` actually says); the other three sentences
+    /// were already screen-safe and are unchanged.
     func testEveryFailureGetsASentenceInTheTranscript() async throws {
         let cases: [(FakePlanProposalModelInvoking.Outcome, String)] = [
             (.failure(.noAPIKeyStored), "Settings"),
-            (.failure(.requestFailed), "connectivity"),
+            (.failure(.requestFailed), "connection"),
             (.failure(.refused), "declined"),
             (.reply("Sure, here you go!"), "Nothing has changed"),
         ]
@@ -337,6 +343,26 @@ final class ChatPlanDraftingTests: XCTestCase {
             XCTAssertTrue(text.contains(fragment), "expected \"\(fragment)\" in: \(text)")
             XCTAssertEqual(store.planWriteCount, 0)
         }
+    }
+
+    /// The exact regression MAX-155 was filed for: a 400 from the drafting endpoint
+    /// used to reach this transcript verbatim as
+    /// *"The plan could not be drafted. The Anthropic API returned an unexpected status
+    /// (400)."* — read straight from `PlanDraftingFailure.description`. It no longer
+    /// can, because `noteDraftingFailure` reads `PlanDraftingNotice` instead.
+    func testAnUnexpectedStatusNeverReachesTheTranscriptAsANumber() async throws {
+        let (chatModel, _, _) = try await makeModel(
+            planCalendar: nil,
+            proposalOutcome: .failure(.unexpectedStatus(400))
+        )
+        await chatModel.load()
+
+        await chatModel.draftPlan()
+
+        let text = chatModel.messages.last?.text ?? ""
+        XCTAssertFalse(text.contains("400"), text)
+        XCTAssertFalse(text.contains("("), text)
+        XCTAssertNil(text.rangeOfCharacter(from: .decimalDigits), text)
     }
 
     /// A reply the app cannot use is asked for again once — the policy is

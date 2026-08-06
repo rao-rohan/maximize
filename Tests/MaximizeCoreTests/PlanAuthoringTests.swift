@@ -129,10 +129,13 @@ final class PlanAuthoringTests: XCTestCase {
     }
 
     /// The rejection has to read as a reason, not as a field name — an athlete sees
-    /// this string.
+    /// this string. And it has to read the plan screens' own date voice (MAX-104):
+    /// `CalendarDay.description`'s bare `2026-06-02` wire format leaked into this
+    /// sentence before `PlanCopy.day(_:)` existed to call through to instead.
     func testBackDatingErrorNamesTheEarliestPermittedDay() throws {
         let error = PlanAuthoringError.effectiveFromTooEarly(earliestPermitted: try day("2026-06-02"))
-        XCTAssertTrue(error.description.contains("2026-06-02"))
+        XCTAssertTrue(error.description.contains("Jun 2, 2026"))
+        XCTAssertFalse(error.description.contains("2026-06-02"))
         XCTAssertFalse(error.description.contains("PlanCalendar"))
     }
 

@@ -32,6 +32,12 @@ public enum SplitsListData: Hashable, Sendable {
     case unavailable
     case available(Content)
 
+    /// What `SplitsView` says for `.unavailable` — moved here (MAX-104) for the reason
+    /// every `*Copy` type in this package gives: the sentence is selected by a case of
+    /// this core-declared enum, so it belongs beside the type CI can pin it against
+    /// rather than as a view literal.
+    public static let unavailableExplanation = "No splits recorded for this run."
+
     /// The breakdown in one unit, formatted.
     public struct Content: Hashable, Sendable {
         /// One split, as two or three already-formatted strings. `SplitsView` lays these

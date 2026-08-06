@@ -248,7 +248,12 @@ final class WorkoutDetailModel {
             return nil
         }
         let capBPM = discipline == .run ? planCalendar?.plan(on: day)?.heartRateCapBPM : nil
-        return HeartRateChartData(series: series, capBPM: capBPM, timeAboveCapSeconds: metrics?.timeAboveCapSeconds)
+        return HeartRateChartData(
+            series: series,
+            discipline: discipline,
+            capBPM: capBPM,
+            timeAboveCapSeconds: metrics?.timeAboveCapSeconds
+        )
     }
 
     /// R8's lazy path (MAX-033): scores a run the background wake could not score.
