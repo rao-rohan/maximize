@@ -592,11 +592,29 @@ but is dated before its effective date is permanently unscorable, and nothing te
 | MAX-165 | **The first plan's effective date** — default covers what is captured; the excluded-workout count on screen. Revisions unchanged | MAX-161 | **Opus** ✅ **built ahead of the rest of this set** — see the MAX-165 section below |
 | MAX-166 | The conversational route to a first plan, offered from the authoring screen. Droppable | MAX-161 | Sonnet |
 | MAX-167 | The API key section's purpose footer — what the key is for, what it costs, where it lives | MAX-161 | Sonnet 🔒 ✅ |
+| MAX-172 | **The consolidated device-verification checklist** — every *Needs device verification* item from #101–#157, reordered into the sequence a person would actually run them in and ranked by risk, instead of thirty scattered PR sections | Owner | Sonnet ✅ |
 
 Order: **165 alone first**, then 162 → (163 ‖ 164). 167 parallelises with everything; 166
 last or never. **164 was built and first opened for review before 163 merged**; it has
 since been updated to read 163's device-lifetime recording — see the MAX-164 section
 below.
+
+**MAX-172.** [docs/DEVICE-CHECKS.md](./docs/DEVICE-CHECKS.md). 92 checks gathered from 32
+merged PRs (#101–#157), cross-checked against this document's own per-ticket sections.
+Organised by the order a person actually works through them — first launch, ingestion and
+scoring, chat, the screens, accessibility, then relaunch behaviour — rather than by ticket
+number, and led by an eight-item "Run these first" section ranked against what the
+tickets themselves flagged as highest-risk: R13 (app-layer wiring that compiles but never
+executes, already responsible for two real defects), the every-launch Health nag three
+separate tickets warned about, the store opening against two new SwiftData record types
+for the first time, `tabViewBottomAccessory`'s first real use, chat's stall indicator (which
+may not be reachable at all — see below), R16's silent-data-loss default, plan drafting's
+storage boundary, and the mixed-day calendar glyph's own author calling its legibility "a
+judgement nobody without a phone can make." A closing section records what a device visit
+will not settle regardless of how carefully it's done: R10 (HealthKit read access can
+never be confirmed), background-delivery timing, whether the Anthropic API emits `ping`
+frames during a stall, prompt-cache engagement, and Keychain retention across a reinstall.
+No source was changed — this is a document only.
 
 **MAX-167.** One sentence, `FailureCopy.apiKeyPurpose`, shown as a footer under Settings'
 existing "Anthropic API key" section — no new entry point, no test-the-key button, no
