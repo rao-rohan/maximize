@@ -33,8 +33,12 @@ final class StoreAvailabilityModel {
     /// - Parameter availability: defaults to `PersistenceComposition.availability`, which
     ///   is what opens the store on the first read. Injectable for previews only; there is
     ///   deliberately no other production source.
-    init(availability: StoreAvailability = PersistenceComposition.availability) {
-        self.availability = availability
+    /// The default is resolved in the body rather than in the parameter list: a default
+    /// argument is evaluated in a nonisolated context, and `PersistenceComposition
+    /// .availability` is `@MainActor`. `nil` therefore means "the production source",
+    /// which is the same contract the parameter list expressed.
+    init(availability: StoreAvailability? = nil) {
+        self.availability = availability ?? PersistenceComposition.availability
     }
 
     /// What the root shows instead of the app, or nil to show the app.
