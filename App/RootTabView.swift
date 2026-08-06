@@ -74,6 +74,19 @@ struct RootTabView: View {
     /// opens is what the button said it would open.
     @State private var chatOpening: ChatOpening?
 
+    /// MAX-163's device-lifetime record of whether the Health sheet has been presented.
+    /// One instance for the view's lifetime — cheap to construct, and stable identity is
+    /// what lets `FirstRunCoverView` hand it straight to `recordHealthRequestPresented()`
+    /// without re-reading `UserDefaults` at every call.
+    @State private var firstRunRecording = UserDefaultsFirstRunPresentationStore()
+
+    /// Whether the first-launch cover is up. Resolved once, from `FirstRunCoverGate`, when
+    /// this view first appears — **not** recomputed on every re-render, which is what
+    /// keeps a later launch from re-opening it: `FirstRunCoverGate.shouldPresent(_:)`
+    /// reads a device-lifetime fact, but a `Bool` still has to hold that answer for
+    /// SwiftUI's presentation binding to drive off, and `.onAppear` is where it is asked.
+    @State private var isPresentingFirstRunCover = false
+
     /// `ChatSubject` is `Hashable`, which is all `sheet(item:)` needs of an identifier,
     /// and it is the right one: two taps on the same subject are the same presentation.
     private struct ChatOpening: Identifiable {
@@ -146,6 +159,21 @@ struct RootTabView: View {
         // the dashboard's window now, not the window at the instant of a tap.
         .sheet(item: $chatOpening) { opening in
             ChatSheet(subject: opening.subject, currentInterval: intervalModel.state.interval)
+        }
+        // MAX-163, FIRST-RUN-SPEC §4. `fullScreenCover`, not `sheet`: see
+        // `FirstRunCoverView`'s own note for why a drag-dismissible sheet is wrong here.
+        // Attached to the `TabView` — the same root the chat sheet presents from — so it
+        // covers the tab bar too; the athlete has not set anything up yet, so there is
+        // nothing behind it worth leaving reachable.
+        .fullScreenCover(isPresented: $isPresentingFirstRunCover) {
+            FirstRunCoverView(isPresented: $isPresentingFirstRunCover, recording: firstRunRecording)
+        }
+        // Resolved once, on first appearance, from the device-lifetime recording —
+        // never from `FirstRunChecklist`, which answers a different question (what is
+        // left to set up) and is MAX-164's setup card's seam, not this cover's. See
+        // `FirstRunCoverGate`'s doc for why the two are deliberately not the same check.
+        .onAppear {
+            isPresentingFirstRunCover = FirstRunCoverGate.shouldPresent(firstRunRecording)
         }
         // Read by `chatEntryPointFocus(workoutID:)` on the workout detail screen. Set on
         // the `TabView` so every tab's navigation stack inherits it.
