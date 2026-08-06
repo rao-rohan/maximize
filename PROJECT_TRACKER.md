@@ -587,6 +587,7 @@ but is dated before its effective date is permanently unscorable, and nothing te
 | ID | Ticket | Source | Tier |
 |---|---|---|---|
 | MAX-162 | `FirstRunChecklist` + `FirstRunCopy` in core — four facts in, ordered steps and one next action out; extends the R10 banned-phrase test | MAX-161 | **Opus** 🔒 ✅ — see the MAX-162 section below for the seam MAX-163 and MAX-164 read |
+| MAX-163 | The first-launch cover — one action, presents the Health sheet, claims no result | MAX-161 | Sonnet |
 | MAX-163 | The first-launch cover — one action, presents the Health sheet, claims no result | MAX-161 | Sonnet ✅ — see the MAX-163 section below for the gate and the recording |
 | MAX-164 | The setup card on the Workouts tab, including the "set up, nothing recorded yet" window | MAX-161 | Sonnet |
 | MAX-165 | **The first plan's effective date** — default covers what is captured; the excluded-workout count on screen. Revisions unchanged | MAX-161 | **Opus** ✅ **built ahead of the rest of this set** — see the MAX-165 section below |
@@ -4032,6 +4033,7 @@ CI cannot prove anything about a screen; no view exists yet. It also cannot prov
 `HealthAccessState` from a per-launch `@State` would nag on every launch. MAX-163 and
 MAX-164 carry that verification.
 
+
 ## MAX-163 — the first-launch cover
 
 One `fullScreenCover`, mounted on `RootTabView`'s `TabView`. Its single action presents
@@ -4134,7 +4136,6 @@ second fake object standing in for one — leaves the `UserDefaults` write intac
 cover's copy fits at Dynamic Type AX5; that Reduce Transparency and Increase Contrast leave
 the screen readable (`.contentSurface(.screen)` is already opaque by construction, so this
 is a lower-risk check than most, but it is still a device check, not a proof).
-
 **`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
 
 ---
