@@ -35,6 +35,12 @@ import MaximizeCore
 /// only ever asks the store whether a key is present; it never reads or displays
 /// an actual key. The only raw key text that exists is what the user actively types
 /// into the `SecureField`, and that never round-trips back onto screen once saved.
+///
+/// **MAX-167.** The Anthropic API key section previously stated a mechanism (a field,
+/// a Save button) and never a purpose. `FailureCopy.apiKeyPurpose` is the one sentence
+/// fixing that — what the key is for, what it costs, and where it lives — and it is the
+/// only change this ticket makes: no second entry point, no test-the-key button, no
+/// wizard step, exactly as `docs/FIRST-RUN-SPEC.md` §6 asks.
 struct SettingsView: View {
     private let keyStore: AnthropicAPIKeyStoring
 
@@ -144,6 +150,15 @@ struct SettingsView: View {
                         .font(.metricLabel)
                         .foregroundStyle(Color.textSecondary)
                 }
+
+                // MAX-167: what the key is for, what it costs, and where it lives — the
+                // three questions an unexplained `SecureField` leaves open. Styled like
+                // `planSection`'s footer just above; the sentence itself is a fixed
+                // literal owned by `FailureCopy` (see its doc comment for why it lives
+                // in the core rather than here despite carrying no data dependency).
+                Text(FailureCopy.apiKeyPurpose)
+                    .font(.metricLabel)
+                    .foregroundStyle(Color.textSecondary)
             }
         }
         // MAX-081: two ways out of the keyboard, neither of which existed before — a
