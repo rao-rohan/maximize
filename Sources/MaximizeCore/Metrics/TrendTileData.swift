@@ -70,8 +70,12 @@ import Foundation
 ///   denominator that *is* measured stays where it belongs, on `effectiveDays`.
 /// - `streak` is never nil. Zero is a real, measured streak — the day after a miss —
 ///   and omitting the tile would hide exactly the number a streak screen exists to show.
-/// - `averageScore` is nil when `Tallies.averageScore` is nil — nothing in the interval
-///   has been scored yet, an honest "no data" rather than a fabricated zero.
+/// - `averageScore` is nil when `Tallies.averageScore` is nil. That covers two honest
+///   "no data" states, not one: nothing in the interval has been scored yet, **or**
+///   (MAX-160) everything that was scored carried a `MiscategorisedScoreLabel` and got
+///   excluded. Neither is a fabricated zero. The tile itself cannot tell the two apart —
+///   there is no value to caption a reason onto — but `TrainingFactSheet` can and does,
+///   because its surface is prose rather than a value/caption pair.
 public struct TrendTileData: Hashable, Sendable {
     /// Reusing `SummaryTileData.Tile` rather than a near-identical duplicate: both
     /// screens want the same bare value/caption shape, and `SummaryTilesView` (MAX-045)
@@ -128,7 +132,9 @@ public struct TrendTileData: Hashable, Sendable {
     /// that day carried. No MAX-140 change belongs here.
     public let streak: Tile
 
-    /// `Tallies.averageScore`, to one decimal place. Nil when nothing has been scored.
+    /// `Tallies.averageScore`, to one decimal place. Nil when nothing eligible has been
+    /// scored — see the type's own "Absent is not zero" section for the two states that
+    /// covers since MAX-160.
     ///
     /// ## MAX-140 — per-workout, decided, and why (the ticket's real question)
     ///
@@ -150,17 +156,16 @@ public struct TrendTileData: Hashable, Sendable {
     /// This is D2-compliant by construction: `TrendTileData` never recomputes the mean
     /// here, it formats what `Tallies` already carries (see this initializer's own doc).
     ///
-    /// **Reported, not decided here: whether a `ScoreLedger` MAX-143 labelled
-    /// miscategorised (a lift scored against the running rubric, A21) should be excluded
-    /// from this mean.** `ScoreLedger.countsTowardScorerQuality` already excludes it from
-    /// PRD §2's scorer-quality signal; MAX-134's own tracker note flags that whether it
-    /// should *also* leave the athlete's average is a live, undecided question belonging
-    /// to `Tallies`/`TalliesCalculator` — files this ticket's scope explicitly excludes
-    /// (`PROJECT_TRACKER.md`'s MAX-140 row). Filing a second, competing average inside
-    /// this display type instead would be exactly the D2 drift `WorkoutContextBuilder`'s
-    /// own precedent warns against, so this ticket declines to widen scope and reports the
-    /// question instead: today, a lift mis-scored against a running rubric still pulls
-    /// this figure down, which A21 says is a verdict answering the wrong question.
+    /// **Decided by MAX-160: a labelled miscategorised score (a lift scored against the
+    /// running rubric, A21) leaves this mean.** MAX-140 left the question open — see the
+    /// tracker's MAX-140 row for why it stayed out of that ticket's scope — and MAX-160
+    /// took it: excluding a score from the athlete's own average is not rewriting history
+    /// (the score, its band and its rationale stay exactly where they were, D8), it is
+    /// declining to let a category error the athlete never made pull down a figure that
+    /// answers "how am I training." `Tallies.averageScore` already reflects the exclusion
+    /// (D2 — the arithmetic lives in `TalliesCalculator`, not here); this tile's own change
+    /// is `averageScoreExcludedMiscategorisedCount` reaching the caption below, so the
+    /// number is never silently different from what its label says.
     public let averageScore: Tile?
 
     /// - Parameters:
@@ -268,7 +273,12 @@ public struct TrendTileData: Hashable, Sendable {
         streak = Tile(value: "\(tallies.currentStreak)", caption: "day streak")
 
         averageScore = tallies.averageScore.map {
-            Tile(value: Self.formattedAverageScore($0), caption: "avg score")
+            Tile(
+                value: Self.formattedAverageScore($0),
+                caption: Self.averageScoreCaption(
+                    excludedCount: tallies.averageScoreExcludedMiscategorisedCount
+                )
+            )
         }
     }
 
@@ -313,5 +323,20 @@ public struct TrendTileData: Hashable, Sendable {
     /// decision where the tile makes it.
     static func formattedAverageScore(_ score: Double) -> String {
         String(format: "%.1f", locale: nil, score)
+    }
+
+    /// "avg score", or — when MAX-160 left one or more labelled scores out of the mean —
+    /// "avg score (excludes N …)". Delegates the parenthetical's wording to
+    /// `MiscategorisedScoreCopy.averageExclusionNote` rather than composing it here, the
+    /// same delegation `formattedAverageScore` gives `TrainingFactSheet`: one function
+    /// decides the words, so the tile and the fact sheet cannot say the exclusion two
+    /// different ways.
+    ///
+    /// Internal, matching `formattedAverageScore`, for the same caller.
+    static func averageScoreCaption(excludedCount: Int) -> String {
+        guard let note = MiscategorisedScoreCopy.averageExclusionNote(excludedCount: excludedCount) else {
+            return "avg score"
+        }
+        return "avg score (\(note))"
     }
 }
