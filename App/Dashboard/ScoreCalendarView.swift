@@ -93,6 +93,23 @@ enum ScoreCalendarDoorRoute: Hashable {
 /// is the channel, and it survives greyscale and every kind of colour vision because it
 /// is a shape. The VoiceOver sentence carries the reason, which no cell this size could.
 ///
+/// ## The mixed day (MAX-135)
+///
+/// A day can now prescribe two sessions (A17), and a cell has to be able to say "one of
+/// two". It says it as a **state**, not as a fourth channel — LIFTING-SPEC §7.2, and the
+/// budget above is the reason. `.partiallyMet` takes the same red a whole miss takes,
+/// because §7.2's rule is that the worse verdict colours the day and a green cell over a
+/// skipped obligation is the calendar lying about the week; what separates it from a miss
+/// and from a badly-scored run — three states, one fill, measured at **1.00:1** against
+/// each other because it is literally the same token — is the glyph, a half-filled disc
+/// against an "×" against an activity figure. Shape, at the same footprint, in the channel
+/// the cell already draws. Nothing new is asked of the palette.
+///
+/// The half that *was* met is not drawn at all. It is spoken in full
+/// (`ScoreCalendarCopy`), and the day's detail is one tap away — the same asymmetry the
+/// plan layer already falls on, and for the same reason: a sentence has budget a 42pt
+/// square does not.
+///
 /// ## The plan layer (MAX-105)
 ///
 /// Everything above describes what *happened*. The plan is what was *prescribed*, and
@@ -544,6 +561,15 @@ private enum ScoreCalendarPalette {
         switch state {
         case .scored(let band, _):
             return Color.scoreBand(band)
+        case .partiallyMet:
+            // §7.2: the worse verdict colours the day. A day that ran well and skipped
+            // the lift is not a green day, and it takes the *same* red a whole miss
+            // takes — no ninth token, nothing new for the contrast suite to hold, and
+            // nothing taken from the budget MAX-084 and MAX-087 spent. What separates it
+            // from `.missed` and from a badly scored day is the glyph
+            // (`ScoreCalendarGlyph`), which is a shape and therefore survives greyscale,
+            // every kind of colour vision, and both accessibility settings.
+            return Color.scoreIneffective
         case .missed:
             // Not a fourth band — D9 says a missed scheduled session "shows red",
             // and the rubric's own "skipped" band already lands in `.ineffective`'s
@@ -570,7 +596,7 @@ private enum ScoreCalendarPalette {
 
     static func ink(for state: ScoreCalendarDayState) -> Color {
         switch state {
-        case .scored, .missed:
+        case .scored, .partiallyMet, .missed:
             return Color.textOnSaturatedFill
         case .awaitingScore, .noVerdict, .convertedRest, .scheduledRest, .forthcoming, .unplanned:
             // `.forthcoming`'s date and glyph sit on the calendar card rather than on
