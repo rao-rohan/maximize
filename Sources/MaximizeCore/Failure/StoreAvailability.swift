@@ -235,12 +235,14 @@ public enum StoreAvailability: Hashable, Sendable {
     /// `IngestionComposition` refuses to do. Making the no-op explicit here is what keeps
     /// a caller from having to remember it.
     public func afterTryingAgain(_ outcome: StoreOpenOutcome) -> StoreAvailability {
-        switch (self, outcome) {
-        case (.open, _), (.openedAfterTryingAgain, _):
-            return self
-        case (.couldNotOpen, .opened):
+        guard case .couldNotOpen = self else { return self }
+
+        switch outcome {
+        case .opened:
             return .openedAfterTryingAgain
-        case let (.couldNotOpen, .couldNotOpen(reason)):
+        case let .couldNotOpen(reason):
+            // Whatever the second attempt found, not what the first did: a phone that has
+            // since been unlocked but is now out of space is a different sentence.
             return .couldNotOpen(StoreOpenFailure(reason: reason, hasAlreadyBeenTriedAgain: true))
         }
     }
