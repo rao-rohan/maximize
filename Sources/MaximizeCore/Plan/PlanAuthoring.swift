@@ -58,7 +58,7 @@ public enum PlanAuthoringError: Error, Hashable, Sendable, CustomStringConvertib
         switch self {
         case let .effectiveFromTooEarly(earliest):
             return "A new plan version has to start after the current one does. "
-                + "The earliest date this version can take effect is \(earliest)."
+                + "The earliest date this version can take effect is \(PlanCopy.day(earliest))."
         case let .heartRateCapImplausible(permitted):
             return "The heart-rate cap has to be between \(Int(permitted.lowerBound)) and "
                 + "\(Int(permitted.upperBound)) bpm."
@@ -72,17 +72,16 @@ public enum PlanAuthoringError: Error, Hashable, Sendable, CustomStringConvertib
             return "Score thresholds have to be between \(permitted.lowerBound) and "
                 + "\(permitted.upperBound)."
         case let .scheduledDistanceNotPositive(weekday):
-            let name = String(describing: weekday).capitalized
-            return "\(name) prescribes a distance of zero. Give it a distance, or leave "
-                + "the distance off entirely."
+            return "\(PlanCopy.weekday(weekday)) prescribes a distance of zero. Give it a distance, "
+                + "or leave the distance off entirely."
         case let .longRunDistanceNotPositive(week):
             return "Week \(week) of the long-run arc prescribes a distance of zero."
         case let .scheduledKindNotPrescribable(weekday):
-            let name = String(describing: weekday).capitalized
-            return "\(name)'s run slot cannot prescribe a lift. Use the lift slot below it."
+            return "\(PlanCopy.weekday(weekday))'s run slot cannot prescribe a lift. Use the lift "
+                + "slot below it."
         case let .liftSessionInvalid(weekday):
-            let name = String(describing: weekday).capitalized
-            return "\(name)'s lift prescription is not valid. Reopen the screen and try again."
+            return "\(PlanCopy.weekday(weekday))'s lift prescription is not valid. Reopen the "
+                + "screen and try again."
         case .wouldRewriteHistory:
             return "This version would change days an earlier plan version already governs, "
                 + "so it cannot be saved. Reopen the screen and try again."

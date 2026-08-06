@@ -93,7 +93,7 @@ struct RouteMapView: View {
     // MARK: - Unavailable
 
     private var unavailableMessage: some View {
-        Text("This run's route could not be loaded.")
+        Text(RouteMapData.unavailableExplanation)
             .font(.bodyCopy)
             .foregroundStyle(Color.textSecondary)
             .frame(maxWidth: .infinity, alignment: .leading)

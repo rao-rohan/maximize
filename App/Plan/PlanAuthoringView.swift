@@ -488,7 +488,7 @@ struct PlanAuthoringView: View {
             } else {
                 ForEach(editing.governedDays) { planDay in
                     row(
-                        planDay.date.description,
+                        PlanFormatting.dayLabel(planDay.date),
                         PlanAuthoringFormatting.describeBothSessions(
                             planDay,
                             unit: editing.distanceUnit

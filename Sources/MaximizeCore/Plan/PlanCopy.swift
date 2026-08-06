@@ -107,6 +107,44 @@ public enum PlanCopy {
         "\(points)"
     }
 
+    /// "Aug 5, 2026" — the plan screens' own rendering of a `CalendarDay`, so a date on
+    /// the plan tab and the same date inside a validation message
+    /// (`PlanAuthoringError.description`) read identically. Pinned to GMT so the printed
+    /// date never shifts against the device's own zone — a one-way bridge for display
+    /// only, never read back into a `CalendarDay`, matching
+    /// `TrendIntervalFormatting.date(for:)`'s own note.
+    ///
+    /// **Not `CalendarDayLabel`.** That type's "3 Aug 2026" is chat and the dashboard's
+    /// own voice (MAX-092); this screen has used `MMM d, yyyy` since MAX-102, and MAX-104
+    /// found two call sites that had drifted onto `CalendarDay.description`'s bare
+    /// `YYYY-MM-DD` wire format instead of calling through here — moving the formatter
+    /// down is what makes that mistake fail to compile a second time (`App/Plan
+    /// /PlanFormatting.dayLabel` now calls straight through, matching every other
+    /// vocabulary function in this type).
+    public static func day(_ day: CalendarDay) -> String {
+        dayFormatter.string(from: date(for: day))
+    }
+
+    private static func date(for day: CalendarDay) -> Date {
+        var components = DateComponents()
+        components.year = day.year
+        components.month = day.month
+        components.day = day.day
+        components.hour = 12
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .gmt
+        // Unreachable for a valid `CalendarDay`; `Date()` rather than a force unwrap
+        // because non-test code may not force-unwrap.
+        return calendar.date(from: components) ?? Date()
+    }
+
+    private static let dayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d, yyyy"
+        formatter.timeZone = .gmt
+        return formatter
+    }()
+
     // MARK: - A day's ask
 
     /// "Long run · 18.0 km · steady", the run slot's one-line rendering.

@@ -113,30 +113,11 @@ enum PlanFormatting {
         return kinds.map(sessionKind).joined(separator: ", ")
     }
 
-    /// "Aug 5, 2026" — pinned to GMT so the printed date never shifts against the
-    /// device's own zone, matching `TrendIntervalFormatting.date(for:)`'s own note:
-    /// this is a one-way bridge for display only, never read back into a `CalendarDay`.
+    /// "Aug 5, 2026". MAX-104 moved the formatter itself down to `PlanCopy.day(_:)` so
+    /// `PlanAuthoringError.description` — a core-declared string, not a view — reads the
+    /// same date the same way; this stays the call site every view on this screen already
+    /// used, unchanged.
     static func dayLabel(_ day: CalendarDay) -> String {
-        dayFormatter.string(from: date(for: day))
+        PlanCopy.day(day)
     }
-
-    private static func date(for day: CalendarDay) -> Date {
-        var components = DateComponents()
-        components.year = day.year
-        components.month = day.month
-        components.day = day.day
-        components.hour = 12
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = .gmt
-        // Unreachable for a valid `CalendarDay`; `Date()` rather than a force unwrap
-        // because non-test code may not force-unwrap.
-        return calendar.date(from: components) ?? Date()
-    }
-
-    private static let dayFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d, yyyy"
-        formatter.timeZone = .gmt
-        return formatter
-    }()
 }
