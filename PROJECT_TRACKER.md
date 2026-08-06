@@ -1768,6 +1768,7 @@ is the overseer's, not a ticket's — flagged here rather than done.
 | MAX-143 | ~~Decide what to do with lifts already scored as runs~~ — **owner chose: label them**, and it is built | 128 | **Opus** ✅ |
 | MAX-144 | ~~How adherence to a muscle-group prescription is judged~~ — **decided (A22)** | 129 | Owner ✅ |
 | MAX-145 | **Enter muscle groups on a strength workout's detail screen** (A22) | 129, 144 | **Opus** ✅ |
+| MAX-146 | Close the `rest.ranAnyway` shadow — the same defect as `easy.wellOverCap`, one band down (source: MAX-133) | 132, 133 | Sonnet |
 | MAX-147 | The scorer's task text learns discipline (source: MAX-133) | 133, 136 | Sonnet ✅ |
 | MAX-148 | A lift's duration and note become editable, proposable, and type-safe | 137, 141 | Sonnet ✅ |
 | MAX-149 | Duration floor for fragments — **the classifier half of gap P3**; not yet wired to any author | 013, 131 | Sonnet ✅ |
@@ -2441,6 +2442,58 @@ is never shown an easy-run day's bands, whatever conditions that band carries.
   band. The comment at the gate now states this reason rather than the mechanism this
   ticket removed, and a test pins that a lift under a rubric with no band for it is
   *refused* rather than mis-scored.
+
+**MAX-146 — closes the `rest.ranAnyway` shadow MAX-133 named.** One line in
+`Sources/MaximizeCore/Plan/StandardPlanSeed.swift`: `rest.ranAnyway` gains
+`.actualDiscipline(oneOf: [.run])`, the identical condition and the identical reasoning
+MAX-132 already used to close `easy.wellOverCap`. Same identifier, same score range
+(50–75), same rationale string — only the condition list grew, so a `Score` this band
+already produced for an actual run on a scheduled rest day is unaffected.
+
+- **Chosen over a new band, and here is why.** MAX-133's report named two candidates: the
+  condition above, or a dedicated band for "a lift on a day whose lift slot prescribes
+  nothing." The report also flagged the risk worth checking before picking either — that
+  narrowing `rest.ranAnyway` might leave such a lift matching *nothing*, which would be a
+  `noBandMatched` refusal instead of a mis-score, possibly a worse outcome. Reading
+  `RubricEvaluator` settles it: `bands(for: .rest)` still includes `fallback.recorded`
+  (`appliesTo` empty, no conditions, last in the seed's order), so a narrowed
+  `rest.ranAnyway` does not throw — the lift falls through to the seed's own unconditional
+  catch-all, 40–69, *"Recorded, but the plan has no specific rule for this session."* That
+  is already honest for this case, and it is the seed's designed answer for exactly this
+  shape of gap (see the type's own note on why the catch-all's range sits below the
+  effective threshold). A dedicated band was rejected on that basis: it would need its own
+  score range, and choosing one is a product opinion about how much an unscheduled lift
+  should count for — not a shadow-closing decision, and not this ticket's to make.
+  `testALiftOnADayThatDoesNotPrescribeOneNoLongerMatchesRestRanAnyway` is the test that
+  fails without the fix, pinning both facts: no longer `rest.ranAnyway`, and specifically
+  `fallback.recorded` rather than a thrown error.
+  `testARunOnAScheduledRestDayStillMatchesRestRanAnywayExactlyAsBefore` is the paired
+  regression, on the historical Monday-run case `DisciplineMatchedEvaluationTests` and the
+  seed's own tests already exercise elsewhere, both live in `LiftRubricVocabularyTests.swift`.
+- **The rest of the seed, audited for the same shape.** Every remaining band was checked
+  against "does this band's `appliesTo` reach a discipline it was never written about."
+  `.easy`/`.long`/`.hard`/`.other` are unreachable by a lift regardless of any band's own
+  conditions: `ScheduledSessionKind.liftPrescribable` restricts the **lift** slot to
+  `[.rest, .lift]` only, so a lift's own-discipline ask (the only session
+  `RubricEvaluator` shows it, since MAX-133) can never resolve to any of those four kinds
+  — the routing itself closes the door, not the band. `.lift`-scoped bands
+  (`lift.completed`, `lift.short`, `lift.happened`) already carry
+  `.actualDiscipline(oneOf: [.lift])`, MAX-132's own guard. `.rest` was the one exception
+  worth finding, because it is the *default* both slots share: every weekday starts `.rest`
+  unless prescribed otherwise, so it is the only scheduled kind a workout of either
+  discipline can land on through no plan decision at all. `fallback.recorded` and
+  `skipped` are both intentionally unconditional/unreachable by the seed's own design (see
+  the type's top-of-file note) and are not shadows — they are declared catch-alls, not
+  accidents of placement. **Finding: `rest.ranAnyway` was the only band with this defect;
+  nothing else in the seed needs the same fix.**
+- **D1, restated for this file specifically.** This is a change to the *seed* —
+  `StandardPlanSeed.rubricBands()` — which only ever supplies the bytes a **new** first
+  plan version starts from. It cannot reach a plan already saved, and it does not try to:
+  every plan on disk keeps the bands it was saved with. Nothing here migrates or
+  rescores anything already written; the label MAX-143 built handles what already exists
+  under D8's constraint, and this ticket does not touch it.
+- **What is still true.** MAX-111's ingestion gate stays shut — this ticket does not open
+  it, and opening it remains its own decision, independent of this fix.
 
 **MAX-134 — the unit of account is the obligation.** A19/LIFTING-SPEC §6. A Tuesday asking
 for a run *and* a lift is two obligations: it contributes two to the effective ratio's

@@ -493,6 +493,63 @@ final class LiftRubricVocabularyTests: XCTestCase {
         )
     }
 
+    // MARK: - MAX-146: the `rest.ranAnyway` shadow
+
+    /// The defect MAX-133's report named: no seeded weekday, and no plan on disk,
+    /// prescribes a lift, so `PlanDay.scheduledSession(for: .lift)` resolves every
+    /// unprescribed lift to `.rest` — correctly, per `RubricEvaluator`'s own contract.
+    /// Before this ticket, `rest.ranAnyway` carried no condition, so that lift matched
+    /// it and was permanently recorded **"Ran on a scheduled rest day"** for a session
+    /// that was not a run.
+    ///
+    /// This is the test that fails without the fix: it asserts the lift lands on
+    /// `fallback.recorded` — the seed's own honest answer for a session it has no
+    /// specific rule for — never on `rest.ranAnyway`.
+    func testALiftOnADayThatDoesNotPrescribeOneNoLongerMatchesRestRanAnyway() throws {
+        let seedRubric = try Self.seedRubric()
+
+        let evaluation = try Self.evaluate(
+            rubric: seedRubric,
+            workout: try Self.lift(),
+            classification: .other,
+            metrics: try Self.liftMetrics(averageHeartRateBPM: 162)
+        )
+
+        XCTAssertTrue(evaluation.scheduledSession.isRest, "the plan's own answer: no lift asked")
+        XCTAssertNotEqual(
+            evaluation.band.identifier,
+            "rest.ranAnyway",
+            "the shadow this ticket closes: a lift is not a run"
+        )
+        XCTAssertEqual(
+            evaluation.band.identifier,
+            "fallback.recorded",
+            "refused by rest.ranAnyway, caught by the seed's unconditional last row"
+        )
+    }
+
+    /// The regression alongside it: a **run** on an actual scheduled rest day is judged
+    /// exactly as it always was. `rest.ranAnyway`'s new condition narrows what it
+    /// matches; it does not change what it means for the discipline it was written
+    /// about.
+    func testARunOnAScheduledRestDayStillMatchesRestRanAnywayExactlyAsBefore() throws {
+        let seedRubric = try Self.seedRubric()
+
+        // Monday: `Fixture.weeklyTemplate()`'s scheduled rest day for the run slot.
+        let evaluation = try Self.evaluate(
+            rubric: seedRubric,
+            workout: try Fixture.workout(),
+            classification: .easy,
+            metrics: try ScoringFixture.metrics(averageHeartRateBPM: 142),
+            on: "2026-01-05"
+        )
+
+        XCTAssertEqual(evaluation.discipline, .run)
+        XCTAssertTrue(evaluation.scheduledSession.isRest)
+        XCTAssertEqual(evaluation.band.identifier, "rest.ranAnyway")
+        XCTAssertEqual(evaluation.permittedScores, try ScoreRange(lowest: 50, highest: 75))
+    }
+
     // MARK: - `.scheduledDuration` and the plan's first duration
 
     func testScheduledDurationResolvesAsAFractionOfTheAsk() throws {
