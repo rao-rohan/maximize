@@ -118,8 +118,8 @@ public enum PlanCopy {
     /// own voice (MAX-092); this screen has used `MMM d, yyyy` since MAX-102, and MAX-104
     /// found two call sites that had drifted onto `CalendarDay.description`'s bare
     /// `YYYY-MM-DD` wire format instead of calling through here — moving the formatter
-    /// down is what makes that mistake fail to compile a second time (`App/Plan
-    /// /PlanFormatting.dayLabel` now calls straight through, matching every other
+    /// down is what makes that mistake fail to compile a second time
+    /// (`PlanFormatting.dayLabel` now calls straight through, matching every other
     /// vocabulary function in this type).
     public static func day(_ day: CalendarDay) -> String {
         dayFormatter.string(from: date(for: day))
