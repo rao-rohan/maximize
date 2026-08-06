@@ -63,14 +63,16 @@ final class WorkoutVerdictTests: XCTestCase {
         }
     }
 
-    /// The prescription is still reported. A day that asked for an easy run and got a
-    /// lift is a real thing the header should say plainly, and it can only say it if
-    /// this state keeps carrying the ask.
-    func testALiftOnAGovernedDayStillReportsWhatThePlanAsked() throws {
+    /// The prescription is still reported — but as of MAX-139, it is the **lift** slot's
+    /// ask, never the run slot's, whatever the run slot happens to say. A day prescribing
+    /// only a run and no lift is a day whose lift ask is `.rest` (`PlanDay`'s default),
+    /// and that is what a lift's header must show — not the easy run it did not do.
+    func testALiftOnAGovernedDayReportsTheLiftAskNotTheRunAsk() throws {
         let planDay = PlanDay(
             date: try Fixture.day(2026, 1, 6),
             planVersion: try PlanVersion(1),
             scheduledSession: try ScheduledSession(kind: .easy, distanceMeters: 8_000)
+            // liftSession defaults to `.rest` — this plan prescribes no lifting.
         )
 
         let verdict = WorkoutVerdict(
@@ -79,8 +81,57 @@ final class WorkoutVerdictTests: XCTestCase {
             ledger: nil
         )
 
-        XCTAssertEqual(verdict.scheduledSession, planDay.scheduledSession)
+        XCTAssertEqual(verdict.scheduledSession, .rest, "Not planDay.scheduledSession, which is the run ask")
+        XCTAssertNotEqual(verdict.scheduledSession, planDay.scheduledSession)
         XCTAssertEqual(verdict.scoring, .noVerdict)
+    }
+
+    /// The mirror case: a day that prescribes both a run and a lift. A lift workout must
+    /// report the lift ask, and a run workout the run ask — each discipline reads only
+    /// its own slot (A17, MAX-133/MAX-139).
+    func testADayPrescribingBothDisciplinesReportsEachWorkoutsOwnAsk() throws {
+        let liftAsk = try ScheduledSession(kind: .lift, durationSeconds: 2_700, muscleGroups: [.chest, .back])
+        let planDay = PlanDay(
+            date: try Fixture.day(2026, 1, 6),
+            planVersion: try PlanVersion(1),
+            scheduledSession: try ScheduledSession(kind: .easy, distanceMeters: 8_000),
+            liftSession: liftAsk
+        )
+
+        let liftVerdict = WorkoutVerdict(
+            workout: try Fixture.workout(activityType: .traditionalStrengthTraining),
+            planDay: planDay,
+            ledger: nil
+        )
+        let runVerdict = WorkoutVerdict(
+            workout: try Fixture.workout(activityType: .running),
+            planDay: planDay,
+            ledger: nil
+        )
+
+        XCTAssertEqual(liftVerdict.scheduledSession, liftAsk)
+        XCTAssertEqual(runVerdict.scheduledSession, planDay.scheduledSession)
+    }
+
+    // MARK: `discipline` (MAX-139)
+
+    func testDisciplineIsReadFromTheWorkoutsActivityType() throws {
+        let run = WorkoutVerdict(workout: try Fixture.workout(activityType: .running), planDay: nil, ledger: nil)
+        let lift = WorkoutVerdict(
+            workout: try Fixture.workout(activityType: .traditionalStrengthTraining), planDay: nil, ledger: nil
+        )
+
+        XCTAssertEqual(run.discipline, .run)
+        XCTAssertEqual(lift.discipline, .lift)
+    }
+
+    func testEveryNonLiftActivityTypeReportsTheRunDiscipline() throws {
+        for activityType: ActivityType in [.running, .treadmillRunning, .cycling, .hiking, .walking, .other] {
+            let verdict = WorkoutVerdict(
+                workout: try Fixture.workout(activityType: activityType), planDay: nil, ledger: nil
+            )
+            XCTAssertEqual(verdict.discipline, .run, "\(activityType)")
+        }
     }
 
     /// D8. A lift ingested before MAX-111 carries an immutable auto-score from the
@@ -276,5 +327,46 @@ final class WorkoutVerdictTests: XCTestCase {
         let verdict = WorkoutVerdict(workout: workout, planDay: planDay, ledger: ledger)
 
         XCTAssertEqual(verdict.scheduledSession, .rest)
+    }
+
+    // MARK: `miscategorisationLabel` (A21/MAX-143)
+
+    func testAnOrdinaryScoredWorkoutReportsNoMiscategorisationLabel() throws {
+        let workout = try Fixture.workout(activityType: .running)
+        let automatic = try Fixture.score(points: 88)
+        let ledger = try ScoreLedger(automatic: automatic)
+
+        let verdict = WorkoutVerdict(workout: workout, planDay: nil, ledger: ledger)
+
+        XCTAssertNil(verdict.miscategorisationLabel)
+    }
+
+    func testAnUnscoredWorkoutReportsNoMiscategorisationLabel() throws {
+        let verdict = WorkoutVerdict(
+            workout: try Fixture.workout(activityType: .traditionalStrengthTraining), planDay: nil, ledger: nil
+        )
+
+        XCTAssertNil(verdict.miscategorisationLabel)
+    }
+
+    /// A lift scored before MAX-133 taught the scorer to resolve a workout's own
+    /// discipline carries a label (A21/MAX-143), and the header reads it straight off
+    /// the ledger — the same fact `ScoreLedger.miscategorisationLabel` already carries,
+    /// never re-derived. The score itself is untouched (D8): same value, same band.
+    func testAMiscategorisedLiftReportsItsLabel() throws {
+        let workout = try Fixture.workout(activityType: .traditionalStrengthTraining)
+        let automatic = try Fixture.score(points: 30, scheduledKind: .easy, actualClassification: .easy)
+        let label = try XCTUnwrap(MiscategorisedScoreLabel.labelling(
+            automatic,
+            workoutDiscipline: .lift,
+            id: UUID(),
+            recordedAt: Fixture.at(120)
+        ))
+        let ledger = try ScoreLedger(automatic: automatic).labelled(with: label)
+
+        let verdict = WorkoutVerdict(workout: workout, planDay: nil, ledger: ledger)
+
+        XCTAssertEqual(verdict.miscategorisationLabel, label)
+        XCTAssertEqual(verdict.scoring, .scored(automatic: automatic, annotation: nil))
     }
 }

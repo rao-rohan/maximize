@@ -1761,7 +1761,7 @@ is the overseer's, not a ticket's — flagged here rather than done.
 | MAX-136 | Context and fact sheet learn discipline | 129, 130 | **Opus** ✅ |
 | MAX-137 | Plan authoring for two slots | 129 | Sonnet ✅ |
 | MAX-138 | The plan screen shows both | 129 | Sonnet ✅ |
-| MAX-139 | Workout detail for a lift | 130, 133 | Sonnet |
+| MAX-139 | Workout detail for a lift | 130, 133 | Sonnet ✅ |
 | MAX-140 | Trend tiles, honestly ("days run", the effective denominator) | 134 | Sonnet ✅ |
 | MAX-141 | `PlanProposal` covers lift days | 129, **099** | Sonnet 🔒 ✅ |
 | MAX-142 | ~~`TrainingContext` is per-session, not per-run~~ — **not needed**, MAX-095 landed briefed | 129, **095** | — ✅ |
@@ -2817,6 +2817,109 @@ settings, and they were being printed under "The plan" as though they governed a
   `Context/TrainingFactSheet.swift` plus a decision about whether an all-rest lift column
   is stated once or per weekday; this ticket's brief scoped it to `WorkoutFactSheet`,
   `WorkoutContext` and `WorkoutContextBuilder`, so it was left alone.
+
+**MAX-139 — the workout detail screen stops drawing a lift as a run with holes in it.**
+LIFTING-SPEC §10.1's other half. The fact sheet stopped describing a lift in running
+vocabulary at MAX-136; this is the screen.
+
+- **The verdict header now reads the workout's own discipline's ask, not the run
+  slot's.** `WorkoutVerdict.scheduledSession` used to be `planDay?.scheduledSession`
+  unconditionally — the run slot, whatever the workout was — which is why a lift's
+  header showed the day's run ask (an easy run it did not do) instead of its own lift
+  ask. It now resolves through `PlanDay.scheduledSession(for:)`, keyed on a new public
+  `WorkoutVerdict.discipline` read from `Workout.activityType.discipline`. A day
+  prescribing a run and no lift now reports `.rest` for a lift on it — the honest
+  answer, per §5's "a workout of a discipline the day did not prescribe" — never the
+  run's easy-run ask. Regression-tested (`testALiftOnAGovernedDayReportsTheLiftAskNot
+  TheRunAsk`) against the exact scenario the pre-existing test asserted the *old*, wrong
+  behaviour for; that test is rewritten rather than left contradicting the fix. A second
+  test pins a day prescribing both slots resolving each workout to its own ask.
+- **Four run-only things stop appearing on a lift's screen, and one sentence stands in
+  their place.** Cadence versus target, the route map, the pace splits, and the HR
+  curve's cap line describe a running prescription (a cadence target is steps against a
+  running gait; `Plan.heartRateCapBPM` is documented as the easy-run ceiling) and none
+  belongs on a lift's screen — not even in its own "no data" state, which is what
+  `CadenceBandView` draws today for any workout with no cadence average, lift or not.
+  **Decision: the decision of which sections apply lives in `SummaryTileData`, not in
+  the view.** A new `SummaryTileData.showsRunOnlySections: Bool` (false for a lift) is
+  what `WorkoutDetailView` reads to skip `CadenceBandView`, `RouteMapView` and
+  `SplitsView` entirely, and a new `SummaryTileData.disciplineNote: String?` (non-nil
+  only for a lift) is the one sentence `SummaryTilesView` renders in their place —
+  worded apart from `WorkoutFactSheet.disciplineFraming` and from `RouteMapView`'s
+  indoor-run copy, per CLAUDE.md's "different statements must not share copy" (the
+  discipline not applying and the sensor not being there are different facts). Both are
+  tested directly on `SummaryTileData`, not inferred from a view.
+- **The lift's summary tiles are gated explicitly, not left to accident.** Distance,
+  drift and grade-adjusted pace are now `nil` for a lift by an explicit discipline check
+  in `SummaryTileData.init`, not merely trusted to already be nil from upstream. Two
+  reasons that is not redundant: `distance` reads `Workout.distanceMeters` directly,
+  which `DerivedMetricKind` has no opinion about at all, so nothing upstream stops a
+  captured lift from carrying one; and a lift ingested **before** MAX-130 gated the
+  calculator can carry a stored drift or grade-adjusted pace figure the old,
+  discipline-blind calculator computed — the identical "stale figure from before this
+  ticket" case `WorkoutFactSheet`'s `describesARun` branch already guards against. A
+  dedicated test constructs exactly that stale-metrics case and asserts both tiles stay
+  hidden. What a lift keeps: duration, active energy, and average/maximum heart rate — a
+  heart rate measured during a lift is still a heart rate (LIFTING-SPEC §3.2).
+- **The HR curve stays for a lift; only its cap line goes.** `HRCurveView` is unchanged
+  and untouched — the curve and the avg/max HR figures apply to both disciplines. What
+  changed is `WorkoutDetailModel.heartRateChart`, which used to hand every workout the
+  plan's `heartRateCapBPM` unconditionally: a single plan-level field with no
+  per-discipline sibling, so a lift on a day a plan governs was drawing the running cap
+  as a dashed line with a "Cap N bpm" annotation. It now passes `nil` for a lift's
+  `capBPM`, the same absence `HRCurveView` already renders correctly for "no plan
+  governs this day." **Known imperfection, left as found**: on a lift day a plan *does*
+  govern, `HRCurveView`'s own copy for a nil cap still reads "No plan governs this day,
+  so there's no cap to compare against" — technically true of the run slot's cap, not of
+  the day. Fixing the sentence needs a discipline-aware copy branch inside
+  `HRCurveView.swift`, which is outside this ticket's five listed files; reported rather
+  than done.
+- **The verdict header now says when a score was reached against the wrong
+  discipline's ask (A21/MAX-143).** MAX-143 shipped `MiscategorisedScoreLabel` and
+  `MiscategorisedScoreCopy` and explicitly left wiring them to a surface to "whichever
+  of MAX-139 or MAX-150 lands second" — MAX-150 landed first, so this ticket took it. A
+  new `WorkoutVerdict.miscategorisationLabel` reads `ScoreLedger.miscategorisationLabel`
+  straight through (never re-derived), and `VerdictHeaderView` renders
+  `MiscategorisedScoreCopy.labelledDetail` as one more plain-text, no-colour line below
+  the rationale — the identical treatment `annotationRow` already gives a manual
+  correction, because a label is the same kind of fact: additive information beside an
+  unchanged, immutable score (D8). The score chip's own VoiceOver label is combined into
+  one element and gains `labelledAccessibilitySuffix` when a label is present, so the
+  number and the caveat read as one sentence rather than two unrelated labels.
+- **The last view literal adopts `FailureCopy`.** MAX-154 defined
+  `LoadFailureSurface.workoutDetail` and left `App/Workouts/WorkoutDetailView.swift`
+  alone because this ticket was in flight; the `.failed` case now reads
+  `FailureCopy.couldNotLoad(.workoutDetail)`.
+- **Two files beyond this ticket's listed five were touched, both minimally and both
+  unowned by any parallel ticket.** `App/Workouts/WorkoutDetailModel.swift` gained the
+  discipline parameter `heartRateChart` needed to gate the cap line (above) — the value
+  is assembled there and nowhere else reachable from the five listed files.
+  `App/Workouts/WorkoutDisplayFormatting.swift`'s `describeScheduledSession(_:unit:)` is
+  the one formatter `VerdictHeaderView` calls for the "Scheduled" row, and its `.lift`
+  case still read `session.note ?? "Lift"` — written before MAX-131/MAX-145 gave a lift
+  session a duration and muscle groups to show. Left as `"Lift"` alone, the header's
+  discipline fix would have been structurally correct (the right `ScheduledSession`) but
+  said almost nothing about it; it now reads "Lift · 45:00 · Chest and shoulders",
+  reusing `SummaryTileData.formattedDuration` and `MuscleGroupEntryCopy.describe` so a
+  lift's ask is never worded two different ways one screen apart.
+- **Considered and rejected: a numeric lifting-progression tile, and a zone-splits
+  view.** LIFTING-SPEC §4.2 ships no numeric lifting progression — nothing measures load
+  or volume — so there is no target for a tile to show against, and a `— / — ` tile is
+  worse than no tile. Zone splits (§3.3's recommendation to keep them for a lift) have no
+  summary-tile or chart surface anywhere in the app today, for *any* discipline — only
+  the fact sheet renders them as prose — so adding one would be new-feature scope for a
+  ticket titled "workout detail for a lift," not a removal-and-replacement. Reported,
+  not built.
+- **Not verified by CI beyond compilation.** Every section composed by
+  `WorkoutDetailView`, the cadence/route/splits omission, the HR curve's cap line, and
+  the verdict header's rendering are App-layer (tracker R2, R13) — CI compiles them and
+  never draws a pixel. **Needs device verification**: open a lift's detail screen and
+  confirm no cadence card, no route card, no splits card, and no dashed cap line appear;
+  confirm the discipline-note sentence reads correctly below the summary tiles; confirm
+  the "Scheduled" row shows the lift's own ask (duration and muscle groups, where
+  prescribed) rather than the day's run ask; open a run's detail screen and confirm
+  nothing changed. A device with a historical miscategorised lift score would also
+  confirm the new label row, but none is known to exist on this account yet.
 
 **MAX-140 — the trend tiles stop calling obligations days, and the average score is
 decided to be per-workout.** LIFTING-SPEC §14 named three jobs; here is what happened to
