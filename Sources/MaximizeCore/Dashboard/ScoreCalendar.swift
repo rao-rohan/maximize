@@ -2,12 +2,16 @@ import Foundation
 
 /// What one day on the score-colored calendar (D4, FR-3.2) actually is.
 ///
-/// ## Why eight cases, not "good / bad / empty"
+/// ## Why nine cases, not "good / bad / empty"
 ///
 /// The PRD treats these as different facts, and collapsing them would throw away
 /// information the athlete can act on:
 ///
 /// - `.scored` — a workout happened and was judged. The one state color is *for*.
+/// - `.partiallyMet` — the day asked for **two** sessions (A17) and exactly one of them
+///   was met. Not a ninth colour and not a fourth channel: LIFTING-SPEC §7.2 is explicit
+///   that the cell gains a *state*, and the contrast budget MAX-084 and MAX-087 paid for
+///   is already spent. See the case's own documentation for what it draws on and why.
 /// - `.awaitingScore` — a workout happened but nothing has judged it yet (§7.0's
 ///   capture-to-score gap, or no API key stored). Not a verdict either way — showing
 ///   it as ineffective would be lying about a score that has not been reached, and
@@ -51,6 +55,36 @@ public enum ScoreCalendarDayState: Hashable, Sendable {
     /// activity type is what is shown — see `ScoreCalendar.resolve` for the ranking
     /// and why a double-workout day is not penalized for its worse session.
     case scored(band: ScoreBand, activityType: ActivityType)
+
+    /// The day prescribed two obligations and **exactly one of them was met** (A19,
+    /// LIFTING-SPEC §7.2). A Tuesday whose run scored effective and whose lift never
+    /// happened is this state, not `.scored`.
+    ///
+    /// ## What this reverses, precisely
+    ///
+    /// `dayState` used to say, in its own words, *"a workout that actually happened
+    /// always outranks the plan's ask for the day"*. That reasoning was written for a day
+    /// whose single ask was rest and the athlete ran anyway, where what was done genuinely
+    /// is the more informative fact. It does not transfer to a day whose *other* ask went
+    /// unmet: there, what was done is a half-truth, and a green cell over a skipped
+    /// obligation is the calendar lying about the week. So `.scored` still outranks the
+    /// ask for **the obligation it belongs to**; it no longer outranks a *different*
+    /// obligation's miss.
+    ///
+    /// ## Why the payload is two halves rather than one verdict
+    ///
+    /// Both halves are drawn from the one shared roll-up (`DayObligationResolver`, §7.3):
+    /// the calendar must never answer "was this day fully met" differently from the
+    /// effective-obligations tile, or the two disagree about the same Tuesday with a
+    /// colour attached. `met` is what the day still earned; `unmet` is what it did not,
+    /// and it names the slot so the spoken sentence can say *which* half was dropped —
+    /// the difference between "you skipped the lift" and "you skipped the run", which no
+    /// ~42pt cell can draw but which is the whole reason the athlete asked for both.
+    ///
+    /// **Never reachable on a day prescribing one session**, by construction: it takes a
+    /// met obligation *and* an unmet one, and a one-slot day has at most one obligation
+    /// of either kind. That is what makes this state cost nothing historically.
+    case partiallyMet(met: MetObligation, unmet: UnmetObligation)
 
     /// A workout was recorded but has no score yet. **A score is still coming**: the
     /// lazy path (`WorkoutIngestionPipeline.completeIngestion(forWorkout:)`) re-attempts
@@ -124,6 +158,66 @@ public enum ScoreCalendarDayState: Hashable, Sendable {
 
     /// No plan version governs this day.
     case unplanned
+}
+
+extension ScoreCalendarDayState {
+
+    /// The half of a mixed day that **was** met (`ObligationOutcome.met`).
+    ///
+    /// `band` is non-optional here because a met obligation always has one: meeting an
+    /// obligation requires a workout of its discipline that was scored, and a scored
+    /// workout carries `ScoreLedger.automatic.band`. Modelling it as an optional would
+    /// have made an unrepresentable day representable.
+    ///
+    /// **The band is the auto-score's, never a correction's** (D1/D4/D8) — the same rule
+    /// `.scored` obeys, and the same one `ObligationResolution.band` already encodes. So
+    /// an obligation met *by annotation* over an ineffective auto-score arrives here as
+    /// met, carrying the band the scorer wrote. The two readings disagree on purpose; the
+    /// divergence between them is PRD §2's scorer-quality signal, and resolving it away
+    /// on a calendar cell would destroy exactly the telemetry it exists to preserve.
+    public struct MetObligation: Hashable, Sendable {
+        public let discipline: Discipline
+
+        /// What the plan asked of this slot — the ask, not what was performed. A day can
+        /// meet a `.long` ask with an easy run; `ScoreCalendarDay.agreement` is where that
+        /// divergence lives, and it is a different question from this one.
+        public let kind: ScheduledSessionKind
+
+        public let band: ScoreBand
+
+        public init(discipline: Discipline, kind: ScheduledSessionKind, band: ScoreBand) {
+            self.discipline = discipline
+            self.kind = kind
+            self.band = band
+        }
+    }
+
+    /// The half of a mixed day that was **not** met — `.missed` (nothing of that
+    /// discipline was recorded and the weekly budget did not stretch to it) or `.notMet`
+    /// (something was recorded, and judged short).
+    ///
+    /// A converted obligation is deliberately **not** one of these: D9/A6 forgave it, so
+    /// the day was not held to it, and `DayObligations.isFullyMet` excludes it from the
+    /// test for exactly the same reason. A day whose lift was forgiven and whose run was
+    /// met is a `.scored` day, not a partial one.
+    public struct UnmetObligation: Hashable, Sendable {
+        public let discipline: Discipline
+
+        /// What the plan asked of this slot.
+        public let kind: ScheduledSessionKind
+
+        /// The band of the best-scored workout of this discipline, or **nil when nothing
+        /// of it was recorded at all**. That nil is the whole difference between "you
+        /// lifted and it fell short" and "you did not lift", which the spoken sentence
+        /// says and the cell — one fill, one glyph — cannot.
+        public let judgedBand: ScoreBand?
+
+        public init(discipline: Discipline, kind: ScheduledSessionKind, judgedBand: ScoreBand?) {
+            self.discipline = discipline
+            self.kind = kind
+            self.judgedBand = judgedBand
+        }
+    }
 }
 
 /// How what the athlete did on a day compares with what the plan asked of it
@@ -255,11 +349,16 @@ public struct ScoreCalendarDay: Hashable, Sendable, Identifiable {
     ///
     /// This is the whole condition the plan layer is drawn on — one bit, so a cell
     /// that carries it needs no legend beyond "the plan asked for something here".
-    /// `PlanDay.canBeMissed` is the same predicate seen from the other end (D9), and
-    /// reusing it is deliberate: a day the plan can hold you to is exactly a day the
-    /// plan asked something of.
+    ///
+    /// **Either slot counts, as of MAX-135.** It was `PlanDay.canBeMissed` — the run ask
+    /// alone — which MAX-134 deliberately left in place because widening it silently
+    /// changes what a cell draws. A day prescribing a lift is a day the plan asked
+    /// something of, and drawing no ring on it would say the opposite in the one channel
+    /// that carries the plan at all. `PlanDay.hasObligations` is the same predicate seen
+    /// from the tallies' end (A19), and the two agree on every day either has ever seen,
+    /// because every plan on disk rests its lift slot.
     public var prescribesASession: Bool {
-        prescription?.canBeMissed == true
+        prescription?.hasObligations == true
     }
 }
 
@@ -352,7 +451,7 @@ public enum ScoreCalendar {
             workoutsByDay[day, default: []].append(workout)
         }
 
-        let (planDaysInRange, convertedDates) = try resolveRestDayConversions(
+        let (planDaysInRange, convertedObligations) = try resolveRestDayConversions(
             from: from,
             through: through,
             today: today,
@@ -370,18 +469,29 @@ public enum ScoreCalendar {
                     scoreLedgers[workout.id].map { (workout, $0) }
                 }
             )
+            // **The shared roll-up, not a second one** (§7.3, MAX-134). Every judgement
+            // below about which of the day's asks were met is read off this value; the
+            // effective-obligations tile counts the same value over the same interval, so
+            // the cell and the tile cannot disagree about the same Tuesday.
+            let obligations = DayObligationResolver.resolve(
+                date: day,
+                planDay: planDay,
+                workouts: dayWorkouts,
+                scoreLedgers: scoreLedgers,
+                convertedObligations: convertedObligations,
+                outcomeIsKnown: outcomeIsKnown
+            )
             let state = dayState(
                 dayWorkouts: dayWorkouts,
                 bestScored: best,
-                planDay: planDay,
-                isConverted: convertedDates.contains(day),
-                outcomeIsKnown: outcomeIsKnown
+                obligations: obligations,
+                planDay: planDay
             )
             return ScoreCalendarDay(
                 date: day,
                 state: state,
                 prescription: planDay,
-                agreement: agreement(planDay: planDay, score: best?.1.automatic),
+                agreement: agreement(planDay: planDay, scored: best),
                 destination: destination(dayWorkouts: dayWorkouts, outcomeIsKnown: outcomeIsKnown)
             )
         }
@@ -416,7 +526,7 @@ public enum ScoreCalendar {
         workoutsByDay: [CalendarDay: [Workout]],
         planCalendar: PlanCalendar?,
         restDayBudget: RestDayBudget
-    ) throws -> (planDaysInRange: [CalendarDay: PlanDay], convertedDates: Set<CalendarDay>) {
+    ) throws -> (planDaysInRange: [CalendarDay: PlanDay], convertedObligations: Set<ObligationID>) {
         guard let planCalendar else { return ([:], []) }
 
         let expandedStart = try from.startOfTrainingWeek()
@@ -443,29 +553,50 @@ public enum ScoreCalendar {
             // cannot be a miss, so it cannot be forgiven.
             outcomesUnknownFrom: today
         )
-        // **The run slot's conversions only**, because every state this set feeds —
-        // `.convertedRest` against `.missed` — describes `planDay.scheduledSession`, the
-        // run ask. A forgiven *lift* has no cell state to land in until MAX-135 gives the
-        // mixed day one, and folding it in here would silently paint a day's run as
-        // forgiven because its lift was. The budget itself is shared and spent over both
-        // slots (§6.4); it is only the rendering that is still one-slot.
-        return (planDaysInRange, Set(conversions.filter { $0.discipline == .run }.map(\.date)))
+        // **Both slots' conversions now** (MAX-135). MAX-134 had to filter this to the run
+        // slot because a forgiven *lift* had no cell state to land in, and folding it in
+        // would have painted a day's run as forgiven because its lift was. The states below
+        // are per-obligation, so the whole set is handed over — the identical value
+        // `TalliesCalculator` passes the same resolver, which is what stops the budget
+        // being spent one way for the tile and another for the cell.
+        return (planDaysInRange, Set(conversions.map(\.id)))
     }
 
     // MARK: - Per-day state
 
+    /// - Parameters:
+    ///   - obligations: the day's asks and what became of each, from the one shared
+    ///     roll-up (§7.3). Every met/unmet/forgiven judgement below reads this rather than
+    ///     re-deriving one; `planDay` is still passed because "no plan governs this day"
+    ///     and "the plan governs it and asks nothing" are different facts and
+    ///     `DayObligations` deliberately does not distinguish them.
     private static func dayState(
         dayWorkouts: [Workout],
         bestScored: (Workout, ScoreLedger)?,
-        planDay: PlanDay?,
-        isConverted: Bool,
-        outcomeIsKnown: Bool
+        obligations: DayObligations,
+        planDay: PlanDay?
     ) -> ScoreCalendarDayState {
-        // A workout that actually happened always outranks the plan's ask for the
-        // day — D4 colors by what was done, not by what was scheduled. This applies
-        // even on a day the plan scheduled as rest: an extra session still gets
-        // judged on its own merits, and a rest day the athlete ran through is a fact
-        // worth surfacing honestly rather than hiding behind "scheduled rest".
+        // §7.2, ahead of everything: on a day that asked for two sessions and got one,
+        // the worse verdict colours the day. A workout that happened still outranks the
+        // plan's ask for *its own* obligation — that is `.scored` below, unchanged — but
+        // it no longer outranks a different obligation's miss.
+        if let mixed = partiallyMet(obligations) {
+            return mixed
+        }
+        // Every decided obligation was met (or forgiven), so the day is coloured by the
+        // **worst** band among the met ones. On the single-obligation day that is every
+        // day in the athlete's history, "worst of one" is the same band the day-wide
+        // best-of below would have chosen, so no historical cell moves; on a two-session
+        // day it is §7.2's rule applied to a day that met both asks, which is the same
+        // all-of the streak uses (§6.3) rather than the best-of that resolves two attempts
+        // at one ask.
+        if let scored = scoredFromObligations(obligations, dayWorkouts: dayWorkouts) {
+            return scored
+        }
+        // A workout that happened on a day the plan asked nothing of — a rest day the
+        // athlete ran through, or a day before the first plan version. D4 colors by what
+        // was done, and that is a fact worth surfacing honestly rather than hiding behind
+        // "scheduled rest".
         if let best = bestScored {
             return .scored(band: best.1.automatic.band, activityType: best.0.activityType)
         }
@@ -489,17 +620,91 @@ public enum ScoreCalendar {
             return .noVerdict(activityType: earliest.activityType)
         }
 
-        guard let planDay else { return .unplanned }
-        guard planDay.canBeMissed else { return .scheduledRest }
-        // Ahead of `missed`/`convertedRest`, and deliberately ahead of `isConverted`
-        // too: a day whose outcome is not in has nothing to forgive, so a stray
-        // conversion could never present itself as one.
-        guard outcomeIsKnown else {
-            return .forthcoming(scheduledKind: planDay.scheduledSession.kind)
+        guard planDay != nil else { return .unplanned }
+        // The plan governs the day and asks nothing of **either** slot. Widened from
+        // `PlanDay.canBeMissed` (the run slot alone) by MAX-135, which is the ticket that
+        // can give a lift-only day a cell to land in: before this, a day prescribing a
+        // lift and resting its run slot drew "scheduled rest day" over an obligation the
+        // athlete was still being held to. No day either predicate has ever seen moves —
+        // every plan on disk rests its lift slot, so the two agree everywhere.
+        guard let first = obligations.resolutions.first else { return .scheduledRest }
+        // Ahead of `.missed`/`.convertedRest`: a day whose outcome is not in has nothing
+        // to forgive and nothing to have skipped. (The resolver settles all of a day's
+        // obligations against the same `outcomeIsKnown`, so these cannot mix.)
+        if let pending = obligations.resolutions.first(where: { $0.outcome == .notYetDue }) {
+            return .forthcoming(scheduledKind: pending.scheduledSession.kind)
         }
-        return isConverted
-            ? .convertedRest(scheduledKind: planDay.scheduledSession.kind)
-            : .missed(scheduledKind: planDay.scheduledSession.kind)
+        // A real miss outranks a forgiven one: on a day whose run was converted and whose
+        // lift was skipped, the cell has to show the skip. Run-first within each, from
+        // `resolutions`' own slot ordering, so the answer never depends on input order.
+        if let missed = obligations.resolutions.first(where: { $0.outcome == .missed }) {
+            return .missed(scheduledKind: missed.scheduledSession.kind)
+        }
+        if let converted = obligations.resolutions.first(where: { $0.outcome == .converted }) {
+            return .convertedRest(scheduledKind: converted.scheduledSession.kind)
+        }
+        // Unreachable: `.met` and `.notMet` imply a scored workout and `.awaitingVerdict`
+        // a recorded one, and all three were answered above. Falls back to the day's ask
+        // rather than to rest, so that a seventh `ObligationOutcome` arriving without a
+        // cell state shows the plan asking for something rather than claiming it did not.
+        return .missed(scheduledKind: first.scheduledSession.kind)
+    }
+
+    /// §7.2's mixed day: exactly one of the day's two obligations was met.
+    ///
+    /// Nil on every day in the athlete's history, because it takes a met obligation *and*
+    /// an unmet one and a one-slot day has at most one obligation of either kind. Both
+    /// lists are the shared roll-up's own (`DayObligations.metObligations` /
+    /// `.unmetObligations`), so "was this day fully met" is answered here by the same
+    /// arithmetic the effective-obligations tile counts by.
+    private static func partiallyMet(_ obligations: DayObligations) -> ScoreCalendarDayState? {
+        guard let met = obligations.metObligations.first,
+              // A met obligation always carries a band (see `MetObligation`); the guard is
+              // how that invariant is enforced rather than assumed, and a day that somehow
+              // lacked one falls through to `.scored` rather than to a force unwrap.
+              let band = met.band,
+              let unmet = obligations.unmetObligations.first
+        else { return nil }
+        return .partiallyMet(
+            met: ScoreCalendarDayState.MetObligation(
+                discipline: met.discipline,
+                kind: met.scheduledSession.kind,
+                band: band
+            ),
+            unmet: ScoreCalendarDayState.UnmetObligation(
+                discipline: unmet.discipline,
+                kind: unmet.scheduledSession.kind,
+                judgedBand: unmet.band
+            )
+        )
+    }
+
+    /// The band and activity a day that met everything it was held to is coloured by:
+    /// the **worst** band among its met obligations.
+    ///
+    /// Worst rather than best because these are different obligations, not two attempts at
+    /// one — §5's warm-up-jog generosity already resolved each obligation's own attempts
+    /// inside the resolver, and applying it a second time across obligations is the
+    /// day-level OR §6.1 rejects. Ties keep the earlier slot (run before lift), so the
+    /// result never depends on input order.
+    ///
+    /// Nil when the day met nothing it was asked for, which includes every day the plan
+    /// asked nothing of; the caller falls back to the day's best-scored workout there.
+    private static func scoredFromObligations(
+        _ obligations: DayObligations,
+        dayWorkouts: [Workout]
+    ) -> ScoreCalendarDayState? {
+        let worst = obligations.metObligations.reduce(nil) { current, candidate -> ObligationResolution? in
+            guard let currentBand = current?.band else { return candidate }
+            guard let candidateBand = candidate.band else { return current }
+            return DayObligationResolver.bandRank(candidateBand) > DayObligationResolver.bandRank(currentBand)
+                ? candidate
+                : current
+        }
+        guard let worst, let band = worst.band,
+              let workout = dayWorkouts.first(where: { $0.id == worst.decidingWorkoutID })
+        else { return nil }
+        return .scored(band: band, activityType: workout.activityType)
     }
 
     // MARK: - Plan vs. execution
@@ -508,13 +713,25 @@ public enum ScoreCalendar {
     /// compares against lives on the auto-score (`Score.actualClassification`, D2), so
     /// a recorded-but-unscored day has an ask and an outcome but no comparison yet.
     /// That is a real state, not a gap to paper over: the calendar still shows the ask.
-    private static func agreement(planDay: PlanDay?, score: Score?) -> PlanExecutionAgreement? {
-        guard let score else { return nil }
-        let performed = score.actualClassification
-        guard let planDay, planDay.canBeMissed else {
+    ///
+    /// **The ask is the scored workout's own slot's** (MAX-135). It used to be
+    /// `planDay.scheduledSession` — the run ask — whatever had been scored, which was
+    /// correct only while nothing but a run could be. Once a lift can carry a score, that
+    /// comparison reads a strength session against the day's running ask and reports the
+    /// athlete diverged from a plan they in fact followed; a lift is not an attempt at the
+    /// run, which is §6.2's rule arriving one surface further on. Unchanged for every
+    /// score on disk: `scheduledSession(for: .run)` *is* `scheduledSession`.
+    private static func agreement(
+        planDay: PlanDay?,
+        scored: (Workout, ScoreLedger)?
+    ) -> PlanExecutionAgreement? {
+        guard let scored else { return nil }
+        let performed = scored.1.automatic.actualClassification
+        let discipline = scored.0.activityType.discipline
+        guard let planDay, !planDay.scheduledSession(for: discipline).isRest else {
             return .unprescribed(performed: performed)
         }
-        let prescribed = planDay.scheduledSession.kind
+        let prescribed = planDay.scheduledSession(for: discipline).kind
         return prescribed == ScheduledSessionKind(performed)
             ? .asPrescribed(kind: prescribed)
             : .divergent(prescribed: prescribed, performed: performed)

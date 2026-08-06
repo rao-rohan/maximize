@@ -406,7 +406,8 @@ final class ScoreCalendarTests: XCTestCase {
                 XCTAssertTrue(activityType.isRun, "\(resolved.date): \(activityType)")
             case .noVerdict(let activityType):
                 XCTAssertFalse(activityType.isRun, "\(resolved.date): \(activityType)")
-            case .scored, .missed, .convertedRest, .scheduledRest, .forthcoming, .unplanned:
+            case .scored, .partiallyMet, .missed, .convertedRest, .scheduledRest,
+                 .forthcoming, .unplanned:
                 continue
             }
         }

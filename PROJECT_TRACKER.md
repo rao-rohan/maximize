@@ -1757,7 +1757,7 @@ is the overseer's, not a ticket's — flagged here rather than done.
 | MAX-132 | Seed bands for lift days; the `easy.wellOverCap` shadow | 131 | Sonnet ✅ |
 | MAX-133 | Match a workout to its own discipline's ask | 129, 131 | **Opus** ✅ |
 | MAX-134 | Obligations, not days: tallies, streak, rest-day budget | 129, 133 | **Opus** ✅ |
-| MAX-135 | The calendar's mixed day | 134, **105** | **Opus** |
+| MAX-135 | The calendar's mixed day | 134, **105** | **Opus** ✅ |
 | MAX-136 | Context and fact sheet learn discipline | 129, 130 | **Opus** ✅ |
 | MAX-137 | Plan authoring for two slots | 129 | Sonnet ✅ |
 | MAX-138 | The plan screen shows both | 129 | Sonnet ✅ |
@@ -1940,7 +1940,7 @@ lift slot — but each currently answers about the day's *run* while calling it 
 |---|---|---|
 | `RubricEvaluator.evaluate` | ~~`planDay.scheduledSession.kind` picks the bands~~ **the workout's own discipline's ask, as of MAX-133** | MAX-133 ✅ |
 | `RestDayBudgeting` / `TalliesCalculator` | ~~`PlanDay.canBeMissed`, `costTier`~~ **each day's obligations, as of MAX-134** | MAX-134 ✅ |
-| `ScoreCalendar.dayState` / `agreement` | the day's single prescribed kind | MAX-135 |
+| `ScoreCalendar.dayState` / `agreement` | ~~the day's single prescribed kind~~ **each day's obligations, and the scored workout's own slot, as of MAX-135** | MAX-135 ✅ |
 | `WorkoutFactSheet` | ~~`planDay.scheduledSession`~~ **the workout's own slot, as of MAX-136** | MAX-136 ✅ |
 | `TrainingFactSheet` plan block | `entry.session` — the lift slot is still unrendered | **open, see MAX-136** |
 | `PlanDraft` setters, `PlanAuthoringError` | ~~the run slot only~~ **both, as of MAX-137** | MAX-137 ✅ |
@@ -2530,6 +2530,76 @@ everything the plan asked today" are different questions.
   lift can reach it while MAX-111's gate stands. Rewording it is prompt content, which wants
   the ticket that owns the lift's fact sheet (MAX-136) and its own security review — not a
   routing ticket.
+
+**MAX-135 — the calendar's mixed day.** LIFTING-SPEC §7. A day can prescribe two
+obligations, and a ~42pt cell has to be able to say "one of two met" without gaining a
+colour channel — §7.2 is explicit that it gains a **state**, and MAX-084, MAX-087 and
+MAX-105 have already spent the cell's budget between them.
+
+- **`ScoreCalendarDayState.partiallyMet(met:unmet:)`, and it computes no roll-up of its
+  own.** `ScoreCalendar.resolve` calls `DayObligationResolver.resolve` per day and reads
+  `metObligations`/`unmetObligations` off the result — §7.3's requirement, so the cell and
+  the effective-obligations tile cannot disagree about the same Tuesday. A test asserts
+  that agreement directly rather than trusting the arrangement. The payload is two small
+  structs rather than §7.2's sketched triple: the unmet half carries the band it earned
+  where one was reached and **nil where nothing was recorded**, which is the difference
+  between "you lifted and it fell short" and "you did not lift" — the one thing a single
+  fill and a single glyph cannot carry, and which the spoken sentence therefore must.
+- **The visual is a shape, and that was the honest answer rather than the cheap one.**
+  The fill is D9's red — the same token `.missed` draws, so the three red states measure
+  **1.00:1** against each other, computed in `WCAGContrastTests` rather than asserted —
+  and the whole separation is the glyph: an activity figure for a run that went badly, an
+  "×" for a day nothing happened on, a half-filled disc for a day that did one of two
+  things. Shape survives greyscale, every kind of colour vision, Increase Contrast and
+  Reduce Transparency alike, which is the same argument MAX-126 used to give `.noVerdict`
+  no colour of its own. **Rejected: reusing MAX-084's corner pip** for the met half — that
+  slot's vocabulary is "which band is this fill", and this fill is not a band; and
+  **rejected: a split fill**, which is a second colour channel by another name.
+- **`testNoTwoScoreBandsAreDistinguishedByHueAlone` was widened, not duplicated.** Its
+  universe is now the *cells* the calendar draws — fill token plus glyph, corner pip and
+  fill/no-fill in the day grid; hollow and inset size at year density — so band-versus-band
+  coverage is unchanged (the three `.scored` cells share an activity glyph by construction
+  and still have to pass on the pip) and every new state is held to the same rule. It is
+  renamed `testNoTwoCalendarCellsAreDistinguishedByHueAlone`.
+- **Two decisions moved into the core to make that test possible**, and they are the
+  ticket's real architecture change. The glyph table is now
+  `MaximizeCore.ScoreCalendarGlyph` (the app is a passthrough) and the mixed day's spoken
+  sentence is `ScoreCalendarCopy`, on `PlanCopy`'s vocabulary. Both are load-bearing
+  channels for this state, and while they sat in the app target nothing could check them —
+  `swift test` never compiles it. The rest of `ScoreCalendarFormatting`'s copy stayed put:
+  moving it needs `WorkoutDisplayFormatting`, which is `App/Workouts/` and another ticket's
+  file this session.
+- **At year density the mixed day collapses onto the miss, deliberately.** No glyph exists
+  at ~6pt, and the two alternatives were a band colour it did not earn or a full-footprint
+  red reading against `.effective`'s full-footprint green on hue alone. Hollow is true of
+  both states; the spoken sentence carries the rest, exactly as `.scheduledRest` and
+  `.convertedRest` are already left to it.
+- **Three one-slot readings were widened with it, and no historical cell moves.**
+  `prescribesASession` and the `.scheduledRest`/`.missed`/`.convertedRest`/`.forthcoming`
+  empties now read both slots (a lift-only day drew *"scheduled rest day"* over an
+  outstanding ask before), `ScoreCalendar` stops filtering the rest-day budget's
+  conversions to the run slot — the workaround MAX-134 left for this ticket — and
+  `agreement` compares a scored workout against **its own discipline's** ask. Every plan on
+  disk rests its lift slot, so all four agree with what they replaced on every day the app
+  has ever seen; a run-only week is asserted cell by cell to say so.
+- **A both-met day is coloured by the worse of its two bands.** §7.2's rule applied to the
+  day that met everything: across obligations the calendar is all-of, the same as the
+  streak (§6.3), while two attempts at *one* obligation still resolve best-of (§5) inside
+  the resolver. Unreachable until something scores lifts, and tested through an obligation
+  met by a *correction* over a marginal auto-score, which pins the other half of it — the
+  cell colours from the immutable auto-score, never from the annotation (D1/D4/D8).
+- **Reported, not done: a recorded-but-unjudged workout still outranks another
+  obligation's settled miss.** A Tuesday whose lift was recorded and unscored and whose run
+  was missed draws `.noVerdict`, and its spoken sentence names neither the miss nor the
+  second ask. §7.2's principle points at changing it, but the same ordering governs
+  single-obligation days that have been on screen since MAX-061 — a ride on a missed run
+  day reads the same way — so changing it here would have moved historical cells under
+  cover of a lifting ticket. It wants its own ticket, and probably a designed state rather
+  than a reordering.
+- **Not verified, and it is the interesting half.** No pixel was drawn. Whether
+  `circle.lefthalf.filled` reads as "half of it happened" at 42pt rather than as noise, and
+  whether a mixed day reads as *worse* than a plain miss when the two share a fill, are
+  device questions. See the PR's device list.
 
 **MAX-145 — the athlete says what a lift worked, and the app learns to wait for it.**
 A22 built. The picker is the small half; the two consequences the amendment named are the

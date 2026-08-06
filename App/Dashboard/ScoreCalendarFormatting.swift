@@ -13,25 +13,19 @@ import MaximizeCore
 /// athlete cannot read hue). Two of the three redundant channels are decided here
 /// rather than left to the view to reinvent per call site:
 ///
-/// - **Glyph shape.** `.scored`/`.awaitingScore`/`.noVerdict` show what activity was
-///   done; `.missed` shows a dedicated "not done" mark rather than an activity icon, so a
-///   scored-badly day (an activity glyph on red) and a missed day (an X on the same
-///   red) never look alike even in grayscale. `.scheduledRest` and `.convertedRest`
-///   use two visually distinct rest glyphs for the same reason, even though both sit
-///   on the same neutral fill.
-///
-///   **What the glyph does not do, and used to claim it did.** It separates *day
-///   states*. It does not separate *bands*, because `.scored` resolves to the
-///   activity glyph regardless of how the run went — so an effective run and a
-///   marginal run of the same type are the same mark on two fills that measure
-///   1.02:1 against each other. That is what `ScoreBand.mark` is for (MAX-084); it
-///   is decided in `MaximizeCore` and drawn by `ScoreBandMarkView`, deliberately not
-///   folded into `systemImageName(for:)` — one glyph cannot encode two orthogonal
-///   facts, and activity is the one this function is named for.
+/// - **Glyph shape**, which since MAX-135 is decided one level further down, in
+///   `MaximizeCore.ScoreCalendarGlyph`, for the reason that type documents: a channel CI
+///   cannot see is not a channel. `.scored`/`.awaitingScore`/`.noVerdict` show what
+///   activity was done; `.missed` shows a dedicated "not done" mark; `.partiallyMet`
+///   shows a half-filled disc — three states on the *same* red fill, told apart by shape
+///   alone. `.scheduledRest` and `.convertedRest` use two distinct rest glyphs for the
+///   same reason, even though both sit on the same neutral fill.
 /// - **VoiceOver label.** Every state gets a full sentence, not just a glyph name —
 ///   the strongest channel of all, since it does not depend on shape recognition
 ///   either. This one *does* already name the band, and since MAX-105 it also names the
-///   plan: what was prescribed, and whether what happened matches it.
+///   plan: what was prescribed, and whether what happened matches it. The mixed day's
+///   sentence is composed in the core (`ScoreCalendarCopy`) because on that state the
+///   sentence is the only place the whole truth exists — see §7.2.
 ///
 /// ## Why the plan is spoken in more detail than it is drawn (MAX-105)
 ///
@@ -49,75 +43,15 @@ enum ScoreCalendarFormatting {
 
     // MARK: - Glyph
 
+    /// **The table moved to `MaximizeCore.ScoreCalendarGlyph` in MAX-135**, and this is
+    /// the passthrough that keeps `ScoreCalendarView`'s call site unchanged. The reason is
+    /// the one CLAUDE.md gives for the whole core: the glyph is the channel that separates
+    /// a day that went badly from a day that did not happen from a day that half happened,
+    /// all three of which draw the same red — and while the mapping lived here, no test
+    /// could see it, because `swift test` never compiles this target. See that type for
+    /// each glyph's argument; `WCAGContrastTests` now asserts the distinctness they claim.
     static func systemImageName(for state: ScoreCalendarDayState) -> String {
-        switch state {
-        case .scored(_, let activityType):
-            return systemImageName(for: activityType)
-        case .awaitingScore(let activityType):
-            return systemImageName(for: activityType)
-        case .noVerdict(let activityType):
-            // The activity, exactly as `.scored` and `.awaitingScore` show it. A lift is
-            // a day the athlete trained, so the cell shows what they did; a mark meaning
-            // "nothing to report here" would be the apology this state must not make.
-            // The activity glyph is also the whole non-hue channel separating this state
-            // from `.awaitingScore`, and it is free: the two can never carry the same
-            // activity type (see `ScoreCalendarDayState.noVerdict`).
-            return systemImageName(for: activityType)
-        case .missed:
-            return "xmark"
-        case .convertedRest:
-            return "moon.zzz"
-        case .scheduledRest:
-            return "moon.zzz.fill"
-        case .forthcoming(let scheduledKind):
-            return systemImageName(forScheduled: scheduledKind)
-        case .unplanned:
-            return "minus"
-        }
-    }
-
-    /// The glyph a day that has not happened yet carries: **what the plan asks for**,
-    /// since there is no activity to report.
-    ///
-    /// This is the one place the calendar's glyph channel points forward rather than
-    /// back, and it is what makes a future day answer "what am I doing Thursday" without
-    /// a tap. It cannot be confused with a performed activity even though `.easy` shares
-    /// `figure.run` with a recorded run: a forthcoming cell is drawn unfilled
-    /// (`ScoreCalendarDayState.isDrawnUnfilledInTheDayGrid`), and no cell showing a
-    /// performed activity ever is.
-    ///
-    /// `.long` takes the same runner inside a ring — the week's headline session as
-    /// "more of the same thing", which is what a long run is — rather than a second,
-    /// unrelated figure. `.hard` takes a bolt because intensity, not distance, is what
-    /// separates it.
-    private static func systemImageName(forScheduled kind: ScheduledSessionKind) -> String {
-        switch kind {
-        case .easy: return "figure.run"
-        case .long: return "figure.run.circle"
-        case .hard: return "bolt"
-        case .other: return "figure.mixed.cardio"
-        // Unreachable: a scheduled rest day is `.scheduledRest` whether it is behind or
-        // ahead of today, so `.forthcoming` never carries `.rest`. Mapped rather than
-        // defaulted so a future `ScheduledSessionKind` case fails to compile here.
-        case .rest: return "moon.zzz.fill"
-        // Also unreachable until the weekly template can prescribe a lift (MAX-111).
-        // The same glyph a recorded strength session already draws below, so the two
-        // read as one activity across the substrate and the figure — which is what
-        // MAX-117 will need when a lift day becomes drawable.
-        case .lift: return "figure.strengthtraining.traditional"
-        }
-    }
-
-    private static func systemImageName(for activityType: ActivityType) -> String {
-        switch activityType {
-        case .running: return "figure.run"
-        case .treadmillRunning: return "figure.run.square.stack"
-        case .walking: return "figure.walk"
-        case .hiking: return "figure.hiking"
-        case .cycling: return "figure.outdoor.cycle"
-        case .traditionalStrengthTraining: return "figure.strengthtraining.traditional"
-        default: return "figure.mixed.cardio"
-        }
+        ScoreCalendarGlyph.symbolName(for: state)
     }
 
     // MARK: - VoiceOver label
@@ -160,6 +94,13 @@ enum ScoreCalendarFormatting {
         switch state {
         case .scored(let band, let activityType):
             return "\(dayText): \(WorkoutDisplayFormatting.describe(activityType)), \(bandLabel(band))."
+        case .partiallyMet(let met, let unmet):
+            // Composed in the core (`ScoreCalendarCopy`), not here: on a mixed day the
+            // sentence is the *only* channel carrying which half was dropped and what the
+            // other half scored, which makes it part of the state rather than a rendering
+            // of it — see LIFTING-SPEC §7.2. This layer still owns the date prefix, so a
+            // month cell and a year cell keep speaking their own dates.
+            return "\(dayText): \(ScoreCalendarCopy.partiallyMetOutcome(met: met, unmet: unmet))"
         case .awaitingScore(let activityType):
             return "\(dayText): \(WorkoutDisplayFormatting.describe(activityType)), awaiting score."
         case .noVerdict(let activityType):
@@ -193,6 +134,13 @@ enum ScoreCalendarFormatting {
     /// itself — "missed easy run. Planned: easy run." VoiceOver users hear every word,
     /// and a calendar is read cell after cell; a redundant clause per day is a real cost.
     private static func planClause(for day: ScoreCalendarDay) -> String? {
+        // A mixed day's outcome clause already names **both** of the day's asks — it is
+        // built out of them — so an agreement clause here would say a third time what the
+        // sentence has said twice. It would also be the wrong subject: `agreement`
+        // describes the day's best-scored workout, which on a mixed day is the half that
+        // went *well*, and appending "As planned: easy run." to a sentence about a skipped
+        // lift reads as approval of the day.
+        if case .partiallyMet = day.state { return nil }
         switch day.agreement {
         case .asPrescribed(let kind)?:
             return "As planned: \(kindLabel(kind))."
@@ -212,7 +160,8 @@ enum ScoreCalendarFormatting {
                     return "Not on the plan."
                 }
                 return "Planned: \(kindLabel(prescription.scheduledSession.kind))."
-            case .scored, .missed, .convertedRest, .scheduledRest, .forthcoming, .unplanned:
+            case .scored, .partiallyMet, .missed, .convertedRest, .scheduledRest,
+                 .forthcoming, .unplanned:
                 return nil
             }
         }
@@ -233,9 +182,8 @@ enum ScoreCalendarFormatting {
         case .hard: return "hard session"
         case .other: return "session"
         case .rest: return "rest day" // unreachable — `PlanDay.canBeMissed` excludes it.
-        // Unreachable until a template can prescribe one (MAX-111). Reads correctly in
-        // every sentence this feeds: "missed lift", "lift scheduled, not yet due",
-        // "As planned: lift."
+        // Reachable as of MAX-135, on a day whose lift slot is prescribed: "missed lift",
+        // "lift scheduled, not yet due", "rest — converted from a missed lift".
         case .lift: return "lift"
         }
     }
@@ -249,10 +197,14 @@ enum ScoreCalendarFormatting {
         case .long: return "long"
         case .hard: return "hard"
         case .other: return "something else"
-        // Unreachable: no stored `Score` carries `.lift`, so `planClause`'s "…; ran
-        // \(classificationLabel(performed))." cannot be built from one yet. The verb in
-        // that sentence stops being right the day it can be, and rewording it needs the
-        // mixed-day cell it belongs to — MAX-117, with MAX-104's copy pass behind it.
+        // Still unreachable, and MAX-135 narrowed the path rather than opening it. It
+        // takes a `.divergent` agreement whose performance is a lift, and `agreement` now
+        // compares a scored workout against **its own slot's** ask: a lift is compared
+        // with the lift ask, which `ScheduledSessionKind.liftPrescribable` allows to be
+        // only `.lift` or `.rest` — so a scored lift is either `.asPrescribed` or, on a
+        // rested slot, `.unprescribed`, and never "planned X; ran a lift". The verb here
+        // would still be wrong if that ever changed; rewording it belongs with MAX-104's
+        // copy pass over the lifting surfaces.
         case .lift: return "a lift"
         }
     }

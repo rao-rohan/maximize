@@ -214,67 +214,209 @@ final class DesignPaletteContrastTests: XCTestCase {
         )
     }
 
-    // MARK: Score bands against *each other* — the gap MAX-084 found
+    // MARK: The calendar's cells against *each other* — the gap MAX-084 found
 
     /// The check this suite was missing, and the reason a 1.02:1 pair shipped.
     ///
     /// Every pairing above measures a token against a *surface*. Nothing measured the
-    /// three bands against one another, so nothing noticed that `scoreEffective` and
-    /// `scoreMarginal` are the same square in greyscale — or that in light appearance
+    /// calendar's own cells against one another, so nothing noticed that `scoreEffective`
+    /// and `scoreMarginal` are the same square in greyscale — or that in light appearance
     /// all three bands land within 1.04:1 of each other.
     ///
-    /// The rule asserted here is the one FR-3.2's calendar actually needs: **no two
-    /// bands may be left distinguishable by hue alone, at the size they are actually
-    /// drawn.** A pair passes at a given representation if either its fills separate by
-    /// WCAG 1.4.11's 3:1 non-text minimum — enough that luminance alone tells them apart
-    /// — or the two carry different non-colour marks *for that representation*. Today
-    /// every pair passes on its mark, in every representation and every appearance;
-    /// that is precisely the point of the mark. A future edit that collapses two bands
-    /// onto one mark, or that adds a fourth band without one, fails here rather than
-    /// waiting for a reviewer with a colour-blindness filter.
+    /// The rule asserted here is the one FR-3.2's calendar actually needs: **no two cells
+    /// may be left distinguishable by hue alone, at the size they are actually drawn.** A
+    /// pair passes at a given representation if either its fills separate by WCAG 1.4.11's
+    /// 3:1 non-text minimum — enough that luminance alone tells them apart — or the two
+    /// carry different non-colour channels *for that representation*. A future edit that
+    /// collapses two cells onto one mark, or that adds a state or a band without one,
+    /// fails here rather than waiting for a reviewer with a colour-blindness filter.
     ///
     /// **Two representations, not one**, since MAX-087: `ScoreBandMark` (MAX-084) is
     /// what `ScoreCalendarDayCell` actually draws in the day grid (week and month
     /// spans); `ScoreBandHeatmapMark` (MAX-087) is what `ScoreCalendarHeatmapCell`
     /// actually draws at year density, where there is no room for a corner pip. Testing
-    /// only the day grid's mark here — as this suite did before MAX-087 — would let the
+    /// only the day grid's mark — as this suite did before MAX-087 — would let the
     /// heatmap's channel silently disappear (or silently collapse two bands onto the
-    /// same size) with nothing to catch it, exactly the gap that shipped in MAX-083 and
-    /// this ticket exists to close.
-    private var representations: [(name: String, marksDiffer: (ScoreBand, ScoreBand) -> Bool)] {
-        [
-            ("day grid, corner pip (MAX-084)", { $0.mark != $1.mark }),
-            ("year heatmap, inset size (MAX-087)", { $0.heatmapMark != $1.heatmapMark }),
-        ]
+    /// same size) with nothing to catch it, exactly the gap that shipped in MAX-083.
+    ///
+    /// **Cells, not bands, since MAX-135**, and that is a widening of the same rule
+    /// rather than a second one. Three of the day grid's states draw on the *identical*
+    /// red token — `.scored(.ineffective, _)`, `.missed`, and the mixed day — so they
+    /// measure 1.00:1 against each other, further apart than nothing and closer than the
+    /// 1.02:1 pair that made this test necessary. Their whole separation is the glyph,
+    /// and while that mapping lived in the app target nothing could check it. Band-versus-
+    /// band coverage is unchanged: the three `.scored` cells below carry the same activity
+    /// glyph by construction, so their pairs still have to pass on the pip and the inset.
+    private struct DrawnCalendarCell {
+        let name: String
+
+        /// The token the cell's reader actually sees behind its mark.
+        let fill: DesignPalette.Ink
+
+        /// Everything about the cell that is not a colour value, so it survives greyscale,
+        /// every kind of colour vision, and Increase Contrast alike.
+        let nonHueChannels: [String]
     }
 
-    func testNoTwoScoreBandsAreDistinguishedByHueAlone() {
-        let bands = ScoreBand.allCases
+    /// The fill each state draws on, mirroring `ScoreCalendarPalette` in
+    /// `App/Dashboard/ScoreCalendarView.swift`. Restated here rather than read, because
+    /// that mapping returns a SwiftUI `Color` and this target cannot import SwiftUI — the
+    /// same reason `DesignPalette` exists at all. Exhaustive on purpose: a new
+    /// `ScoreCalendarDayState` case fails to compile here until someone has said what it
+    /// draws on.
+    private func dayGridFill(for state: ScoreCalendarDayState) -> DesignPalette.Ink {
+        switch state {
+        case .scored(let band, _):
+            return ink(for: band)
+        // D9's red, shared. `.partiallyMet` takes it because §7.2 colours a mixed day by
+        // its worse verdict, and takes *the same token* rather than a ninth one because
+        // the budget for a new saturated colour is not there — which is precisely why the
+        // pairs below have to pass on shape.
+        case .partiallyMet, .missed:
+            return DesignPalette.scoreIneffective
+        // Drawn with no fill at all in the day grid, so what a reader sees behind its
+        // glyph is the calendar card (`isDrawnUnfilledInTheDayGrid`).
+        case .forthcoming:
+            return DesignPalette.surfaceElevated
+        case .awaitingScore, .noVerdict, .convertedRest, .scheduledRest, .unplanned:
+            return DesignPalette.surfaceInset
+        }
+    }
+
+    /// The corner pip, with "no band" and `.unmarked` collapsed onto one value — because
+    /// they draw the same nothing, and a test that treated them as different channels
+    /// would certify a distinction the reader cannot see.
+    private func pipChannel(for state: ScoreCalendarDayState) -> String {
+        guard let mark = state.scoredBand?.mark, mark != .unmarked else { return "pip:none" }
+        return "pip:\(mark.rawValue)"
+    }
+
+    /// One representative cell per state the day grid can draw. The payloads are the
+    /// reachable ones: `.awaitingScore` only ever carries a run and `.noVerdict` only ever
+    /// carries something else (`ActivityType.isRun` splits them in the core), which is the
+    /// invariant that lets those two share a fill.
+    private var dayGridCells: [DrawnCalendarCell] {
+        let states: [ScoreCalendarDayState] = [
+            .scored(band: .effective, activityType: .running),
+            .scored(band: .marginal, activityType: .running),
+            .scored(band: .ineffective, activityType: .running),
+            .partiallyMet(
+                met: ScoreCalendarDayState.MetObligation(discipline: .run, kind: .easy, band: .effective),
+                unmet: ScoreCalendarDayState.UnmetObligation(discipline: .lift, kind: .lift, judgedBand: nil)
+            ),
+            .missed(scheduledKind: .easy),
+            .awaitingScore(activityType: .running),
+            .noVerdict(activityType: .traditionalStrengthTraining),
+            .convertedRest(scheduledKind: .easy),
+            .scheduledRest,
+            .forthcoming(scheduledKind: .easy),
+            .forthcoming(scheduledKind: .lift),
+            .unplanned,
+        ]
+        return states.map { state in
+            DrawnCalendarCell(
+                name: "\(state)",
+                fill: dayGridFill(for: state),
+                nonHueChannels: [
+                    "glyph:\(ScoreCalendarGlyph.symbolName(for: state))",
+                    pipChannel(for: state),
+                    state.isDrawnUnfilledInTheDayGrid ? "unfilled" : "filled",
+                ]
+            )
+        }
+    }
+
+    /// The year heatmap's cells: no glyph at this size, so the channels are the hollow
+    /// outline `.missed` draws and MAX-087's mark size.
+    ///
+    /// **`.partiallyMet` is deliberately absent.** It draws exactly what `.missed` draws
+    /// here — see `ScoreCalendarDayState.isDrawnHollowAtHeatmapDensity`, which argues why
+    /// the collapse is the honest rendering at ~6pt with no glyph — so listing it would
+    /// assert a distinction the design has decided not to make, rather than the rule this
+    /// test is about. `ScoreCalendarMixedDayTests` pins the collapse itself.
+    private var heatmapCells: [DrawnCalendarCell] {
+        let states: [ScoreCalendarDayState] = [
+            .scored(band: .effective, activityType: .running),
+            .scored(band: .marginal, activityType: .running),
+            .scored(band: .ineffective, activityType: .running),
+            .missed(scheduledKind: .easy),
+            .scheduledRest,
+        ]
+        return states.map { state in
+            let size = state.scoredBand.map { "size:\($0.heatmapMark.rawValue)" } ?? "size:fullFootprint"
+            return DrawnCalendarCell(
+                name: "\(state)",
+                // `.forthcoming` is the one state whose fill differs between the two
+                // arrangements (neutral here, no fill in the day grid) and it is not in
+                // this list, so the day grid's mapping serves unchanged.
+                fill: dayGridFill(for: state),
+                nonHueChannels: state.isDrawnHollowAtHeatmapDensity ? ["hollow"] : ["solid", size]
+            )
+        }
+    }
+
+    func testNoTwoCalendarCellsAreDistinguishedByHueAlone() {
+        let representations: [(name: String, cells: [DrawnCalendarCell])] = [
+            ("day grid — glyph, corner pip (MAX-084), fill/no-fill", dayGridCells),
+            ("year heatmap — hollow, inset size (MAX-087)", heatmapCells),
+        ]
         for representation in representations {
-            for (indexA, bandA) in bands.enumerated() {
-                for bandB in bands[(indexA + 1)...] {
-                    let inkA = ink(for: bandA)
-                    let inkB = ink(for: bandB)
+            for (indexA, cellA) in representation.cells.enumerated() {
+                for cellB in representation.cells[(indexA + 1)...] {
                     for appearance in Appearance.allCases {
                         let ratio = WCAGContrast.contrastRatio(
-                            appearance.token(inkA),
-                            appearance.token(inkB)
+                            appearance.token(cellA.fill),
+                            appearance.token(cellB.fill)
                         )
                         let separatedByLuminance = WCAGContrast.meetsAA(ratio, .largeTextOrNonText)
-                        let separatedByShape = representation.marksDiffer(bandA, bandB)
+                        let separatedByShape = cellA.nonHueChannels != cellB.nonHueChannels
                         XCTAssertTrue(
                             separatedByLuminance || separatedByShape,
                             """
-                            \(bandA.rawValue) and \(bandB.rawValue) measure \
+                            \(cellA.name) and \(cellB.name) measure \
                             \(String(format: "%.2f", ratio)):1 against each other \
-                            [\(appearance.rawValue), \(representation.name)] — \
-                            nothing but hue tells them apart.
+                            [\(appearance.rawValue), \(representation.name)] and draw the \
+                            same marks \(cellA.nonHueChannels) — nothing but hue tells \
+                            them apart.
                             """
                         )
                     }
                 }
             }
         }
+    }
+
+    /// The three states that share D9's red, stated as its own measurement so a failure
+    /// reads as what it is. They are not *nearly* the same colour, they are the same
+    /// token — 1.00:1 — so every bit of "ran badly" versus "did not run" versus "did one
+    /// of two" is carried by the glyph, and this is the assertion that says so.
+    func testTheThreeRedCalendarStatesShareOneTokenAndAreSeparatedOnlyByGlyph() {
+        let red: [ScoreCalendarDayState] = [
+            .scored(band: .ineffective, activityType: .running),
+            .missed(scheduledKind: .easy),
+            .partiallyMet(
+                met: ScoreCalendarDayState.MetObligation(discipline: .run, kind: .easy, band: .effective),
+                unmet: ScoreCalendarDayState.UnmetObligation(discipline: .lift, kind: .lift, judgedBand: nil)
+            ),
+        ]
+        for appearance in Appearance.allCases {
+            for state in red {
+                XCTAssertEqual(
+                    WCAGContrast.contrastRatio(
+                        appearance.token(dayGridFill(for: state)),
+                        appearance.token(DesignPalette.scoreIneffective)
+                    ),
+                    1.0,
+                    accuracy: 0.001,
+                    "\(state) is meant to draw on D9's own red [\(appearance.rawValue)]"
+                )
+            }
+        }
+        let glyphs = red.map { ScoreCalendarGlyph.symbolName(for: $0) }
+        XCTAssertEqual(
+            Set(glyphs).count, red.count,
+            "two of the red states draw the same glyph, which leaves them on hue alone: \(glyphs)"
+        )
     }
 
     /// A mark is only a channel if the three values it can take are actually

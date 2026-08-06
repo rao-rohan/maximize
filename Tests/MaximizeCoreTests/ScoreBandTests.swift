@@ -56,6 +56,16 @@ final class ScoreBandMarkTests: XCTestCase {
         XCTAssertNil(ScoreCalendarDayState.convertedRest(scheduledKind: .long).scoredBand)
         XCTAssertNil(ScoreCalendarDayState.scheduledRest.scoredBand)
         XCTAssertNil(ScoreCalendarDayState.unplanned.scoredBand)
+        // MAX-135. The state that *does* hold a band and still must not report one: the
+        // mixed day carries the band its met half earned, and draws on the miss red. A pip
+        // there would put MAX-084's "which band is this fill" vocabulary on a fill that is
+        // not a band, and describe the half of the day the cell is not about.
+        XCTAssertNil(
+            ScoreCalendarDayState.partiallyMet(
+                met: ScoreCalendarDayState.MetObligation(discipline: .run, kind: .easy, band: .effective),
+                unmet: ScoreCalendarDayState.UnmetObligation(discipline: .lift, kind: .lift, judgedBand: nil)
+            ).scoredBand
+        )
     }
 }
 

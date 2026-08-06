@@ -202,9 +202,20 @@ extension ScoreCalendarDayState {
     /// the same reason: a lift is a day the athlete *trained*. Drawing it as the outline
     /// that means "asked and not delivered" would turn a session that happened into a
     /// miss at year density — the one misreading this whole state exists to prevent.
+    /// **`.partiallyMet` is hollow too, and that is a deliberate collapse** (MAX-135). A
+    /// year mark is ~6pt with no glyph, so the shape channel that separates a mixed day
+    /// from a plain miss in the month grid does not exist here. Of the two renderings
+    /// available, hollow is the true one — an obligation the plan set went unmet — and
+    /// solid would have had to be either a band colour it did not earn or a full-footprint
+    /// red that reads against `.effective`'s full-footprint green on hue alone. So the two
+    /// states look identical at this density and the spoken sentence carries the
+    /// difference, exactly as `.scheduledRest` and `.convertedRest` are already left to it.
     public var isDrawnHollowAtHeatmapDensity: Bool {
-        if case .missed = self { return true }
-        return false
+        switch self {
+        case .missed, .partiallyMet: return true
+        case .scored, .awaitingScore, .noVerdict, .convertedRest, .scheduledRest,
+             .forthcoming, .unplanned: return false
+        }
     }
 
     /// Whether the day-grid cell draws no fill at all — an outline with nothing in it.
