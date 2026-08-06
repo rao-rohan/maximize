@@ -236,11 +236,12 @@ final class ScoreCalendarLayoutTests: XCTestCase {
     /// hollow/filled distinction is the only thing separating "I didn't run" from "I ran
     /// badly" at heatmap density.
     ///
-    /// **Two states are hollow since MAX-135**, not one: the mixed day joins the miss
-    /// here because at ~6pt there is no glyph to separate them, and "an obligation went
-    /// unmet" is true of both. The two are indistinguishable at this density on purpose —
-    /// see the accessor's own note — and the month grid and the spoken sentence are where
-    /// the difference lives.
+    /// **Three states are hollow since MAX-159**, not one: the mixed day and the day that
+    /// missed its ask and trained at something unjudged both join the miss here, because at
+    /// ~6pt there is no glyph to separate them and "an obligation went unmet" is true of
+    /// all three. They are indistinguishable at this density on purpose — see the
+    /// accessor's own note — and the month grid and the spoken sentence are where the
+    /// difference lives.
     func testOnlyAnUnmetObligationIsDrawnHollow() throws {
         XCTAssertTrue(ScoreCalendarDayState.missed(scheduledKind: .easy).isDrawnHollowAtHeatmapDensity)
         XCTAssertTrue(
@@ -248,6 +249,12 @@ final class ScoreCalendarLayoutTests: XCTestCase {
                 met: ScoreCalendarDayState.MetObligation(discipline: .run, kind: .easy, band: .effective),
                 unmet: ScoreCalendarDayState.UnmetObligation(discipline: .lift, kind: .lift, judgedBand: nil)
             ).isDrawnHollowAtHeatmapDensity
+        )
+        XCTAssertTrue(
+            ScoreCalendarDayState.missedWithUnjudgedSession(
+                scheduledKind: .easy, recorded: .traditionalStrengthTraining
+            ).isDrawnHollowAtHeatmapDensity,
+            "a settled miss is hollow whether or not the athlete trained at something else that day"
         )
 
         let notHollow: [ScoreCalendarDayState] = [
@@ -298,6 +305,8 @@ final class ScoreCalendarLayoutTests: XCTestCase {
                 met: ScoreCalendarDayState.MetObligation(discipline: .run, kind: .easy, band: .effective),
                 unmet: ScoreCalendarDayState.UnmetObligation(discipline: .lift, kind: .lift, judgedBand: nil)
             ),
+            // MAX-159: unfilled means "not yet due", and this day has been and gone.
+            .missedWithUnjudgedSession(scheduledKind: .easy, recorded: .traditionalStrengthTraining),
             .convertedRest(scheduledKind: .easy),
             .scheduledRest,
             .unplanned,

@@ -238,6 +238,13 @@ final class ScoreCalendarTests: XCTestCase {
     /// `.awaitingScore`, which the calendar draws — and VoiceOver speaks — as a run the
     /// app has not got round to yet. Since MAX-111 no score is ever attempted for it, so
     /// that was a wait with nothing at the end of it.
+    ///
+    /// **Still `.noVerdict` after MAX-159, and the reason is now load-bearing**: the
+    /// default `.standard` budget of one day a week forgives this Tuesday's run (the
+    /// week's cheapest miss — an easy run adjacent to Monday's scheduled rest), so there is
+    /// no *settled* miss on the day for the new state to report. Turn the budget off and
+    /// the same day is `.missedWithUnjudgedSession` — see `ScoreCalendarSettledMissTests`,
+    /// which asserts exactly that pair.
     func testARecordedNonRunHasNoVerdictRatherThanAwaitingOne() throws {
         let days = try resolve(
             from: "2026-01-06", through: "2026-01-06",
@@ -290,11 +297,12 @@ final class ScoreCalendarTests: XCTestCase {
         XCTAssertEqual(try state(days, on: "2026-01-06"), .noVerdict(activityType: .cycling))
     }
 
-    /// A lift on a day the plan asked for an easy run is **not** a miss. Something was
-    /// recorded, and D4's "a workout that happened outranks the plan's ask" is unchanged
-    /// by this ticket — whether an unmet *running* obligation should recolour such a day
-    /// is §7.2's roll-up, which is MAX-116/MAX-117's and needs the lifting plan model to
-    /// exist first. The prescription is still carried on the cell either way.
+    /// A lift on a day the plan asked for an easy run is **not** a miss — **here**, because
+    /// the default budget forgave the run (see the test above for the arithmetic). Whether
+    /// an *unforgiven* running obligation should recolour such a day was §7.2's open
+    /// question, and MAX-159 answered yes: with the budget off this exact day resolves to
+    /// `.missedWithUnjudgedSession`. The prescription is carried on the cell either way,
+    /// and `agreement` stays nil either way — nothing here is scored.
     func testALiftOnAPrescribedRunDayIsNeitherMissedNorScored() throws {
         let days = try resolve(
             from: "2026-01-06", through: "2026-01-06", // Tuesday: easy 8 km
@@ -406,8 +414,13 @@ final class ScoreCalendarTests: XCTestCase {
                 XCTAssertTrue(activityType.isRun, "\(resolved.date): \(activityType)")
             case .noVerdict(let activityType):
                 XCTAssertFalse(activityType.isRun, "\(resolved.date): \(activityType)")
-            case .scored, .partiallyMet, .missed, .convertedRest, .scheduledRest,
-                 .forthcoming, .unplanned:
+            // `.missedWithUnjudgedSession` (MAX-159) carries a recorded activity too, but
+            // it is outside this invariant on purpose: its mark is the state's ringed "×",
+            // not the activity's figure, so a run and a lift in that payload draw the same
+            // cell and nothing has to partition them. `ScoreCalendarSettledMissTests`
+            // covers both payloads.
+            case .scored, .partiallyMet, .missed, .missedWithUnjudgedSession,
+                 .convertedRest, .scheduledRest, .forthcoming, .unplanned:
                 continue
             }
         }

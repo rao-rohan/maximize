@@ -570,6 +570,14 @@ private enum ScoreCalendarPalette {
             // (`ScoreCalendarGlyph`), which is a shape and therefore survives greyscale,
             // every kind of colour vision, and both accessibility settings.
             return Color.scoreIneffective
+        case .missedWithUnjudgedSession:
+            // MAX-159: the settled half colours the day. A skipped run is a miss whether
+            // or not the athlete lifted afterwards, and the same token again rather than a
+            // tenth — the ringed "×" (`ScoreCalendarGlyph`) is what separates it from the
+            // three states already on this red, and a shape survives greyscale, every kind
+            // of colour vision and both accessibility settings where a tenth colour would
+            // not have survived the contrast budget at all.
+            return Color.scoreIneffective
         case .missed:
             // Not a fourth band — D9 says a missed scheduled session "shows red",
             // and the rubric's own "skipped" band already lands in `.ineffective`'s
@@ -596,7 +604,7 @@ private enum ScoreCalendarPalette {
 
     static func ink(for state: ScoreCalendarDayState) -> Color {
         switch state {
-        case .scored, .partiallyMet, .missed:
+        case .scored, .partiallyMet, .missed, .missedWithUnjudgedSession:
             return Color.textOnSaturatedFill
         case .awaitingScore, .noVerdict, .convertedRest, .scheduledRest, .forthcoming, .unplanned:
             // `.forthcoming`'s date and glyph sit on the calendar card rather than on

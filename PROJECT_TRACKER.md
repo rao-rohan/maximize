@@ -1956,7 +1956,7 @@ free. What landed in the file:
   registers is worse than either alone.
 | MAX-151 | **Author the duration floor** — `StandardPlanSeed` states one (600s), the authoring screen edits it, `PlanProposal` can propose it. **Closes gap P3 for real** | 149, 148 | Sonnet ✅ |
 | MAX-158 | **Schema vocabulary reaches the athlete on a rejected proposal** — `PlanProposalError.description` says things like *"The reply left out `liftKind`, which the plan schema requires."* No PII and no status code, so not a privacy defect; but it names wire fields at a person who cannot act on them. MAX-155/156 left it deliberately (MAX-151 owned the file) — see write-up below | 155 | Sonnet ✅ |
-| MAX-159 | **A recorded-but-unjudged workout outranks another obligation's settled miss** — a Tuesday whose lift was recorded but unscored and whose run was missed draws `.noVerdict`, and its sentence names neither. §7.2's principle says change it, but the same ordering governs single-obligation days shipped since MAX-061, so it moves historical cells and wants a designed state | 135 | **Opus** |
+| MAX-159 | **A recorded-but-unjudged workout outranks another obligation's settled miss** — a Tuesday whose lift was recorded but unscored and whose run was missed draws `.noVerdict`, and its sentence names neither. §7.2's principle says change it, but the same ordering governs single-obligation days shipped since MAX-061, so it moves historical cells and wants a designed state | 135 | **Opus** ✅ |
 | MAX-160 | **Should a labelled miscategorised score leave the athlete's own average?** MAX-143 excluded it from the scorer-quality metric only; MAX-140 confirmed the average stays per-workout and declined to widen. A product decision, then a `Tallies` change | 143, 140 | Owner / overseer |
 | MAX-170 | **The stall detector's ping assumption had never met the live API** — MAX-152's two-beat threshold rested on an unverified claim about ping cadence that the API's own documentation contradicts. The rule now calibrates against what each stream demonstrates rather than against a constant | 152 | **Opus** ✅ — see the MAX-170 section below for what was established, what could not be, and how the design tolerates being wrong |
 | MAX-160 | ~~Should a labelled miscategorised score leave the athlete's own average?~~ **Owner decided: yes.** `TalliesCalculator.computeAverageScore` now skips a labelled score; the caption says when one was excluded and a fact-sheet line says why nothing is left when every scored workout was. See the MAX-160 note below | 143, 140 | Sonnet ✅ |
@@ -2822,14 +2822,20 @@ MAX-105 have already spent the cell's budget between them.
   the resolver. Unreachable until something scores lifts, and tested through an obligation
   met by a *correction* over a marginal auto-score, which pins the other half of it — the
   cell colours from the immutable auto-score, never from the annotation (D1/D4/D8).
-- **Reported, not done: a recorded-but-unjudged workout still outranks another
-  obligation's settled miss.** A Tuesday whose lift was recorded and unscored and whose run
+- ~~**Reported, not done: a recorded-but-unjudged workout still outranks another
+  obligation's settled miss.**~~ **Taken by MAX-159 ✅ — see its section below for the
+  precedence, the new state, and the one historical cell shape that moves.** A Tuesday
+  whose lift was recorded and unscored and whose run
   was missed draws `.noVerdict`, and its spoken sentence names neither the miss nor the
   second ask. §7.2's principle points at changing it, but the same ordering governs
   single-obligation days that have been on screen since MAX-061 — a ride on a missed run
   day reads the same way — so changing it here would have moved historical cells under
   cover of a lifting ticket. It wants its own ticket, and probably a designed state rather
-  than a reordering.
+  than a reordering. **One detail of this note is wrong and MAX-159 corrects it**: the ride
+  does *not* read the same way, because `Discipline` makes a ride `.run` by slot, so its
+  obligation is `.awaitingVerdict` rather than `.missed`. The single-obligation shape that
+  actually moves is a **lift** on a prescribed run day. The rest of the note stands, and
+  the designed state it predicted is what MAX-159 built.
 - **Not verified, and it is the interesting half.** No pixel was drawn. Whether
   `circle.lefthalf.filled` reads as "half of it happened" at 42pt rather than as noise, and
   whether a mixed day reads as *worse* than a plain miss when the two share a fill, are
@@ -4724,6 +4730,117 @@ happened, not merely on this being merged.
 
 **`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1). CI is
 the compiler.
+## MAX-159 — a settled miss outranks a pending score
+
+MAX-135's reported defect, taken. `ScoreCalendarDayState` gains
+`.missedWithUnjudgedSession(scheduledKind:recorded:)`; `ScoreCalendar.dayState`,
+`ScoreCalendarGlyph`, `ScoreCalendarCopy` and `isDrawnHollowAtHeatmapDensity` in the core,
+`ScoreCalendarPalette`/`ScoreCalendarFormatting` in the app. **No stored score,
+classification or tally changed** — this is a display precedence and nothing else. D8 is
+untouched, and `TalliesCalculator` was not opened.
+
+### The decision
+
+**A settled outcome on one obligation outranks a pending one on another.** The old rule
+was that a recorded-but-unjudged workout outranked everything, which is right *within* one
+obligation — a day holding a lift and an unscored run is about to become a band, so
+"awaiting" is the true thing to say — and wrong across two, because the score that cell
+waits for will never say anything about the other obligation's miss. A miss is a fact; a
+missing score is not yet anything. It is §7.2's own rule (*"`.scored` no longer outranks a
+different obligation's miss"*) with the tenses swapped in.
+
+**It takes a state, not a reordering, and the state takes a shape.** Letting `.missed`
+simply win would have swapped one half-truth for its mirror: an "×" on a day the athlete
+trained. Both halves are true and neither implies the other, so the cell has to say both.
+The fill is D9's red — the same token `.missed`, `.partiallyMet` and
+`.scored(.ineffective, _)` already draw, so **1.00:1 against all three, computed in
+`WCAGContrastTests` rather than asserted** — and the whole separation is the glyph:
+`xmark.circle`, which is `.missed`'s own mark inside the enclosure this vocabulary already
+uses for *the same thing, plus more* (`.long` takes `figure.run.circle`). Shape survives
+greyscale, every kind of colour vision, Increase Contrast and Reduce Transparency alike.
+`testNoTwoCalendarCellsAreDistinguishedByHueAlone` was **extended**, not duplicated, and
+`testTheThreeRedCalendarStatesShareOneToken…` is now `…TheFourRed…`.
+
+### Which historical cell shapes now render differently
+
+The owner will see this on their own device. Exactly one shape moves:
+
+- **A prescribed run day whose only recorded workout is a strength session, with the run
+  unforgiven by the weekly budget.** Was: a neutral cell, glyph `figure.strengthtraining
+  .traditional`, spoken *"Strength training, recorded. Not scored — the plan scores runs.
+  Planned: easy run."* Now: D9's red, glyph `xmark.circle`, spoken *"missed easy run.
+  Strength training recorded, not scored — the plan scores runs."* At year density it goes
+  from a solid neutral mark to a hollow red one. **The tallies already counted that run as
+  a decided, unmet obligation** — the cell was the half that disagreed, which is §7.3's
+  drift with a colour attached.
+- The two-obligation versions of the same shape (a skipped run beside an unjudged lift, or
+  a skipped lift beside a run awaiting its score) move too, but cost nothing historically:
+  every plan on disk rests its lift slot, so no such day exists yet.
+
+**A ride on a missed-run day does *not* move**, and MAX-135's report named it as the case
+that would. `Discipline` makes a ride `.run` **by slot** (A17: cycling is an `.other`
+session in the run row, not a third discipline), so a ride recorded on a prescribed run day
+leaves that obligation `.awaitingVerdict` — something *was* recorded against it — and never
+`.missed`. There is no settled outcome on such a day for anything to outrank.
+`testARideOnAPrescribedRunDayDoesNotMove` pins it.
+
+**Nothing else moves**, and the fixtures say so rather than the prose:
+`testTheWeekMovesInExactlyOnePlace` resolves the fixture week with D9 off and asserts all
+seven cells; a run awaiting its score, a session on a day the plan asks nothing of, a plain
+miss, a `.scored` day and a forgiven miss are each pinned separately.
+
+### Rejected
+
+- **A plain reordering** (`.missed` ahead of the recorded session) — the mirror-image
+  half-truth, above.
+- **Drawing the recorded activity's own figure on the red fill**, which was the cheaper
+  option and reads well for a lift. It collapses the moment the recorded session is a
+  *run*: an activity figure on this red is already `.scored(.ineffective, _)`'s cell, so
+  "ran badly" and "skipped the ask, ran anyway" would become one drawing. The mark is the
+  state's for that reason, which is also why `WCAGContrastTests` lists one representative
+  rather than two.
+- **A tenth fill token.** MAX-084 and MAX-087 spent the contrast budget; MAX-135 measured
+  the reds at 1.00:1 deliberately, and this state joins them on the same terms.
+- **Widening `.missed`'s payload** instead of adding a case. `.missed` means an empty day,
+  and a reader of a state that sometimes carries a recorded session has to check which.
+- **Reusing `.partiallyMet`**, with its met half made optional. Those are different facts —
+  one half *counted*, here neither did — and an always-nil field is a representable state
+  that cannot occur.
+- **Moving the neighbouring case: a *scored* session on a day another obligation was
+  missed.** Reported, not done — see below.
+
+### Reported, not done
+
+- **A scored session whose own slot the plan rested still outranks a settled miss on the
+  other slot.** The real instance is a pre-MAX-111 lift carrying a running-rubric score
+  (A21/MAX-143) on a day the run was skipped: that cell shows the stored band and says
+  nothing about the miss, which is the same precedence question one tense further on. It
+  was left alone deliberately — it would recolour the cells of *stored scores*, which is
+  wider than this ticket's scope and cuts against MAX-143's decision that those scores keep
+  being reported. `testAScoredSessionStillOutranksAMissedObligationOnTheSameDay` pins
+  today's answer so the boundary is on the record.
+- **A ride's run obligation is `.awaitingVerdict` forever.** Nothing will ever score a ride
+  (MAX-111), so that obligation is permanently undecided and silently drops out of the
+  effective ratio's denominator — the `.awaitingScore`/`.noVerdict` distinction the
+  calendar makes and `ObligationOutcome` does not. It is a tallies question (out of scope
+  here, and `Tallies/` was not touched), and it is what makes the ride case above genuinely
+  unmoved rather than merely unexamined.
+- **`ScoreCalendarCopy` and `ScoreCalendarFormatting.kindLabel` disagree on one word**:
+  `.other` is "other" through `PlanCopy` and "session" in the app's own label. Predates this
+  ticket (MAX-135 inherited it) and belongs to MAX-104's copy pass.
+
+### What CI can and cannot prove
+
+CI can prove: the core compiles, the app target compiles and links, the precedence resolves
+as specified over every fixture above, the cell and the effective-obligations tile agree
+about the same day, no two day-grid cells are left on hue alone, the four reds measure
+1.00:1 and carry four distinct marks, and no future day reaches the red state.
+
+CI cannot prove the half that matters here: whether a ringed "×" reads as *"missed it, but
+trained"* rather than as a close button at ~42pt; whether a red cell over a day the athlete
+did train feels honest or punitive; and whether the sentence is the right length to hear
+cell after cell. **`swift build`/`swift test` were not run** — no Swift toolchain in this
+container (R1). See the PR's device list.
 
 ---
 

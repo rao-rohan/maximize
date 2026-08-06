@@ -818,6 +818,15 @@ final class TalliesTests: XCTestCase {
                 // about that, this is where it shows.
                 expectedEligible += 2
                 expectedEffective += 1
+            case .missedWithUnjudgedSession:
+                // MAX-159, and it is the arithmetic that made the state worth having. The
+                // day holds one decided obligation — an unforgiven miss — plus a session
+                // whose own obligation is either awaiting a verdict or not an obligation at
+                // all; neither of those is eligible. So the cell contributes exactly what a
+                // plain `.missed` does, which is what the tile was already counting on this
+                // shape while the cell drew a neutral "recorded, not scored". Reading them
+                // off one roll-up (§7.3) is what closed that gap.
+                expectedEligible += 1
             case .awaitingScore, .noVerdict, .convertedRest, .scheduledRest, .forthcoming, .unplanned:
                 // `.noVerdict` (MAX-126) joins `.awaitingScore` here for the reason it is
                 // a separate state everywhere else and the same one here: a day with no
@@ -864,6 +873,11 @@ final class TalliesTests: XCTestCase {
                     // everything the plan asked, so it breaks the streak exactly as a
                     // whole miss does — which is the rule `DayObligations
                     // .streakContribution` applies and this reconstruction must mirror.
+                    return streak // breaks
+                case .missedWithUnjudgedSession:
+                    // MAX-159: the day holds an unforgiven miss, and §6.3 is all-of — a
+                    // session the plan did not ask for and nothing has judged does not
+                    // buy it back.
                     return streak // breaks
                 case .awaitingScore, .noVerdict, .convertedRest, .scheduledRest, .forthcoming, .unplanned:
                     // `.noVerdict` is neutral for the same reason `.awaitingScore` is: the
