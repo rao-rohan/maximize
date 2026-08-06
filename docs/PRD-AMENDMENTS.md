@@ -664,6 +664,75 @@ an input rather than to a verdict).
 and the distinction matters here: "I have not told you yet" and "I trained nothing" are
 different, and only the first should prompt.
 
+---
+
+## A23 — A first plan may be dated to cover what has already been captured, and does so by default.
+
+**Clarifies:** D1. Nothing is superseded.
+**Source:** MAX-161, [docs/FIRST-RUN-SPEC.md](./FIRST-RUN-SPEC.md) §7.
+
+**The defect this exists to close.** `AnchoredIngestionPolicy.standard` fetches 90 days of
+history on the first successful pass. `PlanAuthoringSession` suggests
+`startOfTrainingWeek()` as a first plan's effective date. A workout on a day no plan version
+governs is stored without derived metrics and **can never acquire them** — MAX-011 forbids a
+later version from reaching back. So the default first plan permanently strands almost
+everything the app's first minute just captured, and nothing on screen says so.
+
+**Decision.** For `.firstPlan` only, the *suggested* effective date is the day of the
+earliest workout stored on the device, falling back to `startOfTrainingWeek()` when nothing
+is stored. And whatever date is chosen, the authoring screen states the count of captured
+workouts that fall before it, because that count is the actual consequence of the control.
+
+**Why this cannot violate D1.** D1 protects the reproducibility of *stored scores*. A first
+plan cannot make any stored score irreproducible, because none can exist: scoring requires a
+plan (`ContextBuilder` throws without a `PlanCalendar`), so no `Score` predates version 1.
+`earliestEffectiveFrom` is already `nil` for `.firstPlan` — the core already permits
+back-dating a first plan; the screen simply never suggested it.
+
+**Revisions are untouched, and this amendment grants them nothing.**
+`earliestEffectiveFrom` still bounds a revision to the day after the current version began,
+and `wouldRewriteHistory` still guards the write. A later ticket reading this as licence to
+back-date a *revision* does not inherit its permission.
+
+**Why back-dating is honest rather than convenient.** A plan records training intent, and
+that intent predates the app's installation. Scoring last month's runs against the plan they
+were actually run under is more truthful than declaring them unmeasurable because a piece of
+software was not present for them.
+
+---
+
+## A24 — First run is not a conversation. Chat's three jobs do not grow a fourth.
+
+**Bounds:** A9. Nothing is superseded.
+**Source:** MAX-161, [docs/FIRST-RUN-SPEC.md](./FIRST-RUN-SPEC.md) §10.
+
+A9 gives chat three named jobs — generate a plan, read a plan, ask questions about the data.
+A chat-first app invites the reading that *everything* becomes a conversation, and first run
+is the most tempting candidate, because it is mostly asking a person questions. It is
+recorded here as decided so it is not relitigated by whoever next touches the chat surface.
+
+**Decision: the app's first-run prerequisites are gathered by screens, not by chat.** Four
+independent reasons, the first of which settles it on its own:
+
+1. **The dependency order forbids it.** Chat requires an API key. The key is the *last* of
+   the three prerequisites precisely because it is worthless without data. A conversational
+   first run would require a paid key before the app had captured anything at all.
+2. **Chat cannot write** (CHAT-FIRST §2.5): no plan version, no setting, no Keychain item.
+   Every real first-run step ends in a screen regardless, so a conversational shell would be
+   a chattier index of the same buttons.
+3. **A14 forbids its natural shape.** "No unattended chat call, ever." A first run that
+   greets the athlete is an unattended call at launch.
+4. **First run is a state problem, not an interpretation problem.** "No key is stored" is a
+   fact the app knows with certainty. Paying a model to say it, in wording that varies
+   between askings, is the wrong instrument for the one class of statement this app makes
+   deterministically.
+
+**What chat keeps.** Drafting a plan from a conversation (A13) is unchanged and remains the
+better route for an athlete who knows what they want — offered from the authoring screen,
+gated on a stored key, never on the critical path.
+
+---
+
 ## Requirements unaffected
 
 Everything in §7 (features), §9 (metric definitions), §10 (scoring logic), §13 (risks)

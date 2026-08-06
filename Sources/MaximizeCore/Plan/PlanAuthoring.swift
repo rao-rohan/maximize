@@ -148,12 +148,12 @@ public struct PlanAuthoringSession: Hashable, Sendable {
 
     /// Where the screen's date control should start.
     ///
-    /// For a first plan, the Monday of the current training week: plans are written in
-    /// Monday-first weeks (`WeeklyTemplate`), arc weeks are counted from the Monday on
-    /// or before the effective date (`PlanCalendar.arcWeek(for:under:)`), and starting
-    /// there means week 1 is a whole week rather than a stub. It also brings this
-    /// week's already-captured runs under the plan, which is the difference between
-    /// them being scoreable and not.
+    /// For a first plan, the day that covers the history already on the device — see
+    /// `FirstPlanDating.suggestedEffectiveFrom(covering:today:)` for both halves of that
+    /// and why the ceiling is still the current training week's Monday. **This used to be
+    /// the training week's Monday unconditionally, and that was the MAX-165 defect**: an
+    /// athlete who accepted it on install day permanently stranded most of a ninety-day
+    /// backfill.
     ///
     /// For a revision, today — or the earliest permitted day if today is not yet
     /// permitted, which happens only when the current version began today.
@@ -171,6 +171,13 @@ public struct PlanAuthoringSession: Hashable, Sendable {
     /// set rather than a remembered summary of it.
     private let existing: PlanCalendar?
 
+    /// What is already captured, so the session can price a candidate date (MAX-165).
+    ///
+    /// Held rather than reduced to a single count at construction, because the count is a
+    /// function of the date the athlete is currently pointing at and that changes as they
+    /// drag the control.
+    private let capturedHistory: CapturedWorkoutHistory
+
     init(
         mode: Mode,
         version: PlanVersion,
@@ -178,7 +185,8 @@ public struct PlanAuthoringSession: Hashable, Sendable {
         suggestedEffectiveFrom: CalendarDay,
         draft: PlanDraft,
         rubricBands: [RubricBand],
-        existing: PlanCalendar?
+        existing: PlanCalendar?,
+        capturedHistory: CapturedWorkoutHistory = .empty
     ) {
         self.mode = mode
         self.version = version
@@ -187,6 +195,34 @@ public struct PlanAuthoringSession: Hashable, Sendable {
         self.draft = draft
         self.rubricBands = rubricBands
         self.existing = existing
+        self.capturedHistory = capturedHistory
+    }
+
+    // MARK: - What a candidate date costs (MAX-165, A23)
+
+    /// How many already-captured workouts a first plan taking effect on `day` would leave
+    /// permanently unmeasurable.
+    ///
+    /// **Zero for a revision, always.** A revision cannot strand anything: every day
+    /// before its effective date is already governed by the version it supersedes, which
+    /// is exactly what `earliestEffectiveFrom` bounds it to. Asking this question of a
+    /// revision is a category error, and answering it with the same arithmetic the first
+    /// plan uses would put a frightening and false number on the screen of an athlete
+    /// whose history is entirely covered.
+    public func workoutsExcluded(byEffectiveFrom day: CalendarDay) -> Int {
+        guard case .firstPlan = mode else { return 0 }
+        return capturedHistory.workoutsExcluded(byEffectiveFrom: day)
+    }
+
+    /// The sentence a screen shows beneath its date control, or nil when the date costs
+    /// nothing — see `PlanCopy.excludedWorkoutsNotice(count:)` for why nil rather than a
+    /// rendered zero.
+    ///
+    /// The decision and the words are both here rather than beside the control, so what
+    /// the athlete is told is verified on every commit and cannot drift from the number it
+    /// is a sentence about.
+    public func excludedWorkoutsNotice(forEffectiveFrom day: CalendarDay) -> String? {
+        PlanCopy.excludedWorkoutsNotice(count: workoutsExcluded(byEffectiveFrom: day))
     }
 
     /// Whether a day is one this version may take effect on.
@@ -393,9 +429,16 @@ public enum PlanAuthoring {
     ///   - today: the athlete's civil day. Passed in rather than read from a clock,
     ///     because turning an instant into a day needs a time zone and `MaximizeCore`
     ///     does not get to pick one (`CalendarDay.init(_:in:)`).
+    ///   - capturedHistory: the days workouts are already stored on (MAX-165, A23). Only
+    ///     a first plan reads it, and only to decide what date to *suggest* and what a
+    ///     candidate date would cost; nothing here is validation, and no date becomes
+    ///     illegal because of it. Defaults to `.empty`, which reproduces the pre-MAX-165
+    ///     suggestion exactly — a caller that has not asked the store gets the answer it
+    ///     always got rather than a guess.
     public static func session(
         revising calendar: PlanCalendar?,
-        today: CalendarDay
+        today: CalendarDay,
+        capturedHistory: CapturedWorkoutHistory = .empty
     ) throws -> PlanAuthoringSession {
         guard let calendar, let current = currentVersion(of: calendar) else {
             return PlanAuthoringSession(
@@ -407,11 +450,18 @@ public enum PlanAuthoring {
                 // bring them under a plan, because MAX-011 forbids every *later*
                 // version from reaching backwards. It is the one moment this is safe:
                 // there is no earlier version, so there is nothing to re-govern.
+                //
+                // MAX-165: this permission has always been here. What was missing was a
+                // suggestion that used it.
                 earliestEffectiveFrom: nil,
-                suggestedEffectiveFrom: try today.startOfTrainingWeek(),
+                suggestedEffectiveFrom: try FirstPlanDating.suggestedEffectiveFrom(
+                    covering: capturedHistory,
+                    today: today
+                ),
                 draft: try StandardPlanSeed.draft(),
                 rubricBands: try StandardPlanSeed.rubricBands(),
-                existing: nil
+                existing: nil,
+                capturedHistory: capturedHistory
             )
         }
 
@@ -423,7 +473,11 @@ public enum PlanAuthoring {
             suggestedEffectiveFrom: max(today, earliest),
             draft: try PlanDraft(current),
             rubricBands: current.rubric.bands,
-            existing: calendar
+            existing: calendar,
+            // Carried for symmetry and for a future reader, never consulted: a revision
+            // cannot exclude anything, and `workoutsExcluded(byEffectiveFrom:)` says so
+            // by returning zero before it ever reaches this.
+            capturedHistory: capturedHistory
         )
     }
 

@@ -31,9 +31,10 @@ struct PlanAuthoringView: View {
     @State private var model: PlanAuthoringModel
 
     /// - Parameters:
-    ///   - planRepository/settingsRepository: forwarded to `PlanAuthoringModel`, which
-    ///     defaults them to `PersistenceComposition.store` — never to a stub. See that
-    ///     type's docs.
+    ///   - planRepository/settingsRepository/workoutRepository: forwarded to
+    ///     `PlanAuthoringModel`, which defaults them to `PersistenceComposition.store` —
+    ///     never to a stub. See that type's docs. The workout store is read only to say
+    ///     what a first plan's date costs (MAX-165); this screen writes no workout.
     ///   - proposal: a chat proposal to open prefilled from (MAX-101, §4.6). Nil is the
     ///     ordinary case — an athlete opening the screen from the plan tab or Settings.
     ///     Prefilling changes nothing about how this screen saves: the version number and
@@ -42,12 +43,14 @@ struct PlanAuthoringView: View {
     init(
         planRepository: (any PlanRepository)? = nil,
         settingsRepository: (any SettingsRepository)? = nil,
+        workoutRepository: (any WorkoutRepository)? = nil,
         proposal: PlanProposal? = nil
     ) {
         _model = State(
             initialValue: PlanAuthoringModel(
                 planRepository: planRepository,
                 settingsRepository: settingsRepository,
+                workoutRepository: workoutRepository,
                 proposal: proposal
             )
         )
@@ -153,6 +156,14 @@ struct PlanAuthoringView: View {
                         + "offered, because a version that reached back would re-govern days "
                         + "that have already been scored."
                 )
+            }
+
+            // MAX-165: what this date costs, in the athlete's own figures. Absent when it
+            // costs nothing — the core returns nil rather than a rendered zero, so the
+            // ordinary case does not read as a warning. Every word and the number itself
+            // are `PlanAuthoringSession`'s; nothing is decided here.
+            if let excluded = editing.excludedWorkoutsNotice {
+                quietText(excluded)
             }
         }
     }
