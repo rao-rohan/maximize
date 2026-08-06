@@ -1064,7 +1064,7 @@ twelve and is dispatchable immediately.
 | MAX-101 | Conversational plan authoring; proposal card; handoff | 098, 100 | **Opus** ✅ |
 | MAX-102 | **The read-only plan screen with version history** | — | Sonnet ✅ |
 | MAX-103 | "Runs in this conversation" strip | 098 | Sonnet ✅ |
-| MAX-104 | Copy and absence voice, **app-wide** — absorbs MAX-086's other half | 098, 102 | Sonnet |
+| MAX-104 | Copy and absence voice, **app-wide** — absorbs MAX-086's other half. Split: MAX-150 took chat+dashboard, MAX-104 took plan+workout | 098, 102 | Sonnet ✅ |
 | MAX-150 | **Split from MAX-104**: the chat and dashboard half, taken now because those two surfaces are finished and drifting while lifting is still being built | 098, 102, 103 | Sonnet ✅ |
 
 Three collisions the spec calls out and the overseer must respect: **094 lands before 095**
@@ -1637,13 +1637,13 @@ is the overseer's, not a ticket's — flagged here rather than done.
 | MAX-131 | Rubric vocabulary for lifts — **closes gap P3** | 128 | **Opus** ✅ |
 | MAX-132 | Seed bands for lift days; the `easy.wellOverCap` shadow | 131 | Sonnet ✅ |
 | MAX-133 | Match a workout to its own discipline's ask | 129, 131 | **Opus** ✅ |
-| MAX-134 | Obligations, not days: tallies, streak, rest-day budget | 129, 133 | **Opus** |
-| MAX-135 | The calendar's mixed day | 134, **105** | **Opus** |
+| MAX-134 | Obligations, not days: tallies, streak, rest-day budget | 129, 133 | **Opus** ✅ |
+| MAX-135 | The calendar's mixed day | 134, **105** | **Opus** ✅ |
 | MAX-136 | Context and fact sheet learn discipline | 129, 130 | **Opus** ✅ |
 | MAX-137 | Plan authoring for two slots | 129 | Sonnet ✅ |
 | MAX-138 | The plan screen shows both | 129 | Sonnet ✅ |
-| MAX-139 | Workout detail for a lift | 130, 133 | Sonnet |
-| MAX-140 | Trend tiles, honestly ("days run", the effective denominator) | 134 | Sonnet |
+| MAX-139 | Workout detail for a lift | 130, 133 | Sonnet ✅ |
+| MAX-140 | Trend tiles, honestly ("days run", the effective denominator) | 134 | Sonnet ✅ |
 | MAX-141 | `PlanProposal` covers lift days | 129, **099** | Sonnet 🔒 ✅ |
 | MAX-142 | ~~`TrainingContext` is per-session, not per-run~~ — **not needed**, MAX-095 landed briefed | 129, **095** | — ✅ |
 | MAX-143 | ~~Decide what to do with lifts already scored as runs~~ — **owner chose: label them**, and it is built | 128 | **Opus** ✅ |
@@ -1652,7 +1652,10 @@ is the overseer's, not a ticket's — flagged here rather than done.
 | MAX-147 | The scorer's task text learns discipline (source: MAX-133) | 133, 136 | Sonnet ✅ |
 | MAX-148 | A lift's duration and note become editable, proposable, and type-safe | 137, 141 | Sonnet ✅ |
 | MAX-149 | Duration floor for fragments — **the classifier half of gap P3**; not yet wired to any author | 013, 131 | Sonnet ✅ |
-| MAX-151 | **Author the duration floor** — `StandardPlanSeed` states one, the authoring screen edits it, `PlanProposal` can propose it. Without this MAX-149 never fires | 149, 146, 148 | Sonnet |
+| MAX-151 | **Author the duration floor** — `StandardPlanSeed` states one (600s), the authoring screen edits it, `PlanProposal` can propose it. **Closes gap P3 for real** | 149, 148 | Sonnet ✅ |
+| MAX-158 | **Schema vocabulary reaches the athlete on a rejected proposal** — `PlanProposalError.description` says things like *"The reply left out `liftKind`, which the plan schema requires."* No PII and no status code, so not a privacy defect; but it names wire fields at a person who cannot act on them. MAX-155/156 left it deliberately (MAX-151 owned the file) | 155 | Sonnet |
+| MAX-159 | **A recorded-but-unjudged workout outranks another obligation's settled miss** — a Tuesday whose lift was recorded but unscored and whose run was missed draws `.noVerdict`, and its sentence names neither. §7.2's principle says change it, but the same ordering governs single-obligation days shipped since MAX-061, so it moves historical cells and wants a designed state | 135 | **Opus** |
+| MAX-160 | **Should a labelled miscategorised score leave the athlete's own average?** MAX-143 excluded it from the scorer-quality metric only; MAX-140 confirmed the average stays per-workout and declined to widen. A product decision, then a `Tallies` change | 143, 140 | Owner / overseer |
 
 **Four collisions the overseer must respect.**
 
