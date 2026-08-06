@@ -71,6 +71,18 @@ final class PlanAuthoringModel {
         var prefill: PlanPrefillNotice?
 
         var canSave: Bool { problem == nil }
+
+        /// What the date currently chosen costs, in figures — "43 workouts already
+        /// recorded fall before this date…" — or nil when it costs nothing (MAX-165).
+        ///
+        /// Computed rather than stored, so it cannot go stale against `effectiveFrom`,
+        /// and computed by the core, so the number and the sentence about it are one
+        /// decision verified on every commit. **Not a `problem`**: this date is legal and
+        /// may well be the one the athlete wants. It is a consequence, stated before they
+        /// commit to it, which is the difference between the defect and a decision.
+        var excludedWorkoutsNotice: String? {
+            session.excludedWorkoutsNotice(forEffectiveFrom: effectiveFrom)
+        }
     }
 
     /// The banner shown when the form was filled in from a chat proposal (§4.6's
@@ -91,6 +103,11 @@ final class PlanAuthoringModel {
 
     private let planRepository: (any PlanRepository)?
     private let settingsRepository: (any SettingsRepository)?
+    /// Read only to price the date control (MAX-165). Nothing on this screen writes a
+    /// workout, and nothing here decides anything about one — the store is asked what is
+    /// captured, `CapturedWorkoutHistory` turns that into days, and the core says what a
+    /// date costs.
+    private let workoutRepository: (any WorkoutRepository)?
     private let timeZone: TimeZone
     private let todayOverride: CalendarDay?
 
@@ -109,6 +126,8 @@ final class PlanAuthoringModel {
     ///     so a preview or a test can inject a fake; there is deliberately no other
     ///     fallback (see the type's note on MAX-049).
     ///   - settingsRepository: same, for the display unit.
+    ///   - workoutRepository: same, for the captured history a first plan's date is
+    ///     measured against (MAX-165).
     ///   - today: the athlete's civil day. Defaults to now in `timeZone`; pinned by
     ///     tests and previews so the screen does not depend on the wall clock.
     ///   - timeZone: the zone an instant becomes a day in. `.current` is the honest
@@ -121,6 +140,7 @@ final class PlanAuthoringModel {
     init(
         planRepository: (any PlanRepository)? = nil,
         settingsRepository: (any SettingsRepository)? = nil,
+        workoutRepository: (any WorkoutRepository)? = nil,
         today: CalendarDay? = nil,
         timeZone: TimeZone = .current,
         proposal: PlanProposal? = nil
@@ -138,6 +158,11 @@ final class PlanAuthoringModel {
         } else {
             self.settingsRepository = PersistenceComposition.store
         }
+        if let workoutRepository {
+            self.workoutRepository = workoutRepository
+        } else {
+            self.workoutRepository = PersistenceComposition.store
+        }
         self.timeZone = timeZone
         self.todayOverride = today
         self.proposal = proposal
@@ -146,7 +171,7 @@ final class PlanAuthoringModel {
     // MARK: - Loading
 
     func load() async {
-        guard let planRepository,
+        guard let planRepository, let workoutRepository,
               let today = todayOverride ?? (try? CalendarDay(Date(), in: timeZone))
         else {
             state = .failed
@@ -155,7 +180,8 @@ final class PlanAuthoringModel {
         do {
             let session = try PlanAuthoring.session(
                 revising: try await planRepository.planCalendar(),
-                today: today
+                today: today,
+                capturedHistory: try await capturedHistory(from: workoutRepository)
             )
             let unit = await loadedDistanceUnit()
             let applied = try prefilled(session: session, distanceUnit: unit)
@@ -206,6 +232,29 @@ final class PlanAuthoringModel {
                 headline: review.headline,
                 explanation: PlanProposalReview.acceptExplanation
             )
+        )
+    }
+
+    /// What is already captured, as days, in this screen's zone (MAX-165).
+    ///
+    /// **Not degraded to `.empty` on failure, unlike the distance unit below**, and the
+    /// asymmetry is the point. The unit is a display preference with a defensible
+    /// default; the captured history decides both what date is offered and what the
+    /// athlete is told a date costs, and a screen that quietly assumed "nothing is
+    /// captured" would suggest the exact date this ticket exists to stop suggesting — and
+    /// would suppress the count line while doing it. So a failure here propagates to
+    /// `.failed` ("try again later") rather than reintroducing the defect silently. In
+    /// practice this and the plan read are the same store, so a workout read failing
+    /// alone is close to unreachable.
+    ///
+    /// The whole history, not a window: the count has to be of every workout a date would
+    /// exclude, and the same read backs the trends dashboard on the same reasoning.
+    private func capturedHistory(from repository: any WorkoutRepository) async throws -> CapturedWorkoutHistory {
+        try CapturedWorkoutHistory(
+            workouts: try await repository.workouts(
+                startingIn: DateInterval(start: .distantPast, end: .distantFuture)
+            ),
+            in: timeZone
         )
     }
 
