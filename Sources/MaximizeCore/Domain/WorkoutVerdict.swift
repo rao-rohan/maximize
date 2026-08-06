@@ -28,13 +28,32 @@ import Foundation
 ///    athlete has not described yet is not permanently unscoreable — the app is waiting
 ///    on an answer it has asked for.
 ///
+/// 3. **Which prescription is "what the plan asked for"?** A17 gave the plan two slots,
+///    one per discipline, and a workout is only ever judged against its own (LIFTING-SPEC
+///    §10.1). `discipline` and `scheduledSession` below answer this together; see
+///    `scheduledSession`'s own documentation for the MAX-139 fix this made necessary.
+///
 /// A view observes this, renders it, and forwards nothing (there is no user intent to
 /// forward yet) — CLAUDE.md's "thin shell" rule applied to a header that has more than
 /// one branch worth getting right, and worth testing where CI can see it.
 public struct WorkoutVerdict: Hashable, Sendable {
-    /// What the plan asked for on the workout's day, or nil when no plan version
-    /// governs that day (`PlanCalendar.planDay(on:)` returned nil) — a run predating
-    /// the plan, kept distinct from "the plan asked for rest."
+    /// Which of the plan's two prescriptions this workout answers to (A17). Read from
+    /// `Workout.activityType.discipline`, the one place that mapping lives — the same
+    /// source `WorkoutContext.discipline` and `MuscleGroupEntryData.resolve` already
+    /// read, so the header cannot land on a different answer than the fact sheet or the
+    /// muscle-group section give for the identical workout.
+    public let discipline: Discipline
+
+    /// What the plan asked for **this workout's own discipline** on its day, or nil
+    /// when no plan version governs that day (`PlanCalendar.planDay(on:)` returned
+    /// nil) — a run predating the plan, kept distinct from "the plan asked for rest."
+    ///
+    /// **MAX-139**: this used to be `planDay?.scheduledSession` unconditionally — the
+    /// *run* slot, whatever the workout was — which is why a lift's header used to show
+    /// the day's run ask instead of its own. `PlanDay.scheduledSession(for:)` is total
+    /// in the discipline (rest is an answer on each slot), so reading through it costs
+    /// nothing on a run: every reader before this ticket meant the run ask, and
+    /// `discipline == .run` for every one of them, so nothing they saw changes.
     public let scheduledSession: ScheduledSession?
 
     /// What actually happened.
@@ -152,7 +171,9 @@ public struct WorkoutVerdict: Hashable, Sendable {
         ledger: ScoreLedger?,
         muscleGroups: MuscleGroupLog? = nil
     ) {
-        self.scheduledSession = planDay?.scheduledSession
+        let discipline = workout.activityType.discipline
+        self.discipline = discipline
+        self.scheduledSession = planDay?.scheduledSession(for: discipline)
         self.muscleGroupEntry = muscleGroups?.current
         if let ledger {
             self.actual = .classified(ledger.automatic.actualClassification)
@@ -165,7 +186,7 @@ public struct WorkoutVerdict: Hashable, Sendable {
             // drift from the two that decide whether a score is ever attempted.
             if workout.activityType.isRun {
                 self.scoring = .awaitingScore
-            } else if workout.activityType.discipline == .lift,
+            } else if discipline == .lift,
                       let muscleGroups,
                       muscleGroups.isAwaitingEntry {
                 // A22. Read through `Discipline` rather than compared to an activity
