@@ -22,6 +22,19 @@ final class ChatReplyPhaseTests: XCTestCase {
         progress(after: events).phase
     }
 
+    private func beats(_ count: Int) -> [ChatReplyEvent] {
+        Array(repeating: ChatReplyEvent.heartbeat, count: count)
+    }
+
+    /// Beats enough to stall a reply that has shown nothing unusual — the floor, since a
+    /// stream with no proven quiet runs has calibrated nothing (MAX-170).
+    ///
+    /// Read from the type rather than written out, so a change to the policy moves every
+    /// test that needs "enough beats" rather than leaving them asserting a stale number.
+    private var beatsToStallAnUncalibratedReply: Int {
+        ChatReplyProgress().heartbeatsRequiredForStall
+    }
+
     // MARK: - Rung 1: the request is open and nothing has come back
 
     func testARequestWithNothingBackYetIsTheWaitingState() {
@@ -60,22 +73,42 @@ final class ChatReplyPhaseTests: XCTestCase {
 
     // MARK: - Rung 3: a stall is distinguishable from both
 
-    /// Two quiet beats with no token between them, which is `heartbeatsBeforeStall`
-    /// stated by name rather than by counting to two.
+    /// Enough consecutive quiet beats with no token between them, stated by reading the
+    /// policy rather than by counting.
+    ///
+    /// **MAX-170 changed the number this reaches for.** It was `heartbeatsBeforeStall`
+    /// used directly as the threshold; it is now that constant acting as the *floor*
+    /// under a bar the stream itself can raise. On a reply that has proven nothing the
+    /// two are the same, which is the case this test builds.
     func testConsecutiveQuietBeatsMidReplyAreAStall() {
-        let beats = Array(
-            repeating: ChatReplyEvent.heartbeat,
-            count: ChatReplyProgress.heartbeatsBeforeStall
-        )
-        XCTAssertEqual(phase(after: [.requestOpened, .textArrived] + beats), .stalled)
+        let quiet = beats(beatsToStallAnUncalibratedReply)
+        XCTAssertEqual(phase(after: [.requestOpened, .textArrived] + quiet), .stalled)
     }
 
-    /// One beat is not a stall. The API is free to send a `ping` in the middle of a
-    /// perfectly healthy reply, and a threshold of one would flag a working stream as
-    /// stuck every time it did.
+    /// One beat is not a stall. The API is documented as free to send a `ping` in the
+    /// middle of a perfectly healthy reply — its own streaming examples show one between
+    /// two consecutive text deltas — and a threshold of one would flag a working stream
+    /// as stuck every time it did.
+    ///
+    /// Asserted as a bound rather than as equality (MAX-170): the floor's exact value is
+    /// a judgement call this test has no business pinning, but "more than one" is the
+    /// property that makes the case below meaningful.
     func testASingleQuietBeatMidReplyIsStillStreaming() {
-        XCTAssertEqual(ChatReplyProgress.heartbeatsBeforeStall, 2, "the test below assumes it")
+        XCTAssertGreaterThan(ChatReplyProgress.heartbeatsBeforeStall, 1)
         XCTAssertEqual(phase(after: [.requestOpened, .textArrived, .heartbeat]), .streaming)
+    }
+
+    /// The floor is a floor, not the whole rule: nothing a stream does can make it easier
+    /// to be called stalled than this (MAX-170).
+    func testNoStreamCanLowerTheBarBelowTheFloor() {
+        for provenRun in 0...4 {
+            let subject = progress(after: [.requestOpened] + beats(provenRun) + [.textArrived])
+            XCTAssertGreaterThanOrEqual(
+                subject.heartbeatsRequiredForStall,
+                ChatReplyProgress.heartbeatsBeforeStall,
+                "a proven quiet run of \(provenRun)"
+            )
+        }
     }
 
     /// "Consecutive", not "cumulative": beats spread across a long reply that keeps
@@ -93,10 +126,9 @@ final class ChatReplyPhaseTests: XCTestCase {
     }
 
     func testAStalledReplyGoesBackToStreamingWhenTextResumes() {
-        XCTAssertEqual(
-            phase(after: [.requestOpened, .textArrived, .heartbeat, .heartbeat, .textArrived]),
-            .streaming
-        )
+        let stalling = [.requestOpened, .textArrived] + beats(beatsToStallAnUncalibratedReply)
+        XCTAssertEqual(phase(after: stalling), .stalled, "the premise")
+        XCTAssertEqual(phase(after: stalling + [.textArrived]), .streaming)
     }
 
     /// The three live rungs are three distinct values — the property that was missing
@@ -104,12 +136,135 @@ final class ChatReplyPhaseTests: XCTestCase {
     func testWaitingStreamingAndStalledAreThreeDistinctStates() {
         let waiting = phase(after: [.requestOpened])
         let streaming = phase(after: [.requestOpened, .textArrived])
-        let stalled = phase(after: [.requestOpened, .textArrived, .heartbeat, .heartbeat])
+        let stalled = phase(
+            after: [.requestOpened, .textArrived] + beats(beatsToStallAnUncalibratedReply)
+        )
         XCTAssertEqual(Set([waiting, streaming, stalled]).count, 3)
         for phase in [waiting, streaming, stalled] {
             XCTAssertTrue(phase.isLive)
             XCTAssertFalse(phase.isTerminal)
         }
+    }
+
+    // MARK: - MAX-170: the rule tolerates not knowing the ping cadence
+
+    /// A burst of heartbeats before the first token does not leave a reply primed to
+    /// stall the moment it starts speaking.
+    ///
+    /// This is the shape MAX-152's threshold was most likely to get wrong: a model
+    /// thinking for a long time pings its way through the pause, and a rule that counted
+    /// those beats toward a stall — or that ignored them and then applied a small fixed
+    /// threshold afterwards — would call a reply that is working perfectly well stuck.
+    /// Here the pause is *evidence*: the token that ends it proves this connection goes
+    /// that quiet while healthy, and the bar moves above it.
+    func testABurstOfHeartbeatsBeforeTheFirstTokenDoesNotTripAStallLater() {
+        let thinkingPause = ChatReplyProgress.heartbeatsBeforeStall + 3
+        let opening: [ChatReplyEvent] = [.requestOpened] + beats(thinkingPause) + [.textArrived]
+
+        // The premise: this run is longer than the floor, so an uncalibrated rule would
+        // already be over its threshold on the very next quiet stretch.
+        XCTAssertGreaterThan(thinkingPause, ChatReplyProgress.heartbeatsBeforeStall)
+
+        let subject = progress(after: opening)
+        XCTAssertEqual(subject.phase, .streaming)
+        XCTAssertGreaterThan(subject.heartbeatsRequiredForStall, thinkingPause)
+        XCTAssertEqual(phase(after: opening + beats(thinkingPause)), .streaming)
+    }
+
+    /// A reply that keeps pausing for as long as it has already paused successfully is
+    /// never called stalled, however many beats that is.
+    func testAReplyThatKeepsPausingAsLongAsItAlreadyHasNeverStalls() {
+        var events: [ChatReplyEvent] = [.requestOpened]
+        for run in 1...6 {
+            events += beats(run) + [.textArrived]
+            XCTAssertEqual(phase(after: events), .streaming, "after a proven run of \(run)")
+        }
+    }
+
+    /// The bar rises with the stream and the floor never falls — the two halves of "this
+    /// tolerates being wrong about the cadence" stated as arithmetic.
+    func testTheBarRisesWithWhatTheStreamHasProvenAndNeverFalls() {
+        var previous = ChatReplyProgress().heartbeatsRequiredForStall
+        for run in 0...8 {
+            let subject = progress(after: [.requestOpened] + beats(run) + [.textArrived])
+            let bar = subject.heartbeatsRequiredForStall
+            XCTAssertGreaterThanOrEqual(bar, previous, "a proven run of \(run)")
+            XCTAssertGreaterThan(bar, run, "a proven run must never itself be a stall")
+            previous = bar
+        }
+    }
+
+    /// **The property that keeps the rule honest.** However quiet this stream proved it
+    /// gets while healthy, a stream that stops producing text still reaches `.stalled`.
+    ///
+    /// It holds because calibration only ever moves on a token: once text genuinely
+    /// stops, the bar is frozen and the quiet run grows past it. A rule that could be
+    /// talked out of ever declaring a stall would be worse than the one it replaced,
+    /// because a connection that hangs while still sending pings never trips the client's
+    /// byte-level idle timeout either — this rung is the only thing left.
+    func testADeadStreamStillReachesStalledWhateverItProved() {
+        for provenRun in 0...8 {
+            let opening: [ChatReplyEvent] = [.requestOpened] + beats(provenRun) + [.textArrived]
+            let bar = progress(after: opening).heartbeatsRequiredForStall
+            XCTAssertEqual(
+                phase(after: opening + beats(bar)),
+                .stalled,
+                "a stream that proved a run of \(provenRun) and then died"
+            )
+        }
+    }
+
+    /// A reply that goes quiet long enough to be called stalled, then resumes, then
+    /// finishes, ends up complete — and the stall it passed through leaves no trace in
+    /// the outcome.
+    func testAReplyThatResumesAfterAStallStillCompletes() {
+        let stalled = [.requestOpened, .textArrived] + beats(beatsToStallAnUncalibratedReply)
+        XCTAssertEqual(phase(after: stalled), .stalled, "the premise")
+
+        let resumed = stalled + [.textArrived, .heartbeat, .textArrived]
+        XCTAssertEqual(phase(after: resumed), .streaming)
+        XCTAssertEqual(phase(after: resumed + [.completed(.endTurn)]), .complete)
+    }
+
+    /// Surviving a stall teaches the machine that this connection goes that quiet, so the
+    /// same reply is not called stalled again at the same length.
+    ///
+    /// The withdrawal in `testAStalledReplyGoesBackToStreamingWhenTextResumes` is what
+    /// keeps a wrong guess cheap; this is what keeps it from being made twice.
+    func testSurvivingAStallRaisesTheBarForTheRestOfTheReply() {
+        let survived = [.requestOpened, .textArrived]
+            + beats(beatsToStallAnUncalibratedReply)
+            + [.textArrived]
+
+        let subject = progress(after: survived)
+        XCTAssertEqual(subject.phase, .streaming)
+        XCTAssertGreaterThan(subject.heartbeatsRequiredForStall, beatsToStallAnUncalibratedReply)
+        XCTAssertEqual(phase(after: survived + beats(beatsToStallAnUncalibratedReply)), .streaming)
+    }
+
+    /// Calibration describes one connection, not the API, so a retry starts from the
+    /// floor again rather than inheriting what the abandoned attempt happened to show.
+    func testARetryForgetsWhatThePreviousStreamProved() {
+        let firstAttempt: [ChatReplyEvent] = [.requestOpened]
+            + beats(ChatReplyProgress.heartbeatsBeforeStall + 4)
+            + [.textArrived, .failed(.interrupted)]
+
+        let retried = progress(after: firstAttempt + [.requestOpened, .textArrived])
+        XCTAssertEqual(
+            retried.heartbeatsRequiredForStall,
+            ChatReplyProgress().heartbeatsRequiredForStall
+        )
+    }
+
+    func testResetForgetsWhatTheStreamProved() {
+        var subject = progress(
+            after: [.requestOpened] + beats(ChatReplyProgress.heartbeatsBeforeStall + 4) + [.textArrived]
+        )
+        subject.reset()
+        XCTAssertEqual(
+            subject.heartbeatsRequiredForStall,
+            ChatReplyProgress().heartbeatsRequiredForStall
+        )
     }
 
     // MARK: - Rung 4: the four ways a reply stops
@@ -123,10 +278,9 @@ final class ChatReplyPhaseTests: XCTestCase {
     }
 
     func testAStalledReplyCanStillCompleteNormally() {
-        XCTAssertEqual(
-            phase(after: [.requestOpened, .textArrived, .heartbeat, .heartbeat, .completed(.endTurn)]),
-            .complete
-        )
+        let stalling = [.requestOpened, .textArrived] + beats(beatsToStallAnUncalibratedReply)
+        XCTAssertEqual(phase(after: stalling), .stalled, "the premise")
+        XCTAssertEqual(phase(after: stalling + [.completed(.endTurn)]), .complete)
     }
 
     func testAFailureCarriesWhichFailureItWas() {
