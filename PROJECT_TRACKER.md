@@ -1761,7 +1761,7 @@ is the overseer's, not a ticket's — flagged here rather than done.
 | MAX-137 | Plan authoring for two slots | 129 | Sonnet ✅ |
 | MAX-138 | The plan screen shows both | 129 | Sonnet ✅ |
 | MAX-139 | Workout detail for a lift | 130, 133 | Sonnet |
-| MAX-140 | Trend tiles, honestly ("days run", the effective denominator) | 134 | Sonnet |
+| MAX-140 | Trend tiles, honestly ("days run", the effective denominator) | 134 | Sonnet ✅ |
 | MAX-141 | `PlanProposal` covers lift days | 129, **099** | Sonnet 🔒 ✅ |
 | MAX-142 | ~~`TrainingContext` is per-session, not per-run~~ — **not needed**, MAX-095 landed briefed | 129, **095** | — ✅ |
 | MAX-143 | ~~Decide what to do with lifts already scored as runs~~ — **owner chose: label them**, and it is built | 128 | **Opus** ✅ |
@@ -2691,6 +2691,66 @@ settings, and they were being printed under "The plan" as though they governed a
   `Context/TrainingFactSheet.swift` plus a decision about whether an all-rest lift column
   is stated once or per weekday; this ticket's brief scoped it to `WorkoutFactSheet`,
   `WorkoutContext` and `WorkoutContextBuilder`, so it was left alone.
+
+**MAX-140 — the trend tiles stop calling obligations days, and the average score is
+decided to be per-workout.** LIFTING-SPEC §14 named three jobs; here is what happened to
+each.
+
+- **The effective-days caption was a lie on screen, and now is not.** Since MAX-134,
+  `Tallies.effectiveDays` (`EffectiveObligationTally`) counts prescribed *obligations*,
+  not calendar days — a Tuesday asking for a run and a lift is two chances, and a week
+  with three lifts reads `6/8` where it used to read `4/5` for the same training. The
+  number was already right (MAX-134's own byte-for-byte regression proved that); the
+  caption still said "effective days" over a denominator that no longer counted days.
+  Fixed in `TrendTileData.swift`: "effective sessions" at week/month, "effective, of N
+  eligible sessions" at year — "sessions" rather than "obligations" because it is the
+  word LIFTING-SPEC §6.2 itself uses for this exact cost, and the word `PlanFormatting`
+  already uses on the plan screen. Two new tests exercise this through the real
+  `TalliesCalculator`/`DayObligationResolver` pipeline rather than a hand-built `Tallies`
+  — a mixed run+lift day reading `1/2`, and a run-only week reading the same `4/5` a
+  reader would have gotten before MAX-134, proving the single-discipline-history
+  invariant at the tile layer and not only at `Tallies`'.
+- **"Days run" was already fixed.** MAX-150 landed "days trained" ahead of this ticket
+  starting. Checked, not redone: `workoutDays`' doc comment now says so explicitly, and
+  the existing `testAMonthAddsDaysTrainedAndKeepsTheArcComparison` is the pin.
+- **Average score: decided per-workout, deliberately.** `Tallies.averageScore` already
+  means "mean of every scored workout's `effectiveValue` in the interval" —
+  `TalliesCalculator.computeAverageScore` (unmoved, MAX-134's file) sums one term per
+  scored workout, so a day that completed and scored both a run and a lift already
+  contributed two terms before this ticket, the same as two scored attempts at one
+  obligation always have. **Decision: keep it, and say why in the type's own
+  documentation rather than leave the reader to infer it.** "How good was each thing I
+  did" (this tile) and "did I meet each thing the plan asked of me" (`effectiveDays`,
+  best-of-per-obligation then AND-across-day) are different questions, and collapsing
+  the average to one best-of figure per day would discard a second scored effort's own
+  grade — data the athlete asked to see — to buy a distinction that belongs to the other
+  question. D2 is respected by construction: this ticket touches no arithmetic, only
+  documents the arithmetic `Tallies` already runs.
+- **Reported, not decided: whether a MAX-143-labelled miscategorised score (a lift
+  scored against the running rubric, A21) should leave this average.**
+  `ScoreLedger.countsTowardScorerQuality` already excludes it from PRD §2's
+  scorer-quality signal; whether it should *also* stop dragging down the athlete's own
+  average score is a live question MAX-134's own tracker note flagged and explicitly did
+  not take, on the grounds that it belongs to `Tallies`/`TalliesCalculator`. This
+  ticket's scope names those exact files off-limits (`Tallies/`, `Domain/Tallies.swift`
+  — MAX-134's), so it is reported rather than done here: building a second, competing
+  average inside `TrendTileData` to work around the boundary would be exactly the D2
+  drift this file exists to avoid. **Filed here as a candidate follow-up ticket** —
+  "exclude miscategorised scores from `Tallies.averageScore`" — rather than picked up.
+- **Found in passing, reported, not touched:** `Context/TrainingFactSheet.swift` prints
+  the identical string, "Effective days: N/M", straight from the same
+  `EffectiveObligationTally` — the same caption bug, one layer over. Out of this ticket's
+  named files (`Metrics/TrendTileData.swift`, `App/Dashboard/TrendTilesView.swift`), and
+  it is prompt content, which CLAUDE.md requires a `/security-review` for regardless of
+  how small the wording change. Left alone; flagged for whoever owns the fact sheet next
+  (MAX-136/147's territory).
+- **`App/Dashboard/TrendTilesView.swift` needed no change.** Every string it renders
+  comes from `TrendTileData.tiles`; the view lays tiles out and reads captions, it does
+  not know their words. Listed in the ticket's file scope, read, left untouched.
+
+**Needs device verification: none.** Every change in this ticket is a string returned by
+`MaximizeCore`, pinned by tests that run in CI; nothing here reaches a view, a gesture or
+a rendering decision no test can see.
 
 **MAX-147 — the task text learns discipline too.** MAX-133's report named this exactly:
 `WorkoutScorer`'s stable half still opened *"You are scoring one running workout"* for
