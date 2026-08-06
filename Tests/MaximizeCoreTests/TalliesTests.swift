@@ -999,8 +999,11 @@ final class TalliesTests: XCTestCase {
     }
 
     func testTalliesRejectsANegativeAverageScoreExcludedMiscategorisedCount() throws {
+        // `.outOfRange`, not `.inconsistent`: the count goes through `Validate.nonNegative`
+        // like every other bounded figure on this type, and a bound violation is a range
+        // error. `.inconsistent` is for two fields that disagree, which is a different fact.
         assertThrows(
-            .inconsistent,
+            .outOfRange,
             try Tallies(
                 from: try day("2026-01-05"),
                 through: try day("2026-01-05"),
