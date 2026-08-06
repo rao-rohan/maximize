@@ -1070,7 +1070,7 @@ twelve and is dispatchable immediately.
 | MAX-101 | Conversational plan authoring; proposal card; handoff | 098, 100 | **Opus** ✅ |
 | MAX-102 | **The read-only plan screen with version history** | — | Sonnet ✅ |
 | MAX-103 | "Runs in this conversation" strip | 098 | Sonnet ✅ |
-| MAX-104 | Copy and absence voice, **app-wide** — absorbs MAX-086's other half | 098, 102 | Sonnet |
+| MAX-104 | Copy and absence voice, **app-wide** — absorbs MAX-086's other half | 098, 102 | Sonnet ✅ |
 | MAX-150 | **Split from MAX-104**: the chat and dashboard half, taken now because those two surfaces are finished and drifting while lifting is still being built | 098, 102, 103 | Sonnet ✅ |
 
 Three collisions the spec calls out and the overseer must respect: **094 lands before 095**
@@ -3426,6 +3426,200 @@ transcript, and CI already asserts the string it contains.
 comments, both call sites still take the same two `Int`s they took before, and the touched
 test file's assertions were re-read line by line against the new strings. That is "reads
 correctly and should compile," not "compiles" — stated at that strength deliberately.
+
+---
+
+## MAX-104 — copy and absence voice: the plan and workout screens
+
+**MAX-150's accurate remainder.** MAX-150 took the chat and dashboard half of the
+app-wide copy pass early and left `App/Plan/*` and `App/Workouts/*` in full for this
+ticket, plus one already-checked item (`ChatEntryPoint`'s workout-subject strings — see
+MAX-150's own note). By the time this ticket ran, the lifting build (128–150) had landed
+across both directories, so the brief was not just "match MAX-150's voice" but "check
+what the lifting build left wrong" — MAX-139 and MAX-134/140/157 each reported or implied
+a specific defect in a file they were not allowed to touch.
+
+**The voice is MAX-150's, unchanged, not re-derived:** say what's true, in one plain
+sentence, using the noun the underlying data actually counts; absence gets a real
+sentence naming what's missing and why; two different facts stay two different sentences;
+never restate a fact the surface already stated a few lines away.
+
+### Inventory
+
+Every string in `App/Plan/*` and `App/Workouts/*` was traced to its source and
+classified. Most of both directories was already correct: `SummaryTilesView`,
+`WorkoutChatSectionView`, `MuscleGroupEntryView`, `CadenceBandView`, `SplitsView`,
+`WorkoutRow`, `DayWorkoutsView`, `WorkoutsListModel`, `PlanView`, `PlanDetailSections`,
+`PlanVersionDetailView`, `PlanViewModel` read every string off a core type MAX-095–150
+already got right, and `CadenceBandView`/`SplitsView`/`RouteMapView`'s own "no plan
+governs this day" / "no splits" / "no route" sentences are true exactly because those
+three sections are gated off a lift's screen entirely
+(`SummaryTileData.showsRunOnlySections`, MAX-139) — a run-only view speaking in run
+vocabulary is not a bug. Four things were not fine:
+
+1. **`App/Workouts/WorkoutDetailView.swift`'s failure literal — already fixed.** MAX-154
+   reported this as the one un-adopted `LoadFailureSurface.workoutDetail` call site, but
+   MAX-139 landed touching this exact file in between and adopted it
+   (`Text(FailureCopy.couldNotLoad(.workoutDetail))` is already the `.failed` case's
+   body). Checked, confirmed, no action — recorded here so the next reader does not
+   re-open it.
+2. **`HRCurveView`'s cap-absence sentence conflated two different facts (MAX-139's
+   report).** "No plan governs this day, so there's no cap to compare against." was
+   shown whenever `capBPM` was nil — for a run with no governing plan, correctly, and
+   for **every lift**, incorrectly: `Plan.heartRateCapBPM` is the easy-run ceiling and is
+   withheld from a lift's curve regardless of whether a plan governs the day
+   (`WorkoutDetailModel.heartRateChart`). A lift on a plan-governed day was told a false
+   thing about its own plan. Fixed — see below.
+3. **Two spots had drifted onto `CalendarDay.description`'s bare `YYYY-MM-DD` wire
+   format** instead of the plan screens' own "Aug 5, 2026" (`PlanFormatting.dayLabel`,
+   established at MAX-102): `PlanAuthoringView`'s governed-day preview row
+   (`planDay.date.description`) and `PlanAuthoringModel`'s save confirmation
+   (`"…effective from \(saved.effectiveFrom)."`). Neither is new to the lifting build —
+   both predate it — but both are exactly CLAUDE.md's "one consistent voice," broken on
+   the one screen whose whole job is showing dates.
+4. **The same wire-format leak was inside a core-declared error message.**
+   `PlanAuthoringError.effectiveFromTooEarly`'s `description` interpolated
+   `\(earliest)` directly — a `CalendarDay`, which is `.description`'s bare wire
+   format — so the athlete-facing validation message read "…take effect is
+   2026-06-02." on the one screen everything else calls "Jun 2, 2026." A core file's
+   own string had the same bug the App layer did.
+
+**Two more, not wrong, but not where MAX-150's own rule says they belong:**
+
+5. **`RouteMapView`'s and `SplitsView`'s `.unavailable` sentences were view literals
+   selected by a case of a core-declared enum** (`RouteMapData`, `SplitsListData`) —
+   exactly the shape MAX-150 wrote down as its rule for what moves to the core ("a
+   string whose selection is driven by a case of a core-declared type belongs beside
+   that type"). Neither sentence was factually wrong; both were in the wrong layer for
+   CI to pin them against a future edit to either enum.
+
+### What changed
+
+**HR curve (`Sources/MaximizeCore/Metrics/HeartRateChartData.swift`).** Added
+`discipline: Discipline` to the initializer (no default — every call site says
+explicitly which discipline this is, `SummaryTileData`'s own convention) and a computed
+`capAbsenceReason: CapAbsenceReason?` (`.notApplicableToDiscipline` / `.noPlanForDay`),
+resolved from `discipline` and `capBPM` so the two can never disagree — a cap present
+and a reason for its absence is not a state the type can represent. `HRCurveView` now
+reads the computed `capAbsenceExplanation: String?` instead of hand-testing `capBPM ==
+nil` and printing one hard-coded sentence. `WorkoutDetailModel`'s one call site passes
+`discipline:`, which it already had in scope. Four new tests in
+`HeartRateChartDataTests.swift` pin both sentences, that they differ, and that a present
+cap yields neither.
+
+**Plan-screen dates.** Moved the "Aug 5, 2026" formatter itself from
+`App/Plan/PlanFormatting.swift` down to `PlanCopy.day(_:)` (core) — GMT-pinned,
+unchanged algorithm — so a core-declared error and every plan view read a date the same
+way. `PlanFormatting.dayLabel` now calls straight through, matching every other function
+in that file. `PlanAuthoringError.effectiveFromTooEarly` and the two drifted call sites
+(`PlanAuthoringView`'s preview row, `PlanAuthoringModel`'s confirmation) now go through
+`PlanCopy.day(_:)` / `PlanFormatting.dayLabel(_:)`. While in the file, also moved
+`PlanAuthoringError`'s three weekday interpolations off `String(describing: weekday)
+.capitalized` (a second, reflection-based spelling of the same vocabulary
+`PlanCopy.weekday(_:)` already owns) onto `PlanCopy.weekday(_:)` directly — output
+unchanged, one fewer place the weekday's name could drift. `PlanCopyTests.swift` (new)
+pins `day(_:)` against a mid-month date, a year boundary, and the exact wire-format
+regression this ticket found. `PlanAuthoringTests.swift`'s
+`testBackDatingErrorNamesTheEarliestPermittedDay` — the one test that had pinned the old
+`2026-06-02` wire format as the *expected* value — updated to assert `"Jun 2, 2026"` and
+assert the wire format is now absent.
+
+**Route and splits absence text.** `RouteMapData.unavailableExplanation` and
+`SplitsListData.unavailableExplanation` (both core, both `public static let`) now own
+the sentences `RouteMapView` and `SplitsView` used to hard-code. Each has a test
+(`RouteMapDataTests`, `SplitsListDataTests`) pinning the exact string.
+
+### `session`/`day` sweep
+
+Checked every "day"/"days" occurrence in both directories against what it counts, per
+MAX-134/140/157's own concern. All of them are calendar-day references (a weekday-picker
+label, a plan's effective-from date, `WorkoutDisplayFormatting`'s "Rest day") rather than
+a *count* of something MAX-134 redefined the unit of — neither directory renders a
+tally-style figure (an "N days"/"N sessions" count) at all; those live on the dashboard,
+which is MAX-150's and MAX-157's. Nothing to relabel here.
+
+### Reviewed and left alone, on purpose
+
+- **`WorkoutDisplayFormatting.swift`'s switches on `ActivityType`/`WorkoutClassification`
+  /`ScheduledSession` (all core-declared types) stay in the App layer**, the same
+  exception MAX-150 recorded for `ScoreCalendarFormatting.swift`: it predates MAX-150's
+  own "belongs beside the core type" rule, every string in it is correct today, and
+  relocating a formatter this central (read by `WorkoutRow`, `VerdictHeaderView`, and
+  `PlanFormatting`'s own weekday-line rendering) is an architecture change, not a copy
+  fix. Flagged rather than silently left, per MAX-150's own precedent.
+- **`PlanAuthoringFormatting.describe(_ mode:)`/`.explain(_ mode:)`** switch on
+  `PlanAuthoringSession.Mode`, a core-declared type, and by MAX-150's rule belong beside
+  it — but MAX-101 already gave a reasoned, deliberate account for keeping them in the
+  App layer ("so this file stays the one place the authoring screen's own copy is
+  written"), the text is correct, and there are exactly two call sites, both already
+  reading through this one function (no duplication risk to close). Not moved; noted so
+  a future copy pass does not have to re-discover the tension between the two rules.
+- **`PlanAuthoringFormatting.explain(.firstPlan)`'s "runs are captured but not measured
+  against anything"** — checked against whether a first-plan's consequences read
+  correctly now that lifts exist. It still does: a lift is never scored regardless of
+  whether a plan exists (MAX-111), and the sentence is specifically about what a first
+  plan unlocks for scoring, which is unchanged. Not a finding.
+- **`VerdictHeaderView`'s `awaitingScoreSection`/`noVerdictSection` run-vocabulary
+  strings** ("Scoring runs automatically once the run is captured.", "The plan scores
+  runs, so there's no score for this workout.") — checked against `WorkoutVerdict.init`:
+  `.awaitingScore` is reachable only when `activityType.isRun`, and `.noVerdict` only for
+  a non-run, non-lift discipline still classified `.other` (a ride, a hike). Both
+  sentences are true of every workout that can reach them. Not a finding.
+- **`CadenceBandView`/`SplitsView`/`RouteMapView`'s own run-vocabulary absence
+  sentences** — all three sections are omitted from a lift's screen entirely
+  (`SummaryTileData.showsRunOnlySections`, MAX-139), so "no plan governs this day, so
+  there's no target band to compare against" and "no splits/route recorded for this
+  run" are never shown for anything but a run. Not a finding — this is the one place
+  "no plan governs this day" is still the correct, undifferentiated sentence, because
+  the discipline ambiguity `HRCurveView` had cannot arise here.
+
+### Tests
+
+`HeartRateChartDataTests.swift` (4 new), `PlanCopyTests.swift` (new file, 3 tests),
+`RouteMapDataTests.swift` (1 new), `SplitsListDataTests.swift` (1 new),
+`PlanAuthoringTests.swift` (1 updated to assert the corrected wording and the absence of
+the old wire format). Every new or changed string with a data dependency has a test
+asserting its exact value, following `FailureCopy`/`PlanCopy`'s own bar.
+
+### What CI can and cannot prove
+
+CI can prove: the package compiles, and the ten new/updated tests above pass, pinning
+both `HeartRateChartData` absence sentences (and that they differ), `PlanCopy.day(_:)`'s
+formatting including the year-boundary case, and the two moved absence sentences on
+`RouteMapData`/`SplitsListData`. CI cannot prove that `HRCurveView` actually renders the
+right sentence for a real lift on a real device, that `PlanAuthoringView`'s governed-day
+preview reads correctly against Dynamic Type, or anything about how either screen looks —
+see CLAUDE.md's own distinction.
+
+**Needs device verification:**
+- Open a lift's workout detail screen on a day a plan governs (any weekday with a lift
+  prescribed and rest on the run slot) and confirm the HR curve's note reads "This is a
+  lift, not a run, so there's no heart-rate cap to compare against." — not "No plan
+  governs this day."
+- Open a run's workout detail on a day no plan governs (before the plan's
+  `effectiveFrom`, if reachable, or by design a run with no stored plan) and confirm the
+  HR curve still reads "No plan governs this day, so there's no cap to compare against."
+- Open the plan-authoring screen (Plan tab → Author a revision), scroll to "The first
+  week this version governs," and confirm each row's date reads "Aug 5, 2026" style, not
+  "2026-08-05".
+- Save a plan revision and confirm the on-screen confirmation ("Saved plan v_N_,
+  effective from …") reads the same date style.
+- Trigger the back-dating rejection (attempt to set "Takes effect" earlier than
+  permitted, if the picker's own bound can be bypassed, or read the message on a device
+  where it fires) and confirm the earliest-permitted date reads "Aug 5, 2026" style.
+- An outdoor run with a `hasRoute` flag but no stored route, and an outdoor run with no
+  stored splits breakdown — confirm both still read exactly as before ("This run's route
+  could not be loaded.", "No splits recorded for this run."); this is a pure relocation,
+  not a wording change, and worth a device glance since neither test suite renders a
+  view.
+
+**`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1);
+CI is the actual compiler. Every change is a string relocation, a new computed property
+resolved from existing stored data, or a wording fix with no branch or control-flow
+change; every touched call site was re-read line by line against its new signature. That
+is "reads correctly and should compile, and ten tests are written to prove the strings
+once it does" — not "compiles," stated at that strength deliberately, per CLAUDE.md's own
+distinction between the two sentences.
 
 ---
 

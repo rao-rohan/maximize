@@ -33,9 +33,12 @@ import MaximizeCore
 /// - **A run entirely below the cap**: `aboveCapExcursions` is empty and
 ///   `timeAboveCapSeconds` is zero — a success, stated as one ("Held the cap for the
 ///   entire run"), not left blank as though nothing was measured.
-/// - **No plan governs the day**: `capBPM` is nil, so no `RuleMark` and no shading are
-///   drawn — there is nothing to draw a cap *against* — but the curve itself still
-///   renders in full; a note explains the absence rather than leaving it silent.
+/// - **No cap to compare against**: `capBPM` is nil, so no `RuleMark` and no shading
+///   are drawn — there is nothing to draw a cap *against* — but the curve itself still
+///   renders in full; a note explains why, and **why is one of two different facts**
+///   (MAX-139): a run whose day no plan governs, or a lift, which is never handed the
+///   running cap regardless of whether a plan governs the day. `HeartRateChartData
+///   .capAbsenceExplanation` is what tells the two apart; this view does not.
 struct HRCurveView: View {
     let chartData: HeartRateChartData?
 
@@ -125,8 +128,8 @@ struct HRCurveView: View {
 
     @ViewBuilder
     private func summary(for data: HeartRateChartData) -> some View {
-        if data.capBPM == nil {
-            Text("No plan governs this day, so there's no cap to compare against.")
+        if let explanation = data.capAbsenceExplanation {
+            Text(explanation)
                 .font(.metricLabel)
                 .foregroundStyle(Color.textSecondary)
         } else if let seconds = data.timeAboveCapSeconds {

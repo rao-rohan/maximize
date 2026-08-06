@@ -33,7 +33,7 @@ struct SplitsView: View {
         case .unavailable:
             VStack(alignment: .leading, spacing: Spacing.compact) {
                 header(paceCaption: nil)
-                Text("No splits recorded for this run.")
+                Text(SplitsListData.unavailableExplanation)
                     .font(.bodyCopy)
                     .foregroundStyle(Color.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
