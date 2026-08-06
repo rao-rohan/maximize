@@ -11,8 +11,26 @@ import Foundation
 ///
 /// **Carries no health data and no raw reply.** `PlanProposalModelError` is documented as
 /// never carrying a response body, and `PlanProposalError` as never carrying the fact
-/// sheet or the model's text — so `description` is safe to put on screen, which is
-/// exactly what §4.5 step 2 asks for.
+/// sheet or the model's text.
+///
+/// ## `description` is a diagnostic, not screen text (MAX-155)
+///
+/// This doc comment used to end the previous paragraph with "so `description` is safe
+/// to put on screen, which is exactly what §4.5 step 2 asks for." That was wrong: the
+/// `.transport(error)` case interpolates `PlanProposalModelError.description`, which
+/// carries a bare HTTP status number in `.serverUnavailable` and `.unexpectedStatus` —
+/// developer diagnostics, on the same standing as `ChatStreamError.description` before
+/// MAX-152. `ChatModel.noteDraftingFailure` was reading this `description` straight
+/// into the transcript, which is how *"The plan could not be drafted. The Anthropic API
+/// returned an unexpected status (400)."* reached the plan proposal card — the defect
+/// MAX-154's audit found and filed as MAX-155.
+///
+/// `description` keeps its payload and stays exactly what it was: a value's
+/// `CustomStringConvertible` conformance, read in a debugger. **`PlanDraftingNotice` is
+/// what the screen reads now** — the sibling `ChatFailureNotice` keeps for
+/// `ChatStreamError`, exhaustive over these cases with no status code, no enum name and
+/// nothing else diagnostic in reach of a person. `ChatModel.noteDraftingFailure` calls
+/// it, not this.
 public enum PlanDraftingFailure: Error, Hashable, Sendable, CustomStringConvertible {
 
     /// The call never produced a reply: no key, no network, a status, a refusal.

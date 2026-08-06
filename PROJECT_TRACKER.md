@@ -1,6 +1,6 @@
 # Maximize — Project Tracker
 
-**Last updated:** 2026-08-05
+**Last updated:** 2026-08-06
 **Status: every PRD ticket is merged.** FR-0 through FR-4 are built and CI-green; the
 capture-to-score loop is confirmed working on a real iPhone. What remains is device
 verification of the surfaces nobody has looked at yet, and the post-PRD backlog below.
@@ -555,8 +555,8 @@ feature was governed by a plan that could not exist).
 | MAX-150 | **Copy and absence voice: the chat and dashboard surfaces** — split from MAX-104 so the finished half does not wait behind the lifting build | MAX-104, split | Sonnet ✅ |
 | MAX-152 | **The chat's waiting and streaming states** — the full ladder between "sent" and "answered", and every stream failure as a designed state with words | Owner | **Opus** |
 | MAX-154 | **Error handling, audited app-wide** — every failure path outside chat swept as a set, the failure-to-copy mapping moved into the core, and the inventory recorded below | Owner | **Opus** |
-| MAX-155 | **An HTTP status code reaches the athlete's screen** — `PlanDraftingFailure.description` interpolates `PlanProposalModelError.description` in `ChatModel.noteDraftingFailure`, so "…returned an unexpected status (400)." renders on the plan proposal card. **MAX-152 has landed and did not fix this** — its `ChatFailureNotice` covers `ChatStreamError`, and the drafting path is a separate error type. Route it through `ChatFailureNotice`'s no-default, no-numerals, nothing-interpolated discipline | MAX-154 | Sonnet |
-| MAX-156 | **`ScoringError.description` interpolates a workout identifier and a date** — latent, not leaking today, and one `.public` log line away from being a real one | MAX-154 | Sonnet |
+| MAX-155 | **An HTTP status code reaches the athlete's screen** — `PlanDraftingFailure.description` interpolates `PlanProposalModelError.description` in `ChatModel.noteDraftingFailure`, so "…returned an unexpected status (400)." renders on the plan proposal card. Fixed with a sibling to `ChatFailureNotice` (`PlanDraftingNotice`) rather than a case added to it — see write-up below | MAX-154 | Sonnet ✅ |
+| MAX-156 | **`ScoringError.description` interpolates a workout identifier and a date** — latent, not leaking today, and one `.public` log line away from being a real one. Fixed: the two payloads are gone from `description`; the enum's own associated values are the deliberate channel a caller reaches for instead — see write-up below | MAX-154 | Sonnet ✅ |
 | MAX-153 | **The chat shell** — composer, thread list, sheet chrome. The design pass the chat's *shell* never had | Owner | **Opus** |
 | MAX-157 | **The fact sheet tells Claude "days" over a count of obligations** — `TrainingFactSheet`'s "Effective days" line is the same MAX-134 caption bug one layer into the prompt, not just on screen | MAX-140 | Sonnet ✅ |
 
@@ -3207,6 +3207,130 @@ two cases share one, that none carries a digit or names a type, and that the Hea
 claims nothing R10 forbids. **It proves nothing about any of the failures themselves.** CI
 opens no socket, touches no Health store, reads no Keychain and opens no SwiftData store,
 so every path this ticket touches is device-verified only. The PR lists how to provoke each one.
+
+---
+
+## MAX-155/156 — error descriptions stop leaking codes and identifiers
+
+Both filed by MAX-154's audit (§5, "found, reported, not taken"), both fixed the same
+shift: a `description` that used to double as screen or log text now stays a debugger
+diagnostic on the type that already had one, and a new, narrower channel carries the
+words that are actually safe to show or store. **Corrected from the tracker rows that
+filed them:** MAX-155's row names `PlanProposalDrafting.description` interpolating a
+`ScoringModelError` — that description lives on `PlanDraftingFailure`
+(`Plan/PlanProposalDrafting.swift`), and the interpolated type is `PlanProposalModelError`,
+not `ScoringModelError`. Trusted the code over the row, per the ticket's own instruction.
+
+### MAX-155 — the plan proposal card
+
+**Decision: a sibling to `ChatFailureNotice`, not a case added to it.**
+`ChatFailureNotice` maps exactly one input type (`ChatStreamError`) and its own doc
+comment states that as the reason its exhaustiveness claim is meaningful.
+`PlanDraftingFailure` wraps two types `ChatStreamError` knows nothing about
+(`PlanProposalModelError` for a transport failure, `PlanProposalError` for a rejected
+proposal), so folding it in would mean either widening `ChatFailureNotice`'s signature
+to a third, unrelated error type, or bolting a second entry point onto a type whose
+whole design is "one mapping, one input." `PlanDraftingNotice`
+(`Sources/MaximizeCore/Plan/PlanDraftingNotice.swift`) is the sibling instead, same
+shape, same rules, its own exhaustive `switch` with no `default`.
+
+**A 400 from the drafting endpoint and a 400 from the stream get the same words, by
+different code.** Both `unexpectedStatus` cases mean the same thing to an athlete —
+"this app built a request Anthropic rejected, and asking again will not help" — so the
+sentences read alike on purpose. But `ChatStreamError.unexpectedStatus` and
+`PlanProposalModelError.unexpectedStatus` are different types, so the sentence is
+written twice, once per `switch`, the same way each type already writes its own
+`.noAPIKeyStored` sentence rather than sharing a helper across two enums that happen to
+share a case name.
+
+**`PlanDraftingFailure.description` is unchanged**, payload and all — it still
+interpolates `PlanProposalModelError.description`, status codes included. That is
+deliberate, not an oversight: `ChatStreamError.description` was already accepted as a
+developer diagnostic before MAX-152, on the reasoning `FailureCopy` states explicitly
+("`ScoringModelError.description` and friends stay as they are ... written for a
+developer reading a debugger"). Rewriting `PlanDraftingFailure.description` in place
+would only be right if nothing else read it; something did —
+`ChatModel.noteDraftingFailure` — and that is the one line this ticket changed, to read
+`PlanDraftingNotice.notice(for:).message` instead. The doc comment that used to claim
+`description` was screen-safe (the actual bug — see MAX-154's finding) is corrected to
+say the opposite and point at the new type.
+
+**`.rejected(PlanProposalError)` is the deliberate, documented exception** to "nothing
+here is interpolated": `PlanProposalError.description` is correction text, not a wire
+diagnostic — the same string `PlanProposalInstruction(retryingAfter:)` already puts in
+front of the model, and MAX-101's own documentation calls it "the one the athlete should
+read verbatim." It is carried into `PlanDraftingNotice` unchanged. Rewriting it would be
+a second opinion about a file this ticket does not own (`Plan/PlanProposal.swift`,
+MAX-151) — flagged, not touched, per this ticket's scope discipline.
+
+**Retry: no new flag.** `ChatFailureNotice.offersRetry` gates `ChatModel.canRetry`, but
+nothing gates "Draft a plan from this conversation" on the failure kind — the same
+button that failed is the only affordance for every case, and tapping it is what asks
+again. That already satisfies MAX-152's rule (a button, never an automatic policy)
+without a property, so `PlanDraftingNotice` does not add one; adding a flag nothing
+reads would be a second, unenforced decision.
+
+**Tests:** `Tests/MaximizeCoreTests/PlanDraftingNoticeTests.swift`, exhaustive over
+`PlanProposalModelError` — every case a distinct, non-empty sentence, no digit anywhere
+(the exact MAX-155 regression, checked by name for 400 and every other status this
+client can receive), no wire vocabulary, no case name. Plus
+`ChatPlanDraftingTests.testAnUnexpectedStatusNeverReachesTheTranscriptAsANumber`, driving
+the failure through `ChatModel.draftPlan()` end to end. One existing assertion was
+updated rather than left to rot:
+`ChatPlanDraftingTests.testEveryFailureGetsASentenceInTheTranscript`'s `.requestFailed`
+fragment moved from "connectivity" (a wire word that reached the screen by the bug this
+ticket fixes) to "connection" (what the transcript now actually says) — documented in
+place, not silently changed. `PlanProposalDraftingTests`' two assertions against
+`.description` directly (`testTwoUnusableRepliesStopRatherThanLooping`,
+`testTheNoKeySentencePointsAtTheFix`) were left untouched, because `.description`'s
+behaviour for those two cases is unchanged.
+
+### MAX-156 — `ScoringError.description`
+
+**Decision: delete the payload from the two affected sentences; no new property.**
+`noPlanInEffect(day:)` and `contextAlreadyScored(workoutID:)` no longer interpolate
+their associated values into `description` — full stop, not "unless the caller is
+`.private`". CLAUDE.md's health-and-privacy rule has no "the current caller happens to
+be careful" clause, and a `description` is a plain `String`: nothing stops a future
+`.public` log call, a screen, or a crash reporter from reading it, so the fix had to
+make the leak structurally impossible rather than rely on today's one call site staying
+careful.
+
+**No second "diagnostic" channel was added, because one already exists.** The ticket
+brief allows for "a separate non-`description` channel that callers must reach for
+deliberately" if a diagnostic genuinely needs the value. It does not: the day and the
+workout ID are still sitting on the case as ordinary associated values, and a caller
+that wants one switches on `.noPlanInEffect(let day)` or
+`.contextAlreadyScored(let workoutID)` directly — already deliberate, already typed,
+and adding a mirrored property would only duplicate a channel the enum already provides
+for free.
+
+**The other five cases were left alone.** `noBandMatched` interpolates a
+`ScheduledSessionKind` and `WorkoutClassification` raw value ("easy", "hard") — plan
+vocabulary, not an identifier or a date — and the model-fault cases
+(`malformedResponse`, `scoreOutOfPermittedRange`, `scoreOutsideBand`,
+`rationaleRejected`) interpolate a score, a range, or a caller-supplied reason string,
+none of which name a specific workout. MAX-156's brief is the identifier and the date
+specifically; widening the diagnostic-copy rewrite to every case was not asked for and
+was not done.
+
+**Tests:** `Tests/MaximizeCoreTests/ScoringErrorPrivacyTests.swift`, one instance of
+every `ScoringError` case built with a distinctive UUID and `CalendarDay`, asserting
+`description` contains neither the identifier's `uuidString` nor the date's ISO string
+(nor its bare year) for any of the seven cases — not just the two that used to leak. A
+companion test confirms the two affected sentences still say something a debugger reader
+can act on, and another confirms the day and workout ID are still reachable by matching
+the specific case, which is the "separate channel" this decision relies on.
+
+### What CI can and cannot prove, for both
+
+CI proves: every notice/description exists, is non-empty, is distinct from its
+siblings, and — mechanically, by regex over the rendered strings — carries no digit and
+none of the banned wire/enum tokens. It cannot prove the two athlete-facing surfaces
+(the plan proposal card, and anything that ever renders a `ScoringError` — nothing does
+today) look right, or that provoking a real 400 from `AnthropicPlanProposalClient`
+against a live server produces exactly the case this ticket assumes. See the PR's
+**Needs device verification**.
 
 ---
 
