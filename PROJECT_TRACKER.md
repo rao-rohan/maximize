@@ -1955,9 +1955,10 @@ free. What landed in the file:
   explains what went wrong. The composer offers none — two retry affordances in two
   registers is worse than either alone.
 | MAX-151 | **Author the duration floor** — `StandardPlanSeed` states one (600s), the authoring screen edits it, `PlanProposal` can propose it. **Closes gap P3 for real** | 149, 148 | Sonnet ✅ |
-| MAX-158 | **Schema vocabulary reaches the athlete on a rejected proposal** — `PlanProposalError.description` says things like *"The reply left out `liftKind`, which the plan schema requires."* No PII and no status code, so not a privacy defect; but it names wire fields at a person who cannot act on them. MAX-155/156 left it deliberately (MAX-151 owned the file) | 155 | Sonnet |
+| MAX-158 | **Schema vocabulary reaches the athlete on a rejected proposal** — `PlanProposalError.description` says things like *"The reply left out `liftKind`, which the plan schema requires."* No PII and no status code, so not a privacy defect; but it names wire fields at a person who cannot act on them. MAX-155/156 left it deliberately (MAX-151 owned the file) — see write-up below | 155 | Sonnet ✅ |
 | MAX-159 | **A recorded-but-unjudged workout outranks another obligation's settled miss** — a Tuesday whose lift was recorded but unscored and whose run was missed draws `.noVerdict`, and its sentence names neither. §7.2's principle says change it, but the same ordering governs single-obligation days shipped since MAX-061, so it moves historical cells and wants a designed state | 135 | **Opus** |
 | MAX-160 | **Should a labelled miscategorised score leave the athlete's own average?** MAX-143 excluded it from the scorer-quality metric only; MAX-140 confirmed the average stays per-workout and declined to widen. A product decision, then a `Tallies` change | 143, 140 | Owner / overseer |
+| MAX-170 | **The stall detector's ping assumption had never met the live API** — MAX-152's two-beat threshold rested on an unverified claim about ping cadence that the API's own documentation contradicts. The rule now calibrates against what each stream demonstrates rather than against a constant | 152 | **Opus** ✅ — see the MAX-170 section below for what was established, what could not be, and how the design tolerates being wrong |
 
 **Four collisions the overseer must respect.**
 
@@ -3798,6 +3799,99 @@ distinction between the two sentences.
 
 ---
 
+## MAX-158 — a rejected proposal stops speaking schema
+
+**The defect, restated precisely.** `PlanProposalError.description` is written for two
+readers at once: `PlanProposalInstruction(retryingAfter:)` appends it to the retry as a
+correction, and `PlanDraftingNotice`'s `.rejected` case — MAX-155's own documented,
+deliberate exception — carried it straight onto the plan proposal card. The words that
+make the retry work ("the reply left out `liftKind`, which the plan schema requires")
+are exactly the words an athlete cannot act on: nothing on their screen is called
+`liftKind`, and they have never seen a schema.
+
+**Decision: two renderings, one error — a type, not a second property.**
+`PlanProposalError.description` is untouched, payload and all, and stays the correction
+channel. `PlanProposalErrorNotice` (`Sources/MaximizeCore/Plan/PlanProposalErrorNotice.swift`)
+is the new sibling, same shape as `ChatFailureNotice` and `PlanDraftingNotice`: a
+`message`, a private initialiser, and one exhaustive `static func notice(for:)` with no
+`default`. A second `String` property sitting next to `description` on the same enum was
+considered and rejected — a naming convention is exactly what let the original defect
+happen (`PlanDraftingNotice` reading `error.description` as though it were already
+screen-safe), and a second property is still a naming convention: nothing stops a future
+call site from reaching for the wrong one by habit. A distinct type is not a habit — a
+caller wanting athlete-facing text has exactly one type here that offers any.
+
+**Fourteen cases get a new, constant sentence; one case is left alone, on purpose.**
+`.rejectedByAuthoring(PlanAuthoringError)` is not rewritten. `PlanAuthoringError` was
+built for this exact readership — its own doc comment says its cases "say what the
+athlete did and what to do instead," and `FailureCopy.planCouldNotBePrepared`'s doc
+comment independently calls it "already athlete-facing." It never carries a field name,
+"JSON," or "schema." Writing a second sentence for it would be two descriptions of the
+same plan-authoring rule, free to drift the moment one is edited and the other is not —
+the same argument D2/D3 make for one context builder rather than two notions of what a
+workout is. So `PlanProposalErrorNotice` delegates that one case to
+`authoringError.description` verbatim, and says explicitly why doing so is not the
+naming-convention trap the rest of the type exists to close: `PlanAuthoringError` is a
+type of its own, switched on by name, not a same-shaped property assumed safe by
+proximity.
+
+The other fourteen cases (`malformedResponse`, `missingField`, `forbiddenField`,
+`unknownSessionKind`, `unknownWeekday`, `unknownLiftKind`, `unknownMuscleGroup`,
+`weekIsNotOneSessionPerWeekday`, `restDayIsNotEmpty`, `liftRestDayIsNotEmpty`,
+`malformedGoalTargetDay`, `longRunArcIsEmpty`, `longRunArcWeekNotPositive`,
+`longRunArcOutOfOrder`) each get one constant sentence, matching
+`PlanDraftingNotice.transportMessage`'s rule: nothing here is interpolated, so a
+payload (a field name, a weekday, a week index) cannot slip through by accident. Each
+sentence says what is wrong with the *plan*, in `PlanCopy`'s vocabulary — a run kind, a
+lift kind, a muscle group, a rest day, a long-run week — rather than what was wrong with
+the *reply*.
+
+**`PlanDraftingNotice`'s `.rejected` case is the one line that changed.** It now reads
+`PlanProposalErrorNotice.notice(for: error).message` instead of `error.description`
+directly; the surrounding "Claude's plan was not one this app could use, twice: … Nothing
+has changed — say what you want and ask again." sentence is unchanged, since that framing
+was never the leak. `ChatModel.noteDraftingFailure` needed no change — it already read
+`PlanDraftingNotice`, never `PlanProposalError.description` directly.
+
+**The retry is unweakened.** `PlanProposalInstruction`, `PlanProposalDrafting`, and
+`PlanProposalError.description` itself are untouched. `PlanProposalDraftingTests`'
+`testAnUnusableReplyIsAskedAgainOnceWithTheReason` still asserts the retry's `task`
+contains `PlanAuthoringError.heartRateCapImplausible(...).description` verbatim, and
+`PlanProposalTests.testAStringWhereANumberBelongsIsRefusedNotCoerced` still asserts
+`description` names the field. Neither was touched; both still pass by inspection.
+
+**Tests:** `Tests/MaximizeCoreTests/PlanProposalErrorNoticeTests.swift`, exhaustive over
+all fifteen `PlanProposalError` cases — every case a distinct, non-empty sentence; no
+message contains a quotation mark (every field name and value `description` names is
+quoted, so a surviving quote is itself a leak detector); a banned-token list catches
+"JSON", "schema", and the specific field names this ticket's brief named; the fourteen
+model-boundary cases are asserted to differ from their own `description`, and two
+instances of the same case with different payloads are asserted to read identically,
+confirming nothing is interpolated; `.rejectedByAuthoring` is asserted to equal
+`PlanAuthoringError.description` verbatim, pinning the one deliberate exception; and the
+correction channel is asserted, separately, to still name the precise field for every
+case that has one. `PlanDraftingNoticeTests` gained three tests replacing the one that
+used to assert the bug (`testARejectedProposalCarriesTheCorrectionTextVerbatim`, which
+asserted the card *did* contain `error.description` — now asserting the opposite) and
+confirming the `.rejectedByAuthoring` case still reads its one shared sentence through
+`PlanDraftingNotice` end to end.
+
+**Scope discipline.** `Dashboard/ScoreCalendar.swift` and `App/Dashboard/ScoreCalendar*`
+(MAX-159's files) were not touched. No file outside `Sources/MaximizeCore/Plan/` and its
+tests was edited.
+
+### What CI can and cannot prove
+
+CI proves: the package compiles; every `PlanProposalError` case maps to a distinct,
+non-empty, quotation-mark-free sentence with no `default` branch to fall through to; the
+correction channel (`description`) still names the precise field for every case that has
+one; and the `.rejected` path of `PlanDraftingNotice` reads the new type rather than the
+old one. It cannot prove the plan proposal card actually renders this text on a device,
+or that a real rejected proposal from Anthropic reaches this path the way the tests
+simulate it. See the PR's **Needs device verification**.
+
+---
+
 ## MAX-165 — the first plan's date covers captured history (A23)
 
 **The defect, and why it was invisible.** Three behaviours, each correct on its own:
@@ -4277,6 +4371,121 @@ device). See the PR's "Needs device verification" section for the checklist.
 **`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
 Nothing in this ticket touches `Sources/MaximizeCore/`, so neither suite's *content*
 changed; `swift test` was not re-run to confirm the unmodified suite still passes.
+
+---
+
+## MAX-170 — the stall detector stops depending on the ping cadence
+
+**MAX-152's threshold rested on a claim about the API that nobody had checked, and the
+API's own documentation contradicts it.** `ChatReplyProgress.heartbeatsBeforeStall` was
+two, justified as: "the API is documented as free to send a `ping` at any time … two in a
+row with no token between them will not happen to a stream that is producing text." The
+first half is right and the second half was an assumption.
+
+### What was established
+
+Read from the current Messages API streaming documentation, which is authoritative here:
+
+- **Pings carry no cadence guarantee of any kind.** The whole of what is specified is
+  that event streams "may also include **any number** of `ping` events" and that "there
+  may be `ping` events **dispersed throughout the response**". No interval, no frequency,
+  no upper or lower bound, no statement that the rate is stable across models, effort
+  levels or load.
+- **Pings during ordinary generation are the documented shape, not an edge case.** The
+  published streaming examples place a `ping` *between two consecutive `text_delta`
+  events*, and another between `content_block_start` and the first delta. So a healthy,
+  actively-producing stream demonstrably emits pings mid-reply.
+- **The stream's shape is explicitly not frozen.** The versioning policy reserves the
+  right to add event types and instructs clients to tolerate unknown ones, so even a
+  cadence measured today is an implementation detail rather than a contract.
+- **The failure mode was live, not theoretical.** Community reports against the Anthropic
+  TypeScript SDK (anthropics/anthropic-sdk-typescript#998, and the Claude Code hang it
+  cites) describe pings as a roughly fifteen-to-thirty-second liveness signal, and
+  separately describe high-effort Opus replies going quiet for sixty to a hundred and
+  twenty seconds between deltas during a thinking pass. Those two figures together put a
+  perfectly healthy reply at somewhere between two and eight consecutive quiet beats —
+  the low end of which is exactly MAX-152's threshold. **A slow reply rendering as
+  stalled was not a remote possibility; it was the expected case.**
+
+### What could not be established, and it is the important half
+
+**Nothing about the real cadence.** It is not documented, the numbers above are
+third-party observations with no Anthropic confirmation, and the SDK issue that reports
+them proposes that the server should start advertising its own next-ping interval —
+which is an admission by its author that the interval varies and cannot be assumed. CI
+opens no sockets, so nothing in this repo can measure it either. **Any constant chosen
+here is a guess, and choosing a larger one would only have moved the guess.**
+
+### How the design tolerates being wrong
+
+The rule no longer asks how many beats mean a stall in general. It asks how many beats
+mean a stall *on this stream*, and lets the stream answer.
+
+- **Every quiet run that ends in a token is evidence.** It proves this connection goes
+  that quiet while healthy. `longestHealthyQuietRun` records the largest such run, and
+  the bar (`heartbeatsRequiredForStall`) sits a margin above it. A chatty-ping stream
+  teaches the machine to expect chatty pings.
+- **Beats before the first token calibrate it too**, which is the case that matters most.
+  A long thinking pass is precisely when the cadence is measurable and precisely what the
+  old rule would have mistaken for a stall; now the token that ends the pause records the
+  whole run as normal.
+- **Calibration is a `max`, so it only ever raises the bar.** No stream can make the
+  machine more trigger-happy than the floor.
+- **It cannot be talked out of firing.** `longestHealthyQuietRun` moves only on
+  `.textArrived`, so once text genuinely stops the bar is frozen while the quiet run
+  grows without limit. Every dead stream crosses it. That termination property is tested
+  across every calibration level rather than asserted.
+- **Being wrong stays cheap in the direction it can still be wrong.** The floor is the
+  one remaining guess. Too high only delays an advisory line. Too low shows that line
+  early on a working reply — and the rung is withdrawn by the very next token, its copy
+  ("Still connected — nothing new for a moment.") says the connection is fine rather than
+  that anything broke, and surviving one stall raises the bar so the same reply is not
+  accused twice. A wrong floor produces a true sentence slightly early, not a healthy
+  reply presenting as a dead one.
+
+**Which side of MAX-152's line this falls on.** MAX-152 rejected deciding a stall *by*
+elapsed time, and that still stands: there is no clock, no `Task.sleep`, no injected date,
+and the machine remains a pure fold over stream events that CI runs in microseconds. This
+change only *refuses to declare* a stall until the stream has produced more silence than
+it has ever produced while working. Counting rule, not timing rule.
+
+### The MAX-152 tests that were deliberately changed
+
+None were weakened; four stopped pinning a number this ticket deliberately moved.
+`testASingleQuietBeatMidReplyIsStillStreaming` asserted the constant equals two and now
+asserts it exceeds one — the property that actually makes the case meaningful.
+`testAStalledReplyGoesBackToStreamingWhenTextResumes`,
+`testWaitingStreamingAndStalledAreThreeDistinctStates` and
+`testAStalledReplyCanStillCompleteNormally` each built a stall by writing two heartbeats
+literally; they now read the bar from the type, and the first and third gained an explicit
+assertion that the premise holds (that the reply really is stalled before the thing under
+test happens), which the old versions never checked.
+
+**The recovery bug the ticket asked about does not exist.** `.textArrived` guards on
+`phase.isLive`, `.stalled` is live, so text after a stall already returned the reply to
+`.streaming`, and MAX-152 had a test for it. Verified rather than assumed; the coverage is
+now extended to a stall that resumes, keeps streaming and then completes.
+
+### Reported, not done — a pinging-but-dead stream never terminates
+
+MAX-152 stated its cost as "a connection that hangs and sends no pings stays `.streaming`
+until the client's own idle timeout turns it into `.failed(.interrupted)`". **The mirror
+image is worse and was unstated.** `AnthropicStreamingChatClient.idleTimeout` is a
+`URLRequest.timeoutInterval` on a streaming response — a *byte-level* inactivity timer
+that resets whenever data arrives. A ping is data. So a connection that has died on the
+model's side while its keep-alives continue **never trips that timeout at all**: the
+request is held open indefinitely by the very frames that prove nothing is being said.
+
+For that stream `.stalled` is the only signal the app has, and it is not a terminal
+state — the reply stays live, the composer stays blocked, and nothing ever resolves. That
+is why the bar above must stay finite, and it is why the honest fix is a turn-level budget
+in the app layer (a cap on total quiet beats, or on wall time, that produces a real
+terminal failure) rather than anything else this ticket could do in the core. **Outside
+MAX-170's scope and outside `MaximizeCore` — reported here for its own ticket.**
+
+**`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
+The change is pure core logic, so CI proves the rule end to end; what CI cannot prove is
+the live cadence the floor is calibrated against. See the PR's "Needs device verification".
 
 ---
 

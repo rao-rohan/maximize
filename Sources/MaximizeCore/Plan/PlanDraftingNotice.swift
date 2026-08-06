@@ -54,13 +54,17 @@ import Foundation
 /// - **No health data, ever.** Every `.transport` sentence below is a constant; the
 ///   fact sheet and the athlete's turns are never in reach of this mapping.
 ///
-/// `.rejected` is the deliberate exception: `PlanProposalError.description` is not a
-/// wire diagnostic, it is the correction text `PlanProposalInstruction(retryingAfter:)`
-/// already puts in front of the model, written specific enough to act on ("monday is
-/// not a session kind") — MAX-101's own documentation calls it "the one the athlete
-/// should read verbatim." Rewriting it here would be a second, competing opinion about
-/// what a rejected proposal should say, on a file this ticket does not own
-/// (`Plan/PlanProposal.swift`, MAX-151). It is carried through unchanged.
+/// `.rejected` was carried through from `PlanProposalError.description` unchanged until
+/// MAX-158, on the reasoning that it was "the one the athlete should read verbatim"
+/// (MAX-101's own documentation). That reasoning held for the correction a retry needs
+/// and did not hold for a screen: `description` speaks the wire vocabulary a model can
+/// act on ("the reply left out `liftKind`, which the plan schema requires"), and a
+/// person reading the same sentence is handed a field name and the word "schema" they
+/// cannot do anything with. `PlanProposalErrorNotice` (`Plan/PlanProposalErrorNotice.swift`,
+/// MAX-158, the file `PlanProposalError` now belongs to) is the second rendering that
+/// keeps the correction channel untouched and gives the athlete a sentence built for
+/// them instead — see that type's own documentation for why one case of it is still one
+/// sentence for both readers.
 ///
 /// ## Retry stays a button, unconditionally (MAX-152's rule)
 ///
@@ -93,9 +97,11 @@ public struct PlanDraftingNotice: Hashable, Sendable {
         case let .transport(error):
             return transportMessage(for: error)
         case let .rejected(error):
-            // Carried through unchanged — see this type's note on why `.rejected` is
-            // the deliberate exception to "nothing here is interpolated".
-            return "Claude's plan was not one this app could use, twice: \(error.description) "
+            // `PlanProposalErrorNotice` is the athlete-facing rendering of `error`
+            // (MAX-158); `error.description` itself stays the correction text a retry
+            // needs and is never shown here.
+            return "Claude's plan was not one this app could use, twice: "
+                + "\(PlanProposalErrorNotice.notice(for: error).message) "
                 + "Nothing has changed — say what you want and ask again."
         case .nothingToDraftFrom:
             return "Say what you want the plan to do first — a plan is drafted from the "
