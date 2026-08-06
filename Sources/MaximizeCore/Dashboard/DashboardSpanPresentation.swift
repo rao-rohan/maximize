@@ -12,7 +12,7 @@ import Foundation
 /// |---|---|---|---|
 /// | calendar (FR-3.2) | dated day grid | dated day grid | weekday × week heatmap |
 /// | HR drift (FR-3.3) | curve overlay, trendline beneath | curve overlay, trendline beneath | trendline alone |
-/// | tiles (FR-3.4) | mileage vs arc, effective days, streak, avg | + days run | totals and rates, no arc |
+/// | tiles (FR-3.4) | mileage vs arc, effective sessions, streak, avg | + days trained | totals and rates, no arc |
 ///
 /// The reasoning for each row sits on the enum it produces. Two properties are shared
 /// by all three and worth stating once here:
@@ -207,27 +207,30 @@ public enum DriftSectionRepresentation: Hashable, Sendable, CaseIterable {
 /// obvious and most true: the *same* four figures are all computable over a year, and
 /// two of them stop meaning anything useful.
 public enum TrendTileSet: Hashable, Sendable, CaseIterable {
-    /// FR-3.4 as written: mileage vs. the plan's arc target, effective days, streak,
-    /// average score.
+    /// FR-3.4 as written: mileage vs. the plan's arc target, effective sessions, streak,
+    /// average score. **"Sessions", not "days" — MAX-140.** Since MAX-134,
+    /// `EffectiveObligationTally`'s denominator counts prescribed obligations, and a
+    /// two-discipline day is two of them; see `TrendTileData`'s own documentation for the
+    /// caption fix this drove.
     ///
     /// "Mileage vs arc" is at its most literal here — the arc prescribes a weekly
     /// distance (D1, `LongRunArc.Week`), so at a week the tile compares one ask to one
     /// week's execution.
     case weekly
 
-    /// The weekly set plus **days run**.
+    /// The weekly set plus **days trained**.
     ///
     /// Mileage vs. arc survives: summing the month's plan days against the month's
     /// workouts is four or five weekly asks against four or five weeks of execution,
     /// which is still a comparison the athlete can act on.
     ///
-    /// Days run is added because consistency is the figure a month answers and a week
-    /// cannot: 18 days out of a month is a fact about a training block, whereas 4 days
-    /// out of a week is already legible in the calendar row directly above it.
+    /// Days trained is added because consistency is the figure a month answers and a
+    /// week cannot: 18 days out of a month is a fact about a training block, whereas 4
+    /// days out of a week is already legible in the calendar row directly above it.
     case monthly
 
     /// **Totals and rates, with the arc comparison dropped:** total distance,
-    /// effective-day *rate*, days run, streak, average score.
+    /// effective-session *rate*, days trained, streak, average score.
     ///
     /// Two changes, each for a stated reason:
     ///
@@ -239,10 +242,10 @@ public enum TrendTileSet: Hashable, Sendable, CaseIterable {
     ///   while the target covers however many the plan governs, and the tile silently
     ///   reports beating a plan that did not exist yet. Total distance alone carries no
     ///   such claim.
-    /// - **Effective days as a percentage.** At a week, "4/5" is the readable form and
+    /// - **Effective sessions as a percentage.** At a week, "4/5" is the readable form and
     ///   the denominator is the point. At a year, "211/310" is two numbers to divide in
     ///   your head; the rate is the signal. The denominator does not disappear — it
-    ///   moves into the caption, because `EffectiveDayTally`'s own documentation is
+    ///   moves into the caption, because `EffectiveObligationTally`'s own documentation is
     ///   right that a bare percentage hiding its denominator is how a training log
     ///   lies.
     case annual

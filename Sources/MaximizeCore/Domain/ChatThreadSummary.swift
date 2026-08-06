@@ -223,6 +223,58 @@ public struct ChatThreadSummary: Hashable, Sendable, Identifiable {
     }
 }
 
+/// The one string `ChatThreadSummary.preview` being nil stands for (§2.3) — a thread
+/// nobody has spoken in yet.
+///
+/// MAX-150: `ChatThreadListView`'s row wrote this sentence twice, by hand, in two
+/// places that must always agree — the visible caption and the VoiceOver label built
+/// beside it — which is exactly the kind of duplication CLAUDE.md's "one consistent
+/// voice" exists to close: the two could not previously drift, because they were never
+/// checked against each other, only against luck. One constant, read twice, closes it
+/// for good rather than by convention.
+public enum ChatThreadListCopy {
+    public static let noMessagesYetPreview = "No messages yet"
+
+    // MARK: - MAX-153: the list's own two states
+
+    /// The empty list. Absence is a designed state, and this one is a fresh install as
+    /// often as it is a store nobody has asked anything — the sentence names the way out
+    /// rather than reporting the fact, matching
+    /// `ChatConversationCopy.emptyTranscriptInvitation`'s register on the screen a row
+    /// opens.
+    ///
+    /// Moved out of `ChatThreadListView` (MAX-153) for the reason MAX-150 moved
+    /// `notYetScored` and `noVerdict` out of `ChatConversationView`: this is one arm of a
+    /// state machine whose other arms already live in the core, and a switch with half
+    /// its copy in a view is the shape that drifts.
+    public static let noConversationsYet =
+        "No conversations yet — ask about a run or your training to start one."
+
+    /// The store could not be opened, or the read failed. A local-storage problem stated
+    /// plainly, in the same voice as `ChatConversationCopy.failedToLoad`.
+    public static let couldNotLoadConversations = "Conversations could not be loaded."
+
+    /// The headline above each of those two sentences.
+    ///
+    /// Two parts rather than one because the app layer draws these with the platform's own
+    /// empty-state component, which is built as headline-plus-explanation. The sentences
+    /// above are unchanged from what MAX-150 settled; these are the short forms that sit
+    /// over them, and they are deliberately nouns — the sentence is what does the
+    /// explaining.
+    public static let noConversationsTitle = "No conversations"
+    public static let couldNotLoadConversationsTitle = "Conversations unavailable"
+
+    /// The SF Symbol each of those two states wears. The core says which symbol; the app
+    /// layer draws it — `ChatSubjectKind.glyphSystemImageName`'s own rule.
+    public static let noConversationsGlyphSystemImageName = "bubble.left.and.bubble.right"
+    public static let couldNotLoadConversationsGlyphSystemImageName = "exclamationmark.triangle"
+
+    /// The heading above the list. Not "Chat history" and not "Threads": the leading
+    /// toolbar button that pushes this screen is already labelled for the action, and the
+    /// screen itself is the noun.
+    public static let title = "Chats"
+}
+
 /// Turning a turn of a conversation into one line of a list row.
 ///
 /// Internal: this is how `ChatThreadTitle` and `ChatThreadSummary` shorten text, not a

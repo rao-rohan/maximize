@@ -66,25 +66,17 @@ public struct PlanDraft: Hashable, Sendable {
         /// The **lift** slot's kind — `.rest` or `.lift`. Nothing else is offered; see
         /// `ScheduledSessionKind.liftPrescribable`.
         public private(set) var liftKind: ScheduledSessionKind
-        /// Free text carried from the stored plan, **not editable here** (MAX-137 gave
-        /// the lift slot's kind and muscle groups an editor; a lift's duration is still
-        /// only expressible as this note, and that stays true until a future ticket
-        /// gives `ScheduledSession` a structured duration field — LIFTING-SPEC §3.5).
-        /// Carried rather than dropped for the same reason the whole slot used to be:
-        /// `PlanDraft.init(_:)` is documented as lossless, and losing a note here would
-        /// silently delete it the next time the athlete changed an unrelated number.
+        /// Free text describing the lift — "lower body, 45 minutes" territory, though the
+        /// duration itself has its own field below. Editable via `setLiftNote` (MAX-148);
+        /// before that it was carried from the stored plan with no way to author one.
         public private(set) var liftNote: String?
 
-        /// The lift's prescribed duration in **seconds**, carried but not editable here
-        /// — the same shape as `liftNote`, and for the same reason (MAX-137 gave the
-        /// lift slot's kind and muscle groups an editor; its duration still has none).
-        ///
-        /// **Carried is the operative word.** Without this, revising a plan rebuilt every
-        /// lift ask from kind, note and groups alone, so a prescribed "45 minutes, lower
-        /// body" came back as "lower body" with the duration silently gone. A revision
-        /// must not lose a field it never offered to edit — that is data loss wearing a
-        /// no-op's clothes, and `durationSeconds` on the run slot has always been carried
-        /// for exactly this reason.
+        /// The lift's prescribed duration in **seconds**. Editable via
+        /// `setLiftDurationSeconds` (MAX-148) — the lift slot's counterpart to the run
+        /// slot's `durationSeconds`, which stays carried-but-uneditable (nothing prescribes
+        /// a run's length today; LIFTING-SPEC §3.5 gave the lift slot the reason to need
+        /// one first: A20 scores a lift on whether the session happened, and duration is
+        /// the only part of that judgement the record can measure).
         public private(set) var liftDurationSeconds: Double?
         /// What the lift is for. Empty while `.lift` is a real, distinct state — "a
         /// lift with no groups named" — from `liftKind == .rest`, "no lift". See
@@ -103,7 +95,16 @@ public struct PlanDraft: Hashable, Sendable {
             self.liftMuscleGroups = liftSession.muscleGroups
         }
 
+        /// Ignored for `.lift` (MAX-148): the run slot's vocabulary is
+        /// `ScheduledSessionKind.prescribable`, which excludes it, for the reason that
+        /// type's own doc gives — a lift prescribed where the run ask goes would be
+        /// judged against a lift ask, the exact cross-discipline mistake A17 exists to
+        /// rule out. `setLiftKind` is the run slot's way to reach the lift ask. Before
+        /// this ticket the rule lived only in the screen's picker, which offered nothing
+        /// else; enforcing it here means `PlanDraft` itself cannot express the mistake,
+        /// independent of what a future picker offers.
         public mutating func setKind(_ kind: ScheduledSessionKind) {
+            guard ScheduledSessionKind.prescribable.contains(kind) else { return }
             self.kind = kind
             if kind == .rest {
                 distanceMeters = nil
@@ -152,7 +153,30 @@ public struct PlanDraft: Hashable, Sendable {
                 // a value left behind here would make `liftSession()` throw on a draft
                 // the athlete reached through this type's own setters.
                 liftDurationSeconds = nil
+                // Cleared for a softer reason (MAX-148): `ScheduledSession` does not
+                // reject a rest day carrying a note, but "no lift" saying something
+                // about a lift makes no sense to read, and the run slot's own `setKind`
+                // clears its note on the same transition for the same reason.
+                liftNote = nil
             }
+        }
+
+        /// Sets the lift's prescribed duration in seconds (MAX-148). Ignored while the
+        /// slot is not `.lift`, for the same reason `setLiftMuscleGroups` is ignored on a
+        /// rest lift: there is nowhere legal for the value to go, and `ScheduledSession`
+        /// rejects a rest day carrying a duration outright.
+        public mutating func setLiftDurationSeconds(_ seconds: Double?) {
+            guard liftKind == .lift else { return }
+            liftDurationSeconds = seconds
+        }
+
+        /// Sets the lift's free-text note (MAX-148) — the lift slot's `setNote`. Ignored
+        /// while the slot is not `.lift`, and blank text collapses to `nil` the same way
+        /// `setNote` does for the run slot.
+        public mutating func setLiftNote(_ note: String?) {
+            guard liftKind == .lift else { return }
+            let trimmed = note?.trimmingCharacters(in: .whitespacesAndNewlines)
+            liftNote = (trimmed?.isEmpty ?? true) ? nil : trimmed
         }
 
         /// Replaces the lift's muscle groups outright. Ignored while the slot is not
@@ -339,25 +363,27 @@ public struct PlanDraft: Hashable, Sendable {
     ///
     /// ## Why it is an instance method rather than an initializer
     ///
-    /// Because of the lift slot. `PlanProposal`'s vocabulary derives from
-    /// `ScheduledSessionKind.prescribable`, which excludes `.lift` until MAX-141, so a
-    /// proposal describes the **run** slot and says nothing at all about lifts. An
-    /// initializer taking only a proposal would have to invent an answer for the lift
-    /// slot, and the only answers available are "rest everywhere" — silently deleting
-    /// the lift days the athlete already has, on a revision — or a second seed. Applying
-    /// *onto* the draft the athlete is revising carries their lift days through
-    /// untouched, which is both the honest answer and the one the card is required to
-    /// state out loud (`PlanProposalReview.liftNote`, so that an athlete who asked for
-    /// "and lift on Tuesdays" is not told yes by omission).
+    /// Because of the one field a proposal still cannot touch. The run slot's
+    /// `durationSeconds` stays carried-but-uneditable (`durationSeconds` since MAX-131 —
+    /// nothing prescribes a run's length yet), so `PlanProposal` has no wire field for it
+    /// and this mapping has to carry it forward from *somewhere*. An initializer taking
+    /// only a proposal would have nothing to carry it forward *from*. Applying *onto* the
+    /// draft the athlete is revising is what gives this method something to carry it
+    /// from — see `carriedDurationSeconds(from:proposing:)` below.
+    ///
+    /// **The lift slot has no such exception as of MAX-148.** `PlanProposal`'s lift slot
+    /// now carries a kind, muscle groups, a duration and a note — matching exactly what
+    /// `PlanDraft.DayDraft`'s own setters expose (`setLiftKind`, `setLiftMuscleGroups`,
+    /// `setLiftDurationSeconds`, `setLiftNote`) — so every one of its fields is replaced
+    /// outright from the proposal, the same as the run slot's kind, distance and note
+    /// always have been.
     ///
     /// Everything else is replaced outright rather than merged: the proposal is a whole
     /// plan, not a patch, and `PlanProposalInstruction` tells the model exactly that —
-    /// "prescribe the whole week, every time". A field-by-field merge here would be a
-    /// second opinion about what the model meant to change.
-    ///
-    /// The one other carried field is the run slot's `durationSeconds`, for the same
-    /// reason as the lift slot and under a narrower rule — see
-    /// `carriedDurationSeconds(from:proposing:)`.
+    /// "prescribe the whole week, every time", both slots. A weekday the proposal does
+    /// not restate a lift for reverts to rest, the same totality rule `WeeklyTemplate`
+    /// itself applies. A field-by-field merge here would be a second opinion about what
+    /// the model meant to change.
     ///
     /// - Throws: `DomainError` only for the shapes `PlanDraft.init` itself refuses; a
     ///   parsed `PlanProposal` cannot express one (its arc is non-empty and strictly
@@ -375,10 +401,13 @@ public struct PlanDraft: Hashable, Sendable {
                 durationSeconds: carriedDurationSeconds(from: day, proposing: proposed),
                 note: proposed.note
             )
-            // Carried, not re-derived: `liftSession()` is the draft's own accessor, so
-            // the note and the duration MAX-131/MAX-137 deliberately keep uneditable
-            // survive this too.
-            liftSessions[day.weekday] = try day.liftSession()
+            let proposedLift = proposal.liftSession(for: day.weekday)
+            liftSessions[day.weekday] = try ScheduledSession(
+                kind: proposedLift.kind,
+                durationSeconds: proposedLift.durationSeconds,
+                note: proposedLift.note,
+                muscleGroups: proposedLift.muscleGroups
+            )
         }
         return try PlanDraft(
             heartRateCapBPM: proposal.heartRateCapBPM,
@@ -459,6 +488,14 @@ public struct PlanDraft: Hashable, Sendable {
 
     public mutating func toggleLiftMuscleGroup(_ group: MuscleGroup, on weekday: Weekday) {
         mutateDay(weekday) { $0.toggleLiftMuscleGroup(group) }
+    }
+
+    public mutating func setLiftDurationSeconds(_ seconds: Double?, on weekday: Weekday) {
+        mutateDay(weekday) { $0.setLiftDurationSeconds(seconds) }
+    }
+
+    public mutating func setLiftNote(_ note: String?, on weekday: Weekday) {
+        mutateDay(weekday) { $0.setLiftNote(note) }
     }
 
     private mutating func mutateDay(_ weekday: Weekday, _ transform: (inout DayDraft) -> Void) {

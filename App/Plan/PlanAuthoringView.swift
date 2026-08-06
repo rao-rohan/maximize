@@ -60,10 +60,7 @@ struct PlanAuthoringView: View {
                 ProgressView()
             case .failed:
                 Section {
-                    quietText(
-                        "The plan store is unavailable right now, so a plan could not be "
-                            + "loaded and nothing written here would be saved."
-                    )
+                    quietText(FailureCopy.couldNotLoad(.planAuthoring))
                 }
             case let .editing(editing):
                 editingSections(editing)
@@ -103,15 +100,14 @@ struct PlanAuthoringView: View {
     /// typed is not prefilled from anything and does not need telling so. That makes this
     /// the rare section whose absence is correct rather than a designed empty state.
     ///
-    /// Every string comes from the core (`PlanProposalReview`), so the sentence about
-    /// lifts here is the same sentence the card said a tap ago.
+    /// Every string comes from the core (`PlanProposalReview`), so the headline here is
+    /// the same one the card said a tap ago.
     @ViewBuilder
     private func prefillSection(_ editing: PlanAuthoringModel.Editing) -> some View {
         if let prefill = editing.prefill {
             Section("From your conversation") {
                 Text(prefill.headline)
                 quietText(prefill.explanation)
-                quietText(prefill.liftNote)
             }
         }
     }
@@ -328,6 +324,48 @@ struct PlanAuthoringView: View {
                         } label: {
                             row("Groups", PlanAuthoringFormatting.describe(day.liftSummary))
                         }
+
+                        // Collapsed by default rather than two more permanent controls
+                        // (MAX-148): seven weekdays × two slots is dense enough already,
+                        // and duration and note are the two lift fields an athlete sets
+                        // occasionally, not every time they open this screen. The label
+                        // states the pair so the row is still scannable closed.
+                        DisclosureGroup {
+                            Stepper(
+                                value: liftDurationMinutesBinding(
+                                    for: day.weekday,
+                                    seconds: day.liftDurationSeconds
+                                ),
+                                in: 0...240,
+                                step: 5
+                            ) {
+                                row(
+                                    "Duration",
+                                    day.liftDurationSeconds.map { PlanAuthoringFormatting.duration($0) }
+                                        ?? "None"
+                                )
+                            }
+
+                            TextField(
+                                "Note",
+                                text: Binding(
+                                    get: { day.liftNote ?? "" },
+                                    set: { value in
+                                        model.edit { $0.setLiftNote(value, on: day.weekday) }
+                                    }
+                                ),
+                                axis: .vertical
+                            )
+                            .lineLimit(1...3)
+                        } label: {
+                            row(
+                                "Duration & note",
+                                PlanAuthoringFormatting.liftDetail(
+                                    durationSeconds: day.liftDurationSeconds,
+                                    note: day.liftNote
+                                )
+                            )
+                        }
                     }
                 }
                 .padding(.vertical, Spacing.tight)
@@ -343,6 +381,20 @@ struct PlanAuthoringView: View {
                     + "distinct from resting."
             )
         }
+    }
+
+    /// Steps in whole minutes, stored in seconds. Zero reads as "no prescribed
+    /// duration" rather than a duration of zero, matching `distanceBinding`'s own
+    /// "None" convention for the run slot's distance.
+    private func liftDurationMinutesBinding(for weekday: Weekday, seconds: Double?) -> Binding<Double> {
+        Binding(
+            get: { ((seconds ?? 0) / 60).rounded() },
+            set: { minutes in
+                model.edit {
+                    $0.setLiftDurationSeconds(minutes <= 0 ? nil : minutes * 60, on: weekday)
+                }
+            }
+        )
     }
 
     /// Steps in the athlete's own unit, stored in metres. Zero reads as "no prescribed

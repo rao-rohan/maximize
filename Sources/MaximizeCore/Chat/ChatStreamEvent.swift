@@ -46,6 +46,20 @@ public enum ChatStreamEvent: Hashable, Sendable {
     /// More assistant text, to be appended to whatever has arrived already.
     case text(String)
 
+    /// The API's `ping` — the connection is open and carrying nothing (MAX-152).
+    ///
+    /// Dropped by the decoder until this ticket, on the reasonable ground that it is not
+    /// part of the answer. It is not part of the answer, but it is the only thing on the
+    /// wire that distinguishes a reply that has gone quiet from one that is still
+    /// arriving: silence looks identical to a caller either way, and a heartbeat is the
+    /// transport saying which of the two this is. `ChatReplyProgress` is what turns some
+    /// number of these into `ChatReplyPhase.stalled`; how many is a product decision and
+    /// lives there, not here.
+    ///
+    /// Carries nothing. There is nothing in a ping worth carrying, and a heartbeat that
+    /// carried a timestamp would invite a caller to do arithmetic on it.
+    case heartbeat
+
     /// Terminal. The model finished; see `ChatTurnCompletion`.
     case completed(ChatTurnCompletion)
 
@@ -60,7 +74,7 @@ public enum ChatStreamEvent: Hashable, Sendable {
     /// definition, checked by CI, used by both.
     public var isTerminal: Bool {
         switch self {
-        case .text:
+        case .text, .heartbeat:
             return false
         case .completed, .failed:
             return true

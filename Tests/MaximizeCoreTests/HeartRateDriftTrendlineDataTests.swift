@@ -230,6 +230,48 @@ final class HeartRateDriftTrendlineDataTests: XCTestCase {
         XCTAssertLessThan(domain.lowerBound, domain.upperBound)
     }
 
+    // MARK: - MAX-150: copy moved here from `DriftOverlayView`
+
+    /// Nil once there is a fit, and nil while there are no points at all — a view only
+    /// ever reaches this once it already knows there is a chart to explain.
+    func testNoFitExplanationIsNilWhenThereIsAFitOrNoPoints() {
+        let fitted = HeartRateDriftTrendlineData(curves: [
+            curve(daysAfterEpoch: 0, driftFraction: 0.01, id: Fixture.workoutID),
+            curve(daysAfterEpoch: 4, driftFraction: 0.03, id: Fixture.otherWorkoutID),
+        ])
+        XCTAssertNil(fitted.noFitExplanation)
+
+        let empty = HeartRateDriftTrendlineData(curves: [])
+        XCTAssertNil(empty.noFitExplanation)
+    }
+
+    /// One run and two runs sharing an exact date are different reasons `fit` is nil,
+    /// and the sentence must say which one applies.
+    func testNoFitExplanationNamesWhichReasonApplies() {
+        let single = HeartRateDriftTrendlineData(curves: [curve(daysAfterEpoch: 0, driftFraction: 0.05)])
+        XCTAssertEqual(
+            single.noFitExplanation,
+            "One run with a stored drift figure — not enough yet for a trend line."
+        )
+
+        let sameDate = HeartRateDriftTrendlineData(curves: [
+            curve(daysAfterEpoch: 3, driftFraction: 0.01, id: Fixture.workoutID),
+            curve(daysAfterEpoch: 3, driftFraction: 0.09, id: Fixture.otherWorkoutID),
+        ])
+        XCTAssertEqual(
+            sameDate.noFitExplanation,
+            "These runs share one date, so there's no spread to fit a trend line to."
+        )
+    }
+
+    func testChartAccessibilityLabelNamesHowManyRunsArePlotted() {
+        let trendline = HeartRateDriftTrendlineData(curves: [
+            curve(daysAfterEpoch: 0, driftFraction: 0.01, id: Fixture.workoutID),
+            curve(daysAfterEpoch: 4, driftFraction: 0.03, id: Fixture.otherWorkoutID),
+        ])
+        XCTAssertEqual(trendline.chartAccessibilityLabel, "Drift trend across 2 runs, by date")
+    }
+
     // MARK: - Local candidate fixture (mirrors HeartRateDriftOverlayDataTests)
 
     private func makeWorkout(id: UUID, daysBeforeEpoch: Double, durationSeconds: Double) throws -> Workout {

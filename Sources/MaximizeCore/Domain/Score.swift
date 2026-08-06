@@ -170,13 +170,31 @@ public struct ScoreAnnotation: Hashable, Sendable, Codable, Identifiable {
 /// Tallies use `effectiveValue` (the correction, where one exists); the scorer-quality
 /// metric uses `divergence`; the detail view shows both. Adding a correction returns a
 /// *new* ledger and cannot alter `automatic`, which is the invariant the whole type
-/// exists to enforce.
+/// exists to enforce. The same is true of a label (MAX-143): `labelled(with:)` returns a
+/// new ledger carrying the same `automatic`, and there is no path here that replaces it.
 public struct ScoreLedger: Hashable, Sendable, Codable {
     public let automatic: Score
     /// Ascending by `createdAt`; the last one is the correction in force.
     public let annotations: [ScoreAnnotation]
 
-    public init(automatic: Score, annotations: [ScoreAnnotation] = []) throws {
+    /// Marks saying this auto-score was written against the wrong discipline's ask, and
+    /// is therefore not evidence about scorer quality (A21, MAX-143). Ascending by
+    /// `recordedAt`.
+    ///
+    /// **An array rather than an optional, and duplicates are tolerated rather than
+    /// rejected.** Labelling is one fact about a score, so a second label says nothing
+    /// new — but the label is a record keyed by its own identifier, and two devices
+    /// running the pass before either has synced is precisely the "improbable, not
+    /// impossible" case `WorkoutRepository` already declines to write an app around.
+    /// Resolving that deterministically here (`isMiscategorised` is a property of the
+    /// set, not a count) is what makes labelling twice cost nothing.
+    public let labels: [MiscategorisedScoreLabel]
+
+    public init(
+        automatic: Score,
+        annotations: [ScoreAnnotation] = [],
+        labels: [MiscategorisedScoreLabel] = []
+    ) throws {
         for (index, annotation) in annotations.enumerated() {
             guard annotation.workoutID == automatic.workoutID else {
                 throw DomainError.inconsistent(
@@ -187,12 +205,42 @@ public struct ScoreLedger: Hashable, Sendable, Codable {
                 throw DomainError.outOfOrder(field: "ScoreLedger.annotations", index: index)
             }
         }
+        for (index, label) in labels.enumerated() {
+            guard label.workoutID == automatic.workoutID else {
+                throw DomainError.inconsistent(
+                    reason: "ScoreLedger label \(label.id) belongs to a different workout"
+                )
+            }
+            // A label states the ask the score was judged against. If that disagrees with
+            // the score's own stored prescription, one of the two is describing a
+            // different score, and silently trusting either would drop a real divergence
+            // out of the scorer-quality metric.
+            guard label.judgedAgainst == automatic.scheduledSession.kind else {
+                throw DomainError.inconsistent(
+                    reason: "ScoreLedger label \(label.id) says the score was judged against "
+                        + "\(label.judgedAgainst.rawValue), but the score records "
+                        + "\(automatic.scheduledSession.kind.rawValue)"
+                )
+            }
+            if index > 0, label.recordedAt < labels[index - 1].recordedAt {
+                throw DomainError.outOfOrder(field: "ScoreLedger.labels", index: index)
+            }
+        }
         self.automatic = automatic
         self.annotations = annotations
+        self.labels = labels
     }
 
     /// The correction in force, if the user has made one.
     public var currentAnnotation: ScoreAnnotation? { annotations.last }
+
+    /// The label, if this score carries one — the **earliest**, since labelling is a
+    /// single fact and the first statement of it is the one that was made.
+    public var miscategorisationLabel: MiscategorisedScoreLabel? { labels.first }
+
+    /// Whether this auto-score is known to have been judged against the wrong
+    /// discipline's ask (A21, MAX-143).
+    public var isMiscategorised: Bool { !labels.isEmpty }
 
     /// What tallies count: the manual score where one exists, else the auto-score
     /// (§8, "where a manual annotation exists, tallies use it").
@@ -204,29 +252,84 @@ public struct ScoreLedger: Hashable, Sendable, Codable {
     /// score is in force.
     public var isEffective: Bool { effectiveValue >= automatic.effectiveThreshold }
 
-    /// Manual minus automatic, in points — the correction-rate signal of PRD §2. Nil
-    /// when the user has not corrected this score.
+    /// Whether this ledger is evidence about the scorer at all (PRD §2, A21).
+    ///
+    /// False for a labelled score, and that exclusion is the point of MAX-143: the model
+    /// was handed a category error rather than misjudging a run, so counting the gap
+    /// between its answer and the athlete's would measure the question, not the scorer.
+    ///
+    /// Exposed as its own property so an aggregate over many ledgers — a correction rate,
+    /// which nothing computes yet — filters on the same predicate `divergence` already
+    /// applies, instead of re-deriving the rule and getting it slightly different.
+    public var countsTowardScorerQuality: Bool { !isMiscategorised }
+
+    /// Manual minus automatic, in points — the correction-rate signal of PRD §2.
+    ///
+    /// Nil when the user has not corrected this score, **and nil when the score is
+    /// labelled miscategorised** (A21, MAX-143). This is the metric, not the arithmetic:
+    /// the subtraction is only meaningful when the auto-score was the answer to the right
+    /// question, so the exclusion belongs here rather than in each future consumer, where
+    /// one of them would forget it.
+    ///
+    /// A labelled score whose value the athlete *has* corrected is still nil. The
+    /// correction stands and still drives `effectiveValue`; what it is not is evidence
+    /// about the scorer, because the thing it diverges from is not the scorer's judgement
+    /// of this session.
     public var divergence: Int? {
-        currentAnnotation.map { $0.manualScore.points - automatic.value.points }
+        guard countsTowardScorerQuality else { return nil }
+        return currentAnnotation.map { $0.manualScore.points - automatic.value.points }
     }
 
+    /// Whether the athlete recorded a correction. **Unaffected by labelling**, on purpose:
+    /// a label says the auto-score is not evidence about the scorer, not that the
+    /// correction never happened. Erasing it here would rewrite the athlete's record,
+    /// which is the failure mode this whole ticket exists to avoid.
     public var wasCorrected: Bool { currentAnnotation != nil }
 
     /// Additive by construction: the returned ledger carries the same `automatic`
     /// score, and there is no path in this type that replaces it.
     public func annotated(with annotation: ScoreAnnotation) throws -> ScoreLedger {
-        try ScoreLedger(automatic: automatic, annotations: annotations + [annotation])
+        try ScoreLedger(
+            automatic: automatic,
+            annotations: annotations + [annotation],
+            labels: labels
+        )
+    }
+
+    /// Additive in exactly the way `annotated(with:)` is, and for the same reason: the
+    /// returned ledger carries the identical `automatic` score, byte for byte (D8).
+    public func labelled(with label: MiscategorisedScoreLabel) throws -> ScoreLedger {
+        try ScoreLedger(
+            automatic: automatic,
+            annotations: annotations,
+            labels: labels + [label]
+        )
     }
 
     private enum CodingKeys: String, CodingKey {
-        case automatic, annotations
+        case automatic, annotations, labels
+    }
+
+    /// **`labels` is omitted when empty** (MAX-143), for the reason MAX-129 gave for
+    /// `liftSession` and MAX-131 for `durationSeconds`: every ledger already encoded
+    /// carries no labels, so leaving the key out leaves those bytes exactly as they are,
+    /// and a payload written before this ticket decodes to a ledger with no labels —
+    /// which is precisely what it meant.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(automatic, forKey: .automatic)
+        try container.encode(annotations, forKey: .annotations)
+        if !labels.isEmpty {
+            try container.encode(labels, forKey: .labels)
+        }
     }
 
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         try self.init(
             automatic: container.decode(Score.self, forKey: .automatic),
-            annotations: container.decode([ScoreAnnotation].self, forKey: .annotations)
+            annotations: container.decode([ScoreAnnotation].self, forKey: .annotations),
+            labels: container.decodeIfPresent([MiscategorisedScoreLabel].self, forKey: .labels) ?? []
         )
     }
 }

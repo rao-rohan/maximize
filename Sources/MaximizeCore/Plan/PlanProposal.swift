@@ -57,8 +57,25 @@ public enum PlanProposalError: Error, Hashable, Sendable, CustomStringConvertibl
 
     // MARK: - The vocabulary was wrong
 
+    /// Not one of the **run** slot's kinds (`ScheduledSessionKind.prescribable`).
+    ///
+    /// This is also where a reply that sent `"kind": "lift"` for the run slot is caught.
+    /// `.lift` is a real `ScheduledSessionKind` — it has to be, the lift slot's own
+    /// `liftKind` field speaks it — but offering it here would let a reply prescribe a
+    /// lift where the run ask goes, which is the exact cross-discipline judgement A17
+    /// exists to make impossible. See `ScheduledSessionKind.prescribable`'s own note.
     case unknownSessionKind(name: String)
     case unknownWeekday(name: String)
+
+    /// Not one of the **lift** slot's kinds (`ScheduledSessionKind.liftPrescribable`,
+    /// MAX-141) — a smaller, different vocabulary from `unknownSessionKind`'s, for the
+    /// same reason `liftPrescribable` is not `prescribable`: the lift slot has no
+    /// easy/long/hard/other gradient, so `"liftKind": "easy"` is not a lesser version of
+    /// a legal answer, it is a different field's word arriving in the wrong one.
+    case unknownLiftKind(name: String)
+
+    /// Not one of `MuscleGroup.allCases` — the lift slot's `liftMuscleGroups`.
+    case unknownMuscleGroup(name: String)
 
     /// The recurring week did not name each of the seven weekdays exactly once.
     ///
@@ -77,6 +94,16 @@ public enum PlanProposalError: Error, Hashable, Sendable, CustomStringConvertibl
     /// model said two contradictory things about one day, and coercing one of them away
     /// would be this parser deciding which one it meant.
     case restDayIsNotEmpty(weekday: Weekday)
+
+    /// A lift slot of `"rest"` carried muscle groups, a duration, or a note (MAX-141,
+    /// widened by MAX-148 to the two fields it added).
+    ///
+    /// The lift-slot analogue of `restDayIsNotEmpty`, and a distinct case rather than a
+    /// reuse of it: that one's sentence names a distance and a note, which would be a
+    /// false description of what this day actually carried. `PlanDraft.DayDraft`'s own
+    /// `setLiftKind` clears all three fields the moment the kind leaves `.lift` for the
+    /// same reason — this is the wire-boundary side of that rule.
+    case liftRestDayIsNotEmpty(weekday: Weekday)
 
     /// The goal's target day was not `YYYY-MM-DD`.
     case malformedGoalTargetDay(value: String)
@@ -116,10 +143,15 @@ public enum PlanProposalError: Error, Hashable, Sendable, CustomStringConvertibl
             return "The reply set \"\(name)\". A proposed plan does not carry that field — "
                 + "the app derives it. Send only the fields the schema lists."
         case let .unknownSessionKind(name):
-            return "\"\(name)\" is not a session kind this plan understands. Use one of: "
+            return "\"\(name)\" is not a run-slot session kind this plan understands. Use one of: "
                 + "\(PlanProposal.sessionKindVocabulary)."
         case let .unknownWeekday(name):
             return "\"\(name)\" is not a weekday. Use one of: \(PlanProposal.weekdayVocabulary)."
+        case let .unknownLiftKind(name):
+            return "\"\(name)\" is not a lift-slot ask. Use one of: \(PlanProposal.liftKindVocabulary)."
+        case let .unknownMuscleGroup(name):
+            return "\"\(name)\" is not a muscle group this plan understands. Use one of: "
+                + "\(PlanProposal.muscleGroupVocabulary)."
         case let .weekIsNotOneSessionPerWeekday(missing, duplicated):
             var sentence = "The week has to name each of the seven weekdays exactly once."
             if !missing.isEmpty {
@@ -132,6 +164,11 @@ public enum PlanProposalError: Error, Hashable, Sendable, CustomStringConvertibl
         case let .restDayIsNotEmpty(weekday):
             return "\(PlanProposal.wireName(for: weekday).capitalized) is a rest day, so it cannot "
                 + "carry a distance or a note. Give it a session kind, or leave it empty."
+        case let .liftRestDayIsNotEmpty(weekday):
+            return "\(PlanProposal.wireName(for: weekday).capitalized)'s lift slot is rest, so it "
+                + "cannot carry a duration, a note, or muscle groups. Set \"liftKind\" to "
+                + "\"lift\", or leave \"liftDurationSeconds\", \"liftNote\" and "
+                + "\"liftMuscleGroups\" out."
         case let .malformedGoalTargetDay(value):
             return "\"\(value)\" is not a date. Give the goal's target day as YYYY-MM-DD, "
                 + "or leave it out."
@@ -205,33 +242,80 @@ public enum PlanProposalError: Error, Hashable, Sendable, CustomStringConvertibl
 /// translation — a translation is where a field quietly stops being carried.
 public struct PlanProposal: Hashable, Sendable, Codable {
 
-    /// One weekday of the proposed recurring week.
+    /// One weekday of the proposed recurring week — both slots (LIFTING-SPEC §2.2,
+    /// §5, MAX-141).
     ///
-    /// Holds the `ScheduledSession` it validated to, rather than a loose kind/distance
-    /// pair, so a consumer cannot re-derive the session a second way and get a different
-    /// answer. The wire form stays flat — see `CodingKeys`.
+    /// Holds the `ScheduledSession` each slot validated to, rather than a loose
+    /// kind/distance pair, so a consumer cannot re-derive the session a second way and
+    /// get a different answer. The wire form stays flat — see `CodingKeys`.
+    ///
+    /// ## Why the lift slot is a second `ScheduledSession`, not a second type
+    ///
+    /// `liftSession.kind` is restricted to `ScheduledSessionKind.liftPrescribable`
+    /// (`.rest` or `.lift`) by this type's own initializers rather than by
+    /// `ScheduledSession` itself, exactly as `session.kind` is restricted to
+    /// `.prescribable` — see `PlanProposal.sessionKind(named:)` and `.liftKind(named:)`.
+    /// A `ScheduledSession` is the right value to hold either way: it already carries
+    /// `muscleGroups`, and building one directly is what lets `PlanDraft.applying(_:)`
+    /// treat both slots the same way it always has, through `ScheduledSession`'s own
+    /// construction.
+    ///
+    /// `liftSession.note` and `.durationSeconds` are proposable as of MAX-148, matching
+    /// exactly what `PlanDraft.DayDraft`'s own setters expose for the lift slot
+    /// (`setLiftKind`, `setLiftMuscleGroups`, `setLiftDurationSeconds`, `setLiftNote`).
+    /// `PlanDraft.applying(_:)` takes both directly from the proposal now, the same way
+    /// it has always taken `distanceMeters` and `note` for the run slot — a weekday the
+    /// reply does not restate a value for gets none, rather than the value it already
+    /// had.
     public struct Day: Hashable, Sendable, Codable, Identifiable {
         public var id: Weekday { weekday }
 
         public let weekday: Weekday
 
-        /// The plan's ask for this day, already legal.
+        /// The run slot's ask for this day, already legal.
         public let session: ScheduledSession
+
+        /// The lift slot's ask for this day, already legal — `.rest` when the day has
+        /// no lift asked of it (MAX-141).
+        public let liftSession: ScheduledSession
 
         public var kind: ScheduledSessionKind { session.kind }
         public var distanceMeters: Double? { session.distanceMeters }
         public var note: String? { session.note }
 
-        /// - Throws: `PlanProposalError.restDayIsNotEmpty` when a rest day carries work.
-        ///   `ScheduledSession` permits a rest day with a note; a *draft* cannot express
-        ///   one, so accepting it here would mean the note vanished somewhere between the
-        ///   card the athlete approved and the plan they saved.
-        public init(weekday: Weekday, session: ScheduledSession) throws {
+        public var liftKind: ScheduledSessionKind { liftSession.kind }
+        public var liftMuscleGroups: Set<MuscleGroup> { liftSession.muscleGroups }
+        /// The lift's prescribed duration in seconds, proposable as of MAX-148.
+        public var liftDurationSeconds: Double? { liftSession.durationSeconds }
+        /// The lift's free-text note, proposable as of MAX-148.
+        public var liftNote: String? { liftSession.note }
+
+        /// - Throws: `PlanProposalError.restDayIsNotEmpty` when the run slot's rest day
+        ///   carries work. `ScheduledSession` permits a rest day with a note; a *draft*
+        ///   cannot express one, so accepting it here would mean the note vanished
+        ///   somewhere between the card the athlete approved and the plan they saved.
+        ///   `PlanProposalError.liftRestDayIsNotEmpty` for the equivalent rule on the
+        ///   lift slot — a rest lift asking nothing cannot also carry a duration, a
+        ///   note, or muscle groups.
+        public init(
+            weekday: Weekday,
+            session: ScheduledSession,
+            liftSession: ScheduledSession = .rest
+        ) throws {
             guard !(session.isRest && (session.distanceMeters != nil || session.note != nil)) else {
                 throw PlanProposalError.restDayIsNotEmpty(weekday: weekday)
             }
+            guard !(
+                liftSession.isRest
+                    && (liftSession.durationSeconds != nil
+                        || liftSession.note != nil
+                        || !liftSession.muscleGroups.isEmpty)
+            ) else {
+                throw PlanProposalError.liftRestDayIsNotEmpty(weekday: weekday)
+            }
             self.weekday = weekday
             self.session = session
+            self.liftSession = liftSession
         }
 
         /// Convenience for the shape the wire carries.
@@ -239,12 +323,24 @@ public struct PlanProposal: Hashable, Sendable, Codable {
             weekday: Weekday,
             kind: ScheduledSessionKind,
             distanceMeters: Double? = nil,
-            note: String? = nil
+            note: String? = nil,
+            liftKind: ScheduledSessionKind = .rest,
+            liftMuscleGroups: Set<MuscleGroup> = [],
+            liftDurationSeconds: Double? = nil,
+            liftNote: String? = nil
         ) throws {
             let trimmed = note?.trimmingCharacters(in: .whitespacesAndNewlines)
             let cleaned = (trimmed?.isEmpty ?? true) ? nil : trimmed
             guard !(kind == .rest && (distanceMeters != nil || cleaned != nil)) else {
                 throw PlanProposalError.restDayIsNotEmpty(weekday: weekday)
+            }
+            let trimmedLiftNote = liftNote?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let cleanedLiftNote = (trimmedLiftNote?.isEmpty ?? true) ? nil : trimmedLiftNote
+            guard !(
+                liftKind == .rest
+                    && (liftDurationSeconds != nil || cleanedLiftNote != nil || !liftMuscleGroups.isEmpty)
+            ) else {
+                throw PlanProposalError.liftRestDayIsNotEmpty(weekday: weekday)
             }
             let session: ScheduledSession
             do {
@@ -261,11 +357,29 @@ public struct PlanProposal: Hashable, Sendable, Codable {
                     .scheduledDistanceNotPositive(weekday: weekday)
                 )
             }
-            try self.init(weekday: weekday, session: session)
+            let liftSession: ScheduledSession
+            do {
+                liftSession = try ScheduledSession(
+                    kind: liftKind,
+                    durationSeconds: liftDurationSeconds,
+                    note: cleanedLiftNote,
+                    muscleGroups: liftMuscleGroups
+                )
+            } catch {
+                // Reachable as of MAX-148: a non-positive `liftDurationSeconds` reaches
+                // `ScheduledSession` unvalidated and is refused here. The muscle-group
+                // combination stays unreachable given the guard above — `ScheduledSession`
+                // refuses groups only on a non-lift kind, and the only non-lift kind
+                // `liftKind` can hold here is `.rest`, already caught. Reported in the
+                // door's vocabulary either way, belt-and-braces, rather than a `try!`.
+                throw PlanProposalError.rejectedByAuthoring(.liftSessionInvalid(weekday: weekday))
+            }
+            try self.init(weekday: weekday, session: session, liftSession: liftSession)
         }
 
         private enum CodingKeys: String, CodingKey {
             case weekday, kind, distanceMeters, note
+            case liftKind, liftMuscleGroups, liftDurationSeconds, liftNote
         }
 
         public func encode(to encoder: any Encoder) throws {
@@ -274,6 +388,12 @@ public struct PlanProposal: Hashable, Sendable, Codable {
             try container.encode(kind.rawValue, forKey: .kind)
             try container.encodeIfPresent(distanceMeters, forKey: .distanceMeters)
             try container.encodeIfPresent(note, forKey: .note)
+            try container.encode(liftKind.rawValue, forKey: .liftKind)
+            if !liftMuscleGroups.isEmpty {
+                try container.encode(liftMuscleGroups.ordered.map(\.rawValue), forKey: .liftMuscleGroups)
+            }
+            try container.encodeIfPresent(liftDurationSeconds, forKey: .liftDurationSeconds)
+            try container.encodeIfPresent(liftNote, forKey: .liftNote)
         }
 
         public init(from decoder: any Decoder) throws {
@@ -286,11 +406,34 @@ public struct PlanProposal: Hashable, Sendable, Codable {
             guard let kind = PlanProposal.sessionKind(named: kindName) else {
                 throw PlanProposalError.unknownSessionKind(name: kindName)
             }
+
+            let liftKindName = try PlanProposal.decodeString(.liftKind, from: container)
+            guard let liftKind = PlanProposal.liftKind(named: liftKindName) else {
+                throw PlanProposalError.unknownLiftKind(name: liftKindName)
+            }
+
+            var liftMuscleGroups: Set<MuscleGroup> = []
+            if let names = try container.decodeIfPresent([String].self, forKey: .liftMuscleGroups) {
+                for name in names {
+                    guard let group = PlanProposal.muscleGroup(named: name) else {
+                        throw PlanProposalError.unknownMuscleGroup(name: name)
+                    }
+                    liftMuscleGroups.insert(group)
+                }
+            }
+
             try self.init(
                 weekday: weekday,
                 kind: kind,
                 distanceMeters: try container.decodeIfPresent(Double.self, forKey: .distanceMeters),
-                note: try container.decodeIfPresent(String.self, forKey: .note)
+                note: try container.decodeIfPresent(String.self, forKey: .note),
+                liftKind: liftKind,
+                liftMuscleGroups: liftMuscleGroups,
+                liftDurationSeconds: try container.decodeIfPresent(
+                    Double.self,
+                    forKey: .liftDurationSeconds
+                ),
+                liftNote: try container.decodeIfPresent(String.self, forKey: .liftNote)
             )
         }
     }
@@ -443,11 +586,22 @@ public struct PlanProposal: Hashable, Sendable, Codable {
         self.goalTargetDay = goalTargetDay
     }
 
-    /// The proposed session for a weekday. Total by construction: the initializer refuses
-    /// an incomplete week.
+    /// The proposed run session for a weekday. Total by construction: the initializer
+    /// refuses an incomplete week.
     public subscript(weekday: Weekday) -> ScheduledSession {
         for day in week where day.weekday == weekday {
             return day.session
+        }
+        // Unreachable: `init` rejects a week that does not name all seven days.
+        return .rest
+    }
+
+    /// The proposed **lift** session for a weekday (MAX-141) — not a second subscript,
+    /// since a subscript overloaded only on return type reads as ambiguous at the call
+    /// site rather than as "the other slot". Total for the same reason `subscript` is.
+    public func liftSession(for weekday: Weekday) -> ScheduledSession {
+        for day in week where day.weekday == weekday {
+            return day.liftSession
         }
         // Unreachable: `init` rejects a week that does not name all seven days.
         return .rest
@@ -541,6 +695,12 @@ public struct PlanProposal: Hashable, Sendable, Codable {
         let kindLines = ScheduledSessionKind.prescribable
             .map { "    - \"\($0.rawValue)\" — \(gloss(for: $0))" }
             .joined(separator: "\n")
+        let liftKindLines = ScheduledSessionKind.liftPrescribable
+            .map { "    - \"\($0.rawValue)\" — \(liftGloss(for: $0))" }
+            .joined(separator: "\n")
+        let muscleGroupLines = MuscleGroup.allCases
+            .map { "    - \"\($0.rawValue)\"" }
+            .joined(separator: "\n")
 
         return """
             Reply with a single JSON object and nothing else — no prose before it, none \
@@ -553,14 +713,19 @@ public struct PlanProposal: Hashable, Sendable, Codable {
               "effectiveThresholdPoints": <integer>,
               "marginalThresholdPoints": <integer>,
               "week": [
-                {"weekday": "<weekday>", "kind": "<kind>", "distanceMeters": <number>, "note": "<text>"}
+                {
+                  "weekday": "<weekday>",
+                  "kind": "<kind>", "distanceMeters": <number>, "note": "<text>",
+                  "liftKind": "<liftKind>", "liftMuscleGroups": ["<muscle group>"],
+                  "liftDurationSeconds": <number>, "liftNote": "<text>"
+                }
               ],
               "longRunArc": [{"index": <integer>, "distanceMeters": <number>}],
               "goalStatements": ["<one line per goal>"],
               "goalTargetDay": "<YYYY-MM-DD>"
             }
 
-            Every distance is in metres.
+            Every distance is in metres. Every duration is in seconds.
 
             - "heartRateCapBPM" is the easy-run heart-rate ceiling, in beats per minute, \
             between \(Int(heartRate.lowerBound)) and \(Int(heartRate.upperBound)).
@@ -572,15 +737,28 @@ public struct PlanProposal: Hashable, Sendable, Codable {
             above the effective threshold counted as effective; one below the marginal \
             threshold went wrong. The marginal threshold must not exceed the effective one.
             - "week" is the recurring week: exactly seven entries, one for each weekday, \
-            Monday first. A week is always Monday-first.
+            Monday first. A week is always Monday-first, and every entry states both the \
+            run ask and the lift ask — a day can carry a run, a lift, both, or neither.
               - "weekday" is one of: \(weekdayVocabulary).
-              - "kind" is one of:
+              - "kind" is the run slot's ask, one of:
             \(kindLines)
-              - "distanceMeters" is the prescribed distance, above zero. Omit it for a \
-            session described only by its "note" — "6 × 800m", say.
-              - "note" is free text shown alongside the day. Omit it when there is nothing \
+              - "distanceMeters" is the run's prescribed distance, above zero. Omit it for \
+            a session described only by its "note" — "6 × 800m", say.
+              - "note" is free text shown alongside the run. Omit it when there is nothing \
             to add.
-              - A rest day carries neither a distance nor a note.
+              - A rest day's run carries neither a distance nor a note.
+              - "liftKind" is the lift slot's own, separate ask, one of:
+            \(liftKindLines)
+              - "liftMuscleGroups" names what a lift works, chosen from:
+            \(muscleGroupLines)
+              Omit it, or send an empty list, when the lift's muscle groups are not \
+            stated — that is a real answer ("lift on Tuesday, groups unstated"), not a \
+            gap, and different from no lift at all ("liftKind": "rest").
+              - "liftDurationSeconds" is the lift's prescribed length, in seconds, above \
+            zero. Omit it when the lift's length is not stated.
+              - "liftNote" is free text shown alongside the lift. Omit it when there is \
+            nothing to add.
+              - A rest lift carries no duration, no note, and no muscle groups.
             - "longRunArc" is the long run's progression: at least one entry, "index" \
             counting weeks from 1 and strictly ascending, "distanceMeters" above zero. \
             Week 1 is the week the plan takes effect. The arc supplies the long day's \
@@ -597,6 +775,9 @@ public struct PlanProposal: Hashable, Sendable, Codable {
             - No scoring rubric bands. The athlete's own bands are carried forward \
             unchanged into every new version, and a proposal that re-seeded them would \
             quietly change what every future run scores.
+            - Never send "kind": "lift". A lift is prescribed through "liftKind", never \
+            through "kind" — the two slots are judged separately, and a lift named in the \
+            run slot would be a plan nobody can mean.
             """
     }
 
@@ -605,11 +786,12 @@ public struct PlanProposal: Hashable, Sendable, Codable {
     /// which is a stronger guarantee than the test that also checks it — and it did
     /// exactly that when MAX-128 added `.lift`.
     ///
-    /// `.lift` is glossed but **not offered**: the vocabulary the model is given comes
-    /// from `ScheduledSessionKind.prescribable`, which excludes it, for the same reason
-    /// MAX-128 kept it out of the authoring picker. There is one prescription slot today,
-    /// and a lift proposed into the run slot would be a plan the athlete cannot mean.
-    /// MAX-141 opens it, once MAX-129 has given the week a second slot to put it in.
+    /// `.lift` is glossed but **not offered**: the vocabulary the model is given for the
+    /// **run** slot comes from `ScheduledSessionKind.prescribable`, which excludes it,
+    /// for the same reason MAX-128 kept it out of the authoring picker — a lift proposed
+    /// into the run slot would be a plan the athlete cannot mean. MAX-141 gives the
+    /// model its own, separate word for a lift — `"liftKind": "lift"`, glossed by
+    /// `liftGloss(for:)` below — rather than widening this vocabulary to include it.
     private static func gloss(for kind: ScheduledSessionKind) -> String {
         switch kind {
         case .easy:
@@ -619,12 +801,34 @@ public struct PlanProposal: Hashable, Sendable, Codable {
         case .hard:
             return "a hard session — intervals, tempo, hills. Put its structure in the note"
         case .rest:
-            return "no session is asked for"
+            return "no run is asked for"
         case .other:
             return "scheduled, but not one of the three run types the scoring rubric "
-                + "reasons about — cross-training, strength, mobility"
+                + "reasons about — cross-training, mobility"
         case .lift:
-            return "a strength session. Not proposable yet — see `prescribable`"
+            return "a strength session — the lift slot's own ask; see \"liftKind\", not this field"
+        }
+    }
+
+    /// One line per lift-slot kind (MAX-141) — `ScheduledSessionKind.liftPrescribable`'s
+    /// own, smaller vocabulary, not `gloss(for:)`'s: the lift slot has no easy/long/hard
+    /// gradient (LIFTING-SPEC §3.5), so its two kinds read differently from the run
+    /// slot's five even where a word (`"rest"`) is shared.
+    ///
+    /// Exhaustive over `ScheduledSessionKind` rather than over the two-case
+    /// `liftPrescribable` array, for the same forcing-function reason `gloss(for:)` is:
+    /// a case added to the enum breaks this switch before anyone notices the prompt
+    /// went stale. The four run-only branches are unreachable from
+    /// `renderedSchema()`, which only ever calls this over `liftPrescribable`.
+    private static func liftGloss(for kind: ScheduledSessionKind) -> String {
+        switch kind {
+        case .rest:
+            return "no lift is asked for"
+        case .lift:
+            return "a strength session; name what it works in \"liftMuscleGroups\", or "
+                + "leave that empty if the plan does not say"
+        case .easy, .long, .hard, .other:
+            return "not a lift-slot ask — this word belongs to \"kind\", the run slot"
         }
     }
 
@@ -635,6 +839,16 @@ public struct PlanProposal: Hashable, Sendable, Codable {
 
     /// "easy, long, …", derived from the enum for the same reason.
     static let sessionKindVocabulary = ScheduledSessionKind.prescribable
+        .map(\.rawValue)
+        .joined(separator: ", ")
+
+    /// "rest, lift", the lift slot's own smaller vocabulary (MAX-141).
+    static let liftKindVocabulary = ScheduledSessionKind.liftPrescribable
+        .map(\.rawValue)
+        .joined(separator: ", ")
+
+    /// "chest, back, …", derived from `MuscleGroup` for the same reason.
+    static let muscleGroupVocabulary = MuscleGroup.allCases
         .map(\.rawValue)
         .joined(separator: ", ")
 
@@ -665,9 +879,30 @@ public struct PlanProposal: Hashable, Sendable, Codable {
         return Weekday.allCases.first { wireName(for: $0) == needle }
     }
 
+    /// Restricted to `.prescribable` rather than `.allCases` — closing exactly the leak
+    /// this ticket exists to prevent. `.lift` is a real `ScheduledSessionKind`, and
+    /// `MuscleGroup`/`liftKind` now give a model a second, legitimate reason to type the
+    /// word "lift" in a reply, so a `kind` field that accepted it too would let a
+    /// well-meaning reply slip a lift into the run slot with nothing here to catch it —
+    /// see `PlanProposalError.unknownSessionKind`'s note.
     static func sessionKind(named text: String) -> ScheduledSessionKind? {
         let needle = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return ScheduledSessionKind.allCases.first { $0.rawValue == needle }
+        return ScheduledSessionKind.prescribable.first { $0.rawValue == needle }
+    }
+
+    /// The lift slot's own, smaller lookup (MAX-141) — `.liftPrescribable`, not
+    /// `.prescribable`, so `"liftKind": "easy"` is refused by `unknownLiftKind` rather
+    /// than silently accepted as a run-shaped ask in the lift slot.
+    static func liftKind(named text: String) -> ScheduledSessionKind? {
+        let needle = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return ScheduledSessionKind.liftPrescribable.first { $0.rawValue == needle }
+    }
+
+    /// Case- and whitespace-insensitive, matching `weekday(named:)` and
+    /// `sessionKind(named:)`.
+    static func muscleGroup(named text: String) -> MuscleGroup? {
+        let needle = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return MuscleGroup.allCases.first { $0.rawValue == needle }
     }
 
     /// `fileprivate` rather than `private` because `PlanProposalError.description`, one

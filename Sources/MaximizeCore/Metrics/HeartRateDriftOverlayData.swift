@@ -430,6 +430,26 @@ public struct HeartRateDriftOverlayData: Hashable, Sendable {
         "\(curves.count) of \(candidateCount) \(candidateCount == 1 ? "run" : "runs") stacked"
     }
 
+    /// What the view prints in place of a chart when nothing qualified — never a blank
+    /// axis or a flat line at zero (`DriftOverlayView.emptyState`'s own note).
+    ///
+    /// Moved here from `DriftOverlayView` (MAX-150): the branch is `candidateCount`, a
+    /// fact this type already carries, and the sentence duplicated one drawn from
+    /// `DriftFigureSelection.emptyStateText` at the year span — two hand-typed copies of
+    /// one fact, in one file, is exactly the drift a single computed property closes.
+    public var emptyStateText: String {
+        candidateCount == 0
+            ? "No runs in this interval."
+            : "No run in this interval has a heart-rate curve to normalise."
+    }
+
+    /// The chart's VoiceOver label. `curves.count` is data, so — the same reasoning
+    /// `stackSummary` and `exclusionNotes` already follow — it belongs here rather than
+    /// interpolated inline in the view that draws the chart.
+    public var chartAccessibilityLabel: String {
+        "Heart-rate curves for \(curves.count) runs, on a shared percent-elapsed axis"
+    }
+
     /// How many runs were excluded for this reason.
     public func count(of reason: ExclusionReason) -> Int {
         excluded.reduce(0) { $0 + ($1.reason == reason ? 1 : 0) }

@@ -4,8 +4,8 @@ import MaximizeCore
 /// The proposal card in the transcript (CHAT-FIRST-SPEC.md §4.6, MAX-101).
 ///
 /// **This view decides nothing.** What the card says — the headline, the summary, every
-/// row's label and value, which rows changed and what they changed from, the sentence
-/// about lifts, and what accepting and discarding each promise — is all
+/// row's label and value (lift rows included, MAX-141), which rows changed and what they
+/// changed from, and what accepting and discarding each promise — is all
 /// `PlanProposalReview`, computed in `MaximizeCore` and covered by
 /// `PlanProposalReviewTests`. This file lays those strings out and forwards two taps,
 /// which is the "observe, render, forward intent" shape every other view here follows.
@@ -62,9 +62,6 @@ struct PlanProposalCardView: View {
             if review.isRevision {
                 disclosureToggle
             }
-            Text(review.liftNote)
-                .font(.microLabel)
-                .foregroundStyle(Color.textSecondary)
             actions
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -115,7 +112,7 @@ struct PlanProposalCardView: View {
             // model was asked and proposed the plan already in force. Said plainly rather
             // than rendered as an empty list.
             if review.isRevision, !showsEveryRow, review.changedRowCount == 0 {
-                Text("This proposal matches the plan already in force, field for field.")
+                Text(PlanProposalReview.noChangesInDiffText)
                     .font(.metricLabel)
                     .foregroundStyle(Color.textSecondary)
             }
@@ -138,9 +135,10 @@ struct PlanProposalCardView: View {
         // Bound to a `String` before it reaches `Label`, so the `StringProtocol`
         // initializer is chosen rather than the `LocalizedStringKey` one — this app has
         // no localization tables, and an interpolated key would look for one.
-        let title: String = showsEveryRow
-            ? "Show only what changed"
-            : "Show the whole plan (\(review.rowCount) fields)"
+        let title: String = PlanProposalReview.disclosureTitle(
+            showingEveryRow: showsEveryRow,
+            rowCount: review.rowCount
+        )
         return Button {
             showsEveryRow.toggle()
         } label: {

@@ -2,14 +2,22 @@ import Foundation
 
 /// The text put in front of the model for one scoring call, split by what it contains.
 ///
-/// The split is not cosmetic. `task` is identical for every workout and holds no health
-/// data whatsoever, so it can be sent as a system prompt and cached; `subject` is this
-/// run and is the only half that carries PII. Keeping them apart means the sensitive
-/// text is a single, reviewable value rather than something interleaved through a
-/// template — and CLAUDE.md's rule that only what the scorer needs enters a prompt is
-/// then checkable by reading one property.
+/// The split is not cosmetic. `task` holds no health data whatsoever, so it can be sent
+/// as a system prompt and cached; `subject` is this run and is the only half that
+/// carries PII. Keeping them apart means the sensitive text is a single, reviewable
+/// value rather than something interleaved through a template — and CLAUDE.md's rule
+/// that only what the scorer needs enters a prompt is then checkable by reading one
+/// property.
+///
+/// `task` is identical for every workout **of the same discipline** (MAX-147): it
+/// still carries no health data, no plan data and no numbers, but it is no longer one
+/// literal for every call, because a lift and a run are not scored on the same grounds
+/// (LIFTING-SPEC §8.3). Two stable variants instead of one is still stable — either one
+/// is cacheable, and a client keys its cache on the discipline the same way it already
+/// keys everything else on the workout being scored.
 public struct ScoringInstruction: Hashable, Sendable {
-    /// Stable across every call. No health data, no plan data, no numbers.
+    /// Stable across every call **for one discipline**. No health data, no plan data,
+    /// no numbers — see the type's doc comment for why that survived the branch.
     public let task: String
 
     /// This run: the rubric's verdict, then the context builder's fact sheet verbatim.
@@ -96,31 +104,86 @@ public enum WorkoutScorer {
         lines.append("")
         lines.append(context.factSheet())
 
-        return ScoringInstruction(task: taskDescription, subject: lines.joined(separator: "\n"))
+        return ScoringInstruction(
+            task: taskDescription(for: context.discipline),
+            subject: lines.joined(separator: "\n")
+        )
     }
 
-    /// The stable half of the prompt. Contains no data about any run.
-    private static let taskDescription = """
-        You are scoring one running workout against the athlete's training plan.
+    /// The stable half of the prompt. Contains no data about any run — but it is not
+    /// one literal for every call any more (MAX-147).
+    ///
+    /// ## Why a lift needs different words at all
+    ///
+    /// MAX-136 taught `WorkoutFactSheet` to stop describing a lift in running
+    /// vocabulary; this is the instruction wrapped around that fact sheet, and it had
+    /// the same problem one level up. Read literally, "using the run's measured numbers"
+    /// sends the model hunting a lift's fact sheet for a pace or a cadence line that
+    /// LIFTING-SPEC §10.1 deliberately omits — and worse, nothing stopped it reaching
+    /// for the one number a lift's record actually has plenty of signal for reasoning
+    /// about that A20 explicitly forbids scoring on: how much was lifted. §8.3 is
+    /// unambiguous that no such number exists in the record, so a task that invited the
+    /// model to weigh load or volume would be asking it to invent one.
+    ///
+    /// ## One template with a discipline branch, not two independent strings
+    ///
+    /// The rejection rule, the rationale contract and the JSON reply format are the same
+    /// contract regardless of what is being scored — the model is asked for the same
+    /// *shape* of answer either way, and only what it is told to weigh differs. Writing
+    /// two complete literals would duplicate those shared paragraphs and let them drift
+    /// apart the next time either is edited, which is exactly the failure
+    /// `WorkoutFactSheet.factSheet()` avoids by being one renderer with one discipline
+    /// branch rather than a second renderer (A12, MAX-136). This function makes the same
+    /// choice at the scale of the instruction that wraps it.
+    ///
+    /// The branch is on `Discipline`, not `ActivityType.isRun`, for the identical reason
+    /// the fact sheet's is: A17's slot is what a workout is judged against, so a hike or
+    /// a ride sits in the run slot and reads the run text unchanged.
+    ///
+    /// **The run branch's output is pinned as a literal in `ScorerTaskTextTests`** — it
+    /// predates this function and must read exactly as it did before the lift branch
+    /// existed.
+    private static func taskDescription(for discipline: Discipline) -> String {
+        let opening: String
+        let firstInstruction: String
+        switch discipline {
+        case .run:
+            opening = "You are scoring one running workout against the athlete's training plan."
+            firstInstruction = "using the run's measured numbers to decide where in that range it "
+                + "belongs. The bottom of the range means the run barely satisfied the rule; the top "
+                + "means it satisfied it emphatically."
+        case .lift:
+            // No "pace", "cadence", "cap", "splits" or "distance" — none of them describe
+            // this session (§10.1) — and no "load" or "volume": §8.3 says plainly that no
+            // such number exists in the record, so this text does not send the model
+            // looking for one.
+            opening = "You are scoring one lifting workout against the athlete's training plan."
+            firstInstruction = "using the session's measured facts to decide where in that range it "
+                + "belongs: whether the prescribed session happened, on the prescribed day, for "
+                + "roughly the prescribed length. The bottom of the range means it barely cleared "
+                + "that; the top means it matched cleanly."
+        }
 
-        The plan's rubric has already been applied deterministically, and you are told \
-        which rule matched and the score range that rule permits. Your job is the part \
-        the rubric cannot do:
+        return """
+            \(opening)
 
-        1. Choose the exact score within the permitted range, using the run's measured \
-        numbers to decide where in that range it belongs. The bottom of the range means \
-        the run barely satisfied the rule; the top means it satisfied it emphatically.
-        2. Write the one-line rationale shown in the app's verdict header.
+            The plan's rubric has already been applied deterministically, and you are told \
+            which rule matched and the score range that rule permits. Your job is the part \
+            the rubric cannot do:
 
-        Do not argue with the matched rule and do not score outside the permitted range. \
-        A score outside it will be rejected and you will be asked again.
+            1. Choose the exact score within the permitted range, \(firstInstruction)
+            2. Write the one-line rationale shown in the app's verdict header.
 
-        Rationale rules:
-        \(RationaleContract.instructionText)
+            Do not argue with the matched rule and do not score outside the permitted range. \
+            A score outside it will be rejected and you will be asked again.
 
-        Reply with a single JSON object and nothing else — no prose before or after it:
-        \(ScoreProposal.responseFormatDescription)
-        """
+            Rationale rules:
+            \(RationaleContract.instructionText)
+
+            Reply with a single JSON object and nothing else — no prose before or after it:
+            \(ScoreProposal.responseFormatDescription)
+            """
+    }
 
     // MARK: - Accepting
 

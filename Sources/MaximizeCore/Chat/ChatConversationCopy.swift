@@ -60,4 +60,103 @@ public enum ChatConversationCopy {
     /// the lookup that would have supplied it is the lookup that just failed — so,
     /// unlike the three strings above, this one does not vary by kind.
     public static let threadNotFound = "This conversation no longer exists."
+
+    // MARK: - MAX-150: the other two `ChatModel.LoadState` cases
+
+    /// `ChatModel.LoadState.notYetScored` — a workout thread opened before its run has a
+    /// score (FR-2.1 seeds chat from one). Ordinary, not a failure, and reached for a
+    /// workout subject only.
+    ///
+    /// Moved here from `ChatConversationView` (MAX-150): it is chosen by the same
+    /// `model.loadState` switch as `failedToLoad` and `threadNotFound` above, and having
+    /// two of that switch's four cases in `MaximizeCore` and two as view literals was the
+    /// inconsistency — one state machine, one voice, one place.
+    public static let notYetScored =
+        "This run hasn't been scored yet — chat opens once it has a score."
+
+    /// `ChatModel.LoadState.noVerdict` (MAX-126) — the opposite tense of `notYetScored`:
+    /// a lift is never scored (MAX-111), so there is no score coming for chat to wait on.
+    public static let noVerdict =
+        "The plan scores runs, so there's no score for this workout — and chat starts from one."
+
+    // MARK: - MAX-150: `ChatModel.DisplayMessage`'s two flags
+
+    /// `DisplayMessage.wasTruncated` — the reply ran out of the model's usable reply
+    /// budget. Moved here for the same reason `notYetScored`/`noVerdict` were: the flag
+    /// is a fact `ChatModel` already decided, and the sentence stating it belongs beside
+    /// every other string that reads off that decision rather than inline in the bubble
+    /// that draws it.
+    public static let truncatedCaption = "Cut short — hit the reply length limit."
+
+    /// `DisplayMessage.wasInterruptedByFailure` — a partial reply survived a dropped
+    /// connection (constraint #4). See `truncatedCaption`'s own note.
+    public static let interruptedByFailureCaption = "Connection dropped before this reply finished."
+
+    // MARK: - MAX-152: the rungs of `ChatReplyPhase`
+
+    /// What the transcript says *in place of* a reply that has not arrived yet, and the
+    /// text the waiting animation is drawn over.
+    ///
+    /// Its existence is the point. CLAUDE.md's "no information carried by hue alone"
+    /// generalises: a state carried only by an animation is a state that vanishes under
+    /// Reduce Motion, and a shimmer with nothing underneath it is exactly that. The words
+    /// are the channel; the sweep is decoration on top of the words, which is also how
+    /// Claude's own interface does it.
+    ///
+    /// Not worded from the subject, unlike the three strings at the top of this file:
+    /// "waiting for a reply" is the same fact on a run thread and a training thread, and
+    /// two sentences that differ in no useful way are two sentences to keep in step for
+    /// nothing.
+    public static let awaitingFirstReply = "Thinking…"
+
+    /// `ChatReplyPhase.stalled` — the reply started, stopped, and the connection is still
+    /// open.
+    ///
+    /// Worded to say the two things a person actually wants at that moment: nothing is
+    /// broken, and nothing is being asked of them. It deliberately does not offer an
+    /// action — there is nothing useful to do while a stream is quiet, and a button that
+    /// abandons a reply that is about to resume would be a worse outcome than waiting.
+    public static let replyStalled = "Still connected — nothing new for a moment."
+
+    /// The line shown beneath or in place of the pending reply, or nil where the reply
+    /// itself is the statement.
+    ///
+    /// `.streaming` is the nil that matters: once the first token lands, the words on
+    /// screen say everything a status line could, and leaving an indicator beside them
+    /// would be the app talking over its own answer. That is the ladder's second rung
+    /// stated as copy — waiting ends when text begins.
+    public static func pendingStatus(for phase: ChatReplyPhase) -> String? {
+        switch phase {
+        case .awaitingFirstToken: return awaitingFirstReply
+        case .stalled: return replyStalled
+        case .streaming, .idle, .complete, .truncated, .emptyReply, .failed: return nil
+        }
+    }
+
+    /// What VoiceOver reads for the pending-reply row, for each of the three live rungs.
+    ///
+    /// Separate from `pendingStatus(for:)` because the two differ for `.streaming`: there
+    /// is no visible status while text arrives, but a person who cannot see the text
+    /// arriving still needs to be told that it is. Terminal rungs are absent on purpose —
+    /// each has already produced a row that says what happened (a reply bubble, its
+    /// truncated caption, or a `ChatFailureNotice`), and announcing a second sentence
+    /// about a row already on screen is the "never restate a fact the surface already
+    /// stated" rule from MAX-150's voice.
+    public static func pendingAccessibilityLabel(for phase: ChatReplyPhase) -> String? {
+        switch phase {
+        case .awaitingFirstToken: return "Waiting for Claude's reply."
+        case .streaming: return "Claude is replying."
+        case .stalled: return "Still connected. Waiting for more of the reply."
+        case .idle, .complete, .truncated, .emptyReply, .failed: return nil
+        }
+    }
+
+    /// The action offered on a failure that is worth asking again
+    /// (`ChatReplyPhase.offersRetry`). One tap, one call — see `ChatFailureNotice`'s
+    /// retry note for why nothing here is automatic.
+    public static let retryAction = "Try again"
+
+    /// What that action does, for VoiceOver — said as a fact about cost, because a
+    /// person cannot see that this is the app's only path to spending another call.
+    public static let retryActionHint = "Asks Claude the same question again."
 }

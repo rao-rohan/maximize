@@ -138,6 +138,14 @@ extension MaximizeStore: WorkoutRepository {
                     model: ScoreAnnotationRecord.self,
                     where: #Predicate<ScoreAnnotationRecord> { $0.workoutUUID == id }
                 )
+            case .miscategorisedScoreLabels:
+                // A21/MAX-143: the label qualifies this workout's score and says nothing
+                // about any other, so it goes with it — the same cascade the score
+                // annotation above takes.
+                try modelContext.delete(
+                    model: MiscategorisedScoreLabelRecord.self,
+                    where: #Predicate<MiscategorisedScoreLabelRecord> { $0.workoutUUID == id }
+                )
             case .muscleGroupEntries:
                 // A22: the athlete's answers describe this session and nothing else, so
                 // they go with it — the same cascade a score annotation takes.
@@ -256,9 +264,11 @@ extension MaximizeStore: ScoreRepository {
     func ledger(forWorkout id: UUID) async throws -> ScoreLedger? {
         guard let record = try scoreRecord(for: id) else { return nil }
         let annotations = try annotationRecords(for: id).map { try $0.stored.toDomain() }
+        let labels = try miscategorisationLabelRecords(for: id).map { try $0.stored.toDomain() }
         return try ScoreLedger(
             automatic: try record.stored.toDomain(),
-            annotations: annotations
+            annotations: annotations,
+            labels: labels
         )
     }
 
@@ -266,6 +276,16 @@ extension MaximizeStore: ScoreRepository {
     /// can reach the auto-score.
     func annotate(_ annotation: ScoreAnnotation) async throws {
         modelContext.insert(ScoreAnnotationRecord(StoredScoreAnnotation(annotation)))
+        try modelContext.save()
+    }
+
+    /// A21/MAX-143. Additive in exactly the way `annotate(_:)` is — a new row keyed by its
+    /// own identifier, with no update path and no reference to `ScoreRecord`, so D8 holds
+    /// here by construction rather than by care.
+    func recordMiscategorisationLabel(_ label: MiscategorisedScoreLabel) async throws {
+        modelContext.insert(
+            MiscategorisedScoreLabelRecord(StoredMiscategorisedScoreLabel(label))
+        )
         try modelContext.save()
     }
 
@@ -284,6 +304,20 @@ extension MaximizeStore: ScoreRepository {
             FetchDescriptor<ScoreAnnotationRecord>(
                 predicate: #Predicate<ScoreAnnotationRecord> { $0.workoutUUID == identifier },
                 sortBy: [SortDescriptor<ScoreAnnotationRecord>(\.createdAt, order: .forward)]
+            )
+        )
+    }
+
+    /// Ascending by `recordedAt`, which is the order `ScoreLedger` requires — and, for a
+    /// label, the *first* is the one in force, since labelling is a single fact rather
+    /// than a history of opinions.
+    private func miscategorisationLabelRecords(
+        for identifier: UUID
+    ) throws -> [MiscategorisedScoreLabelRecord] {
+        try modelContext.fetch(
+            FetchDescriptor<MiscategorisedScoreLabelRecord>(
+                predicate: #Predicate<MiscategorisedScoreLabelRecord> { $0.workoutUUID == identifier },
+                sortBy: [SortDescriptor<MiscategorisedScoreLabelRecord>(\.recordedAt, order: .forward)]
             )
         )
     }

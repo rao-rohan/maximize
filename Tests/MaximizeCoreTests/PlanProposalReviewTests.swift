@@ -50,27 +50,34 @@ final class PlanProposalReviewTests: XCTestCase {
     private static let storedArc =
         #"[{"index": 1, "distanceMeters": 16000}, {"index": 2, "distanceMeters": 18000}, {"index": 3, "distanceMeters": 20000}]"#
 
-    /// A proposal that restates the stored plan exactly. Every diff test below is this,
-    /// with one thing changed, so a failing assertion names the difference.
+    /// A proposal that restates the stored plan exactly, lift days included — Tuesday's
+    /// and Friday's default to `storedPlan()`'s own asks, so the "nothing changes"
+    /// baseline tests stay true once the lift slot is diffable too (MAX-141). Every diff
+    /// test below is this, with one thing changed, so a failing assertion names the
+    /// difference.
     private func reply(
         heartRateCapBPM: String = "152",
         cadenceLow: String = "165",
         cadenceHigh: String = "170",
         effective: String = "70",
         marginal: String = "45",
-        thursday: String = #"{"weekday": "thursday", "kind": "easy", "distanceMeters": 8000}"#,
+        thursday: String = #"{"weekday": "thursday", "kind": "easy", "distanceMeters": 8000, "liftKind": "rest"}"#,
+        tuesday: String =
+            #"{"weekday": "tuesday", "kind": "easy", "distanceMeters": 8000, "liftKind": "lift", "liftMuscleGroups": ["legs"]}"#,
+        friday: String =
+            #"{"weekday": "friday", "kind": "rest", "liftKind": "lift", "liftMuscleGroups": ["chest", "back"]}"#,
         longRunArc: String = PlanProposalReviewTests.storedArc,
         goalStatements: String = #"["Run a sub-4:00 marathon"]"#,
         goalTargetDay: String = #""2026-04-20""#
     ) -> String {
         let week = [
-            #"{"weekday": "monday", "kind": "rest"}"#,
-            #"{"weekday": "tuesday", "kind": "easy", "distanceMeters": 8000}"#,
-            #"{"weekday": "wednesday", "kind": "hard", "note": "6 × 800m"}"#,
+            #"{"weekday": "monday", "kind": "rest", "liftKind": "rest"}"#,
+            tuesday,
+            #"{"weekday": "wednesday", "kind": "hard", "note": "6 × 800m", "liftKind": "rest"}"#,
             thursday,
-            #"{"weekday": "friday", "kind": "rest"}"#,
-            #"{"weekday": "saturday", "kind": "easy", "distanceMeters": 6000}"#,
-            #"{"weekday": "sunday", "kind": "long", "distanceMeters": 18000}"#,
+            friday,
+            #"{"weekday": "saturday", "kind": "easy", "distanceMeters": 6000, "liftKind": "rest"}"#,
+            #"{"weekday": "sunday", "kind": "long", "distanceMeters": 18000, "liftKind": "rest"}"#,
         ]
         return """
         {
@@ -147,7 +154,7 @@ final class PlanProposalReviewTests: XCTestCase {
     func testTheAskedForChangeAndTheUnrequestedOneAreBothOneRowEach() throws {
         let review = try card(reply(
             heartRateCapBPM: "148",
-            thursday: #"{"weekday": "thursday", "kind": "easy", "distanceMeters": 6000}"#
+            thursday: #"{"weekday": "thursday", "kind": "easy", "distanceMeters": 6000, "liftKind": "rest"}"#
         ))
 
         XCTAssertEqual(review.changedRowCount, 2)
@@ -251,34 +258,91 @@ final class PlanProposalReviewTests: XCTestCase {
         )
     }
 
-    // MARK: - Lifts must be visible, not silently absent
+    // MARK: - Lifts are a diffable section now (MAX-141)
 
-    /// The ticket's own requirement: *"someone who says 'and lift on Tuesdays' must not
-    /// be told yes by omission."* A proposal cannot prescribe a lift, so the card says so
-    /// on every card and names the lift days that carried through.
-    func testTheCardAlwaysStatesWhatHappenedToLifts() throws {
-        let review = try card(reply())
+    /// The ticket's own requirement, met a different way than before: *"someone who says
+    /// 'and lift on Tuesdays' must not be told yes by omission."* A proposal can now
+    /// prescribe a lift, so a lift change shows up exactly the way a run change does — a
+    /// `.changed` row in its own section — rather than a fixed sentence the athlete has
+    /// to trust separately from what the card shows.
+    func testALiftChangeIsAChangedRowInTheLiftSection() throws {
+        let review = try card(reply(
+            tuesday: #"{"weekday": "tuesday", "kind": "easy", "distanceMeters": 8000, "liftKind": "lift", "liftMuscleGroups": ["legs", "core"]}"#
+        ))
 
-        XCTAssertTrue(review.liftNote.contains("Tuesday"))
-        XCTAssertTrue(review.liftNote.contains("Friday"))
-        XCTAssertTrue(review.liftNote.contains("carry through unchanged"))
-        XCTAssertFalse(review.liftNote.isEmpty)
-
-        // And no lift day is a row in the week section, which would imply the proposal
-        // could have moved one.
-        for row in review.sections.flatMap(\.rows) {
-            XCTAssertFalse(row.value.contains("Lift"), "\(row.id) renders a lift the proposal cannot set")
-        }
+        let tuesday = try field("lift.tuesday", in: review)
+        XCTAssertEqual(tuesday.label, "Tuesday")
+        XCTAssertEqual(tuesday.value, "Lift · Legs, Core")
+        XCTAssertEqual(tuesday.change, .changed(from: "Lift · Legs"))
+        XCTAssertEqual(review.changedRowCount, 1)
     }
 
-    /// The other half: with no lift days on the plan, the note still appears and still
-    /// says a drafted plan cannot add one — the case an athlete who just asked for lifts
-    /// is actually in.
-    func testTheLiftNoteIsPresentEvenWhenNoLiftIsPrescribed() throws {
-        let review = try card(reply(), session: try firstPlanSession())
+    /// Dropping a lift day the athlete has — the model silently not restating it — is
+    /// exactly as visible as any other unrequested edit: a `.changed` row from what the
+    /// lift was to "Rest". This is the property `PlanDraft.applying(_:)`'s own doc
+    /// points at: the athlete's proof that nothing changed is the diff, not a sentence.
+    func testDroppingAnExistingLiftDayIsAVisibleChange() throws {
+        let review = try card(reply(
+            tuesday: #"{"weekday": "tuesday", "kind": "easy", "distanceMeters": 8000, "liftKind": "rest"}"#
+        ))
 
-        XCTAssertTrue(review.liftNote.contains("run slot only"))
-        XCTAssertTrue(review.liftNote.contains("plan editor"))
+        let tuesday = try field("lift.tuesday", in: review)
+        XCTAssertEqual(tuesday.value, "Rest")
+        XCTAssertEqual(tuesday.change, .changed(from: "Lift · Legs"))
+        XCTAssertEqual(tuesday.change.marker, "Changed")
+    }
+
+    /// The lift section reads the same way the week section does: seven rows, Monday
+    /// first, stating every weekday's ask rather than only the ones with a lift on them.
+    func testTheLiftSectionIsSevenRowsMondayFirst() throws {
+        let review = try card(reply())
+        let lifts = try XCTUnwrap(review.sections.first { $0.id == "lift" })
+
+        XCTAssertEqual(lifts.title, "Lifts")
+        XCTAssertEqual(
+            lifts.rows.map(\.label),
+            ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+        )
+        XCTAssertEqual(lifts.rows.first?.value, "Rest")
+        XCTAssertEqual(try field("lift.tuesday", in: review).value, "Lift · Legs")
+        XCTAssertEqual(try field("lift.friday", in: review).value, "Lift · Chest, Back")
+    }
+
+    /// The ticket's own requirement (MAX-148): a duration or note change is not a
+    /// separate row, it is part of the same per-weekday lift ask, so it shows up the
+    /// same way a muscle-group change does — a `.changed` row in the lift section.
+    func testAChangedLiftDurationIsAChangedRowInTheLiftSection() throws {
+        let review = try card(reply(
+            friday: #"{"weekday": "friday", "kind": "rest", "liftKind": "lift", "liftMuscleGroups": ["chest", "back"], "liftDurationSeconds": 2700}"#
+        ))
+
+        let friday = try field("lift.friday", in: review)
+        XCTAssertEqual(friday.value, "Lift · Chest, Back · 45 min")
+        XCTAssertEqual(friday.change, .changed(from: "Lift · Chest, Back"))
+        XCTAssertEqual(review.changedRowCount, 1)
+    }
+
+    /// The note's twin of the same property.
+    func testAChangedLiftNoteIsAChangedRowInTheLiftSection() throws {
+        let review = try card(reply(
+            friday: #"{"weekday": "friday", "kind": "rest", "liftKind": "lift", "liftMuscleGroups": ["chest", "back"], "liftNote": "Focus on form"}"#
+        ))
+
+        let friday = try field("lift.friday", in: review)
+        XCTAssertEqual(friday.value, "Lift · Chest, Back · Focus on form")
+        XCTAssertEqual(friday.change, .changed(from: "Lift · Chest, Back"))
+        XCTAssertEqual(review.changedRowCount, 1)
+    }
+
+    /// A first plan states the lift section the same way it states every other one —
+    /// there is nothing to diff against, so every row is `.stated`.
+    func testALiftSectionOnAFirstPlanStatesRatherThanDiffs() throws {
+        let review = try card(reply(), session: try firstPlanSession())
+        let lifts = try XCTUnwrap(review.sections.first { $0.id == "lift" })
+
+        for row in lifts.rows {
+            XCTAssertEqual(row.change, .stated)
+        }
     }
 
     // MARK: - Units
@@ -313,6 +377,28 @@ final class PlanProposalReviewTests: XCTestCase {
         XCTAssertEqual(
             first.sections.flatMap(\.rows).map(\.id),
             second.sections.flatMap(\.rows).map(\.id)
+        )
+    }
+
+    // MARK: - MAX-150: copy moved here from `PlanProposalCardView`
+
+    /// The row area's own statement of "nothing changed" — distinct wording from
+    /// `summary`'s "Nothing changes against plan v3…" (the header already gives the
+    /// count and the plan number), but the same fact, and now the same type.
+    func testNoChangesInDiffTextIsNotEmptyAndNotTheSameSentenceAsSummary() throws {
+        let review = try card(reply())
+        XCTAssertFalse(PlanProposalReview.noChangesInDiffText.isEmpty)
+        XCTAssertNotEqual(PlanProposalReview.noChangesInDiffText, review.summary)
+    }
+
+    func testDisclosureTitleNamesTheRowCountOnlyWhenCollapsed() {
+        XCTAssertEqual(
+            PlanProposalReview.disclosureTitle(showingEveryRow: true, rowCount: 25),
+            "Show only what changed"
+        )
+        XCTAssertEqual(
+            PlanProposalReview.disclosureTitle(showingEveryRow: false, rowCount: 25),
+            "Show the whole plan (25 fields)"
         )
     }
 }

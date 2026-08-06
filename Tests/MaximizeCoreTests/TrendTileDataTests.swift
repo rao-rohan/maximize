@@ -34,7 +34,7 @@ final class TrendTileDataTests: XCTestCase {
         from: String,
         through: String,
         workoutDays: Int = 0,
-        effectiveDays: EffectiveDayTally? = nil,
+        effectiveDays: EffectiveObligationTally? = nil,
         averageScore: Double? = nil,
         currentStreak: Int = 0
     ) throws -> Tallies {
@@ -43,7 +43,7 @@ final class TrendTileDataTests: XCTestCase {
             from: start,
             through: try day(through),
             workoutDays: workoutDays,
-            effectiveDays: try effectiveDays ?? EffectiveDayTally(effectiveCount: 0, eligibleCount: 0),
+            effectiveDays: try effectiveDays ?? EffectiveObligationTally(effectiveCount: 0, eligibleCount: 0),
             averageScore: averageScore,
             currentStreak: currentStreak,
             currentWeek: try TrainingWeek(
@@ -168,7 +168,7 @@ final class TrendTileDataTests: XCTestCase {
         let tallies = try tallies(
             from: "2026-01-05",
             through: "2026-01-11",
-            effectiveDays: try EffectiveDayTally(effectiveCount: 3, eligibleCount: 5)
+            effectiveDays: try EffectiveObligationTally(effectiveCount: 3, eligibleCount: 5)
         )
 
         let data = try TrendTileData(
@@ -177,14 +177,17 @@ final class TrendTileDataTests: XCTestCase {
         )
 
         XCTAssertEqual(data.effectiveDays?.value, "3/5")
-        XCTAssertEqual(data.effectiveDays?.caption, "effective days")
+        // MAX-140: "sessions", not "days" — since MAX-134 the denominator counts
+        // prescribed obligations, and a caption still saying "days" would be wrong the
+        // moment a week carries a lift.
+        XCTAssertEqual(data.effectiveDays?.caption, "effective sessions")
     }
 
     func testEffectiveDaysIsNilWhenNothingWasEligible() throws {
         let tallies = try tallies(
             from: "2026-01-05",
             through: "2026-01-11",
-            effectiveDays: try EffectiveDayTally(effectiveCount: 0, eligibleCount: 0)
+            effectiveDays: try EffectiveObligationTally(effectiveCount: 0, eligibleCount: 0)
         )
 
         let data = try TrendTileData(
@@ -254,7 +257,7 @@ final class TrendTileDataTests: XCTestCase {
         let tallies = try tallies(
             from: "2026-01-05",
             through: "2026-01-11",
-            effectiveDays: try EffectiveDayTally(effectiveCount: 2, eligibleCount: 4),
+            effectiveDays: try EffectiveObligationTally(effectiveCount: 2, eligibleCount: 4),
             averageScore: 88,
             currentStreak: 3
         )
@@ -267,7 +270,7 @@ final class TrendTileDataTests: XCTestCase {
             distanceUnit: .kilometers
         )
 
-        XCTAssertEqual(data.tiles.map(\.caption), ["km vs. arc", "effective days", "day streak", "avg score"])
+        XCTAssertEqual(data.tiles.map(\.caption), ["km vs. arc", "effective sessions", "day streak", "avg score"])
     }
 
     /// With mileage and effective days both absent, `tiles` drops straight to the two
@@ -294,13 +297,13 @@ final class TrendTileDataTests: XCTestCase {
     }
 
     /// A month keeps the arc comparison and gains a consistency figure.
-    func testAMonthAddsDaysRunAndKeepsTheArcComparison() throws {
+    func testAMonthAddsDaysTrainedAndKeepsTheArcComparison() throws {
         let calendar = try PlanCalendar([try Fixture.plan()])
         let tallies = try tallies(
             from: "2026-01-01",
             through: "2026-01-31",
             workoutDays: 18,
-            effectiveDays: try EffectiveDayTally(effectiveCount: 12, eligibleCount: 20),
+            effectiveDays: try EffectiveObligationTally(effectiveCount: 12, eligibleCount: 20),
             averageScore: 74,
             currentStreak: 3
         )
@@ -316,16 +319,18 @@ final class TrendTileDataTests: XCTestCase {
         XCTAssertNil(data.totalDistance)
         XCTAssertEqual(data.effectiveDays?.value, "12/20")
         XCTAssertEqual(data.workoutDays?.value, "18")
-        XCTAssertEqual(data.workoutDays?.caption, "days run")
+        // "days trained", not "days run" (MAX-150): `Tallies.workoutDays` counts a day
+        // whose only workout was a lift too, and the caption must not claim otherwise.
+        XCTAssertEqual(data.workoutDays?.caption, "days trained")
         XCTAssertEqual(
             data.tiles.map(\.caption),
-            ["km vs. arc", "effective days", "days run", "day streak", "avg score"]
+            ["km vs. arc", "effective sessions", "days trained", "day streak", "avg score"]
         )
     }
 
-    /// A week does **not** get the days-run tile: four days out of seven is already
+    /// A week does **not** get the days-trained tile: four days out of seven is already
     /// legible in the calendar row directly above the tiles.
-    func testAWeekDoesNotCarryTheDaysRunTile() throws {
+    func testAWeekDoesNotCarryTheDaysTrainedTile() throws {
         let tallies = try tallies(from: "2026-01-05", through: "2026-01-11", workoutDays: 4)
 
         let data = try TrendTileData(
@@ -345,7 +350,7 @@ final class TrendTileDataTests: XCTestCase {
             from: "2026-01-01",
             through: "2026-12-31",
             workoutDays: 212,
-            effectiveDays: try EffectiveDayTally(effectiveCount: 211, eligibleCount: 310),
+            effectiveDays: try EffectiveObligationTally(effectiveCount: 211, eligibleCount: 310),
             averageScore: 79.44,
             currentStreak: 5
         )
@@ -366,11 +371,11 @@ final class TrendTileDataTests: XCTestCase {
         XCTAssertEqual(data.totalDistance?.caption, "km total")
         // 211/310 = 68.06%.
         XCTAssertEqual(data.effectiveDays?.value, "68%")
-        XCTAssertEqual(data.effectiveDays?.caption, "effective, of 310 eligible days")
+        XCTAssertEqual(data.effectiveDays?.caption, "effective, of 310 eligible sessions")
         XCTAssertEqual(data.workoutDays?.value, "212")
         XCTAssertEqual(
             data.tiles.map(\.caption),
-            ["km total", "effective, of 310 eligible days", "days run", "day streak", "avg score"]
+            ["km total", "effective, of 310 eligible sessions", "days trained", "day streak", "avg score"]
         )
     }
 
@@ -425,7 +430,7 @@ final class TrendTileDataTests: XCTestCase {
         let tallies = try tallies(
             from: "2026-01-01",
             through: "2026-12-31",
-            effectiveDays: try EffectiveDayTally(effectiveCount: 2, eligibleCount: 3)
+            effectiveDays: try EffectiveObligationTally(effectiveCount: 2, eligibleCount: 3)
         )
 
         let data = try tileData(kind: .year, workouts: [], tallies: tallies, planCalendar: nil)
@@ -439,7 +444,7 @@ final class TrendTileDataTests: XCTestCase {
         let tallies = try tallies(
             from: "2026-01-01",
             through: "2026-12-31",
-            effectiveDays: try EffectiveDayTally(effectiveCount: 0, eligibleCount: 0)
+            effectiveDays: try EffectiveObligationTally(effectiveCount: 0, eligibleCount: 0)
         )
 
         let data = try tileData(kind: .year, workouts: [], tallies: tallies, planCalendar: nil)
@@ -462,5 +467,183 @@ final class TrendTileDataTests: XCTestCase {
             planCalendar: planCalendar,
             distanceUnit: .kilometers
         )
+    }
+
+    // MARK: - MAX-140: the effective-sessions caption end to end, through the real
+    // obligation arithmetic (not a hand-built `Tallies`) — the same integration the tests
+    // above deliberately avoid, per this file's own header comment that `Tallies` is not
+    // re-tested here. These two prove the *caption* stays honest against `TalliesCalculator`
+    // itself rather than against a synthetic tally this file made up.
+
+    private func scoredWorkout(
+        id: UUID,
+        on dayText: String,
+        activityType: ActivityType = .running,
+        startOffsetSeconds: Double = 0
+    ) throws -> Workout {
+        let start = try day(dayText).civilAnchor().addingTimeInterval(startOffsetSeconds)
+        return try Workout(
+            id: id,
+            activityType: activityType,
+            start: start,
+            end: start.addingTimeInterval(3_600),
+            durationSeconds: 3_600,
+            distanceMeters: activityType.isRun ? 8_000 : nil,
+            activeEnergyKilocalories: 500,
+            hasRoute: false,
+            source: .appleWatch,
+            ingestedAt: start.addingTimeInterval(3_660)
+        )
+    }
+
+    private func ledger(
+        points: Int,
+        workoutID: UUID,
+        scheduledKind: ScheduledSessionKind = .easy,
+        actualClassification: WorkoutClassification = .easy
+    ) throws -> ScoreLedger {
+        try ScoreLedger(
+            automatic: try Fixture.score(
+                points: points,
+                workoutID: workoutID,
+                scheduledKind: scheduledKind,
+                actualClassification: actualClassification
+            )
+        )
+    }
+
+    /// `Fixture.plan()`'s run slot, unmodified: Monday/Friday rest; Tuesday/Thursday easy
+    /// 8 km; Wednesday hard; Saturday easy 6 km; Sunday long 18 km. Five eligible days —
+    /// the same figure `ObligationTalliesTests`' header comment reasons against.
+    ///
+    /// **This is a single-discipline history** — the lift slot is never prescribed — so
+    /// per LIFTING-SPEC §6.2's own acceptance criterion, obligation-counting and
+    /// day-counting must land on the identical number. This test is that criterion,
+    /// exercised at the tile layer rather than only at `Tallies`'.
+    func testASingleDisciplineWeekReachesTheTileWithNumbersMAX134LeftUnchanged() throws {
+        // Monday and Friday are rest — no obligation, no workout, nothing to assert
+        // against them.
+        let tue = UUID(), wed = UUID(), thu = UUID(), sat = UUID(), sun = UUID()
+        let calendar = try PlanCalendar([try Fixture.plan()]) // no lift ever prescribed
+
+        // Every eligible day (Tue/Wed/Thu/Sat/Sun) scores effective except Wednesday,
+        // which is scored below threshold — four of five met, the same shape
+        // `ObligationTalliesTests` reasons against for a run-only week.
+        let workouts = [
+            try scoredWorkout(id: tue, on: "2026-01-06"),
+            try scoredWorkout(id: wed, on: "2026-01-07"),
+            try scoredWorkout(id: thu, on: "2026-01-08"),
+            try scoredWorkout(id: sat, on: "2026-01-10"),
+            try scoredWorkout(id: sun, on: "2026-01-11"),
+        ]
+        let scoreLedgers: [UUID: ScoreLedger] = [
+            tue: try ledger(points: 80, workoutID: tue),
+            wed: try ledger(points: 30, workoutID: wed, scheduledKind: .hard, actualClassification: .hard),
+            thu: try ledger(points: 80, workoutID: thu),
+            sat: try ledger(points: 80, workoutID: sat),
+            sun: try ledger(points: 80, workoutID: sun, scheduledKind: .long, actualClassification: .long),
+        ]
+
+        let input = try TalliesInput(
+            from: try day("2026-01-05"),
+            through: try day("2026-01-11"),
+            timeZone: .gmt,
+            today: try day("2026-01-12"),
+            workouts: workouts,
+            scoreLedgers: scoreLedgers,
+            planCalendar: calendar,
+            restDayBudget: try RestDayBudget(daysPerWeek: 0)
+        )
+        let tallies = try TalliesCalculator.compute(input)
+
+        let data = try TrendTileData(
+            kind: .week, tallies: tallies,
+            workouts: workouts, timeZone: .gmt, planCalendar: calendar, distanceUnit: .kilometers
+        )
+
+        // The number a day-counting reader already expects: 4 of 5 days met, exactly as
+        // it would have read before MAX-134 — proving the arithmetic this tile displays
+        // is unmoved, only its caption changed.
+        XCTAssertEqual(data.effectiveDays?.value, "4/5")
+        XCTAssertEqual(data.effectiveDays?.caption, "effective sessions")
+    }
+
+    /// A day prescribing both a run and a lift is **two** obligations, and the tile's
+    /// denominator must show it — the exact case the old "effective days" caption could
+    /// not describe honestly (it counted days; the number now counts chances).
+    func testEffectiveSessionsCountsAMixedDisciplineDayAsTwoObligations() throws {
+        let run = UUID()
+        let calendar = try PlanCalendar([try Fixture.plan(lift: [.tuesday: ScheduledSession(kind: .lift)])])
+
+        // Tuesday only: the run happened and scored well; the lift never happened and the
+        // week's rest-day budget is zero, so nothing forgives it.
+        let workouts = [try scoredWorkout(id: run, on: "2026-01-06")]
+        let scoreLedgers: [UUID: ScoreLedger] = [run: try ledger(points: 80, workoutID: run)]
+
+        let input = try TalliesInput(
+            from: try day("2026-01-06"),
+            through: try day("2026-01-06"),
+            timeZone: .gmt,
+            today: try day("2026-01-07"),
+            workouts: workouts,
+            scoreLedgers: scoreLedgers,
+            planCalendar: calendar,
+            restDayBudget: try RestDayBudget(daysPerWeek: 0)
+        )
+        let tallies = try TalliesCalculator.compute(input)
+
+        let data = try TrendTileData(
+            kind: .week, tallies: tallies,
+            workouts: workouts, timeZone: .gmt, planCalendar: calendar, distanceUnit: .kilometers
+        )
+
+        // Two chances (run + lift), one met — the flattering old day-level "1/1" is gone.
+        XCTAssertEqual(data.effectiveDays?.value, "1/2")
+        XCTAssertEqual(data.effectiveDays?.caption, "effective sessions")
+    }
+
+    // MARK: - MAX-140: average score is per scored workout
+
+    /// A day prescribing and completing both a run and a lift contributes **two** terms
+    /// to the average — the per-workout decision this ticket makes deliberately (see
+    /// `TrendTileData.averageScore`'s own documentation), not a by-product of anything
+    /// this ticket changed in `Tallies`.
+    func testAverageScoreCountsBothDisciplinesOnAMixedDay() throws {
+        let run = UUID()
+        let lift = UUID()
+        let calendar = try PlanCalendar([try Fixture.plan(lift: [.tuesday: ScheduledSession(kind: .lift)])])
+
+        let workouts = [
+            try scoredWorkout(id: run, on: "2026-01-06"),
+            try scoredWorkout(
+                id: lift, on: "2026-01-06",
+                activityType: .traditionalStrengthTraining, startOffsetSeconds: 3_600 * 8
+            ),
+        ]
+        let scoreLedgers: [UUID: ScoreLedger] = [
+            run: try ledger(points: 80, workoutID: run),
+            lift: try ledger(points: 60, workoutID: lift, scheduledKind: .lift, actualClassification: .lift),
+        ]
+
+        let input = try TalliesInput(
+            from: try day("2026-01-06"),
+            through: try day("2026-01-06"),
+            timeZone: .gmt,
+            today: try day("2026-01-07"),
+            workouts: workouts,
+            scoreLedgers: scoreLedgers,
+            planCalendar: calendar,
+            restDayBudget: try RestDayBudget(daysPerWeek: 0)
+        )
+        let tallies = try TalliesCalculator.compute(input)
+
+        let data = try TrendTileData(
+            kind: .week, tallies: tallies,
+            workouts: workouts, timeZone: .gmt, planCalendar: calendar, distanceUnit: .kilometers
+        )
+
+        // (80 + 60) / 2 = 70.0 — both scored efforts counted, neither collapsed to a
+        // single best-of-the-day figure the way `effectiveDays` would.
+        XCTAssertEqual(data.averageScore?.value, "70.0")
     }
 }

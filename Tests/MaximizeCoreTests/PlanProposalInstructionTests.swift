@@ -99,8 +99,11 @@ final class PlanProposalInstructionTests: XCTestCase {
             .forbiddenField(name: "version"),
             .unknownSessionKind(name: "tempo"),
             .unknownWeekday(name: "moonday"),
+            .unknownLiftKind(name: "easy"),
+            .unknownMuscleGroup(name: "abs"),
             .weekIsNotOneSessionPerWeekday(missing: [.sunday], duplicated: [.monday]),
             .restDayIsNotEmpty(weekday: .monday),
+            .liftRestDayIsNotEmpty(weekday: .tuesday),
             .malformedGoalTargetDay(value: "15 November"),
             .longRunArcIsEmpty,
             .longRunArcWeekNotPositive(week: 0),
@@ -119,15 +122,27 @@ final class PlanProposalInstructionTests: XCTestCase {
     /// without anyone editing it.
     func testAVocabularyRejectionListsTheWholeVocabulary() {
         let kinds = PlanProposalError.unknownSessionKind(name: "tempo").description
-        // `prescribable`: the rejection lists what the model may actually propose, so a
-        // retry is pointed at a legal vocabulary rather than at one including `.lift`,
-        // which has nowhere to go until MAX-129 gives the week a second slot.
+        // `prescribable`: the rejection lists what the model may actually propose for the
+        // **run** slot — never `.lift`, which has its own separate vocabulary and its
+        // own error case (`unknownLiftKind`, MAX-141) rather than a spot in this one.
         for kind in ScheduledSessionKind.prescribable {
             XCTAssertTrue(kinds.contains(kind.rawValue), "the message omits \(kind.rawValue)")
         }
         let weekdays = PlanProposalError.unknownWeekday(name: "moonday").description
         for weekday in Weekday.allCases {
             XCTAssertTrue(weekdays.contains(PlanProposal.wireName(for: weekday)))
+        }
+    }
+
+    /// The lift slot's own vocabulary error (MAX-141), checked the same way.
+    func testALiftKindRejectionListsTheWholeLiftVocabulary() {
+        let kinds = PlanProposalError.unknownLiftKind(name: "easy").description
+        for kind in ScheduledSessionKind.liftPrescribable {
+            XCTAssertTrue(kinds.contains(kind.rawValue), "the message omits \(kind.rawValue)")
+        }
+        let groups = PlanProposalError.unknownMuscleGroup(name: "abs").description
+        for group in MuscleGroup.allCases {
+            XCTAssertTrue(groups.contains(group.rawValue), "the message omits \(group.rawValue)")
         }
     }
 
@@ -156,13 +171,13 @@ final class PlanProposalInstructionTests: XCTestCase {
             {"heartRateCapBPM": 148, "cadenceLowStepsPerMinute": 165, \
             "cadenceHighStepsPerMinute": 172, "effectiveThresholdPoints": 70, \
             "marginalThresholdPoints": 45, "week": [\
-            {"weekday": "monday", "kind": "rest"}, \
-            {"weekday": "tuesday", "kind": "easy", "distanceMeters": 8000}, \
-            {"weekday": "wednesday", "kind": "hard", "note": "6 × 800m"}, \
-            {"weekday": "thursday", "kind": "easy", "distanceMeters": 6000}, \
-            {"weekday": "friday", "kind": "rest"}, \
-            {"weekday": "saturday", "kind": "easy", "distanceMeters": 6000}, \
-            {"weekday": "sunday", "kind": "long", "distanceMeters": 20000}], \
+            {"weekday": "monday", "kind": "rest", "liftKind": "rest"}, \
+            {"weekday": "tuesday", "kind": "easy", "distanceMeters": 8000, "liftKind": "rest"}, \
+            {"weekday": "wednesday", "kind": "hard", "note": "6 × 800m", "liftKind": "rest"}, \
+            {"weekday": "thursday", "kind": "easy", "distanceMeters": 6000, "liftKind": "rest"}, \
+            {"weekday": "friday", "kind": "rest", "liftKind": "rest"}, \
+            {"weekday": "saturday", "kind": "easy", "distanceMeters": 6000, "liftKind": "rest"}, \
+            {"weekday": "sunday", "kind": "long", "distanceMeters": 20000, "liftKind": "rest"}], \
             "longRunArc": [{"index": 1, "distanceMeters": 16000}], \
             "goalStatements": ["Half marathon"], "goalTargetDay": "2026-11-15"}
             """
