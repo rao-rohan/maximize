@@ -586,7 +586,7 @@ but is dated before its effective date is permanently unscorable, and nothing te
 
 | ID | Ticket | Source | Tier |
 |---|---|---|---|
-| MAX-162 | `FirstRunChecklist` + `FirstRunCopy` in core — four facts in, ordered steps and one next action out; extends the R10 banned-phrase test | MAX-161 | **Opus** 🔒 |
+| MAX-162 | `FirstRunChecklist` + `FirstRunCopy` in core — four facts in, ordered steps and one next action out; extends the R10 banned-phrase test | MAX-161 | **Opus** 🔒 ✅ — see the MAX-162 section below for the seam MAX-163 and MAX-164 read |
 | MAX-163 | The first-launch cover — one action, presents the Health sheet, claims no result | MAX-161 | Sonnet |
 | MAX-164 | The setup card on the Workouts tab, including the "set up, nothing recorded yet" window | MAX-161 | Sonnet |
 | MAX-165 | **The first plan's effective date** — default covers what is captured; the excluded-workout count on screen. Revisions unchanged | MAX-161 | **Opus** ✅ **built ahead of the rest of this set** — see the MAX-165 section below |
@@ -3879,6 +3879,120 @@ CI cannot prove anything about the screen. It never draws a pixel.
 
 ---
 
+## MAX-162 — the first-run checklist, in the core
+
+Four facts in — has the Health sheet been presented, is a plan version stored, is a key
+stored, is any workout stored — and out come the outstanding steps in ask order and the
+single next action. Pure core (`Sources/MaximizeCore/FirstRun/`), no view, no framework,
+every branch executed by CI. FIRST-RUN-SPEC §3, §5, §8, §9.
+
+### The seam MAX-163 and MAX-164 read
+
+The interface matters more than the internals here, because two tickets consume it.
+
+- **MAX-164 (setup card) reads `FirstRunChecklist.card`** — one `FirstRunCardState?`,
+  switched over, `nil` meaning no card — and `FirstRunCopy.card(_:)` for the words. That
+  value is a `FirstRunCardCopy`: `heading`, `body`, `detail` (a second paragraph at
+  secondary weight, present only for the waiting state), `action: FirstRunStep?` and
+  `actionLabel: String?`. **The card assembles nothing**: it never branches on `facts`, and
+  it never writes a sentence.
+- **MAX-163 (launch cover) reads `FirstRunCopy.cover`** and nothing else here — `title`,
+  `health`, `privacy`, `continueLabel`, plus `paragraphs` for laying the two out. The
+  cover's *gate* is that ticket's own `FirstRunPresentationRecording`, deliberately not
+  defined here.
+- **Either, later:** `remainingSteps` and `nextStep`, if the owner decides the card should
+  list all three steps rather than the next one (spec §15 q2). Both ship today so that is a
+  view change, not a redesign.
+- **`healthAccess` must be the device-lifetime answer, not the launch's.**
+  `HealthAccessState.notRequestedYet` is documented as "not presented *on this launch*",
+  because the Settings section holds it in `@State`. A checklist built from that value puts
+  "Health access has not been requested" on the card at every launch of a working install —
+  §5.4's nag, exactly. MAX-163's recorded presentation is what resolves to
+  `.requestAnswered`. Documented on `FirstRunFacts`; **this is the likeliest wiring mistake
+  in the set.**
+- **§5.4's "the card does not come back" is MAX-164's**, and is stated as such: this type is
+  a pure function of facts and cannot express "already shown once".
+
+### R10, structurally rather than editorially
+
+`FirstRunStep` models **no per-step completion** — no `isComplete`, no `.done`, no case
+standing for a step that has been taken — and the Health step has **no completed state**. A
+step that has been done leaves `remainingSteps`; it never sits in it wearing a tick. So a
+view cannot render "Health ✓" from anything in this module, because no value means it. The
+banned-phrase test was **extended over `FirstRunCopy`** rather than duplicated
+(`FailureCopyTests.testNoHealthCopyClaimsAccessWasGrantedOrRefused`), per spec §9.3 and
+CLAUDE.md's instruction about the analogous hue rule.
+
+### Decided
+
+- **Health → plan → key, and the order is a property, not case order.**
+  `FirstRunStep.recovery` states what a delay costs — nothing arrives until Health is
+  answered; a plan is irrecoverable only before the date it is eventually given; a key is
+  fully recovered whenever it is done, because history is scored when next opened. The ask
+  order is that, ascending, and a test asserts the two agree, so a step added later has to
+  answer the same question to get a position.
+- **A Keychain read that failed (`StoredAPIKeyPresence.unknown`) is not a missing key.** It
+  produces no step and never the "No Anthropic API key" card. MAX-154's finding was exactly
+  this conflation reaching a screen as a confident absence; Settings already says the honest
+  thing where the athlete can act on it.
+- **`.requestFailed` gets its own card**, because state 1's copy says the question has not
+  been put and after a failed request that is false. Same button — asking again is the fix
+  for both.
+- **`HealthAccessState.healthDataUnavailable` gets a sixth card state, which is not in the
+  spec's five.** The checklist takes a `HealthAccessState` (§9.1 requires it) and that enum
+  has four cases. It carries no action — an athlete cannot install a Health store — and it
+  empties `remainingSteps`, because a plan and a key would be steps toward data that can
+  never arrive. **Flagged as a deliberate extension of the spec.**
+- **Two spec sentences were reworded, and the phrase is now banned in the test.** §5.2's
+  state 2 ("Runs are being captured…") and state 3 ("Your runs are captured and measured.")
+  both assert that capture is happening — the one claim R10 says the app cannot make, since
+  a refused read looks identical from inside. The shipped wording says workouts are stored
+  *as they arrive*, and `"being captured"` is on the banned list so it cannot quietly come
+  back. §8's wording, which the spec defends explicitly, is kept verbatim.
+
+### Rejected
+
+- **A `Bool` for "Health asked".** `HealthAccessState` and `StoredAPIKeyPresence` already
+  carry the honest third answer for the two facts that can fail to be established; a boolean
+  beside them is how MAX-154's defect happened.
+- **A per-step `isComplete`, even defaulted to false.** It is the one field from which a
+  tick could be drawn, and the whole R10 defence is that no such field exists.
+- **Collapsing §8's second paragraph into `FailureCopy.noWorkoutsRecorded`** (spec §15 q4,
+  "try collapsing first"). Tried: that string opens "No workouts yet.", which under a heading
+  already reading "Nothing recorded yet." is the same sentence twice on one card. They are
+  written for different moments. A test asserts both still name the same recovery path in
+  Settings, which is the drift that would actually matter.
+- **Copy for the `.unknown` key state.** Two voices on one fact, and a nag built on a guess.
+
+### Tests
+
+`Tests/MaximizeCoreTests/FirstRunChecklistTests.swift` resolves **all forty-eight
+combinations** of the four facts and asserts over the whole set: that the card's action is
+always the next step (two independent derivations that must never disagree), that at most
+one action is offered however many steps remain, that Health outranks everything while it
+is still a question, that the key is never asked before the steps above it, that remaining
+steps are always in ask order, that `.unknown` never becomes a missing key, that a device
+without Health data is told so and asked for nothing, and that the only combination with no
+card is the fully settled one. Plus the two named windows — set up with nothing recorded,
+and set up with something recorded — and copy properties: every state has its own heading
+and sentence, the buttons are distinct, the ninety days in the waiting copy match
+`AnchoredIngestionPolicy.standard.firstRunBackfill`, and no other string carries a digit
+(the same privacy proof `FailureCopy` uses — nothing interpolates, so nothing can leak).
+
+### What CI can and cannot prove
+
+CI can prove: the package compiles, and every branch and every string of the checklist
+behaves as above — including the R10 rule over both copy types.
+
+CI cannot prove anything about a screen; no view exists yet. It also cannot prove the fact
+*supply* is right, and that is the risk this ticket cannot close: a correct checklist fed
+`HealthAccessState` from a per-launch `@State` would nag on every launch. MAX-163 and
+MAX-164 carry that verification.
+
+**`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
+
+---
+
 ## Risks
 
 | # | Item | Impact | Status |
@@ -3897,8 +4011,7 @@ CI cannot prove anything about the screen. It never draws a pixel.
 | R12 | The anchor write and the workout write are two separate stores, so the window between them exists by construction | A crash between them re-delivers the batch — absorbed by dedupe, so this is the safe side | **Accepted permanently. Do not "fix" this.** ~~MAX-020 can close it by moving the anchor into the same SwiftData transaction~~ — that earlier note was wrong and MAX-020 correctly refused it. See below |
 | **R15** | **No failure state in the app offers a retry, and a whole-store failure is never named as one.** Every `.failed` state is terminal until the view is rebuilt — including the ones a second attempt would plainly clear (a scoring call that timed out, a Keychain read during the moment the device was locked). And when the *store* is what failed, every screen independently says its own content could not be loaded, which reads as five separate problems rather than the one that it is; nothing tells the athlete that nothing at all is being saved | An athlete's only recovery from a transient failure is to guess that backing out and re-entering a screen will help, and their only signal for a permanent one is that the whole app looks broken in five different ways | **Open.** MAX-154 made every failure legible and put the store-open reason in the log (it previously went nowhere), but deliberately did not add controls or an app-level banner — that is a design decision about affordances, not an error-handling audit. Found by MAX-154 |
 | **R16** | **A first plan dated later than the history already on the device destroys that history, permanently and silently.** Three individually correct behaviours compose into it: the ingester backfills 90 days on its first pass, the authoring screen suggested this week's Monday as a first plan's effective date, and a workout on a day no plan governs is stored with no derived metrics and reported as `.workoutPredatesEveryPlan` — a reason that **never resolves**, because MAX-011 rightly forbids a later version from opening before an earlier one | An athlete accepting the suggested date on install day stranded roughly 89 days of their own training: stored, but never measurable, never scorable, never in a tally, and never mentioned on any screen. Silent, permanent, and invisible in CI because each part was correct in isolation | **Closed by MAX-165 (A23)** for the first plan, which is where it was reachable: the suggestion now covers the earliest captured workout, and the screen states in figures what any candidate date would exclude. **The class is not closed.** A workout that syncs *after* the first plan is saved but is dated before its effective date — a late Watch sync, a Health import from another app — is stranded the same way, still silently. Named in FIRST-RUN-SPEC §7.4; not yet a ticket |
-| R10 | The app cannot know whether Health *read* access was granted — `authorizationStatus(for:)` reports share status only, by Apple's design | No UI can honestly display "Health connected"; a permission problem is indistinguishable from "no workouts recorded yet" | Accepted, Apple-imposed. Found at MAX-030. Any future settings or onboarding UI must not claim read access it cannot verify |
-| R10 | The app cannot know whether Health *read* access was granted — `authorizationStatus(for:)` reports share status only, by Apple's design | No UI can honestly display "Health connected"; a permission problem is indistinguishable from "no workouts recorded yet" | Accepted, Apple-imposed. Found at MAX-030. Any future settings or onboarding UI must not claim read access it cannot verify. **MAX-161's spec §9 turns that into a rule with a structural defence and a test**: the first-run checklist has no completed state for the Health step and `FirstRunStep` models no per-step completion, so there is nothing for a tick to be drawn in |
+| R10 | The app cannot know whether Health *read* access was granted — `authorizationStatus(for:)` reports share status only, by Apple's design | No UI can honestly display "Health connected"; a permission problem is indistinguishable from "no workouts recorded yet" | Accepted, Apple-imposed. Found at MAX-030. Any future settings or onboarding UI must not claim read access it cannot verify. **MAX-161's spec §9 turns that into a rule with a structural defence and a test, and MAX-162 built it**: `FirstRunStep` models no per-step completion and the Health step has no completed state, so there is no value a view could draw a tick from; `FailureCopyTests.testNoHealthCopyClaimsAccessWasGrantedOrRefused` was extended over `FirstRunCopy` rather than duplicated. The rule now binds MAX-163's cover and MAX-164's card by construction rather than by review. (This row appeared twice after MAX-161; the duplicate is removed) |
 
 ## Overseer failure modes
 
