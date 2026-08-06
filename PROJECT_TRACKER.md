@@ -587,7 +587,7 @@ but is dated before its effective date is permanently unscorable, and nothing te
 | ID | Ticket | Source | Tier |
 |---|---|---|---|
 | MAX-162 | `FirstRunChecklist` + `FirstRunCopy` in core — four facts in, ordered steps and one next action out; extends the R10 banned-phrase test | MAX-161 | **Opus** 🔒 ✅ — see the MAX-162 section below for the seam MAX-163 and MAX-164 read |
-| MAX-163 | The first-launch cover — one action, presents the Health sheet, claims no result | MAX-161 | Sonnet |
+| MAX-163 | The first-launch cover — one action, presents the Health sheet, claims no result | MAX-161 | Sonnet ✅ — see the MAX-163 section below for the gate and the recording |
 | MAX-164 | The setup card on the Workouts tab, including the "set up, nothing recorded yet" window | MAX-161 | Sonnet |
 | MAX-165 | **The first plan's effective date** — default covers what is captured; the excluded-workout count on screen. Revisions unchanged | MAX-161 | **Opus** ✅ **built ahead of the rest of this set** — see the MAX-165 section below |
 | MAX-166 | The conversational route to a first plan, offered from the authoring screen. Droppable | MAX-161 | Sonnet |
@@ -4031,6 +4031,109 @@ CI cannot prove anything about a screen; no view exists yet. It also cannot prov
 *supply* is right, and that is the risk this ticket cannot close: a correct checklist fed
 `HealthAccessState` from a per-launch `@State` would nag on every launch. MAX-163 and
 MAX-164 carry that verification.
+
+## MAX-163 — the first-launch cover
+
+One `fullScreenCover`, mounted on `RootTabView`'s `TabView`. Its single action presents
+the iOS Health sheet (`HealthAccessSettingsSection`'s call site, a second time); it reads
+`FirstRunCopy.cover` and nothing else from MAX-162's module; it dismisses claiming no
+result, ever. FIRST-RUN-SPEC §4, §9.
+
+New: `Sources/MaximizeCore/FirstRun/FirstRunPresentationRecording.swift`,
+`App/FirstRun/FirstRunCoverView.swift`,
+`App/FirstRun/UserDefaultsFirstRunPresentationStore.swift`. Touched:
+`App/RootTabView.swift` (mounts the cover and resolves the gate on appear).
+
+### The gate: device-lifetime, and where it lives
+
+MAX-162 flagged this as the likeliest bug in the set — a cover gated on
+`HealthAccessState`'s per-launch `@State` would present itself on every launch of a
+working install. Closing it took two pieces, both new:
+
+- **`FirstRunPresentationRecording`** (core protocol) — `hasPresentedHealthRequest: Bool`
+  and `recordHealthRequestPresented()`. Reached through a protocol, per CLAUDE.md, because
+  `UserDefaults` is a platform type the core does not touch.
+- **`FirstRunCoverGate.shouldPresent(_:)`** (core, one line: `!recording
+  .hasPresentedHealthRequest`) — still put in the core and tested, because "should a
+  screen appear" is a decision, not layout, and the whole point of this ticket is that the
+  decision is provable rather than trusted to a view's `@State` initializer.
+- **`UserDefaultsFirstRunPresentationStore`** (app adapter) — a single boolean key in
+  `UserDefaults.standard`.
+
+**Deliberately not added to `FirstRunChecklist`.** That type is MAX-164's seam and answers
+a different question ("what is left to set up"); the cover's question — "has this specific
+one-shot screen been shown before" — is narrower and unrelated to the other three facts.
+`FirstRunChecklist` still composes `HealthAccessState.requestAnswered` from this same
+recording, which is MAX-164's wiring to get right, not this ticket's.
+
+### Decided
+
+- **`UserDefaults`, not a file (MAX-031's anchor pattern) and not `AppSettings`.** The
+  anchor store rejected `UserDefaults` because the anchor's correctness needs "durable the
+  instant `save` returns," a promise `UserDefaults` does not make. This flag needs only
+  "eventually true" — the failure mode of a delayed write is the cover appearing one extra
+  time, and iOS itself makes a repeat `requestAuthorization` call idempotent once answered,
+  so an extra presentation costs nothing but a tap. `AppSettings` (SwiftData) was rejected
+  for the reason spec §4.4 gives directly: a store that fails to open must not be the thing
+  that makes the one screen asking for health permissions reappear forever.
+- **Reinstall resets the recording, on purpose.** `UserDefaults.standard` is removed with
+  the app container, so a reinstall shows the cover again — correct, per spec §4.4: A8
+  defers CloudKit, so a reinstall already loses every workout, plan and score, and re-asking
+  the one question iOS will not let this app ask twice per install is the intended
+  behaviour, not a gap.
+- **The recording is written the instant Continue is tapped, not conditioned on what the
+  Health call returns.** Considered recording only on `HealthKitObserverError
+  .healthDataUnavailable` — throws before HealthKit is ever asked, so no sheet exists to
+  present. Rejected in favour of recording unconditionally: a device with no Health store
+  fails identically on every future attempt, so *not* recording there would present the
+  cover on every single launch forever — precisely the nag this ticket was warned about,
+  and worse than the alternative. Recording unconditionally costs nothing on the path where
+  the sheet really was shown, because iOS's own repeat-call behaviour (no UI on a second ask
+  once answered) makes "asked again" harmless.
+- **`fullScreenCover`, not `sheet`.** A drag-dismissible sheet lets someone dismiss the one
+  screen that explains what is about to be asked without reading it — a small departure
+  from the lighter presentation this app otherwise reaches for (`ChatSheet`, the Settings
+  sheet), named here per CLAUDE.md's "say why" on a deliberate default departure.
+- **The primary button is `.buttonStyle(.borderedProminent)` + `Color.accent`**, matching
+  `PlanView`'s "Author a plan" — the system's own current control, not a hand-rolled
+  capsule, per the same rule `glassChrome` enforces for chrome.
+
+### Rejected
+
+- **A checkmark, a "Health connected" line, or any second screen after the sheet returns.**
+  R10: iOS never reports read-access outcome, and this is the one screen where that claim
+  would be most tempting. The view draws nothing from the call's result either way — see
+  `presentHealthSheet()`'s empty `catch`.
+- **Reading the caught `Error` for anything, including a log.** An arbitrary HealthKit
+  `Error` may carry sample values in `userInfo` (CLAUDE.md — health data does not go into
+  logs). The failed-request sentence a person eventually sees comes from MAX-164's card via
+  `HealthAccessState.requestFailed`, never from this view.
+- **New `FirstRunCopy` strings.** The ticket's own instruction: read `.cover` and nothing
+  else. Nothing here needed a word MAX-162 had not already written and tested.
+
+### Tests
+
+`Tests/MaximizeCoreTests/FirstRunCoverGateTests.swift`: the cover presents on a fresh
+install (an unrecorded fake), does not present once recorded, recording is idempotent
+across repeated calls, and — the acceptance criterion the ticket named explicitly — the
+recording survives a *simulated* relaunch: a second, independently constructed fake seeded
+with what the first one wrote stands in for a new process, the same technique
+`FirstRunChecklistTests` uses elsewhere in this module for "a fresh install" without
+running one.
+
+### What CI can and cannot prove
+
+CI can prove: the gate's decision is correct against a fake for every combination this
+ticket defined — fresh, recorded, idempotent-recorded, and simulated-relaunch. The package
+compiles and the app shell builds against Xcode 26's simulator SDK.
+
+CI cannot prove, and this PR says so under **Needs device verification**: that a
+`fullScreenCover` actually appears on a fresh install; that tapping Continue actually
+presents the iOS Health sheet, or what it looks like; that a real app relaunch — not a
+second fake object standing in for one — leaves the `UserDefaults` write intact; that the
+cover's copy fits at Dynamic Type AX5; that Reduce Transparency and Increase Contrast leave
+the screen readable (`.contentSurface(.screen)` is already opaque by construction, so this
+is a lower-risk check than most, but it is still a device check, not a proof).
 
 **`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
 
