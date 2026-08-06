@@ -553,13 +553,13 @@ feature was governed by a plan that could not exist).
 | MAX-128 … MAX-143 | The lifting build, decomposed from MAX-109 | MAX-109 | see below ✅ |
 | MAX-126 | **"No verdict by design" is a state** — a lift stops being drawn and spoken as a run awaiting a score | MAX-111 | **Opus** ✅ |
 | MAX-150 | **Copy and absence voice: the chat and dashboard surfaces** — split from MAX-104 so the finished half does not wait behind the lifting build | MAX-104, split | Sonnet ✅ |
-| MAX-152 | **The chat's waiting and streaming states** — the full ladder between "sent" and "answered", and every stream failure as a designed state with words | Owner | **Opus** |
-| MAX-154 | **Error handling, audited app-wide** — every failure path outside chat swept as a set, the failure-to-copy mapping moved into the core, and the inventory recorded below | Owner | **Opus** |
+| MAX-152 | **The chat's waiting and streaming states** — the full ladder between "sent" and "answered", and every stream failure as a designed state with words | Owner | **Opus** ✅ |
+| MAX-154 | **Error handling, audited app-wide** — every failure path outside chat swept as a set, the failure-to-copy mapping moved into the core, and the inventory recorded below | Owner | **Opus** ✅ |
 | MAX-155 | **An HTTP status code reaches the athlete's screen** — `PlanDraftingFailure.description` interpolates `PlanProposalModelError.description` in `ChatModel.noteDraftingFailure`, so "…returned an unexpected status (400)." renders on the plan proposal card. Fixed with a sibling to `ChatFailureNotice` (`PlanDraftingNotice`) rather than a case added to it — see write-up below | MAX-154 | Sonnet ✅ |
 | MAX-156 | **`ScoringError.description` interpolates a workout identifier and a date** — latent, not leaking today, and one `.public` log line away from being a real one. Fixed: the two payloads are gone from `description`; the enum's own associated values are the deliberate channel a caller reaches for instead — see write-up below | MAX-154 | Sonnet ✅ |
-| MAX-153 | **The chat shell** — composer, thread list, sheet chrome. The design pass the chat's *shell* never had | Owner | **Opus** |
+| MAX-153 | **The chat shell** — composer, thread list, sheet chrome. The design pass the chat's *shell* never had | Owner | **Opus** ✅ |
 | MAX-157 | **The fact sheet tells Claude "days" over a count of obligations** — `TrainingFactSheet`'s "Effective days" line is the same MAX-134 caption bug one layer into the prompt, not just on screen | MAX-140 | Sonnet ✅ |
-| MAX-161 | **First-run experience spec** — there is no first-run path in the app at all; a fresh install has no Health request, no plan, no key, and nothing pointing at any of them. Spec + A23/A24, decomposed into MAX-162…167 below | Owner | **Opus** |
+| MAX-161 | **First-run experience spec** — there is no first-run path in the app at all; a fresh install has no Health request, no plan, no key, and nothing pointing at any of them. Spec + A23/A24, decomposed into MAX-162…167 below | Owner | **Opus** ✅ |
 | MAX-162 … MAX-167 | The first-run build, decomposed from MAX-161 | MAX-161 | see below |
 
 **MAX-161.** [docs/FIRST-RUN-SPEC.md](./docs/FIRST-RUN-SPEC.md). Verified by search: no
@@ -1849,10 +1849,10 @@ is the overseer's, not a ticket's — flagged here rather than done.
 | MAX-147 | The scorer's task text learns discipline (source: MAX-133) | 133, 136 | Sonnet ✅ |
 | MAX-148 | A lift's duration and note become editable, proposable, and type-safe | 137, 141 | Sonnet ✅ |
 | MAX-149 | Duration floor for fragments — **the classifier half of gap P3**; not yet wired to any author | 013, 131 | Sonnet ✅ |
-| MAX-151 | **Author the duration floor** — `StandardPlanSeed` states one, the authoring screen edits it, `PlanProposal` can propose it. Without this MAX-149 never fires. (Depended on 146 only for file ownership of `StandardPlanSeed`, which is now released) | 149, 148 | Sonnet |
+| MAX-151 | **Author the duration floor** — `StandardPlanSeed` states one, the authoring screen edits it, `PlanProposal` can propose it. Without this MAX-149 never fires. (Depended on 146 only for file ownership of `StandardPlanSeed`, which is now released) | 149, 148 | Sonnet ✅ |
 | MAX-151 | **Author the duration floor** — `StandardPlanSeed` states one, the authoring screen edits it, `PlanProposal` can propose it. Without this MAX-149 never fires — **closes gap P3 for real** | 149, 146, 148 | Sonnet ✅ |
-| MAX-153 | **The chat shell: composer, thread list, sheet chrome** — the design pass MAX-092–103 never had over the shell its features sit in | Owner, 092–103 | **Opus** |
-| MAX-165 | **The first plan's date covers captured history** (A23) — `.firstPlan`'s suggested `effectiveFrom` reaches back over the 90-day backfill instead of stopping at this week's Monday, and the authoring screen states in figures how many already-recorded workouts a candidate date would strand. **Closes R16.** Revisions and D1 untouched | 011, 033, 080 | **Opus** |
+| MAX-153 | **The chat shell: composer, thread list, sheet chrome** — the design pass MAX-092–103 never had over the shell its features sit in | Owner, 092–103 | **Opus** ✅ |
+| MAX-165 | **The first plan's date covers captured history** (A23) — `.firstPlan`'s suggested `effectiveFrom` reaches back over the 90-day backfill instead of stopping at this week's Monday, and the authoring screen states in figures how many already-recorded workouts a candidate date would strand. **Closes R16.** Revisions and D1 untouched | 011, 033, 080 | **Opus** ✅ |
 
 **MAX-153 — what was decided, what was rejected, and what it is blocked on.**
 
