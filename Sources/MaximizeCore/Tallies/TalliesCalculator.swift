@@ -218,6 +218,18 @@ public struct TalliesInput: Sendable {
 /// `automatic` — this type adds no second copy of that rule. Reading the ledger's own
 /// answer is what keeps the auto-score visibly on record (`ledger.automatic` is
 /// untouched by every tally here) while the tallies themselves use the correction.
+///
+/// ## MAX-160 — a labelled score leaves the average, and only the average
+///
+/// `computeAverageScore` also reads `ScoreLedger.isMiscategorised` and skips a labelled
+/// score entirely — not counted toward the sum, not counted toward the denominator (see
+/// that function's own documentation for why this reads the label directly rather than
+/// through `countsTowardScorerQuality`). **Nothing else in this file changed.**
+/// `effectiveObligationTally` and `streak` still read every scored workout exactly as
+/// before, labelled or not — this ticket's scope is `Tallies.averageScore` alone, and
+/// widening the exclusion to the obligation ratio or the streak was reported, not done
+/// (`PROJECT_TRACKER.md`'s MAX-160 row carries the finding). A labelled score today still
+/// counts toward `effectiveDays` and can still extend or break `currentStreak`.
 public enum TalliesCalculator {
     /// Discarded by every reader here — `RestDayBudgeting` only stamps this on the
     /// `ConvertedObligation` values it returns, and this type reads nothing off them but
@@ -239,7 +251,11 @@ public enum TalliesCalculator {
         // one day here even though it is two obligations below. A19 moved the unit of
         // account for *adherence*; it did not make this figure mean something else.
         let workoutDays = queriedDays.filter { workoutsByDay[$0] != nil }.count
-        let averageScore = try computeAverageScore(queriedDays: queriedDays, workoutsByDay: workoutsByDay, input: input)
+        let (averageScore, averageScoreExcludedMiscategorisedCount) = try computeAverageScore(
+            queriedDays: queriedDays,
+            workoutsByDay: workoutsByDay,
+            input: input
+        )
 
         // C1: resolve rest-day budgeting over the whole Monday-first weeks touching
         // the interval, never a slice of one. See `TalliesInput`'s documentation for
@@ -272,6 +288,7 @@ public enum TalliesCalculator {
             workoutDays: workoutDays,
             effectiveDays: effectiveDays,
             averageScore: averageScore,
+            averageScoreExcludedMiscategorisedCount: averageScoreExcludedMiscategorisedCount,
             currentStreak: currentStreak,
             currentWeek: currentWeek
         )
@@ -279,21 +296,45 @@ public enum TalliesCalculator {
 
     // MARK: - Average score
 
+    /// MAX-160: a scored workout whose `ScoreLedger` carries a `MiscategorisedScoreLabel`
+    /// (A21) contributes to neither the sum nor the count — it was judged against the
+    /// wrong discipline's ask, which makes it noise about a bug, not evidence about the
+    /// athlete's training. See `Tallies.averageScore`'s own documentation for the reasoning
+    /// and `Tallies.averageScoreExcludedMiscategorisedCount` for what is reported alongside
+    /// it.
+    ///
+    /// **Deliberately reads `ScoreLedger.isMiscategorised` directly, not
+    /// `!ScoreLedger.countsTowardScorerQuality`.** The two happen to agree today — labelling
+    /// is the only thing either predicate currently reacts to — but they answer different
+    /// questions: `countsTowardScorerQuality` says whether a score is evidence *about the
+    /// scorer* (PRD §2's divergence signal), and this reads whether it is evidence *about
+    /// the athlete's training*. Coupling this exclusion to the scorer-quality predicate
+    /// would make a future change to what disqualifies a score from PRD §2 — for a reason
+    /// that has nothing to do with whether it measures the athlete honestly — silently
+    /// change this average too. Reading `isMiscategorised` keeps the two aggregates
+    /// independently correct even though they currently exclude the identical set of
+    /// scores.
     private static func computeAverageScore(
         queriedDays: [CalendarDay],
         workoutsByDay: [CalendarDay: [Workout]],
         input: TalliesInput
-    ) throws -> Double? {
+    ) throws -> (averageScore: Double?, excludedMiscategorisedCount: Int) {
         var total = 0
         var count = 0
+        var excluded = 0
         for day in queriedDays {
             for workout in workoutsByDay[day] ?? [] {
                 guard let ledger = input.scoreLedgers[workout.id] else { continue }
+                guard !ledger.isMiscategorised else {
+                    excluded += 1
+                    continue
+                }
                 total += ledger.effectiveValue.points
                 count += 1
             }
         }
-        return count > 0 ? Double(total) / Double(count) : nil
+        let averageScore = count > 0 ? Double(total) / Double(count) : nil
+        return (averageScore, excluded)
     }
 
     // MARK: - Rest-day conversion (C1)
