@@ -47,7 +47,12 @@ final class PlanAuthoringModel {
     }
 
     struct Editing: Equatable {
-        let session: PlanAuthoringSession
+        /// `var` since MAX-173: choosing whether this version adopts the app's current
+        /// scoring rules produces a new session value (`adoptingCurrentRubric(_:)`), the
+        /// same way every other edit on this screen produces a new draft. Nothing else
+        /// about the session is settable, and nothing here derives one — `load()` is still
+        /// the only place a session is built, and it is still built from storage.
+        var session: PlanAuthoringSession
         /// The athlete's display unit (MAX-047). Distances are stored in metres always;
         /// this only decides what the steppers read.
         let distanceUnit: DistanceUnit
@@ -331,6 +336,21 @@ final class PlanAuthoringModel {
     func setEffectiveFrom(_ day: CalendarDay) {
         guard case .editing(var editing) = state else { return }
         editing.effectiveFrom = day
+        editing.confirmation = nil
+        state = .editing(refreshed(editing))
+    }
+
+    /// Chooses between the scoring rules this build ships and the ones the superseded
+    /// version was saved with (MAX-173).
+    ///
+    /// The default is the core's — a session adopts the current rules from the moment it
+    /// is built — so this method exists to let the athlete *decline*, not to switch the
+    /// fix on. That direction matters: a screen that had to remember to turn it on is a
+    /// screen one forgotten call away from the defect this ticket closes, which is R13's
+    /// signature.
+    func setAdoptsCurrentRubric(_ adopt: Bool) {
+        guard case .editing(var editing) = state else { return }
+        editing.session = editing.session.adoptingCurrentRubric(adopt)
         editing.confirmation = nil
         state = .editing(refreshed(editing))
     }

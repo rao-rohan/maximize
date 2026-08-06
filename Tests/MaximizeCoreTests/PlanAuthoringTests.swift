@@ -174,9 +174,24 @@ final class PlanAuthoringTests: XCTestCase {
         XCTAssertNotEqual(rebuilt.effectiveFrom, stored.effectiveFrom)
     }
 
-    /// The seed must not leak into a revision. If it did, editing `StandardPlanSeed`
-    /// would reach through and change a rubric the athlete had already settled.
-    func testRevisionCarriesTheStoredRubricBandsRatherThanReseeding() throws {
+    /// A revision that **declines** the app's current rules keeps the stored ones, band
+    /// for band.
+    ///
+    /// ## This assertion used to be unconditional, and MAX-173 changed that deliberately
+    ///
+    /// It read "the seed must not leak into a revision" — carrying the stored bands
+    /// forward was the only behaviour there was. That turned out to be the defect: a
+    /// correction to a seed band could never reach a device whose plan already existed,
+    /// which stranded MAX-132's lift adherence bands and MAX-146's `rest.ranAnyway`
+    /// condition and is why the lift ingestion gate could not open.
+    ///
+    /// The default is now the other way round (`PlanAuthoringSession.adoptsCurrentRubric`,
+    /// which carries the argument), and the property this test pins is what remains true
+    /// regardless: **a rubric an athlete settled on is still reachable and still
+    /// preserved**, by declining. The plan built below is the case that motivates keeping
+    /// it — a rubric no seed could have produced, which today only a test can construct,
+    /// and which a band editor would one day make real.
+    func testARevisionThatDeclinesKeepsTheStoredRubricBands() throws {
         let session = try PlanAuthoring.session(revising: nil, today: try today)
         var draft = session.draft
         draft.effectiveThresholdPoints = 65
@@ -210,8 +225,15 @@ final class PlanAuthoringTests: XCTestCase {
             revising: try PlanCalendar([firstPlan]),
             today: try today
         )
-        let second = try revision.plan(from: revision.draft, effectiveFrom: try day("2026-08-05"))
-        XCTAssertEqual(second.rubric.bands.map(\.identifier), ["athletes.own.rule"])
+        let declined = try revision
+            .adoptingCurrentRubric(false)
+            .plan(from: revision.draft, effectiveFrom: try day("2026-08-05"))
+        XCTAssertEqual(declined.rubric.bands.map(\.identifier), ["athletes.own.rule"])
+
+        // And the default, stated here so the pair reads as one decision rather than two
+        // tests that happen to disagree.
+        let adopted = try revision.plan(from: revision.draft, effectiveFrom: try day("2026-08-05"))
+        XCTAssertEqual(adopted.rubric.bands, try StandardPlanSeed.rubricBands())
     }
 
     /// A plan built here has to be one the store will accept — the store validates by

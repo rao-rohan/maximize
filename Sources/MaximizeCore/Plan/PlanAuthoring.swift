@@ -124,6 +124,40 @@ public enum PlanAuthoringError: Error, Hashable, Sendable, CustomStringConvertib
 /// produce and let it throw — the same check `MaximizeStore.store(_:)` performs before
 /// touching disk. The two agree because they run the same code, not because they were
 /// written to match.
+///
+/// ## The rubric a revision writes (MAX-173)
+///
+/// Until MAX-173 a revision carried `current.rubric.bands` forward verbatim, and there
+/// was no other path. That made the seed's bands unreachable for anybody whose plan
+/// already existed: MAX-132's three `lift.*` adherence bands and MAX-146's
+/// `.actualDiscipline(oneOf: [.run])` on `rest.ranAnyway` were corrections no device
+/// could ever receive, which is why the lift ingestion gate could not open.
+///
+/// So a session now knows two band lists — the ones the superseded version was saved
+/// with, and the ones this build ships — and `adoptsCurrentRubric` says which it will
+/// write. **It writes the current ones by default**, for three reasons stated together
+/// because no one of them carries it alone:
+///
+/// 1. **Nothing stored carries athlete intent.** There is no band editor and never has
+///    been (`PlanDraft` deliberately omits the bands), so every band inside every stored
+///    plan is a past copy of `StandardPlanSeed.rubricBands()`. Adopting is taking the
+///    corrected version of rules the athlete never chose, not overwriting a position they
+///    took. *If a band editor ever ships, this default must be revisited* — at that point
+///    a stored rubric can mean something, and `adoptingCurrentRubric(false)` is the
+///    behaviour to make the default.
+/// 2. **It cannot move history.** A rubric change is a new version with its own
+///    `effectiveFrom`, and scoring resolves the version in effect on the workout's own
+///    date (D1/D8). The blast radius is days this version governs, all of which are on or
+///    after a date the athlete picks.
+/// 3. **Declining is the failure mode with no exit.** An athlete who leaves it off keeps
+///    a rubric that stamps their lifts *"Ran on a scheduled rest day."* forever, and
+///    nothing later can reach back and fix it.
+///
+/// None of that makes it silent: `rubricUpdate` describes the change and is non-empty
+/// exactly when there is one, and `PlanAuthoringView` states it above the switch. What is
+/// deliberately **not** offered is a band-level diff — see `PlanRubricUpdate` for why a
+/// rendered `RubricCondition` is a sentence about a data structure rather than about
+/// training.
 public struct PlanAuthoringSession: Hashable, Sendable {
 
     public enum Mode: Hashable, Sendable {
@@ -163,9 +197,27 @@ public struct PlanAuthoringSession: Hashable, Sendable {
     /// the version being superseded.
     public let draft: PlanDraft
 
-    /// Carried forward, never re-seeded — see `PlanDraft`'s note on why the bands are
-    /// not part of the draft.
-    private let rubricBands: [RubricBand]
+    /// The bands the version being superseded was saved with — the seed's own on a first
+    /// plan, where there is nothing to supersede. See `PlanDraft`'s note on why the bands
+    /// are not part of the draft.
+    private let storedRubricBands: [RubricBand]
+
+    /// The bands this build of the app ships (`StandardPlanSeed.rubricBands()`), read
+    /// once at construction so the session's answers cannot change under a caller.
+    private let currentRubricBands: [RubricBand]
+
+    /// What adopting the current rules would change about the stored ones. Empty when
+    /// there is nothing to adopt — always so for a first plan, whose two lists are the
+    /// same list.
+    public let rubricUpdate: PlanRubricUpdate
+
+    /// Whether the version this session writes carries the current rules or the stored
+    /// ones. True by default; see the type's note for the argument.
+    ///
+    /// `private(set)` with `adoptingCurrentRubric(_:)` as the only door, rather than a
+    /// plain `var`: this decides what a saved plan permanently *means*, and a settable
+    /// property is one a view could flip as a side effect of some unrelated binding.
+    public private(set) var adoptsCurrentRubric: Bool
 
     /// The versions already stored. Kept so the ordering check runs against the real
     /// set rather than a remembered summary of it.
@@ -184,7 +236,8 @@ public struct PlanAuthoringSession: Hashable, Sendable {
         earliestEffectiveFrom: CalendarDay?,
         suggestedEffectiveFrom: CalendarDay,
         draft: PlanDraft,
-        rubricBands: [RubricBand],
+        storedRubricBands: [RubricBand],
+        currentRubricBands: [RubricBand],
         existing: PlanCalendar?,
         capturedHistory: CapturedWorkoutHistory = .empty
     ) {
@@ -193,9 +246,47 @@ public struct PlanAuthoringSession: Hashable, Sendable {
         self.earliestEffectiveFrom = earliestEffectiveFrom
         self.suggestedEffectiveFrom = suggestedEffectiveFrom
         self.draft = draft
-        self.rubricBands = rubricBands
+        self.storedRubricBands = storedRubricBands
+        self.currentRubricBands = currentRubricBands
+        self.rubricUpdate = PlanRubricUpdate(stored: storedRubricBands, current: currentRubricBands)
+        self.adoptsCurrentRubric = true
         self.existing = existing
         self.capturedHistory = capturedHistory
+    }
+
+    // MARK: - Which rules this version writes (MAX-173)
+
+    /// The session that writes the current rules, or the stored ones.
+    ///
+    /// A returned copy rather than a mutation, so the choice travels with the value a
+    /// screen is holding and there is no moment where a half-configured session exists.
+    /// A no-op when the two lists agree — including for every first plan.
+    public func adoptingCurrentRubric(_ adopt: Bool = true) -> PlanAuthoringSession {
+        var updated = self
+        updated.adoptsCurrentRubric = adopt
+        return updated
+    }
+
+    /// What has changed since the superseded version was saved, in the athlete's words —
+    /// nil when nothing has, or when there is no version to have moved on from.
+    ///
+    /// The decision and the sentence live together here for the reason
+    /// `excludedWorkoutsNotice` does: what the athlete is told is then verified on every
+    /// commit and cannot drift from the fact it is a sentence about.
+    public var rubricUpdateNotice: String? {
+        guard case let .revision(supersedes, _) = mode else { return nil }
+        return PlanCopy.rubricUpdateNotice(rubricUpdate, supersedes: supersedes)
+    }
+
+    /// What declining leaves in place, or nil when there is nothing to decline.
+    public var rubricUpdateDeclineNotice: String? {
+        guard case let .revision(supersedes, _) = mode, !rubricUpdate.isEmpty else { return nil }
+        return PlanCopy.rubricUpdateDeclineNotice(supersedes: supersedes)
+    }
+
+    /// The bands `plan(from:effectiveFrom:)` will write.
+    private var rubricBands: [RubricBand] {
+        adoptsCurrentRubric ? currentRubricBands : storedRubricBands
     }
 
     // MARK: - What a candidate date costs (MAX-165, A23)
@@ -358,6 +449,10 @@ public struct PlanAuthoringSession: Hashable, Sendable {
         guard draft.marginalThresholdPoints <= draft.effectiveThresholdPoints else {
             throw PlanAuthoringError.thresholdsInverted
         }
+        // The two thresholds come from the draft, because they are single numbers an
+        // athlete has an opinion about; the bands come from the session, because they are
+        // not editable anywhere and `adoptsCurrentRubric` is the only choice about them
+        // (MAX-173).
         return try ScoringRubric(
             effectiveThreshold: ScoreValue(draft.effectiveThresholdPoints),
             marginalThreshold: ScoreValue(draft.marginalThresholdPoints),
@@ -440,6 +535,11 @@ public enum PlanAuthoring {
         today: CalendarDay,
         capturedHistory: CapturedWorkoutHistory = .empty
     ) throws -> PlanAuthoringSession {
+        // Read once, for both branches. A first plan's stored and current lists are the
+        // same list — there is nothing to have moved on from — so its `rubricUpdate` is
+        // empty and adoption is a no-op, exactly as it should be.
+        let currentRubricBands = try StandardPlanSeed.rubricBands()
+
         guard let calendar, let current = currentVersion(of: calendar) else {
             return PlanAuthoringSession(
                 mode: .firstPlan,
@@ -459,7 +559,8 @@ public enum PlanAuthoring {
                     today: today
                 ),
                 draft: try StandardPlanSeed.draft(),
-                rubricBands: try StandardPlanSeed.rubricBands(),
+                storedRubricBands: currentRubricBands,
+                currentRubricBands: currentRubricBands,
                 existing: nil,
                 capturedHistory: capturedHistory
             )
@@ -472,7 +573,8 @@ public enum PlanAuthoring {
             earliestEffectiveFrom: earliest,
             suggestedEffectiveFrom: max(today, earliest),
             draft: try PlanDraft(current),
-            rubricBands: current.rubric.bands,
+            storedRubricBands: current.rubric.bands,
+            currentRubricBands: currentRubricBands,
             existing: calendar,
             // Carried for symmetry and for a future reader, never consulted: a revision
             // cannot exclude anything, and `workoutsExcluded(byEffectiveFrom:)` says so
