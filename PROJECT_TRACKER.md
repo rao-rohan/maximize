@@ -559,6 +559,42 @@ feature was governed by a plan that could not exist).
 | MAX-156 | **`ScoringError.description` interpolates a workout identifier and a date** — latent, not leaking today, and one `.public` log line away from being a real one. Fixed: the two payloads are gone from `description`; the enum's own associated values are the deliberate channel a caller reaches for instead — see write-up below | MAX-154 | Sonnet ✅ |
 | MAX-153 | **The chat shell** — composer, thread list, sheet chrome. The design pass the chat's *shell* never had | Owner | **Opus** |
 | MAX-157 | **The fact sheet tells Claude "days" over a count of obligations** — `TrainingFactSheet`'s "Effective days" line is the same MAX-134 caption bug one layer into the prompt, not just on screen | MAX-140 | Sonnet ✅ |
+| MAX-161 | **First-run experience spec** — there is no first-run path in the app at all; a fresh install has no Health request, no plan, no key, and nothing pointing at any of them. Spec + A23/A24, decomposed into MAX-162…167 below | Owner | **Opus** |
+| MAX-162 … MAX-167 | The first-run build, decomposed from MAX-161 | MAX-161 | see below |
+
+**MAX-161.** [docs/FIRST-RUN-SPEC.md](./docs/FIRST-RUN-SPEC.md). Verified by search: no
+onboarding, welcome or first-run surface exists anywhere under `App/`. The spec argues
+*against* building an onboarding flow and proposes one new screen, one new card and two
+edits instead — see its §11. Two findings are defects rather than gaps, and both are
+recorded here because they are cheap to lose:
+
+- **The first plan's default effective date silently strands the 90-day backfill.**
+  `AnchoredIngestionPolicy.standard` fetches 90 days on the first pass; `.firstPlan`
+  suggests `startOfTrainingWeek()`; a workout on a day no plan governs can never acquire
+  derived metrics, because MAX-011 forbids a later version reaching back. So the default
+  permanently strands nearly everything the first pass captured, and nothing on screen says
+  how many runs that is. **MAX-165 is the one ticket in the set that prevents permanent data
+  loss, and it is pure core logic CI proves end to end.** Amendment A23.
+- **`requestReadAuthorization()` has exactly one call site**, in the Settings *sheet*, behind
+  a toolbar button. The iOS Health sheet is one-shot: a fresh install can register the
+  observer query, receive nothing forever, and show an empty list whose copy is about a
+  permission never requested. MAX-163.
+
+Reported and deliberately **not taken**: a workout that syncs *after* the first plan is saved
+but is dated before its effective date is permanently unscorable, and nothing tells anyone
+(spec §7.4). A late Watch sync or a Health import from another app does this. Its own ticket.
+
+| ID | Ticket | Source | Tier |
+|---|---|---|---|
+| MAX-162 | `FirstRunChecklist` + `FirstRunCopy` in core — four facts in, ordered steps and one next action out; extends the R10 banned-phrase test | MAX-161 | **Opus** 🔒 |
+| MAX-163 | The first-launch cover — one action, presents the Health sheet, claims no result | MAX-161 | Sonnet |
+| MAX-164 | The setup card on the Workouts tab, including the "set up, nothing recorded yet" window | MAX-161 | Sonnet |
+| MAX-165 | **The first plan's effective date** — default covers what is captured; the excluded-workout count on screen. Revisions unchanged | MAX-161 | **Opus** ✅ **built ahead of the rest of this set** — see the MAX-165 section below |
+| MAX-166 | The conversational route to a first plan, offered from the authoring screen. Droppable | MAX-161 | Sonnet |
+| MAX-167 | The API key section's purpose footer — what the key is for, what it costs, where it lives | MAX-161 | Sonnet 🔒 |
+
+Order: **165 alone first**, then 162 → (163 ‖ 164). 167 parallelises with everything; 166
+last or never.
 
 **MAX-066.** Splits currently need a GPS track, so a treadmill run has none — correctly
 rendered as an absence rather than fabricated. `distanceWalkingRunning` is already
@@ -3862,6 +3898,7 @@ CI cannot prove anything about the screen. It never draws a pixel.
 | **R15** | **No failure state in the app offers a retry, and a whole-store failure is never named as one.** Every `.failed` state is terminal until the view is rebuilt — including the ones a second attempt would plainly clear (a scoring call that timed out, a Keychain read during the moment the device was locked). And when the *store* is what failed, every screen independently says its own content could not be loaded, which reads as five separate problems rather than the one that it is; nothing tells the athlete that nothing at all is being saved | An athlete's only recovery from a transient failure is to guess that backing out and re-entering a screen will help, and their only signal for a permanent one is that the whole app looks broken in five different ways | **Open.** MAX-154 made every failure legible and put the store-open reason in the log (it previously went nowhere), but deliberately did not add controls or an app-level banner — that is a design decision about affordances, not an error-handling audit. Found by MAX-154 |
 | **R16** | **A first plan dated later than the history already on the device destroys that history, permanently and silently.** Three individually correct behaviours compose into it: the ingester backfills 90 days on its first pass, the authoring screen suggested this week's Monday as a first plan's effective date, and a workout on a day no plan governs is stored with no derived metrics and reported as `.workoutPredatesEveryPlan` — a reason that **never resolves**, because MAX-011 rightly forbids a later version from opening before an earlier one | An athlete accepting the suggested date on install day stranded roughly 89 days of their own training: stored, but never measurable, never scorable, never in a tally, and never mentioned on any screen. Silent, permanent, and invisible in CI because each part was correct in isolation | **Closed by MAX-165 (A23)** for the first plan, which is where it was reachable: the suggestion now covers the earliest captured workout, and the screen states in figures what any candidate date would exclude. **The class is not closed.** A workout that syncs *after* the first plan is saved but is dated before its effective date — a late Watch sync, a Health import from another app — is stranded the same way, still silently. Named in FIRST-RUN-SPEC §7.4; not yet a ticket |
 | R10 | The app cannot know whether Health *read* access was granted — `authorizationStatus(for:)` reports share status only, by Apple's design | No UI can honestly display "Health connected"; a permission problem is indistinguishable from "no workouts recorded yet" | Accepted, Apple-imposed. Found at MAX-030. Any future settings or onboarding UI must not claim read access it cannot verify |
+| R10 | The app cannot know whether Health *read* access was granted — `authorizationStatus(for:)` reports share status only, by Apple's design | No UI can honestly display "Health connected"; a permission problem is indistinguishable from "no workouts recorded yet" | Accepted, Apple-imposed. Found at MAX-030. Any future settings or onboarding UI must not claim read access it cannot verify. **MAX-161's spec §9 turns that into a rule with a structural defence and a test**: the first-run checklist has no completed state for the Health step and `FirstRunStep` models no per-step completion, so there is nothing for a tick to be drawn in |
 
 ## Overseer failure modes
 
