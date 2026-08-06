@@ -587,15 +587,16 @@ but is dated before its effective date is permanently unscorable, and nothing te
 | ID | Ticket | Source | Tier |
 |---|---|---|---|
 | MAX-162 | `FirstRunChecklist` + `FirstRunCopy` in core — four facts in, ordered steps and one next action out; extends the R10 banned-phrase test | MAX-161 | **Opus** 🔒 ✅ — see the MAX-162 section below for the seam MAX-163 and MAX-164 read |
-| MAX-163 | The first-launch cover — one action, presents the Health sheet, claims no result | MAX-161 | Sonnet |
 | MAX-163 | The first-launch cover — one action, presents the Health sheet, claims no result | MAX-161 | Sonnet ✅ — see the MAX-163 section below for the gate and the recording |
-| MAX-164 | The setup card on the Workouts tab, including the "set up, nothing recorded yet" window | MAX-161 | Sonnet |
+| MAX-164 | The setup card on the Workouts tab, including the "set up, nothing recorded yet" window | MAX-161 | Sonnet ✅ — see the MAX-164 section below, including how it now reads MAX-163's device-lifetime recording |
 | MAX-165 | **The first plan's effective date** — default covers what is captured; the excluded-workout count on screen. Revisions unchanged | MAX-161 | **Opus** ✅ **built ahead of the rest of this set** — see the MAX-165 section below |
 | MAX-166 | The conversational route to a first plan, offered from the authoring screen. Droppable | MAX-161 | Sonnet |
 | MAX-167 | The API key section's purpose footer — what the key is for, what it costs, where it lives | MAX-161 | Sonnet 🔒 ✅ |
 
 Order: **165 alone first**, then 162 → (163 ‖ 164). 167 parallelises with everything; 166
-last or never.
+last or never. **164 was built and first opened for review before 163 merged**; it has
+since been updated to read 163's device-lifetime recording — see the MAX-164 section
+below.
 
 **MAX-167.** One sentence, `FailureCopy.apiKeyPurpose`, shown as a footer under Settings'
 existing "Anthropic API key" section — no new entry point, no test-the-key button, no
@@ -4137,6 +4138,127 @@ cover's copy fits at Dynamic Type AX5; that Reduce Transparency and Increase Con
 the screen readable (`.contentSurface(.screen)` is already opaque by construction, so this
 is a lower-risk check than most, but it is still a device check, not a proof).
 **`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
+
+---
+
+## MAX-164 — the setup card on the Workouts tab
+
+`App/FirstRun/FirstRunCardView.swift` renders `FirstRunChecklist.card`'s six states
+(`FirstRunCopy.card(_:)` for every word) above the workout list; `App/FirstRun/FirstRunModel.swift`
+is the async plumbing that reads the four facts and re-resolves the card on appear and
+after each of the card's actions returns. `App/WorkoutsView.swift` wires both in and
+answers the three actions: Health access in place, "Author a plan" pushed (matching
+`PlanView`'s own entry point), "Add a key" presented as a Settings sheet. FIRST-RUN-SPEC
+§5, §8. No change to `Sources/MaximizeCore/`.
+
+**Landed in two passes.** First opened before MAX-163 merged, with `healthAccess` held in
+memory and the gap below reported rather than closed. MAX-163 landed
+`FirstRunPresentationRecording` shortly after, and this PR was updated in place — same
+branch, same ticket — to read it, closing the gap before merge. The section below is kept
+as "closed" rather than rewritten as if it were never open, because the reasoning for
+*why* the reconciliation below is not a plain pass-through is worth keeping on the record.
+
+### Decided
+
+- **The card is a fixed header above every load state of the list**, not only the loaded
+  one — `.loading`, `.failed` and the empty state all get it too, because none of those
+  states are gated on setup being complete and the card's own presence is what answers
+  "why is this list not helping me yet."
+- **`FailureCopy.noWorkoutsRecorded` is suppressed while the card is showing.** Both are
+  independently correct absence copy, and stacking them **is** the mistake FIRST-RUN-SPEC
+  §8 considered and rejected for the card's own two paragraphs — extended here to the two
+  *surfaces*, not just the two sentences the spec was originally weighing. Once the card
+  is gone this is the sole absence message again, exactly as before this ticket.
+- **"Author a plan" pushes `PlanAuthoringView`, not a sheet.** `PlanView` already opens the
+  same screen the same way for the same first-plan case, worded identically
+  (`FirstRunCopy.actionLabel(for: .authorAPlan)` = "Author a plan" = `PlanView`'s own
+  button); matching that precedent beat matching `SettingsView.planSection`'s sheet,
+  which exists for a *different* entry point (revising from Settings).
+- **The Health-request adapter (`FirstRunModel.requestRealHealthAccess`) and the Keychain
+  presence read (`FirstRunModel.resolveKeyPresence`) are duplicated from
+  `HealthAccessSettingsSection` and `SettingsView`, not shared.** Both views are outside
+  this ticket's file list; both duplicates are three lines of adapter with no decision in
+  them (the decision — what a result *means* — is `MaximizeCore`'s). Flagged for a future
+  ticket that touches both spots to fold into one.
+- **`FirstRunModel.requestHealthAccessTapped()` also calls
+  `presentationRecording.recordHealthRequestPresented()`**, not only the launch cover.
+  This card's own Health button is reachable — the rare, crash-recovery path
+  `FirstRunCardState.healthAccessNotRequested`'s own doc comment names ("a cover dismissed
+  by a crash, a store that failed at the wrong moment") — and if a tap through *this* door
+  left the recording unwritten, `FirstRunCoverGate` would still believe the sheet had never
+  been shown and reopen the full-screen cover on top of an otherwise working install on the
+  next launch. Recording is idempotent (MAX-163's own guarantee), so this costs nothing on
+  the ordinary path where the cover already wrote it first.
+
+### Closed: `healthAccess` now reads MAX-163's device-lifetime recording
+
+MAX-162's own note had named this "the likeliest wiring mistake in the set." This PR opened
+before MAX-163 merged, with the gap reported rather than closed (`healthAccess` held in
+memory, seeded `.notRequestedYet`, per this ticket's scope discipline against adding the
+missing protocol itself). MAX-163 landed `FirstRunPresentationRecording` immediately after,
+and this same branch was updated to read it before merging — `FirstRunModel
+.resolveHealthAccess()` composes `presentationRecording.hasPresentedHealthRequest` with a
+capability check, rather than passing the recording straight through:
+
+- Not yet presented → `.notRequestedYet` — unchanged from a fresh install's answer today.
+- Presented, and `HKHealthStore.isHealthDataAvailable()` says this device can provide
+  Health data → `.requestAnswered`. The recording only ever means "the sheet was presented
+  and answered" (its own doc comment); it never means granted or refused (R10), so
+  `.requestAnswered` is the strongest honest reading of a `true` recording.
+- **Presented, but this device has no Health store → `.healthDataUnavailable`, not
+  `.requestAnswered`.** This is the reconciliation the coordinator asked for by name:
+  MAX-163's recording is written the instant the cover's Continue button is tapped,
+  *unconditionally* — deliberately not gated on the Health call succeeding, because a
+  device with no Health store fails that call identically forever and gating the recording
+  on success would rebuild the every-launch nag through another door. Trusting the
+  recording alone here would read a `true` value on such a device as "answered" and put a
+  plan-and-key checklist in front of an athlete on hardware that can never receive a
+  workout. `isHealthDataAvailable()` is a synchronous capability check with no privacy
+  surface — "does this hardware support HealthKit," not anything about the athlete — so
+  reconciling on every `load()` costs nothing and needs no permission.
+- `.requestFailed` stays reachable only within the current session
+  (`sessionHealthAccessOverride`), never from the persisted recording: once presented, the
+  recording cannot un-present itself, so a relaunch cannot distinguish "answered" from
+  "failed for a reason other than device capability." MAX-163's own reasoning is that this
+  does not need distinguishing past the current session, because a repeat
+  `requestAuthorization` call is itself idempotent and harmless once the sheet has been
+  shown once.
+
+**Consequence, now closed:** an athlete who granted Health access on a past launch sees the
+correct downstream card (plan, key, or nothing) on the very next launch, whether or not
+they ever touched this ticket's own Health button — the cover's recording and this card's
+now agree, because both write to and read the one `FirstRunPresentationRecording`.
+
+### Rejected
+
+- **Combining the six states' rendering with a branch in the view.** `FirstRunCardView`
+  switches on nothing; `copy.detail` and `copy.actionLabel` being `nil` on the states that
+  have neither is what makes the layout unconditional. A view-side `switch state` would
+  have duplicated `FirstRunChecklist`'s own case list for no reason.
+- **A checklist-style list of all three steps.** The type carries `remainingSteps` for
+  this (FIRST-RUN-SPEC §5.3, §15 q2); MAX-164 renders `card` only, per the spec's decision
+  that a checklist reads as a nag and the single next action reads as guidance.
+
+### What CI can and cannot prove
+
+CI can prove: the app target compiles, `xcodebuild` links `MaximizeCore` and
+`App/FirstRun/`'s two new files against it, and — unchanged by this ticket —
+`FirstRunChecklistTests` and `FailureCopyTests` still hold `FirstRunChecklist`/`FirstRunCopy`
+to every branch and the R10 banned-phrase list.
+
+CI cannot prove anything this ticket actually changed: that the card renders correctly at
+any state, any Dynamic Type size, or under Increase Contrast/Reduce Transparency; that the
+three actions reach the right screen and the card disappears on return; that the
+Health-request button actually presents the iOS sheet; or — the one that matters most for
+this pass — that a `UserDefaults` write from this card's own Health button, or from the
+launch cover, is actually read back as `true` by the other on a real relaunch. Both
+`FirstRunCoverGateTests` (MAX-163) and this ticket's reasoning above are proven only
+against a fake; the real adapter is untested by construction (R1, no toolchain, no
+device). See the PR's "Needs device verification" section for the checklist.
+
+**`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
+Nothing in this ticket touches `Sources/MaximizeCore/`, so neither suite's *content*
+changed; `swift test` was not re-run to confirm the unmodified suite still passes.
 
 ---
 
