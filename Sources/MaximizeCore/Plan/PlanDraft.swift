@@ -23,10 +23,10 @@ import Foundation
 /// **The rubric's bands.** A draft holds the two rubric *thresholds* (effective and
 /// marginal) because those are single numbers an athlete has an opinion about. The
 /// bands themselves — the ordered `metric ≤ cap + 8`-shaped conditions of PRD §10.3 —
-/// are carried forward verbatim by `PlanAuthoringSession` from the version being
-/// revised, or seeded on a first plan. Editing them needs a structured rule editor,
-/// which is its own ticket; carrying them forward means a revision never silently
-/// re-seeds a rubric the athlete had already tuned.
+/// are `PlanAuthoringSession`'s, seeded on a first plan and chosen on a revision between
+/// the superseded version's own and the ones this build ships (MAX-173,
+/// `adoptsCurrentRubric`). Editing an individual band needs a structured rule editor,
+/// which is still its own ticket and still not this type's.
 ///
 /// **The version and the effective date.** Both are derived, not chosen: see
 /// `PlanAuthoringSession`. A draft that carried them would let a screen offer a version

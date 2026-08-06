@@ -173,6 +173,79 @@ public enum PlanCopy {
             + "no later plan version is allowed to reach back past the first one's start date."
     }
 
+    // MARK: - Adopting the current scoring rules (MAX-173)
+
+    /// The control's own title. A statement of what turning it on does, not a question:
+    /// the switch is on by default (see `PlanAuthoringSession.adoptsCurrentRubric`), and a
+    /// title phrased as a question would imply a decision the athlete has not yet made.
+    public static let rubricAdoptionTitle = "Use the current scoring rules"
+
+    /// What has changed since the version being superseded was saved, in figures — or nil
+    /// when nothing has, in which case the whole control is absent rather than shown
+    /// saying "no changes".
+    ///
+    /// Nil rather than a "nothing to adopt" sentence for `excludedWorkoutsNotice`'s
+    /// reason: an athlete already carrying the current rules has nothing to decide, and a
+    /// row telling them so is a row they have to read and dismiss on every visit.
+    public static func rubricUpdateNotice(
+        _ update: PlanRubricUpdate,
+        supersedes: PlanVersion
+    ) -> String? {
+        guard !update.isEmpty else { return nil }
+        return "The scoring rules this app ships have moved on since plan \(supersedes) was "
+            + "saved: \(rubricUpdateFigures(update)). Saving this version adopts them."
+    }
+
+    /// D8, said before the save rather than after it. The sentence an athlete needs in
+    /// order to read the control above as safe: adopting is forward-looking by
+    /// construction, because scoring resolves the plan version in effect on the workout's
+    /// own date.
+    public static let rubricUpdatePermanence =
+        "No score already recorded changes. Scoring reads the plan version in effect on a "
+            + "workout's own date, so every workout keeps the rules it was judged under, and "
+            + "this version governs only days from its start date onwards."
+
+    /// What declining means, stated as plainly as what accepting means. "Including any
+    /// this app has since corrected" is the part worth saying out loud: the stored rules
+    /// are not a considered position an athlete took, they are whatever the app seeded on
+    /// the day their first plan was written.
+    public static func rubricUpdateDeclineNotice(supersedes: PlanVersion) -> String {
+        "Turned off, this version is saved with the rules plan \(supersedes) already carries "
+            + "— including any this app has since corrected."
+    }
+
+    public static let rubricUpdateAddedHeading = "Rules this adds, in the words a verdict will use:"
+    public static let rubricUpdateChangedHeading = "Rules this changes:"
+    public static let rubricUpdateRemovedHeading = "Rules this withdraws:"
+
+    /// "3 added and 2 changed" — the count-first shape `PlanProposalReview.summary`
+    /// already uses, for the same reason: "did it touch one rule or nine" is the question,
+    /// and the answer should not need counting.
+    private static func rubricUpdateFigures(_ update: PlanRubricUpdate) -> String {
+        var clauses: [String] = []
+        if !update.addedRules.isEmpty {
+            clauses.append("\(update.addedRules.count) added")
+        }
+        if !update.changedRules.isEmpty {
+            clauses.append("\(update.changedRules.count) changed")
+        }
+        if !update.removedRules.isEmpty {
+            clauses.append("\(update.removedRules.count) withdrawn")
+        }
+        if update.reordersExistingRules {
+            clauses.append("the order they are checked in changed")
+        }
+        return joined(clauses)
+    }
+
+    /// "a", "a and b", "a, b and c". Never reached with an empty list: every caller has
+    /// already established the update is not empty, which guarantees at least one clause.
+    private static func joined(_ clauses: [String]) -> String {
+        guard let last = clauses.last else { return "" }
+        guard clauses.count > 1 else { return last }
+        return clauses.dropLast().joined(separator: ", ") + " and " + last
+    }
+
     // MARK: - A day's ask
 
     /// "Long run · 18.0 km · steady", the run slot's one-line rendering.

@@ -85,6 +85,7 @@ struct PlanAuthoringView: View {
             durationFloorSection(editing)
             cadenceSection(editing)
             thresholdsSection(editing)
+            rubricSection(editing)
         }
         Group {
             weekSection(editing)
@@ -295,6 +296,72 @@ struct PlanAuthoringView: View {
             }
 
             quietText("The two cut points behind the calendar's green, amber and red.")
+        }
+    }
+
+    // MARK: - How workouts are judged (MAX-173)
+
+    /// The one place the app can adopt a corrected rubric, and it does so by writing a new
+    /// plan version like everything else on this screen.
+    ///
+    /// **Absent whenever there is nothing to adopt**, which is the ordinary case for an
+    /// athlete already up to date and for every first plan. That is a designed absence in
+    /// the strict sense — the core returns nil rather than "no changes", for
+    /// `excludedWorkoutsNotice`'s reason: a row that always says nothing is a row read and
+    /// dismissed on every visit.
+    ///
+    /// **The switch is on when the section appears**, because the core's session adopts by
+    /// default (`PlanAuthoringSession.adoptsCurrentRubric`, which carries the argument).
+    /// So this offers a decline rather than an opt-in, and states what declining leaves in
+    /// place. Nothing here decides anything: every sentence, and the fact there is a
+    /// section at all, is `PlanAuthoringSession`'s answer.
+    ///
+    /// **No band-level diff, deliberately.** A rendered `RubricCondition` is a sentence
+    /// about a data structure; a `RubricBand.rationale` is the line the athlete will read
+    /// on a verdict. So the rules are listed in the words they will use, under a plain
+    /// statement of how many changed. See `PlanRubricUpdate`.
+    @ViewBuilder
+    private func rubricSection(_ editing: PlanAuthoringModel.Editing) -> some View {
+        if let notice = editing.session.rubricUpdateNotice {
+            Section("How workouts are judged") {
+                Text(notice)
+
+                Toggle(
+                    PlanCopy.rubricAdoptionTitle,
+                    isOn: Binding(
+                        get: { editing.session.adoptsCurrentRubric },
+                        set: { model.setAdoptsCurrentRubric($0) }
+                    )
+                )
+
+                if editing.session.adoptsCurrentRubric {
+                    ruleList(PlanCopy.rubricUpdateAddedHeading, editing.session.rubricUpdate.addedRules)
+                    ruleList(PlanCopy.rubricUpdateChangedHeading, editing.session.rubricUpdate.changedRules)
+                    ruleList(PlanCopy.rubricUpdateRemovedHeading, editing.session.rubricUpdate.removedRules)
+                    quietText(PlanCopy.rubricUpdatePermanence)
+                } else if let decline = editing.session.rubricUpdateDeclineNotice {
+                    quietText(decline)
+                }
+            }
+        }
+    }
+
+    /// A heading and the rules under it, or nothing at all when that category is empty.
+    ///
+    /// Keyed by position rather than by the rationale itself: two bands are free to share a
+    /// rationale — `ScoringRubric` only requires *identifiers* to be unique — and a
+    /// `ForEach` with duplicate identities renders unpredictably. The list is rebuilt whole
+    /// or not at all, so a positional identity has nothing to get wrong here.
+    @ViewBuilder
+    private func ruleList(_ heading: String, _ rules: [String]) -> some View {
+        if !rules.isEmpty {
+            VStack(alignment: .leading, spacing: Spacing.tight) {
+                quietText(heading)
+                ForEach(rules.indices, id: \.self) { index in
+                    Text(rules[index])
+                }
+            }
+            .padding(.vertical, Spacing.hairspace)
         }
     }
 
