@@ -362,9 +362,20 @@ final class PlanProposalApplyingTests: XCTestCase {
             plan.weeklyTemplate.session(on: .tuesday, for: .lift).muscleGroups,
             [.legs, .core]
         )
-        // And the rubric bands the athlete tuned are carried forward, not re-seeded
-        // (§4.4) — the proposal carries no bands and cannot.
-        XCTAssertEqual(plan.rubric.bands, try Fixture.rubric().bands)
+        // The bands are not something a proposal can touch — §4.4 gives it no field for
+        // one, and `PlanProposal.parse` rejects a reply that invents one. Which set the
+        // saved version carries is the *session's* choice (MAX-173): adopted from the app
+        // by default, and the stored set when that is declined. Both are asserted, because
+        // the property this test has always been about is that applying a proposal moves
+        // neither.
+        XCTAssertEqual(plan.rubric.bands, try StandardPlanSeed.rubricBands())
+        XCTAssertEqual(
+            try session.adoptingCurrentRubric(false).plan(
+                from: try session.draft.applying(proposal),
+                effectiveFrom: session.suggestedEffectiveFrom
+            ).rubric.bands,
+            try Fixture.rubric().bands
+        )
     }
 
     // MARK: - A13: it applies, it does not store

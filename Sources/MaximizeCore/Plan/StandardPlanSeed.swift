@@ -14,10 +14,12 @@ import Foundation
 /// - **Editing this file cannot change a stored plan.** Version 1 is a row in the
 ///   store; changing a constant here does not touch it, and cannot make a historical
 ///   score irreproducible. That is the property D1 actually protects.
-/// - **Revisions do not re-read it.** `PlanAuthoringSession` prefills a revision from
-///   the version being superseded, and carries that version's rubric bands forward
-///   verbatim. So an athlete who tuned their plan never has this file's opinions
-///   reintroduced behind their back.
+/// - **A revision may adopt this file's bands, and only by authoring a new version**
+///   (MAX-173). `PlanAuthoringSession` prefills a revision from the version being
+///   superseded and reads `rubricBands()` alongside it, so the athlete is told what
+///   differs and the corrected rules take effect from a date they choose — never in
+///   place, never backwards. Every number above stays authoring input the athlete then
+///   edits; nothing here is re-read at scoring time, then or now.
 ///
 /// The alternative — shipping no seed and asking the athlete to hand-assemble an
 /// ordered list of rubric bands before the app can score anything — is not a defence of
@@ -174,12 +176,14 @@ public enum StandardPlanSeed {
     /// the band's only condition (average heart rate over cap + 8, which any lift does
     /// as a matter of course) and was permanently scored 20–45 as a failed easy run.
     ///
-    /// **This seed change cannot reach a stored plan, and does not try to.** D1 makes
-    /// the plan versioned data: every plan already saved keeps the bands it was saved
-    /// with, seed included, and this file only ever supplies the *first* version an
-    /// athlete's plan starts from. So the lifts already scored 20–45 or 40–69 by the
-    /// unfixed bands stay scored that way (D8) — that is §11.4's escalation, tracked as
-    /// MAX-143 and explicitly not this ticket's to resolve.
+    /// **This seed change could not reach a stored plan when it was written, and MAX-173
+    /// is what gave it a route.** D1 makes the plan versioned data: every plan already
+    /// saved keeps the bands it was saved with, and nothing rewrites one in place. What
+    /// changed is that authoring the *next* version can now adopt these bands, with the
+    /// difference stated on screen first (`PlanAuthoringSession.adoptsCurrentRubric`). So
+    /// the lifts already scored 20–45 or 40–69 by the unfixed bands stay scored that way
+    /// (D8) — that is §11.4's escalation, tracked as MAX-143 and never this file's to
+    /// resolve — while days a new version governs are judged by the corrected rules.
     ///
     /// **Nothing routed a workout to these bands at the time this was written.**
     /// `RubricEvaluator` still read `planDay.scheduledSession` — the **run** slot — for
@@ -215,9 +219,9 @@ public enum StandardPlanSeed {
     /// refusal. See `LiftRubricVocabularyTests` for the pinned regression and the
     /// fixture proving the fallback lands.
     ///
-    /// **This seed change cannot reach a stored plan, and does not try to,** for the
-    /// identical D1 reason the paragraph above states: it is the first version a plan
-    /// starts from, never a rewrite of one already saved. Lifts already recorded with
+    /// **This seed change reaches a stored plan only the way the paragraph above
+    /// describes** — by authoring a new version that adopts it (MAX-173), never by a
+    /// rewrite of one already saved. Lifts already recorded with
     /// `rest.ranAnyway`'s rationale — which, per MAX-111's gate, is none yet, since a
     /// lift is not scored at all until that gate opens — stay however they were scored
     /// (D8). What to do about any that exist is MAX-143's, not this ticket's.
