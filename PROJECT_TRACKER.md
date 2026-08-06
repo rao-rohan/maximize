@@ -553,13 +553,13 @@ feature was governed by a plan that could not exist).
 | MAX-128 … MAX-143 | The lifting build, decomposed from MAX-109 | MAX-109 | see below ✅ |
 | MAX-126 | **"No verdict by design" is a state** — a lift stops being drawn and spoken as a run awaiting a score | MAX-111 | **Opus** ✅ |
 | MAX-150 | **Copy and absence voice: the chat and dashboard surfaces** — split from MAX-104 so the finished half does not wait behind the lifting build | MAX-104, split | Sonnet ✅ |
-| MAX-152 | **The chat's waiting and streaming states** — the full ladder between "sent" and "answered", and every stream failure as a designed state with words | Owner | **Opus** |
-| MAX-154 | **Error handling, audited app-wide** — every failure path outside chat swept as a set, the failure-to-copy mapping moved into the core, and the inventory recorded below | Owner | **Opus** |
+| MAX-152 | **The chat's waiting and streaming states** — the full ladder between "sent" and "answered", and every stream failure as a designed state with words | Owner | **Opus** ✅ |
+| MAX-154 | **Error handling, audited app-wide** — every failure path outside chat swept as a set, the failure-to-copy mapping moved into the core, and the inventory recorded below | Owner | **Opus** ✅ |
 | MAX-155 | **An HTTP status code reaches the athlete's screen** — `PlanDraftingFailure.description` interpolates `PlanProposalModelError.description` in `ChatModel.noteDraftingFailure`, so "…returned an unexpected status (400)." renders on the plan proposal card. Fixed with a sibling to `ChatFailureNotice` (`PlanDraftingNotice`) rather than a case added to it — see write-up below | MAX-154 | Sonnet ✅ |
 | MAX-156 | **`ScoringError.description` interpolates a workout identifier and a date** — latent, not leaking today, and one `.public` log line away from being a real one. Fixed: the two payloads are gone from `description`; the enum's own associated values are the deliberate channel a caller reaches for instead — see write-up below | MAX-154 | Sonnet ✅ |
-| MAX-153 | **The chat shell** — composer, thread list, sheet chrome. The design pass the chat's *shell* never had | Owner | **Opus** |
+| MAX-153 | **The chat shell** — composer, thread list, sheet chrome. The design pass the chat's *shell* never had | Owner | **Opus** ✅ |
 | MAX-157 | **The fact sheet tells Claude "days" over a count of obligations** — `TrainingFactSheet`'s "Effective days" line is the same MAX-134 caption bug one layer into the prompt, not just on screen | MAX-140 | Sonnet ✅ |
-| MAX-161 | **First-run experience spec** — there is no first-run path in the app at all; a fresh install has no Health request, no plan, no key, and nothing pointing at any of them. Spec + A23/A24, decomposed into MAX-162…167 below | Owner | **Opus** |
+| MAX-161 | **First-run experience spec** — there is no first-run path in the app at all; a fresh install has no Health request, no plan, no key, and nothing pointing at any of them. Spec + A23/A24, decomposed into MAX-162…167 below | Owner | **Opus** ✅ |
 | MAX-162 … MAX-167 | The first-run build, decomposed from MAX-161 | MAX-161 | see below |
 
 **MAX-161.** [docs/FIRST-RUN-SPEC.md](./docs/FIRST-RUN-SPEC.md). Verified by search: no
@@ -1849,10 +1849,10 @@ is the overseer's, not a ticket's — flagged here rather than done.
 | MAX-147 | The scorer's task text learns discipline (source: MAX-133) | 133, 136 | Sonnet ✅ |
 | MAX-148 | A lift's duration and note become editable, proposable, and type-safe | 137, 141 | Sonnet ✅ |
 | MAX-149 | Duration floor for fragments — **the classifier half of gap P3**; not yet wired to any author | 013, 131 | Sonnet ✅ |
-| MAX-151 | **Author the duration floor** — `StandardPlanSeed` states one, the authoring screen edits it, `PlanProposal` can propose it. Without this MAX-149 never fires. (Depended on 146 only for file ownership of `StandardPlanSeed`, which is now released) | 149, 148 | Sonnet |
+| MAX-151 | **Author the duration floor** — `StandardPlanSeed` states one, the authoring screen edits it, `PlanProposal` can propose it. Without this MAX-149 never fires. (Depended on 146 only for file ownership of `StandardPlanSeed`, which is now released) | 149, 148 | Sonnet ✅ |
 | MAX-151 | **Author the duration floor** — `StandardPlanSeed` states one, the authoring screen edits it, `PlanProposal` can propose it. Without this MAX-149 never fires — **closes gap P3 for real** | 149, 146, 148 | Sonnet ✅ |
-| MAX-153 | **The chat shell: composer, thread list, sheet chrome** — the design pass MAX-092–103 never had over the shell its features sit in | Owner, 092–103 | **Opus** |
-| MAX-165 | **The first plan's date covers captured history** (A23) — `.firstPlan`'s suggested `effectiveFrom` reaches back over the 90-day backfill instead of stopping at this week's Monday, and the authoring screen states in figures how many already-recorded workouts a candidate date would strand. **Closes R16.** Revisions and D1 untouched | 011, 033, 080 | **Opus** |
+| MAX-153 | **The chat shell: composer, thread list, sheet chrome** — the design pass MAX-092–103 never had over the shell its features sit in | Owner, 092–103 | **Opus** ✅ |
+| MAX-165 | **The first plan's date covers captured history** (A23) — `.firstPlan`'s suggested `effectiveFrom` reaches back over the 90-day backfill instead of stopping at this week's Monday, and the authoring screen states in figures how many already-recorded workouts a candidate date would strand. **Closes R16.** Revisions and D1 untouched | 011, 033, 080 | **Opus** ✅ |
 
 **MAX-153 — what was decided, what was rejected, and what it is blocked on.**
 
@@ -1937,7 +1937,7 @@ free. What landed in the file:
   explains what went wrong. The composer offers none — two retry affordances in two
   registers is worse than either alone.
 | MAX-151 | **Author the duration floor** — `StandardPlanSeed` states one (600s), the authoring screen edits it, `PlanProposal` can propose it. **Closes gap P3 for real** | 149, 148 | Sonnet ✅ |
-| MAX-158 | **Schema vocabulary reaches the athlete on a rejected proposal** — `PlanProposalError.description` says things like *"The reply left out `liftKind`, which the plan schema requires."* No PII and no status code, so not a privacy defect; but it names wire fields at a person who cannot act on them. MAX-155/156 left it deliberately (MAX-151 owned the file) | 155 | Sonnet |
+| MAX-158 | **Schema vocabulary reaches the athlete on a rejected proposal** — `PlanProposalError.description` says things like *"The reply left out `liftKind`, which the plan schema requires."* No PII and no status code, so not a privacy defect; but it names wire fields at a person who cannot act on them. MAX-155/156 left it deliberately (MAX-151 owned the file) — see write-up below | 155 | Sonnet ✅ |
 | MAX-159 | **A recorded-but-unjudged workout outranks another obligation's settled miss** — a Tuesday whose lift was recorded but unscored and whose run was missed draws `.noVerdict`, and its sentence names neither. §7.2's principle says change it, but the same ordering governs single-obligation days shipped since MAX-061, so it moves historical cells and wants a designed state | 135 | **Opus** |
 | MAX-160 | ~~Should a labelled miscategorised score leave the athlete's own average?~~ **Owner decided: yes.** `TalliesCalculator.computeAverageScore` now skips a labelled score; the caption says when one was excluded and a fact-sheet line says why nothing is left when every scored workout was. See the MAX-160 note below | 143, 140 | Sonnet ✅ |
 
@@ -3921,6 +3921,99 @@ change; every touched call site was re-read line by line against its new signatu
 is "reads correctly and should compile, and ten tests are written to prove the strings
 once it does" — not "compiles," stated at that strength deliberately, per CLAUDE.md's own
 distinction between the two sentences.
+
+---
+
+## MAX-158 — a rejected proposal stops speaking schema
+
+**The defect, restated precisely.** `PlanProposalError.description` is written for two
+readers at once: `PlanProposalInstruction(retryingAfter:)` appends it to the retry as a
+correction, and `PlanDraftingNotice`'s `.rejected` case — MAX-155's own documented,
+deliberate exception — carried it straight onto the plan proposal card. The words that
+make the retry work ("the reply left out `liftKind`, which the plan schema requires")
+are exactly the words an athlete cannot act on: nothing on their screen is called
+`liftKind`, and they have never seen a schema.
+
+**Decision: two renderings, one error — a type, not a second property.**
+`PlanProposalError.description` is untouched, payload and all, and stays the correction
+channel. `PlanProposalErrorNotice` (`Sources/MaximizeCore/Plan/PlanProposalErrorNotice.swift`)
+is the new sibling, same shape as `ChatFailureNotice` and `PlanDraftingNotice`: a
+`message`, a private initialiser, and one exhaustive `static func notice(for:)` with no
+`default`. A second `String` property sitting next to `description` on the same enum was
+considered and rejected — a naming convention is exactly what let the original defect
+happen (`PlanDraftingNotice` reading `error.description` as though it were already
+screen-safe), and a second property is still a naming convention: nothing stops a future
+call site from reaching for the wrong one by habit. A distinct type is not a habit — a
+caller wanting athlete-facing text has exactly one type here that offers any.
+
+**Fourteen cases get a new, constant sentence; one case is left alone, on purpose.**
+`.rejectedByAuthoring(PlanAuthoringError)` is not rewritten. `PlanAuthoringError` was
+built for this exact readership — its own doc comment says its cases "say what the
+athlete did and what to do instead," and `FailureCopy.planCouldNotBePrepared`'s doc
+comment independently calls it "already athlete-facing." It never carries a field name,
+"JSON," or "schema." Writing a second sentence for it would be two descriptions of the
+same plan-authoring rule, free to drift the moment one is edited and the other is not —
+the same argument D2/D3 make for one context builder rather than two notions of what a
+workout is. So `PlanProposalErrorNotice` delegates that one case to
+`authoringError.description` verbatim, and says explicitly why doing so is not the
+naming-convention trap the rest of the type exists to close: `PlanAuthoringError` is a
+type of its own, switched on by name, not a same-shaped property assumed safe by
+proximity.
+
+The other fourteen cases (`malformedResponse`, `missingField`, `forbiddenField`,
+`unknownSessionKind`, `unknownWeekday`, `unknownLiftKind`, `unknownMuscleGroup`,
+`weekIsNotOneSessionPerWeekday`, `restDayIsNotEmpty`, `liftRestDayIsNotEmpty`,
+`malformedGoalTargetDay`, `longRunArcIsEmpty`, `longRunArcWeekNotPositive`,
+`longRunArcOutOfOrder`) each get one constant sentence, matching
+`PlanDraftingNotice.transportMessage`'s rule: nothing here is interpolated, so a
+payload (a field name, a weekday, a week index) cannot slip through by accident. Each
+sentence says what is wrong with the *plan*, in `PlanCopy`'s vocabulary — a run kind, a
+lift kind, a muscle group, a rest day, a long-run week — rather than what was wrong with
+the *reply*.
+
+**`PlanDraftingNotice`'s `.rejected` case is the one line that changed.** It now reads
+`PlanProposalErrorNotice.notice(for: error).message` instead of `error.description`
+directly; the surrounding "Claude's plan was not one this app could use, twice: … Nothing
+has changed — say what you want and ask again." sentence is unchanged, since that framing
+was never the leak. `ChatModel.noteDraftingFailure` needed no change — it already read
+`PlanDraftingNotice`, never `PlanProposalError.description` directly.
+
+**The retry is unweakened.** `PlanProposalInstruction`, `PlanProposalDrafting`, and
+`PlanProposalError.description` itself are untouched. `PlanProposalDraftingTests`'
+`testAnUnusableReplyIsAskedAgainOnceWithTheReason` still asserts the retry's `task`
+contains `PlanAuthoringError.heartRateCapImplausible(...).description` verbatim, and
+`PlanProposalTests.testAStringWhereANumberBelongsIsRefusedNotCoerced` still asserts
+`description` names the field. Neither was touched; both still pass by inspection.
+
+**Tests:** `Tests/MaximizeCoreTests/PlanProposalErrorNoticeTests.swift`, exhaustive over
+all fifteen `PlanProposalError` cases — every case a distinct, non-empty sentence; no
+message contains a quotation mark (every field name and value `description` names is
+quoted, so a surviving quote is itself a leak detector); a banned-token list catches
+"JSON", "schema", and the specific field names this ticket's brief named; the fourteen
+model-boundary cases are asserted to differ from their own `description`, and two
+instances of the same case with different payloads are asserted to read identically,
+confirming nothing is interpolated; `.rejectedByAuthoring` is asserted to equal
+`PlanAuthoringError.description` verbatim, pinning the one deliberate exception; and the
+correction channel is asserted, separately, to still name the precise field for every
+case that has one. `PlanDraftingNoticeTests` gained three tests replacing the one that
+used to assert the bug (`testARejectedProposalCarriesTheCorrectionTextVerbatim`, which
+asserted the card *did* contain `error.description` — now asserting the opposite) and
+confirming the `.rejectedByAuthoring` case still reads its one shared sentence through
+`PlanDraftingNotice` end to end.
+
+**Scope discipline.** `Dashboard/ScoreCalendar.swift` and `App/Dashboard/ScoreCalendar*`
+(MAX-159's files) were not touched. No file outside `Sources/MaximizeCore/Plan/` and its
+tests was edited.
+
+### What CI can and cannot prove
+
+CI proves: the package compiles; every `PlanProposalError` case maps to a distinct,
+non-empty, quotation-mark-free sentence with no `default` branch to fall through to; the
+correction channel (`description`) still names the precise field for every case that has
+one; and the `.rejected` path of `PlanDraftingNotice` reads the new type rather than the
+old one. It cannot prove the plan proposal card actually renders this text on a device,
+or that a real rejected proposal from Anthropic reaches this path the way the tests
+simulate it. See the PR's **Needs device verification**.
 
 ---
 

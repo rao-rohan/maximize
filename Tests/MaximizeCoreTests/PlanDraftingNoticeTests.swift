@@ -134,16 +134,40 @@ final class PlanDraftingNoticeTests: XCTestCase {
 
     // MARK: - The failures that are not transport failures
 
-    /// `.rejected` is the deliberate exception to "nothing is interpolated" — see this
-    /// type's documentation. It is carried through unchanged, and asserted here so a
-    /// future edit to it is a decision rather than an accident.
-    func testARejectedProposalCarriesTheCorrectionTextVerbatim() {
+    /// MAX-158: `.rejected` used to carry `PlanProposalError.description` onto the card
+    /// unchanged — the wire vocabulary a retry needs, not words an athlete can act on.
+    /// It now reads `PlanProposalErrorNotice` instead, and this pins that the swap
+    /// actually happened rather than trusting the source to say so.
+    func testARejectedProposalReadsTheAthleteFacingNoticeNotTheCorrectionText() {
         let error = PlanProposalError.longRunArcIsEmpty
         let message = PlanDraftingNotice.notice(for: .rejected(error)).message
 
-        XCTAssertTrue(message.contains(error.description), message)
+        XCTAssertTrue(message.contains(PlanProposalErrorNotice.notice(for: error).message), message)
+        XCTAssertFalse(message.contains(error.description), message)
         XCTAssertTrue(message.contains("Nothing has changed"), message)
         XCTAssertFalse(message.isEmpty)
+    }
+
+    /// The model-boundary cases carry no wire vocabulary onto the card, matching
+    /// `PlanProposalErrorNoticeTests`'s own assertion for the type this delegates to.
+    func testARejectedProposalNamesNoFieldAndNoSchema() {
+        let error = PlanProposalError.missingField(name: "heartRateCapBPM")
+        let message = PlanDraftingNotice.notice(for: .rejected(error)).message
+
+        XCTAssertFalse(message.contains("heartRateCapBPM"), message)
+        XCTAssertFalse(message.contains("schema"), message)
+        XCTAssertFalse(message.contains("JSON"), message)
+    }
+
+    /// `.rejectedByAuthoring` is the one case `PlanProposalErrorNotice` carries through
+    /// unchanged, so the card still reads `PlanAuthoringError.description` verbatim for
+    /// it — the sentence §4.5 always meant for this specific failure.
+    func testARejectedProposalStillReadsThePlanAuthoringSentenceForThatCase() {
+        let authoringError = PlanAuthoringError.thresholdsInverted
+        let error = PlanProposalError.rejectedByAuthoring(authoringError)
+        let message = PlanDraftingNotice.notice(for: .rejected(error)).message
+
+        XCTAssertTrue(message.contains(authoringError.description), message)
     }
 
     /// The conversation being too thin to draft from is its own sentence, and it names
