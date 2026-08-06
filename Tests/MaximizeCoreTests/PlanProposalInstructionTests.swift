@@ -109,6 +109,7 @@ final class PlanProposalInstructionTests: XCTestCase {
             .longRunArcWeekNotPositive(week: 0),
             .longRunArcOutOfOrder(week: 2),
             .rejectedByAuthoring(.cadenceBandInverted),
+            .rejectedByAuthoring(.minimumSessionDurationNotPositive),
         ]
         for failure in failures {
             let text = failure.description

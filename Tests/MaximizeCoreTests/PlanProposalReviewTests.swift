@@ -31,7 +31,8 @@ final class PlanProposalReviewTests: XCTestCase {
             heartRateCapBPM: 152,
             cadenceTarget: CadenceBand(lowStepsPerMinute: 165, highStepsPerMinute: 170),
             rubric: Fixture.rubric(),
-            goals: PlanGoals(statements: ["Run a sub-4:00 marathon"], targetDay: Fixture.day(2026, 4, 20))
+            goals: PlanGoals(statements: ["Run a sub-4:00 marathon"], targetDay: Fixture.day(2026, 4, 20)),
+            minimumSessionDurationSeconds: 600
         )
     }
 
@@ -61,6 +62,7 @@ final class PlanProposalReviewTests: XCTestCase {
         cadenceHigh: String = "170",
         effective: String = "70",
         marginal: String = "45",
+        minimumSessionDurationSeconds: String? = "600",
         thursday: String = #"{"weekday": "thursday", "kind": "easy", "distanceMeters": 8000, "liftKind": "rest"}"#,
         tuesday: String =
             #"{"weekday": "tuesday", "kind": "easy", "distanceMeters": 8000, "liftKind": "lift", "liftMuscleGroups": ["legs"]}"#,
@@ -79,6 +81,8 @@ final class PlanProposalReviewTests: XCTestCase {
             #"{"weekday": "saturday", "kind": "easy", "distanceMeters": 6000, "liftKind": "rest"}"#,
             #"{"weekday": "sunday", "kind": "long", "distanceMeters": 18000, "liftKind": "rest"}"#,
         ]
+        let floorLine = minimumSessionDurationSeconds
+            .map { #""minimumSessionDurationSeconds": \#($0),"# } ?? ""
         return """
         {
           "heartRateCapBPM": \(heartRateCapBPM),
@@ -86,6 +90,7 @@ final class PlanProposalReviewTests: XCTestCase {
           "cadenceHighStepsPerMinute": \(cadenceHigh),
           "effectiveThresholdPoints": \(effective),
           "marginalThresholdPoints": \(marginal),
+          \(floorLine)
           "week": [\(week.joined(separator: ", "))],
           "longRunArc": \(longRunArc),
           "goalStatements": \(goalStatements),
@@ -195,6 +200,44 @@ final class PlanProposalReviewTests: XCTestCase {
         XCTAssertEqual(review.changedRowCount, 2)
         XCTAssertEqual(try field("effectiveThreshold", in: review).change, .changed(from: "70"))
         XCTAssertEqual(try field("marginalThreshold", in: review).change, .changed(from: "45"))
+    }
+
+    // MARK: - The duration floor (MAX-151) — a plan-level row, beside the cap
+
+    /// A restated floor is unchanged, and reads in the same "10 min" shape a lift's
+    /// duration row already does — `PlanCopy.duration`, not a bare number of seconds.
+    func testTheDurationFloorRestatedIsUnchanged() throws {
+        let review = try card(reply())
+        let floor = try field("minimumSessionDurationFloor", in: review)
+        XCTAssertEqual(floor.value, "10 min")
+        XCTAssertEqual(floor.change, .unchanged)
+    }
+
+    /// A different floor is its own changed row, sitting in "Targets" beside the cap
+    /// rather than in the weekly grid — it is a plan-level ask, not a per-day one.
+    func testADifferentDurationFloorIsAChangedRow() throws {
+        let review = try card(reply(minimumSessionDurationSeconds: "900"))
+        let floor = try field("minimumSessionDurationFloor", in: review)
+        XCTAssertEqual(floor.value, "15 min")
+        XCTAssertEqual(floor.change, .changed(from: "10 min"))
+        XCTAssertEqual(review.changedRowCount, 1)
+    }
+
+    /// A proposal that drops the floor entirely reads as "None" — the same
+    /// designed-absence word `PlanAuthoringView`'s own distance and duration rows use —
+    /// and dropping a floor the athlete had is a visible change, not a silent merge.
+    func testADroppedDurationFloorReadsAsNoneAndIsAChange() throws {
+        let review = try card(reply(minimumSessionDurationSeconds: nil))
+        let floor = try field("minimumSessionDurationFloor", in: review)
+        XCTAssertEqual(floor.value, "None")
+        XCTAssertEqual(floor.change, .changed(from: "10 min"))
+    }
+
+    /// A first plan states the floor the same way it states every other target — there
+    /// is nothing to diff against.
+    func testTheDurationFloorOnAFirstPlanStates() throws {
+        let review = try card(reply(), session: try firstPlanSession())
+        XCTAssertEqual(try field("minimumSessionDurationFloor", in: review).change, .stated)
     }
 
     /// The week is seven rows, Monday-first, always — a day nobody changed still appears,

@@ -448,7 +448,7 @@ change rather than four.
 |---|---|---|---|
 | P1 | `Plan` cannot express the *shape* of classification rules, so four dimensionless ratios live in `WorkoutClassificationPolicy` | MAX-013 | Real D1 leak, but bounded: they are ratios, never a bpm, metre or minute, so changing the cap or arc still moves the thresholds. A `classification` block on a future plan version fixes it |
 | P2 | Same, for the cap-anchored zone multipliers in `HeartRateZoneModel` | MAX-012 | As P1 |
-| P3 | ~~`Plan` records **no durations at all**~~ **Expressible in both halves; not yet effective.** MAX-131 gave the plan `ScheduledSession.durationSeconds` and `RubricReference.scheduledDuration(fraction:)` (the rubric half); **MAX-149 gives `Plan.minimumSessionDurationSeconds`** and teaches `WorkoutClassifier.isFragment` to read it (the classifier half) | MAX-013 | **Do not tick this closed yet.** The plan can now *express* a duration floor, and `isFragment` reads it — but **nothing authors one**: neither `StandardPlanSeed` nor the authoring screen sets `minimumSessionDurationSeconds`, so every plan on disk has `nil` and the floor never fires. A mis-started treadmill run still reaches the scorer today. **MAX-151 wires it**; until that merges, this gap is closed in vocabulary only, which is the same shape MAX-131 and MAX-132 had between them |
+| P3 | ~~`Plan` records **no durations at all**~~ **Closed.** MAX-131 gave the plan `ScheduledSession.durationSeconds` and `RubricReference.scheduledDuration(fraction:)` (the rubric half); MAX-149 gave `Plan.minimumSessionDurationSeconds` and taught `WorkoutClassifier.isFragment` to read it (the classifier half); **MAX-151 authors it** — `StandardPlanSeed` states 600 s, the authoring screen edits it, `PlanProposal` can propose it | MAX-013 | **Genuinely closed, not only expressible.** A first-time athlete's app now seeds a floor, an athlete can edit or clear it, and a mis-started HR-only treadmill run under the seeded plan classifies as a fragment end to end (`FragmentDurationFloorTests`). Every plan already on disk still keeps `nil` (D1, no migration) — a stored plan authored before MAX-151 states no opinion until its athlete revises it |
 | P4 | `ScheduledSession` cannot express interval structure (e.g. 6×800m) | MAX-013 | The scorer sees "hard" but not the prescribed shape, so it cannot judge whether the session was executed as written |
 
 Separately, `CalendarDay` lacks day/week arithmetic — MAX-013 carried a private day
@@ -1773,6 +1773,7 @@ is the overseer's, not a ticket's — flagged here rather than done.
 | MAX-148 | A lift's duration and note become editable, proposable, and type-safe | 137, 141 | Sonnet ✅ |
 | MAX-149 | Duration floor for fragments — **the classifier half of gap P3**; not yet wired to any author | 013, 131 | Sonnet ✅ |
 | MAX-151 | **Author the duration floor** — `StandardPlanSeed` states one, the authoring screen edits it, `PlanProposal` can propose it. Without this MAX-149 never fires. (Depended on 146 only for file ownership of `StandardPlanSeed`, which is now released) | 149, 148 | Sonnet |
+| MAX-151 | **Author the duration floor** — `StandardPlanSeed` states one, the authoring screen edits it, `PlanProposal` can propose it. Without this MAX-149 never fires — **closes gap P3 for real** | 149, 146, 148 | Sonnet ✅ |
 | MAX-153 | **The chat shell: composer, thread list, sheet chrome** — the design pass MAX-092–103 never had over the shell its features sit in | Owner, 092–103 | **Opus** |
 
 **MAX-153 — what was decided, what was rejected, and what it is blocked on.**
@@ -2337,6 +2338,80 @@ rather than building it, because its brief forbade a behaviour change.
   and the classifier are ready; nothing in this build can author a floor yet. That is
   follow-on ticket work, the same shape MAX-131 left `durationSeconds` in before MAX-137
   gave it an editor.
+
+**MAX-151 — the three places the floor gets authored, and the value chosen for the
+first one.** MAX-149 gave `Plan` the field and taught the classifier to read it, and
+then reported, honestly, that nothing set it: `StandardPlanSeed` stayed silent, the
+authoring screen had no control, and `PlanProposal` had no wire field — so every plan
+on disk kept `minimumSessionDurationSeconds == nil` and the floor never fired. This
+ticket is the follow-on MAX-149 named, taken in MAX-148's own shape (seed, screen,
+proposal) rather than a new approach.
+
+- **The seeded value is 600 seconds (ten minutes), and it is the real decision here.**
+  A watch session carrying heart-rate data and no distance at all is overwhelmingly one
+  of two things: a mis-started or HealthKit-split treadmill run — belt not moving yet,
+  GPS never acquiring indoors, a stop tapped seconds after start — or a deliberate short
+  session that genuinely has no distance sample, an indoor track with no GPS lock chief
+  among them. The first shape is seconds to a couple of minutes; the second is rarely
+  under ten. Ten minutes sits between them, and it is cross-checked rather than picked
+  in isolation: `fragmentDistanceFraction` (0.25) against the seed's own shortest
+  prescribed run — Saturday's 6 km — works out to 1 500 m, which an easy effort covers
+  in roughly ten minutes, so the plan's two fragment floors read as one policy instead
+  of two unrelated guesses. **Rejected: a plan-relative fraction**, for the reason
+  `Plan.minimumSessionDurationSeconds`'s own doc already gives — the run slot's
+  `durationSeconds` is still carried-but-uneditable, so a relative floor would have
+  nothing to be relative *to* on any plan an athlete can actually author. **Rejected:
+  leaving the seed at nil**, which was MAX-149's own stopgap and is precisely the "closed
+  in vocabulary only" state this ticket exists to end — a seed that states no opinion
+  ships an app whose central mis-start case, LIFTING-SPEC §9.2's worked example, is
+  never caught on a fresh install.
+- **A lift is still never caught, unchanged from MAX-149 and pinned again.** The seed
+  choosing a number does not touch `WorkoutClassifier.classify`, which still answers
+  `.other` for any non-run before `isFragment` runs at all — a lift has no distance by
+  definition, and nothing in this ticket gives the floor a path to one.
+  `FragmentDurationFloorTests.testALiftIsNeverClassifiedAsAFragmentByTheDurationFloor`
+  (MAX-149's own test) still passes unmodified, and a new end-to-end test runs the same
+  claim against the plan `StandardPlanSeed` actually produces rather than a hand-built
+  fixture.
+- **The screen: a plan-level control beside the cap, not a per-weekday one.**
+  `PlanDraft` gains `minimumSessionDurationSeconds: Double?` as a plain `var` — the same
+  shape `heartRateCapBPM` already has, no setter method, because there is no illegal
+  combination for it to protect against the way a rest day and a distance protect each
+  other. `PlanAuthoringView` gets one new section, "Fragment duration floor", between
+  the HR cap and the cadence target — a stepper in whole minutes (0–30), zero reading as
+  "no floor stated" the same convention the lift duration stepper already set.
+  `PlanAuthoringSession.plan(from:effectiveFrom:)` validates it exactly like every other
+  plan-level number (`Validate.optionalPositive`'s rule, translated to a new
+  `PlanAuthoringError.minimumSessionDurationNotPositive`) — nil is the one legal
+  "no opinion" answer, a stated zero or negative is not.
+- **The proposal: a new top-level wire field, not a per-day one.** `PlanProposal` gains
+  `minimumSessionDurationSeconds: Double?`, coded and validated the same way
+  `heartRateCapBPM` is, with its own line in `schemaDescription`'s JSON shape and prose —
+  "omit it to state no floor at all," matching every other optional field's instruction
+  in that file. `PlanDraft.applying(_:)` takes it directly from the proposal, the same
+  "plan-level field, no carry-forward helper" shape `heartRateCapBPM` already has —
+  unlike the run slot's own `durationSeconds`, which still has no wire field and still
+  needs `carriedDurationSeconds(from:proposing:)`. `PlanProposalReview.targetsSection`
+  gains a fifth row, "Fragment duration floor", beside the cap and the two thresholds,
+  rendering "None" for an absent floor — the same word the run slot's distance row and
+  the lift slot's duration row already use for an unset numeric field.
+- **Nothing stored moves (D1).** `StandardPlanSeed` is authoring input the scoring path
+  never reads — see the file's own top-of-file note — so seeding a floor changes only
+  what the *next* plan version starts from. `FragmentDurationFloorTests`' pre-MAX-149
+  hand-written payload still decodes to a plan with no floor and still re-encodes
+  without the key; nothing in this ticket touches that fixture or its assertions.
+  `PlanAuthoringTests.testRevisionDraftReproducesTheStoredPlanExactly` now also asserts
+  the floor carries forward unchanged on a revision, the same as the cap does.
+- **The end-to-end proof the ticket exists for.** A new test builds a plan through
+  `PlanAuthoring.session(revising: nil, ...)` — the exact path a first-time athlete's
+  app takes — and classifies a 90-second, heart-rate-only, no-distance workout against
+  it: `.other`. Before this ticket the seeded plan's floor was nil, `isFragment`'s
+  duration branch never fired, and the same workout would have reached the scorer as a
+  real session. A sibling test pins the other side: a genuine 15-minute no-distance run
+  still classifies `.easy` under the same seeded plan.
+
+**Tracker gap P3 is now genuinely closed**, not only expressible: the row above is
+updated to say so.
 
 **MAX-132 — `StandardPlanSeed` learns to speak the vocabulary MAX-131 gave it, and closes
 the shadow §11.4 escalates.** Two changes to `Sources/MaximizeCore/Plan/StandardPlanSeed.swift`,

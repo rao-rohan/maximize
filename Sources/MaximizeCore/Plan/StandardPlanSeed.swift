@@ -57,6 +57,40 @@ public enum StandardPlanSeed {
     public static let arcFirstWeekDistanceMeters: Double = 14_000
     public static let arcPeakWeekDistanceMeters: Double = 32_000
 
+    /// The shortest a **recorded run may last** before `WorkoutClassifier` reads it as a
+    /// fragment, when the workout carries no distance to test instead — the seed's
+    /// opinion for `Plan.minimumSessionDurationSeconds`, which MAX-149 gave the plan the
+    /// vocabulary to state and nothing authored until now (MAX-151, tracker gap **P3**).
+    ///
+    /// **Ten minutes (600 s), and the argument for it.** A watch session that carries
+    /// heart-rate data and *no distance at all* is, overwhelmingly, one of two things: a
+    /// mis-started or HealthKit-split treadmill run — the belt not yet moving, GPS never
+    /// acquiring indoors, a stop tapped seconds after start — or a deliberate short
+    /// session that genuinely has no distance sample, such as an indoor track with no
+    /// GPS lock. The first shape is characteristically seconds to a couple of minutes;
+    /// the second is rarely under ten. Ten minutes sits between them, and it is not a
+    /// number invented for this field alone: `fragmentDistanceFraction` (0.25) against
+    /// this seed's own shortest prescribed run — Saturday's 6 km — works out to 1 500 m,
+    /// which an easy effort covers in roughly that much time, so the two floors this
+    /// plan states read as one policy rather than two unrelated guesses.
+    ///
+    /// **A lift is never caught by this, and not by luck.** `WorkoutClassifier.classify`
+    /// answers `.other` for any non-run before `isFragment` runs at all — a lift has no
+    /// distance by definition, and a floor that read "no distance" as "test the duration
+    /// instead" would flag every strength session as a fragment if it reached one.
+    /// `FragmentDurationFloorTests.testALiftIsNeverClassifiedAsAFragmentByTheDurationFloor`
+    /// pins exactly this, with a floor long enough to catch a 45-minute lift if it could
+    /// reach one, and this ticket changes nothing about why it cannot.
+    ///
+    /// **D1: a starting number for the *next* plan, not a threshold pinned into code.**
+    /// Nothing on the scoring path reads this file — see the type's own note — so
+    /// raising or lowering this later is authoring a new plan version, exactly like
+    /// moving the HR cap, never a code edit. Every plan already on disk keeps
+    /// `minimumSessionDurationSeconds == nil` regardless of what this constant says
+    /// (MAX-149's own no-migration guarantee); seeding a value here only changes what an
+    /// athlete authoring their *next* version starts from.
+    public static let minimumSessionDurationSeconds: Double = 600
+
     /// The draft an athlete lands on before they have authored anything.
     public static func draft() throws -> PlanDraft {
         try PlanDraft(
@@ -70,7 +104,8 @@ public enum StandardPlanSeed {
                 firstWeekDistanceMeters: arcFirstWeekDistanceMeters,
                 peakWeekDistanceMeters: arcPeakWeekDistanceMeters,
                 weekCount: arcWeekCount
-            )
+            ),
+            minimumSessionDurationSeconds: minimumSessionDurationSeconds
         )
     }
 

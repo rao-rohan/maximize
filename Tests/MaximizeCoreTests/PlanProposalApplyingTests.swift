@@ -32,17 +32,21 @@ final class PlanProposalApplyingTests: XCTestCase {
 
     private func reply(
         heartRateCapBPM: String = "148",
+        minimumSessionDurationSeconds: String? = "540",
         week: [String] = PlanProposalApplyingTests.weekEntries,
         longRunArc: String = #"[{"index": 1, "distanceMeters": 16000}, {"index": 2, "distanceMeters": 18000}]"#,
         goalStatements: String = #"["Sub-1:45 half marathon"]"#
     ) -> String {
-        """
+        let floorLine = minimumSessionDurationSeconds
+            .map { #""minimumSessionDurationSeconds": \#($0),"# } ?? ""
+        return """
         {
           "heartRateCapBPM": \(heartRateCapBPM),
           "cadenceLowStepsPerMinute": 168,
           "cadenceHighStepsPerMinute": 176,
           "effectiveThresholdPoints": 72,
           "marginalThresholdPoints": 44,
+          \(floorLine)
           "week": [\(week.joined(separator: ", "))],
           "longRunArc": \(longRunArc),
           "goalStatements": \(goalStatements),
@@ -69,7 +73,8 @@ final class PlanProposalApplyingTests: XCTestCase {
             heartRateCapBPM: 152,
             cadenceTarget: CadenceBand(lowStepsPerMinute: 165, highStepsPerMinute: 170),
             rubric: Fixture.rubric(),
-            goals: PlanGoals(statements: ["Run a sub-4:00 marathon"], targetDay: Fixture.day(2026, 4, 20))
+            goals: PlanGoals(statements: ["Run a sub-4:00 marathon"], targetDay: Fixture.day(2026, 4, 20)),
+            minimumSessionDurationSeconds: 300
         )
     }
 
@@ -91,6 +96,7 @@ final class PlanProposalApplyingTests: XCTestCase {
         XCTAssertEqual(applied.cadenceHighStepsPerMinute, 176)
         XCTAssertEqual(applied.effectiveThresholdPoints, 72)
         XCTAssertEqual(applied.marginalThresholdPoints, 44)
+        XCTAssertEqual(applied.minimumSessionDurationSeconds, 540)
         XCTAssertEqual(applied.longRunArc.map(\.index), [1, 2])
         XCTAssertEqual(applied.longRunArc.map(\.distanceMeters), [16_000, 18_000])
         XCTAssertEqual(applied.goalStatements, "Sub-1:45 half marathon")
@@ -233,6 +239,43 @@ final class PlanProposalApplyingTests: XCTestCase {
         // The rest of Friday's lift ask is untouched by dropping the duration and note.
         XCTAssertEqual(applied[.friday].liftKind, .lift)
         XCTAssertEqual(applied[.friday].liftMuscleGroups, [.chest])
+    }
+
+    // MARK: - The duration floor (MAX-151): a plan-level value, taken directly
+
+    /// A proposal that states a floor different from the stored plan's replaces it
+    /// outright — a plan-level field is taken directly from the proposal, exactly like
+    /// `heartRateCapBPM`, with no carry-forward involved.
+    func testAStatedDurationFloorReplacesTheStoredOne() throws {
+        let applied = try revisionSession().draft.applying(
+            try PlanProposal.parse(reply(minimumSessionDurationSeconds: "900"))
+        )
+        XCTAssertEqual(applied.minimumSessionDurationSeconds, 900)
+    }
+
+    /// A proposal that omits the floor entirely carries no opinion onto the draft, even
+    /// when the plan being revised had one — restating it is the model's job, the same
+    /// "whole plan, not a patch" rule the run slot's kind and distance already follow.
+    func testAnOmittedDurationFloorClearsWhateverTheStoredPlanHad() throws {
+        let session = try PlanAuthoring.session(
+            revising: try PlanCalendar([
+                try Plan(
+                    version: PlanVersion(3),
+                    effectiveFrom: Fixture.day(2026, 6, 1),
+                    weeklyTemplate: Fixture.weeklyTemplate(),
+                    longRunArc: LongRunArc(weeks: [LongRunArc.Week(index: 1, distanceMeters: 16_000)]),
+                    heartRateCapBPM: 152,
+                    cadenceTarget: CadenceBand(lowStepsPerMinute: 165, highStepsPerMinute: 170),
+                    rubric: Fixture.rubric(),
+                    minimumSessionDurationSeconds: 600
+                ),
+            ]),
+            today: try Fixture.day(2026, 8, 5)
+        )
+        let applied = try session.draft.applying(
+            try PlanProposal.parse(reply(minimumSessionDurationSeconds: nil))
+        )
+        XCTAssertNil(applied.minimumSessionDurationSeconds)
     }
 
     // MARK: - The run slot's duration (MAX-131's carried, uneditable field)
