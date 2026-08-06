@@ -62,6 +62,31 @@ public struct ActivityType: RawRepresentable, Hashable, Sendable, Codable, Custo
         return self == .running || self == .treadmillRunning
     }
 
+    /// Whether a plan's rubric can describe a workout of this type **at all** (MAX-168).
+    ///
+    /// The successor to `isRun` at the four places that used it to answer "will a score
+    /// ever be reached for this?" — the ingestion gate, the verdict header, the calendar
+    /// cell and chat's load state. Until MAX-168 those four asked `isRun` and the answer
+    /// was right, because the rubric's only vocabulary was running vocabulary. MAX-131
+    /// gave it `.actualDiscipline` and `.scheduledDuration`, MAX-132 wrote lift bands with
+    /// them, and MAX-133 routes a lift to its own slot's ask — so a lift is now something
+    /// a plan can judge, and the old predicate would have those four surfaces telling the
+    /// athlete a verdict is never coming for a session that is being scored.
+    ///
+    /// **A ride, a hike and a walk are still `false` here, and permanently.** They occupy
+    /// the run slot by A17 without being runs, the run bands are written about a distance
+    /// and an easy-run heart-rate cap that describe none of them, and `Discipline` is
+    /// closed at two cases — so no band naming them can be written, and there is no
+    /// authoring screen that could write one. Their absent score really is settled.
+    ///
+    /// **Type-level, and therefore not the whole gate.** This says the *vocabulary*
+    /// exists; whether a particular workout is scored also depends on the plan version in
+    /// effect on its day (whether the day asked for a lift, and whether its rubric carries
+    /// the bands that judge one) and, for a lift, on the athlete having said what it
+    /// worked (A22). Those are facts about a plan and a record, not about an activity
+    /// type, and `WorkoutIngestionPipeline.applyScore` is where they are asked.
+    public var isScoreable: Bool { isRun || discipline == .lift }
+
     /// Whether the activity is expected to carry a GPS route. Indoor runs answering
     /// `false` here is the point of FR-0.6.
     public var isOutdoorByNature: Bool {

@@ -26,7 +26,9 @@ import Foundation
 ///    own the header promised every lift a verdict that was never going to arrive. The
 ///    second was added by MAX-145 (A22), and it is the opposite correction: a lift the
 ///    athlete has not described yet is not permanently unscoreable — the app is waiting
-///    on an answer it has asked for.
+///    on an answer it has asked for. **MAX-168 moved a lift out of the third and into
+///    the first two**: the ingestion gate now offers a lift the scoring path, so
+///    `.noVerdict` keeps only what it was always true of — a ride, a hike, a walk.
 ///
 /// 3. **Which prescription is "what the plan asked for"?** A17 gave the plan two slots,
 ///    one per discipline, and a workout is only ever judged against its own (LIFTING-SPEC
@@ -81,6 +83,13 @@ public struct WorkoutVerdict: Hashable, Sendable {
         /// that the lazy path retries every time the screen is opened. Both are
         /// ordinary, expected states, not errors.
         ///
+        /// **A lift reaches this too, as of MAX-168**, once the athlete has said what it
+        /// worked. Its wait can be longer than a run's and still honest: a lift on a day
+        /// prescribing none, or under a plan version whose rubric predates the lift bands,
+        /// is waiting on a new plan version — the same tense this state already carries
+        /// for a run whose rubric has no band for what happened, since D1 makes a band a
+        /// plan version rather than a code change.
+        ///
         /// Named for the wait since MAX-126, because there is now a second scoreless
         /// state that is *not* one; `.unscored` described them both equally well, which
         /// is exactly why it had to stop being the only one.
@@ -108,14 +117,25 @@ public struct WorkoutVerdict: Hashable, Sendable {
         ///
         /// **The difference from `.noVerdict` is tense.** `.noVerdict` says no verdict
         /// is coming; this says one cannot be reached *yet*, for a reason the athlete
-        /// can remove. Nothing scores a lift today either way — the lift rubric is
-        /// MAX-131/132 — but what the app is waiting for is now something it knows and
-        /// can say.
+        /// can remove.
+        ///
+        /// **And as of MAX-168 the sentence it shows is literally true** — *"This lift
+        /// isn't scored until you set the muscle groups it worked."* When MAX-145 wrote
+        /// that, nothing scored a lift under any condition, so the copy stated an
+        /// amendment rather than a mechanism. The ingestion gate now honours it:
+        /// `IngestionPipelineDiagnostic.UnscoredReason.liftAwaitingMuscleGroups` is this
+        /// state seen from the pipeline's side, and answering is what unblocks the score.
         case awaitingMuscleGroups
 
         /// No automatic score has been recorded for this workout and **none ever will
-        /// be**: the plan scores runs (D1), and this was a lift, a ride, a hike or a
-        /// walk (MAX-111).
+        /// be**: this was a ride, a hike or a walk, and the plan's rubric has no
+        /// vocabulary that describes one (MAX-111, narrowed by MAX-168 — a lift is now
+        /// judged, and reaches `.awaitingScore` or `.awaitingMuscleGroups` instead).
+        ///
+        /// Still permanent, and by construction rather than by policy: `Discipline` is
+        /// closed at two cases, a ride occupies the run slot without being a run, and
+        /// there is no band editor with which an athlete could author a rule that named
+        /// one. See `ActivityType.isScoreable`.
         ///
         /// The athlete did the work. What is missing is a rubric to judge it by, which
         /// is a fact about the plan rather than about the session or about the app's
@@ -192,25 +212,27 @@ public struct WorkoutVerdict: Hashable, Sendable {
             self.scoring = .scored(automatic: ledger.automatic, annotation: ledger.currentAnnotation)
         } else {
             self.actual = .unclassified(workout.activityType)
-            // `activityType.isRun` is the same predicate `WorkoutIngestionPipeline`
-            // declines to score on and `WorkoutClassifier` short-circuits on, on
-            // purpose: one notion of "is this a run" in the core, not a third that can
-            // drift from the two that decide whether a score is ever attempted.
-            if workout.activityType.isRun {
-                self.scoring = .awaitingScore
-            } else if discipline == .lift,
-                      let muscleGroups,
-                      muscleGroups.isAwaitingEntry {
-                // A22. Read through `Discipline` rather than compared to an activity
-                // type, so a strength type mapped later is asked the same question —
-                // and `MuscleGroupEntryData.resolve` uses the same predicate, so the
-                // header's state and the section's cannot disagree about whether this
-                // workout is one the app asks.
-                //
-                // The ledger branch above is what keeps D8 intact here: a lift that was
-                // already scored as a run (A21/MAX-143) never reaches this line, so no
-                // existing score changes state because of this ticket.
+            // A22 first, and the order is the ticket (MAX-168). A lift the athlete has
+            // not answered for is waiting on *them*, and it is the pipeline's first gate
+            // too — so asking `isScoreable` before this would collapse the state A22
+            // added into the generic wait and take the question off the screen that asks
+            // it. Read through `Discipline` rather than compared to an activity type, so
+            // a strength type mapped later is asked the same question, and so
+            // `MuscleGroupEntryData.resolve` and this cannot disagree about which
+            // workouts the app asks.
+            //
+            // The ledger branch above is what keeps D8 intact here: a lift that was
+            // already scored as a run (A21/MAX-143) never reaches this line, so no
+            // existing score changes state.
+            if discipline == .lift, let muscleGroups, muscleGroups.isAwaitingEntry {
                 self.scoring = .awaitingMuscleGroups
+            } else if workout.activityType.isScoreable {
+                // `isScoreable` rather than `isRun` since MAX-168: a lift is now offered
+                // the scoring path, so telling the athlete no verdict is coming would be
+                // false the moment one arrives. The same predicate the pipeline gates on
+                // and the calendar splits on — one notion of "can this be judged" in the
+                // core, not three that can drift.
+                self.scoring = .awaitingScore
             } else {
                 self.scoring = .noVerdict
             }

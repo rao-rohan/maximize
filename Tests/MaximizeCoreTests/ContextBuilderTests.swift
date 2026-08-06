@@ -288,8 +288,9 @@ final class ContextBuilderTests: XCTestCase {
 
     // MARK: - Absence is first-class (MAX-111, A18)
 
-    /// MAX-111 leaves every non-run unscored **by design**, permanently. A line for one
-    /// must read as a verdict that was never going to exist, not as a missing value.
+    /// A session can be unscored **by design** — permanently for a ride or a hike, and
+    /// until a plan version can judge it for a lift (MAX-111, MAX-168). A line for one
+    /// must read as a verdict that is not there, not as a missing value.
     func testAnUnscoredSessionReadsAsNoVerdict() throws {
         let unscoredRun = UUID()
         let lift = UUID()

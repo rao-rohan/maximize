@@ -62,6 +62,17 @@ public struct RubricEvaluation: Hashable, Sendable {
     public var scheduledSession: ScheduledSession { planDay.scheduledSession(for: discipline) }
     public var rubric: ScoringRubric { plan.rubric }
 
+    /// Whether the band that matched is a band **about this workout's discipline**
+    /// (MAX-168) — see `RubricBand.names(_:)` for what that means and why the rubric's
+    /// catch-all does not count.
+    ///
+    /// A run is not asked: every band in every rubric this app has ever seeded is a
+    /// running band, and asking a run to be named by one would refuse a stored rubric that
+    /// predates the vocabulary entirely (`.actualDiscipline` arrived in MAX-131, and no
+    /// band carried it before MAX-132). The question is only meaningful for the discipline
+    /// the rubric learned about late.
+    public var bandNamesItsDiscipline: Bool { band.names(discipline) }
+
     /// The score range the matched band permits. A model proposal outside it is
     /// rejected, not clamped.
     public var permittedScores: ScoreRange { band.scoreRange }

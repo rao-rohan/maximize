@@ -7,7 +7,7 @@ is.** It is gathered from the *Needs device verification* sections of the merged
 per-ticket write-ups, then reordered into the sequence a person would actually work
 through on a phone, instead of thirty separate lists in ticket order.
 
-**63 checks below, gathered from 32 merged PRs.** Every check names the PR it came from
+**67 checks below, gathered from 33 merged PRs.** Every check names the PR it came from
 so a failure can be traced back to the ticket that owns the surface. Nothing here is
 invented — where a PR reported a gap rather than a check, it is noted as a gap, not
 turned into a tick box.
@@ -196,7 +196,8 @@ information or as noise.
 | 4.4 | Tap a missed day, a scheduled-rest day, a forthcoming day, an unplanned day | Each shows a sensible alert and dismisses cleanly; nothing navigates | MAX-108 (#101) |
 | 4.5 | VoiceOver over a week of cells, on the smallest supported device | Every cell announces as a button with a sensible sentence; tap targets near the grid edge are comfortably 44pt | MAX-108 (#101) |
 | 4.6 | Look at a lift day with no verdict | Neutral cell, strength glyph — not a band colour, not the forthcoming hollow outline, not visually a miss; still carries the plan ring if prescribed | MAX-126 (#103) |
-| 4.7 | VoiceOver on that same cell and on a day mixing a run and a lift | Reads the correct combined sentence ("Not scored — the plan scores runs" / plan clause where relevant) | MAX-126 (#103) |
+| 4.7 | VoiceOver on that same cell and on a day mixing a run and a lift | Reads the correct combined sentence. **Since MAX-168 a lift reads "awaiting score", not "not scored"** — the settled wording is now only for a ride, a hike or a walk, and reads "Not scored — the plan has no rule for it" | MAX-126 (#103), MAX-168 |
+| 4.7a | Find a day whose only workout is a **ride**, and one whose only workout is a **lift** | The two cells speak in opposite tenses: the ride is settled ("not scored"), the lift is waiting ("awaiting score"). If the lift reads as settled, MAX-168's split did not reach the calendar | MAX-168 |
 | 4.8 | Find a mixed-obligation day (one of two met) | See "Run these first" #8 for the glyph-legibility question | MAX-135 (#143) |
 | 4.9 | Compare that mixed cell to a plain miss in the same week | Reads as **worse than** a miss, but distinguishable from it | MAX-135 (#143) |
 | 4.10 | A lift-only day (run slot rests) | Ringed, reads as a miss rather than a rest day | MAX-135 (#143) |
@@ -228,6 +229,9 @@ information or as noise.
 | 4.26 | Open a run's detail screen | Completely unchanged — cadence, route, splits, cap line all still appear | MAX-139 (#145) |
 | 4.27 | If a device has a historical miscategorised lift score | The new label row renders under the score chip with a correct VoiceOver reading | MAX-139 (#145), MAX-143 (#134) |
 | 4.28 | Compare a lift's HR-cap-absence sentence to a run's on a day with no governing plan | The two read as genuinely different sentences — a lift's says it's not a run, a run's says no plan governs the day | MAX-104 (#148) |
+| 4.29 | Open a lift nobody has described | Header asks "Tell me what you trained" and states that the lift is not scored until the groups are set. **That sentence is now literally true** — confirm no score appears while the prompt is showing | MAX-145 (#146), MAX-168 |
+| 4.30 | Set the muscle groups on that lift, on a day the plan prescribes **no** lift | The prompt is replaced by "Not yet scored", and **no score arrives** — the plan asked for nothing to adhere to. This is the designed outcome, not a stall | MAX-168 |
+| 4.31 | Author a revision that prescribes a lift day (adopting the current rubric — MAX-173's section), then open a lift on such a day and set its groups | A score arrives on that visit, with a lifting rationale ("Completed the prescribed lift." / "Cut the lift short…"), never a running one. **This is the one end-to-end check that proves the gate opened** | MAX-168, MAX-173 (#163) |
 
 ## 5. Accessibility
 

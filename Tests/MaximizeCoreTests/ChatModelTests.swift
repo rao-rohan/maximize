@@ -161,16 +161,34 @@ final class ChatModelTests: XCTestCase {
 
     /// MAX-126. Same missing ledger, different reason, and the difference is the whole
     /// point: `.notYetScored` renders as "chat opens once it has a score", which for a
-    /// lift is a door that never opens. MAX-111 stopped non-runs being scored, so the
-    /// lazy path re-reaches the same conclusion on every visit.
-    func testAnUnscoredLiftHasNoVerdictRatherThanNotYetScored() async throws {
+    /// ride is a door that never opens — no band in any rubric describes one, and none
+    /// can be authored.
+    ///
+    /// **The lift moved to the other side in MAX-168** (`testAnUnscoredLiftIsAWait`
+    /// below): once the ingestion gate offers a lift a score, the door does open, so this
+    /// case is now about the activities it stays shut for.
+    func testAnUnscoredRideHasNoVerdictRatherThanNotYetScored() async throws {
+        let store = try await readyStore(
+            seedScore: false,
+            activityType: .cycling
+        )
+        let (chatModel, _) = try await model(store: store)
+        await chatModel.load()
+        XCTAssertEqual(chatModel.loadState, .noVerdict)
+        XCTAssertTrue(chatModel.messages.isEmpty)
+    }
+
+    /// MAX-168, the other half: an unscored lift is waiting, not settled. Its score
+    /// arrives once the athlete has said what it worked (A22) and a plan version can
+    /// judge the day — both reachable, which is exactly what `.notYetScored` means.
+    func testAnUnscoredLiftIsAWait() async throws {
         let store = try await readyStore(
             seedScore: false,
             activityType: .traditionalStrengthTraining
         )
         let (chatModel, _) = try await model(store: store)
         await chatModel.load()
-        XCTAssertEqual(chatModel.loadState, .noVerdict)
+        XCTAssertEqual(chatModel.loadState, .notYetScored)
         XCTAssertTrue(chatModel.messages.isEmpty)
     }
 

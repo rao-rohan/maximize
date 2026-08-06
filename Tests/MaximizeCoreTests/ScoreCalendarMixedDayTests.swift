@@ -66,10 +66,9 @@ final class ScoreCalendarMixedDayTests: XCTestCase {
         )
     }
 
-    /// A lift's ledger. Nothing scores lifts yet — `WorkoutIngestionPipeline` still gates
-    /// on `activityType.isRun` — so these are supplied directly, the same way
-    /// `ObligationTalliesTests` supplies them: the cell has to draw the first scored lift
-    /// correctly on the day the gate opens, not a ticket later.
+    /// A lift's ledger, supplied directly rather than produced by the pipeline, the same
+    /// way `ObligationTalliesTests` supplies one. Written before MAX-168 opened the gate,
+    /// so that the cell drew the first scored lift correctly on the day it did.
     private func liftLedger(points: Int, workoutID: UUID, correctedTo correction: Int? = nil) throws -> ScoreLedger {
         try ledger(
             points: points,

@@ -305,9 +305,10 @@ struct ChatConversationView: View {
             }
         case .noVerdict:
             // The same absence, and the opposite tense (MAX-126). The sentence above
-            // would be a promise here: the plan scores runs, so this workout will never
-            // have the score chat is seeded from. Said once, plainly, in the same voice
-            // the verdict header uses on the screen behind this sheet.
+            // would be a promise here: no band in the plan's rubric describes a ride, a
+            // hike or a walk, so this workout will never have the score chat is seeded
+            // from. Said once, plainly, in the same voice the verdict header uses on the
+            // screen behind this sheet. (A lift left this branch in MAX-168.)
             centered {
                 secondaryText(ChatConversationCopy.noVerdict)
             }

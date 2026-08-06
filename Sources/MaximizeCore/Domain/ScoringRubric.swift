@@ -192,6 +192,38 @@ public struct RubricBand: Hashable, Sendable, Codable {
         appliesTo.isEmpty || appliesTo.contains(kind)
     }
 
+    /// Whether this band says **in its own conditions** that it is about `discipline`
+    /// (MAX-168).
+    ///
+    /// `appliesTo` is the *scheduled* side and cannot answer this: it filters by the kind
+    /// of session the day asked for, so a band reached by a discipline the plan asked
+    /// nothing of — every unprescribed lift, since `PlanDay.scheduledSession(for:)`
+    /// answers `.rest` for an empty slot — passes it without the band ever having claimed
+    /// to describe that discipline. `.actualDiscipline` is the *actual* side, and a band
+    /// carrying it is a band that has said what it is for.
+    ///
+    /// The distinction is not academic. `rest.ranAnyway` matched every unprescribed lift
+    /// and stamped it *"Ran on a scheduled rest day."* precisely because it was
+    /// unconditional (MAX-146); `easy.wellOverCap` scored lifts 20–45 as failed easy runs
+    /// for the same reason (A21). Both were fixed in `StandardPlanSeed` — but D1 makes a
+    /// rubric versioned data, so a plan saved before those fixes still carries the
+    /// unconditional bands, and no code change can reach it. This predicate is how the
+    /// scoring path asks a *stored* rubric whether the band it just matched was written
+    /// about this workout, rather than assuming the answer from what the seed says today.
+    ///
+    /// **False for the catch-all, deliberately.** `fallback.recorded` carries no
+    /// conditions and no `appliesTo`, which is what makes it the seed's answer for a run
+    /// the rubric has no row for. It is not an opinion about a lift: MAX-146 considered
+    /// adding a band for the lift-on-an-unprescribed-day case and declined, because
+    /// choosing its score range is a product decision nobody has made. Answering `true`
+    /// here would let that unmade decision be written into a permanent score (D8).
+    public func names(_ discipline: Discipline) -> Bool {
+        conditions.contains { condition in
+            guard case let .actualDiscipline(disciplines) = condition else { return false }
+            return disciplines.contains(discipline)
+        }
+    }
+
     private enum CodingKeys: String, CodingKey {
         case identifier, appliesTo, conditions, scoreRange, rationale
     }

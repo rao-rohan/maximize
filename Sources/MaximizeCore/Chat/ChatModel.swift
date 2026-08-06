@@ -99,12 +99,14 @@ import Observation
 /// `IngestionComposition.completeIngestion(forWorkout:)` (R8's lazy path) before this
 /// screen's chat entry point ever renders.
 ///
-/// **For a workout that is not a run it is not a wait at all** (MAX-126). MAX-111 stopped
-/// non-runs being scored, so the lazy path above re-reaches the same conclusion every
-/// time and no ledger ever appears. `.noVerdict` is that case, split out from
-/// `.notYetScored` for the same reason `WorkoutVerdict.Scoring` splits it: the two states
-/// are identical in what they lack and opposite in what happens next, and only one of
-/// them can honestly tell the athlete to come back later.
+/// **For a workout no rubric describes it is not a wait at all** (MAX-126). A ride, a
+/// hike and a walk are never scored, so the lazy path above re-reaches the same
+/// conclusion every time and no ledger ever appears. `.noVerdict` is that case, split out
+/// from `.notYetScored` for the same reason `WorkoutVerdict.Scoring` splits it: the two
+/// states are identical in what they lack and opposite in what happens next, and only one
+/// of them can honestly tell the athlete to come back later. **A lift is on the waiting
+/// side as of MAX-168** — its score arrives once the athlete has said what it worked (A22)
+/// and a plan version prescribes and can judge a lift day.
 ///
 /// A training thread has neither state: it describes a window, and a window with no
 /// scored runs in it is still a window the roll-up can describe truthfully.
@@ -666,9 +668,11 @@ public final class ChatModel {
         // See "Why a workout thread requires an existing score": no ledger means no
         // stored classification, and this type does not derive one of its own.
         guard let ledger = try await scoreRepository.ledger(forWorkout: workoutID) else {
-            // The same `isRun` split `WorkoutVerdict` and `ScoreCalendar` make, for the
-            // same reason: without it, a lift is told a score is on its way.
-            loadState = workout.activityType.isRun ? .notYetScored : .noVerdict
+            // The same `isScoreable` split `WorkoutVerdict` and `ScoreCalendar` make, for
+            // the same reason: without it, a ride is told a score is on its way. It was
+            // `isRun` until MAX-168 opened the gate for a lift, at which point telling a
+            // lift no score is coming became the wrong half of the same mistake.
+            loadState = workout.activityType.isScoreable ? .notYetScored : .noVerdict
             return nil
         }
         guard let metrics = try await workoutRepository.derivedMetrics(forWorkout: workoutID) else {

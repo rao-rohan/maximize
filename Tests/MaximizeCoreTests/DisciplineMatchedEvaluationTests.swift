@@ -163,15 +163,17 @@ final class DisciplineMatchedEvaluationTests: XCTestCase {
         )
     }
 
-    /// The state this ticket lands in, pinned so that removing MAX-111's ingestion gate
-    /// early is a visible decision rather than an accident.
+    /// The state this ticket landed in, and the reason MAX-168 could not open the gate on
+    /// routing alone.
     ///
     /// Routing a lift correctly is not the same as having somewhere to route it *to*.
-    /// Under a rubric with no band for a lift day — which is every plan on disk until
-    /// MAX-132 seeds one — a lift on a day that prescribes one is **refused**, not
-    /// mis-scored. That refusal is the right failure (D1: an incomplete rubric is repaired
-    /// by a new plan version, never by a default in Swift), and it is why the pipeline
-    /// still leaves a lift unscored rather than sending it to the model.
+    /// Under a rubric with no band for a lift day — which is every plan saved before an
+    /// athlete adopts MAX-132's rows (MAX-173) — a lift on a day that prescribes one is
+    /// **refused**, not mis-scored. That refusal is the right failure (D1: an incomplete
+    /// rubric is repaired by a new plan version, never by a default in Swift), and the
+    /// pipeline's own guard answers the same way from one band further on: a rubric that
+    /// *does* match, with a band written about something else, leaves the lift unscored
+    /// rather than judged (`UnscoredReason.noLiftBandMatched`).
     func testUnderARubricWithNoLiftBandsALiftIsRefusedRatherThanMisScored() throws {
         assertThrowsScoring(
             .noBandMatched,

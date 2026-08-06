@@ -41,7 +41,7 @@ import XCTest
 /// Most tests pass `RestDayBudget(daysPerWeek: 0)`, and here that is load-bearing rather
 /// than tidy: with the standard budget of one day a week, the fixture's Tuesday easy run
 /// is the week's cheapest miss and D9 forgives it — and a **forgiven** obligation is not a
-/// settled miss, so the day stays `.noVerdict`. Both sides of that boundary are asserted
+/// settled miss, so the day stays neutral. Both sides of that boundary are asserted
 /// below rather than left to the reader.
 final class ScoreCalendarSettledMissTests: XCTestCase {
     private func day(_ text: String) throws -> CalendarDay {
@@ -175,7 +175,10 @@ final class ScoreCalendarSettledMissTests: XCTestCase {
 
         XCTAssertEqual(
             try state(days, on: "2026-01-06"),
-            .noVerdict(activityType: .traditionalStrengthTraining)
+            // `.awaitingScore` rather than `.noVerdict` since MAX-168 — the lift's score
+            // is outstanding, not settled. What this test is about is unchanged: a
+            // forgiven obligation produces no red cell either way.
+            .awaitingScore(activityType: .traditionalStrengthTraining)
         )
     }
 
@@ -200,7 +203,7 @@ final class ScoreCalendarSettledMissTests: XCTestCase {
     /// The mirror image, which the state is symmetric for: the lift slot was skipped and
     /// the run is the session still waiting on a score. The missed *lift* is named, and the
     /// recorded half keeps its own tense — a run's verdict really is still coming, which is
-    /// the difference `ActivityType.isRun` carries here exactly as it does between
+    /// the difference `ActivityType.isScoreable` carries here exactly as it does between
     /// `.awaitingScore` and `.noVerdict`.
     func testAMissedLiftBesideARunAwaitingItsScoreNamesTheLift() throws {
         let days = try resolve(
@@ -317,7 +320,7 @@ final class ScoreCalendarSettledMissTests: XCTestCase {
 
         XCTAssertEqual(
             try state(days, on: "2026-01-06"),
-            .noVerdict(activityType: .traditionalStrengthTraining),
+            .awaitingScore(activityType: .traditionalStrengthTraining),
             "a scheduled run at six in the morning has not been skipped"
         )
         XCTAssertEqual(try state(days, on: "2026-01-07"), .forthcoming(scheduledKind: .hard))
@@ -408,7 +411,7 @@ final class ScoreCalendarSettledMissTests: XCTestCase {
         )
         XCTAssertEqual(
             try state(days, on: "2026-01-05"),
-            .noVerdict(activityType: .traditionalStrengthTraining)
+            .awaitingScore(activityType: .traditionalStrengthTraining)
         )
         XCTAssertFalse(try cell(days, on: "2026-01-05").prescribesASession)
     }
@@ -417,7 +420,8 @@ final class ScoreCalendarSettledMissTests: XCTestCase {
     /// the regression fixture this ticket owes the board. Exactly one cell in it is new,
     /// and the other six say what they said before:
     ///
-    /// - Monday, rest, lift recorded → `.noVerdict`. No obligation, nothing missed.
+    /// - Monday, rest, lift recorded → `.awaitingScore` (`.noVerdict` before MAX-168 —
+    ///   the lift's score is outstanding, not settled). No obligation, nothing missed.
     /// - Tuesday, easy run asked, **ride** recorded → `.noVerdict`. The ride is `.run` by
     ///   slot, so the obligation is awaiting a verdict, not missed.
     /// - Wednesday, hard session asked, **lift** recorded → **`.missedWithUnjudgedSession`**.
@@ -448,7 +452,7 @@ final class ScoreCalendarSettledMissTests: XCTestCase {
         )
 
         XCTAssertEqual(
-            try state(days, on: "2026-01-05"), .noVerdict(activityType: .traditionalStrengthTraining)
+            try state(days, on: "2026-01-05"), .awaitingScore(activityType: .traditionalStrengthTraining)
         )
         XCTAssertEqual(try state(days, on: "2026-01-06"), .noVerdict(activityType: .cycling))
         XCTAssertEqual(
@@ -470,6 +474,9 @@ final class ScoreCalendarSettledMissCopyTests: XCTestCase {
 
     /// The headline is the miss, because it is the settled half and the reason the cell is
     /// red; the recorded session follows, with the tense its activity earns.
+    ///
+    /// The lift's clause changed in MAX-168 — its score is outstanding now, not absent —
+    /// so the settled wording is asserted below on the activity that still earns it.
     func testTheSentenceNamesTheMissedAskThenTheRecordedSession() {
         XCTAssertEqual(
             ScoreCalendarCopy.missedWithUnjudgedSessionOutcome(
@@ -477,14 +484,22 @@ final class ScoreCalendarSettledMissCopyTests: XCTestCase {
                 recorded: .traditionalStrengthTraining,
                 describedAs: "Strength training"
             ),
-            "missed easy run. Strength training recorded, not scored — the plan scores runs."
+            "missed easy run. Strength training recorded, awaiting score."
+        )
+        XCTAssertEqual(
+            ScoreCalendarCopy.missedWithUnjudgedSessionOutcome(
+                scheduledKind: .easy,
+                recorded: .cycling,
+                describedAs: "Cycling"
+            ),
+            "missed easy run. Cycling recorded, not scored — the plan has no rule for it."
         )
     }
 
     /// A recorded **run** is still waiting on a model, so the clause is a wait rather than
     /// a settled absence — the same distinction `.awaitingScore` and `.noVerdict` carry,
     /// arriving in the sentence because this state has one fill and one mark for both.
-    func testARecordedRunIsSpokenAsAWaitAndALiftAsASettledAbsence() {
+    func testARecordedRunIsSpokenAsAWaitAndARideAsASettledAbsence() {
         XCTAssertEqual(
             ScoreCalendarCopy.missedWithUnjudgedSessionOutcome(
                 scheduledKind: .lift, recorded: .running, describedAs: "Running"
@@ -501,14 +516,15 @@ final class ScoreCalendarSettledMissCopyTests: XCTestCase {
             ScoreCalendarCopy.missedWithUnjudgedSessionOutcome(
                 scheduledKind: .long, recorded: .cycling, describedAs: "Cycling"
             ),
-            "missed long run. Cycling recorded, not scored — the plan scores runs.",
+            "missed long run. Cycling recorded, not scored — the plan has no rule for it.",
             "a ride is never judged either, so promising it a verdict would be the MAX-126 defect again"
         )
     }
 
-    /// The tense is `ActivityType.isRun` and nothing else — asserted over every activity
-    /// the app names, so a type added later cannot quietly acquire the wrong promise.
-    func testTheTenseFollowsIsRunForEveryNamedActivity() {
+    /// The tense is `ActivityType.isScoreable` and nothing else — asserted over every
+    /// activity the app names, so a type added later cannot quietly acquire the wrong
+    /// promise. It was `isRun` until MAX-168 opened the gate for a lift.
+    func testTheTenseFollowsIsScoreableForEveryNamedActivity() {
         let activities: [ActivityType] = [
             .running, .treadmillRunning, .walking, .hiking, .cycling, .traditionalStrengthTraining, .other,
         ]
@@ -516,11 +532,11 @@ final class ScoreCalendarSettledMissCopyTests: XCTestCase {
             let sentence = ScoreCalendarCopy.missedWithUnjudgedSessionOutcome(
                 scheduledKind: .easy, recorded: activity, describedAs: "Session"
             )
-            let expected = activity.isRun
-                ? "a run, whose score may still arrive"
+            let expected = activity.isScoreable
+                ? "a session whose score may still arrive"
                 : "a session nothing will ever judge"
             XCTAssertEqual(
-                sentence.contains("awaiting score"), activity.isRun,
+                sentence.contains("awaiting score"), activity.isScoreable,
                 "\(activity) is \(expected), and the sentence says the opposite: \(sentence)"
             )
         }
