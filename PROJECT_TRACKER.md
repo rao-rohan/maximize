@@ -591,10 +591,48 @@ but is dated before its effective date is permanently unscorable, and nothing te
 | MAX-164 | The setup card on the Workouts tab, including the "set up, nothing recorded yet" window | MAX-161 | Sonnet |
 | MAX-165 | **The first plan's effective date** — default covers what is captured; the excluded-workout count on screen. Revisions unchanged | MAX-161 | **Opus** ✅ **built ahead of the rest of this set** — see the MAX-165 section below |
 | MAX-166 | The conversational route to a first plan, offered from the authoring screen. Droppable | MAX-161 | Sonnet |
-| MAX-167 | The API key section's purpose footer — what the key is for, what it costs, where it lives | MAX-161 | Sonnet 🔒 |
+| MAX-167 | The API key section's purpose footer — what the key is for, what it costs, where it lives | MAX-161 | Sonnet 🔒 ✅ |
 
 Order: **165 alone first**, then 162 → (163 ‖ 164). 167 parallelises with everything; 166
 last or never.
+
+**MAX-167.** One sentence, `FailureCopy.apiKeyPurpose`, shown as a footer under Settings'
+existing "Anthropic API key" section — no new entry point, no test-the-key button, no
+wizard step, per spec §6. It is a fixed literal with no data dependency, but it lives in
+`MaximizeCore` rather than as a view literal anyway: `FailureCopy` is already the one
+place this screen's copy lives, and a sentence about key handling is exactly the kind of
+thing CI should be able to pin against the A5 tripwire rather than trust a reviewer to
+reread on every future edit.
+
+> Maximize calls Claude to score each workout and to answer questions in chat, using a
+> key of your own — usage is billed to your Anthropic account, not Maximize's. Workouts
+> are captured and stored without one; they are simply not scored until a key is added,
+> and everything already recorded is scored once it is. The key stays on this device and
+> is sent only to Anthropic. Create one at console.anthropic.com.
+
+Four things it says, each the ticket's own requirement:
+
+- **What the key is for** — scoring and chat, named plainly, plus the reassuring true
+  fact that a workout captured with no key is not lost, only unscored, and is scored once
+  a key exists (`WorkoutIngestionPipeline.completeIngestion(forWorkout:)`, MAX-033).
+- **What it costs** — a payer (the athlete's own Anthropic account), never a figure. The
+  model and effort are configurable elsewhere and any price quoted here would go stale.
+- **Where it lives** — "on this device," not "in Keychain." No user-facing string
+  anywhere else in this app names that framework — `AnthropicAPIKeyError`'s
+  Keychain-referencing cases are `description`s written for a developer, never copy a
+  screen shows — and this sentence keeps that pattern rather than starting a second one.
+- **Nothing that would survive distribution unchanged.** No "secure," "safe," or
+  "private" — words that would read exactly as reassuring in a shipped, multi-user app,
+  which is the drift CLAUDE.md's A5 tripwire exists to catch. What replaces them is
+  checkable fact only: who calls Claude, who pays, and where the key sits today.
+
+Tested in `FailureCopyTests`: the whole-set properties every `FailureCopy` string
+already keeps (unique, ends in a full stop, no digit, no framework/diagnostic name), plus
+three tests scoped to this sentence — that it states the three required facts, that it
+never uses the banned-after-distribution vocabulary, and that it never names Keychain.
+`/security-review` run before merge (required — this PR touches key-handling copy); no
+key material is read, logged, or rendered by this change. **Needs no device
+verification**: the change is a `Text` view over a fixed string, nothing interactive.
 
 **MAX-066.** Splits currently need a GPS track, so a treadmill run has none — correctly
 rendered as an absence rather than fabricated. `distanceWalkingRunning` is already
@@ -1107,6 +1145,7 @@ twelve and is dispatchable immediately.
 | MAX-102 | **The read-only plan screen with version history** | — | Sonnet ✅ |
 | MAX-103 | "Runs in this conversation" strip | 098 | Sonnet ✅ |
 | MAX-104 | Copy and absence voice, **app-wide** — absorbs MAX-086's other half | 098, 102 | Sonnet ✅ |
+| MAX-104 | Copy and absence voice, **app-wide** — absorbs MAX-086's other half. Split: MAX-150 took chat+dashboard, MAX-104 took plan+workout | 098, 102 | Sonnet ✅ |
 | MAX-150 | **Split from MAX-104**: the chat and dashboard half, taken now because those two surfaces are finished and drifting while lifting is still being built | 098, 102, 103 | Sonnet ✅ |
 
 Three collisions the spec calls out and the overseer must respect: **094 lands before 095**
@@ -1895,6 +1934,10 @@ free. What landed in the file:
 - **Retry is MAX-152's and stays in the transcript**, beside the failure notice that
   explains what went wrong. The composer offers none — two retry affordances in two
   registers is worse than either alone.
+| MAX-151 | **Author the duration floor** — `StandardPlanSeed` states one (600s), the authoring screen edits it, `PlanProposal` can propose it. **Closes gap P3 for real** | 149, 148 | Sonnet ✅ |
+| MAX-158 | **Schema vocabulary reaches the athlete on a rejected proposal** — `PlanProposalError.description` says things like *"The reply left out `liftKind`, which the plan schema requires."* No PII and no status code, so not a privacy defect; but it names wire fields at a person who cannot act on them. MAX-155/156 left it deliberately (MAX-151 owned the file) | 155 | Sonnet |
+| MAX-159 | **A recorded-but-unjudged workout outranks another obligation's settled miss** — a Tuesday whose lift was recorded but unscored and whose run was missed draws `.noVerdict`, and its sentence names neither. §7.2's principle says change it, but the same ordering governs single-obligation days shipped since MAX-061, so it moves historical cells and wants a designed state | 135 | **Opus** |
+| MAX-160 | **Should a labelled miscategorised score leave the athlete's own average?** MAX-143 excluded it from the scorer-quality metric only; MAX-140 confirmed the average stays per-workout and declined to widen. A product decision, then a `Tallies` change | 143, 140 | Owner / overseer |
 
 **Four collisions the overseer must respect.**
 

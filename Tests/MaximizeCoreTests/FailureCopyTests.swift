@@ -62,6 +62,7 @@ final class FailureCopyTests: XCTestCase {
         entries.append(
             Entry(label: "planVersionCouldNotBeSaved", text: FailureCopy.planVersionCouldNotBeSaved)
         )
+        entries.append(Entry(label: "apiKeyPurpose", text: FailureCopy.apiKeyPurpose))
         return entries
     }
 
@@ -102,7 +103,8 @@ final class FailureCopyTests: XCTestCase {
         XCTAssertEqual(StoredAPIKeyPresence.allCases.count, 3)
         XCTAssertEqual(APIKeyStatusMessage.allCases.count, 6)
         XCTAssertEqual(HealthAccessState.allCases.count, 4)
-        XCTAssertEqual(allCopy.count, 27)
+        // 28, not 27: MAX-167 added the API key section's purpose footer.
+        XCTAssertEqual(allCopy.count, 28)
 
         // MAX-162's inventory, counted for the same reason: six card states, each with a
         // heading and a sentence, one second paragraph, four buttons, and the cover's
@@ -322,6 +324,64 @@ final class FailureCopyTests: XCTestCase {
             FailureCopy.apiKeyStatus(.cleared)
         )
         XCTAssertTrue(FailureCopy.apiKeyStatus(.couldNotClear).contains("may still be stored"))
+    }
+
+    // MARK: - Why the key exists (MAX-167)
+
+    /// The purpose footer under Settings' "Anthropic API key" section states what the
+    /// key is for, what it costs, and where it lives — the three facts the section left
+    /// unstated before this ticket — plus the reassuring, true fact that a workout
+    /// captured before a key exists is not lost, only unscored.
+    func testTheKeyPurposeFooterStatesWhatItIsForWhatItCostsAndWhereItLives() {
+        let text = FailureCopy.apiKeyPurpose.lowercased()
+
+        // What it's for.
+        XCTAssertTrue(text.contains("score"))
+        XCTAssertTrue(text.contains("chat"))
+
+        // The reassuring, true fact: absence is recoverable, not destructive.
+        XCTAssertTrue(text.contains("captured and stored"))
+        XCTAssertTrue(text.contains("scored once"))
+
+        // What it costs — a payer, never a figure (the model and effort are
+        // configurable elsewhere, so any number here would go stale).
+        XCTAssertTrue(text.contains("billed"))
+        XCTAssertTrue(text.contains("your anthropic account"))
+
+        // Where it lives.
+        XCTAssertTrue(text.contains("this device"))
+    }
+
+    /// **A5's tripwire, verbatim from CLAUDE.md:** "if this app is ever shipped to
+    /// anyone else, the key must move behind a server first." A sentence claiming the
+    /// key is "secure," "safe," or "private" would read exactly as reassuring in a
+    /// distributed app as it does today — which is precisely the drift the tripwire
+    /// exists to catch before it ships. This is the test the ticket asks for: no string
+    /// may claim the key is secure in a way that would survive distribution.
+    func testTheKeyPurposeFooterDoesNotClaimSecurityThatWouldSurviveDistribution() {
+        let banned = ["secure", "safe", "protected", "encrypted", "private", "trust"]
+        let text = FailureCopy.apiKeyPurpose.lowercased()
+        for term in banned {
+            XCTAssertFalse(
+                text.contains(term),
+                "apiKeyPurpose claims \"\(term)\", which would read identically after distribution"
+            )
+        }
+    }
+
+    /// No price. The model and effort are configurable and any figure quoted here would
+    /// go stale the moment either changes, so the footer names who pays, never how much.
+    func testTheKeyPurposeFooterNamesAPayerNeverAPrice() {
+        XCTAssertFalse(FailureCopy.apiKeyPurpose.contains(where: { $0.isNumber }))
+        XCTAssertFalse(FailureCopy.apiKeyPurpose.contains("$"))
+    }
+
+    /// No user-facing string anywhere else in this app names the Keychain framework by
+    /// name — `AnthropicAPIKeyError`'s Keychain-referencing cases are `description`s
+    /// written for a developer, never copy a screen shows. This sentence keeps that
+    /// pattern rather than starting a second vocabulary for the same fact.
+    func testTheKeyPurposeFooterDoesNotNameTheFrameworkItIsStoredIn() {
+        XCTAssertFalse(FailureCopy.apiKeyPurpose.lowercased().contains("keychain"))
     }
 
     // MARK: - The dashboard's blank

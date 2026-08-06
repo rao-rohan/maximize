@@ -235,6 +235,45 @@ public enum FailureCopy {
         }
     }
 
+    /// The footer under Settings' "Anthropic API key" section (MAX-167).
+    ///
+    /// A `SecureField` with no explanation states a mechanism and never a purpose — a
+    /// person who does not already know what an Anthropic API key is learns nothing from
+    /// it. This sentence answers the three questions that leaves open: what the key is
+    /// for, what it costs, and where it lives. A fixed literal with no data dependency —
+    /// nothing here is derived from a fact the app can only learn at runtime, unlike
+    /// `storedKeyPresence` or `apiKeyStatus` above — so it lives here rather than as a
+    /// view literal anyway, matching every other sentence on this screen (the plan
+    /// section's footer in `SettingsView.planSection` is the sibling this one is styled
+    /// after) and keeping the whole vocabulary of what this screen says in one place CI
+    /// can check.
+    ///
+    /// **A5's tripwire governs every clause.** CLAUDE.md: "if this app is ever shipped to
+    /// anyone else, the key must move behind a server first." This sentence must therefore
+    /// read as true and unremarkable in a single-user, never-distributed app *and* stop
+    /// being comfortable the moment that stops being true — so it never says the key is
+    /// "secure," "safe," or "private": those words describe a promise that would survive
+    /// distribution unchanged, which is exactly the drift the tripwire exists to catch.
+    /// What it says instead is checkable fact: two call sites (`AnthropicScoringModelClient`,
+    /// `AnthropicStreamingChatClient`/`AnthropicPlanProposalClient`), the athlete's own
+    /// Anthropic account footing the bill, on-device storage, and no third destination for
+    /// the key. It also says the recoverable, reassuring truth explicitly: a workout
+    /// captured before a key exists is not lost, only unscored, and is scored once a key
+    /// is added (`WorkoutIngestionPipeline.completeIngestion(forWorkout:)`).
+    ///
+    /// **Says "on this device," never "Keychain."** No user-facing string anywhere else in
+    /// this app names the framework a value is stored in — `AnthropicAPIKeyError`'s
+    /// Keychain-referencing cases are `description`s written for a developer, not copy a
+    /// screen shows (see this file's own "two rules" above) — and this sentence keeps that
+    /// pattern rather than starting a second one.
+    public static let apiKeyPurpose =
+        "Maximize calls Claude to score each workout and to answer questions in chat, "
+            + "using a key of your own — usage is billed to your Anthropic account, not "
+            + "Maximize's. Workouts are captured and stored without one; they are simply "
+            + "not scored until a key is added, and everything already recorded is scored "
+            + "once it is. The key stays on this device and is sent only to Anthropic. "
+            + "Create one at console.anthropic.com."
+
     /// The status line under the key field, after an action.
     ///
     /// Exhaustive with no `default`.
