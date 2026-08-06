@@ -1961,6 +1961,8 @@ free. What landed in the file:
 | MAX-160 | **Should a labelled miscategorised score leave the athlete's own average?** MAX-143 excluded it from the scorer-quality metric only; MAX-140 confirmed the average stays per-workout and declined to widen. A product decision, then a `Tallies` change | 143, 140 | Owner / overseer |
 | MAX-170 | **The stall detector's ping assumption had never met the live API** — MAX-152's two-beat threshold rested on an unverified claim about ping cadence that the API's own documentation contradicts. The rule now calibrates against what each stream demonstrates rather than against a constant | 152 | **Opus** ✅ — see the MAX-170 section below for what was established, what could not be, and how the design tolerates being wrong |
 | MAX-160 | ~~Should a labelled miscategorised score leave the athlete's own average?~~ **Owner decided: yes.** `TalliesCalculator.computeAverageScore` now skips a labelled score; the caption says when one was excluded and a fact-sheet line says why nothing is left when every scored workout was. See the MAX-160 note below | 143, 140 | Sonnet ✅ |
+| MAX-168 | **Open MAX-111's lift ingestion gate** — stop refusing to score a lift now that the vocabulary (131), the seed bands (132), the routing (133) and the copy (147) are all in place. **Was blocked on MAX-173** and found the gap that became it: it refused to open because no stored plan could reach MAX-132's or MAX-146's corrected bands, so opening the gate would have scored real lifts against a rubric that calls them runs. **Unblocked by MAX-173 — conditionally.** MAX-173 ships the *mechanism*; the gate is only safe once a plan version carrying the corrected bands is actually **in effect on the device**, which is an owner action (Plan → revise → Save). MAX-168 must check for that condition rather than assume it, and must say in its PR what happens to a lift ingested under a plan version that still carries the old bands | 111, 132, 133, 146, **173** | **Opus** |
+| MAX-173 | **A rubric fix can reach a stored plan** — authoring a revision adopts the bands this build ships, stated on screen and declinable, as a **new plan version**. Closes the D1 gap that made every seed-side rubric correction unreachable on a device with a plan. **Unblocks MAX-168.** Opens **R17** | 080, 132, 146 | **Opus** |
 
 **Four collisions the overseer must respect.**
 
@@ -4632,6 +4634,97 @@ MAX-170's scope and outside `MaximizeCore` — reported here for its own ticket.
 **`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
 The change is pure core logic, so CI proves the rule end to end; what CI cannot prove is
 the live cadence the floor is calibrated against. See the PR's "Needs device verification".
+## MAX-173 — a rubric fix can reach a stored plan
+
+**The gap, and why it was invisible.** `PlanAuthoringSession` reached
+`StandardPlanSeed.rubricBands()` at exactly one place — the `.firstPlan` branch. Every
+revision built with `rubricBands: current.rubric.bands`, carrying the stored bands forward
+verbatim, and chat proposals (MAX-141/148) went through the same door and inherited the same
+stale bands. Each half was correct on its own: D1 says a seed is authoring input and must not
+reach a stored plan, and carrying a revision's bands forward is what stops a seed edit
+silently re-writing a rubric an athlete tuned. Composed, they meant **no seed-side rubric fix
+could ever reach a plan that already existed** — a whole class of correction with no delivery
+route. Found by MAX-168 when it refused to open the lift-scoring gate.
+
+**Two corrections were stranded.** MAX-132's three `lift.*` adherence bands — a stored plan
+resolves `bands(for: .lift)` to `[skipped, fallback.recorded]` and lands on the catch-all, so
+even authoring a lift day through chat could not reach them. And MAX-146's
+`.actualDiscipline(oneOf: [.run])` on `rest.ranAnyway` — a stored plan's copy is
+unconditional, so a lift on a day prescribing no lift matches it and is permanently stamped
+*"Ran on a scheduled rest day."*, 50–75.
+
+**The mechanism, and it is the one D1 already provides.** A session now holds two band lists
+— the superseded version's, and the ones this build ships — and `adoptsCurrentRubric` decides
+which the saved version carries. `adoptingCurrentRubric(_:)` returns a copy; there is no
+setter, no code path that mutates a stored plan's rubric in place, and no migration. A rubric
+change is a **new version with its own `effectiveFrom`**, written through the one door that
+already existed (`plan(from:effectiveFrom:)`, A13's "opens by hand").
+
+**Decided: adopt by default, state it, allow a decline.** Three arguments, none carrying it
+alone. (1) *Nothing stored carries athlete intent* — there is no band editor and never has
+been, so every band in every stored plan is a past copy of the seed; adopting takes the
+corrected version of rules the athlete never chose. (2) *It cannot move history* — scoring
+resolves the version in effect on the workout's own date, so the blast radius is days on or
+after a date the athlete picks. (3) *Declining is the failure with no exit* — leaving it off
+keeps a rubric that calls every lift a run, forever. The default lives in `MaximizeCore`, not
+in the view, deliberately: a screen that had to remember to switch the fix **on** is one
+forgotten call away from the defect, which is R13's signature.
+
+**Decided: a plain statement, not a band-level diff.** A deliberate departure from the
+proposal card's per-field diff (MAX-101/141), and the honest answer.
+*"`.metric(averageHeartRateBPM, greaterThan, .heartRateCap(offsetBPM: 8))` gained
+`.actualDiscipline(oneOf: [.run])`"* is a sentence about a data structure; an athlete asked to
+approve it can only guess. `RubricBand.rationale` is the one renderable field — it is the line
+that appears in a verdict header — so the section states counts ("3 added and 2 changed") and
+lists the rules in the exact words they will later use. A test asserts the notice speaks no
+band identifier and no condition case name.
+
+**Decided: a revision, with its own section — not its own action.** A `Plan` has no partial
+form; `PlanCalendar` resolves one record per date, so "change only the rubric" already *is*
+"author a new version identical except the rubric". A separate action would mean a second path
+to `PlanRepository.store(_:)`, which A13 forbids. It gets its own section rather than being
+buried in the week grid, and the copy states that saving without touching anything else
+changes nothing but the rules and the start date.
+
+**A hand-authored rubric is a non-case today, and the decline path exists anyway.** No band
+editor means no stored rubric can differ from some past seed.
+`PlanAuthoringTests.testARevisionThatDeclinesKeepsTheStoredRubricBands` pins the decline
+against a rubric only a test can construct. **If a band editor ever ships, the default must be
+revisited** — at that point a stored rubric means something, and `adoptingCurrentRubric(false)`
+is the behaviour to make the default. That is written into `PlanAuthoringSession`'s own doc
+comment, beside the argument it would invalidate.
+
+**One assertion was deliberately reversed.**
+`PlanAuthoringTests.testRevisionCarriesTheStoredRubricBandsRatherThanReseeding` asserted the
+old behaviour unconditionally — "the seed must not leak into a revision". That turned out to
+be the defect. It is now `testARevisionThatDeclinesKeepsTheStoredRubricBands`, pinning what
+remains true regardless: a rubric an athlete settled on is still reachable and still preserved,
+by declining. `StandardPlanSeed`'s own doc had three paragraphs asserting the invariant this
+ticket changes ("Revisions do not re-read it", "cannot reach a stored plan, and does not try
+to"); all three are corrected rather than left as a false invariant a future reader would trust.
+
+**What CI proves.** A revision of a plan carrying pre-MAX-132/146 bands adopts all three lift
+rows and `rest.ranAnyway`'s condition, and `bands(for: .lift)` goes from
+`[skipped, fallback.recorded]` to the five rows it should have been. **D8 with fixtures:** the
+same lift on the same day under version 1, evaluated against a calendar with and without the
+adopting version, produces an identical whole `RubricEvaluation` — same plan, same resolved
+day, same band, same permitted range — and an easy run is asserted the same way so the proof is
+not only about the defect. MAX-011 still refuses a back-dated version. A plan already carrying
+the current rules yields an empty update, a nil notice and byte-equal adopt/decline plans; a
+first plan has nothing to adopt. **The stored-payload no-op:** nothing here is persisted —
+`adoptsCurrentRubric` and `PlanRubricUpdate` live on `PlanAuthoringSession`, never written to
+disk — so a stored plan round-trips unchanged and its JSON gains no key.
+
+**What CI cannot prove, and the owner action that is the whole deliverable.** CI never draws a
+pixel, so the section's appearance, its Dynamic Type behaviour, its VoiceOver reading and its
+degradation under Reduce Transparency are unverified. More importantly: **shipping the
+mechanism is not the same as the fix being in effect.** The owner has to open Plan → revise →
+Save, choosing the start date deliberately, before any lift is judged by the corrected rules.
+Until they do, every device still carries the old bands. MAX-168 depends on that having
+happened, not merely on this being merged.
+
+**`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1). CI is
+the compiler.
 ## MAX-169 — a store that will not open is a designed state
 
 The highest-consequence path in the app that nothing has ever executed.
@@ -4766,6 +4859,7 @@ check is the point of the ticket, not a footnote to it.
 | R12 | The anchor write and the workout write are two separate stores, so the window between them exists by construction | A crash between them re-delivers the batch — absorbed by dedupe, so this is the safe side | **Accepted permanently. Do not "fix" this.** ~~MAX-020 can close it by moving the anchor into the same SwiftData transaction~~ — that earlier note was wrong and MAX-020 correctly refused it. See below |
 | **R15** | **No failure state in the app offers a retry, and a whole-store failure is never named as one.** Every `.failed` state is terminal until the view is rebuilt — including the ones a second attempt would plainly clear (a scoring call that timed out, a Keychain read during the moment the device was locked). And when the *store* is what failed, every screen independently says its own content could not be loaded, which reads as five separate problems rather than the one that it is; nothing tells the athlete that nothing at all is being saved | An athlete's only recovery from a transient failure is to guess that backing out and re-entering a screen will help, and their only signal for a permanent one is that the whole app looks broken in five different ways | **The store half is closed by MAX-169; the per-screen half is still open.** MAX-154 made every failure legible and put the store-open reason in the log (it previously went nowhere), but deliberately did not add controls or an app-level banner. MAX-169 added both, for the store only: an unopenable store is now one named state (`StoreAvailability`) said once at the app root instead of nine surfaces each reporting their own read, it says plainly that nothing is being saved and that nothing has been deleted, and it offers a retry on the reasons a second attempt could clear and none on the reason it could not. **Still open:** every other `.failed` state is terminal until its view is rebuilt — a scoring call that timed out, a Keychain read taken while the device was locked, a plan version that would not save. Each has a retry that would plainly work and no control for it. Found by MAX-154 |
 | **R16** | **A first plan dated later than the history already on the device destroys that history, permanently and silently.** Three individually correct behaviours compose into it: the ingester backfills 90 days on its first pass, the authoring screen suggested this week's Monday as a first plan's effective date, and a workout on a day no plan governs is stored with no derived metrics and reported as `.workoutPredatesEveryPlan` — a reason that **never resolves**, because MAX-011 rightly forbids a later version from opening before an earlier one | An athlete accepting the suggested date on install day stranded roughly 89 days of their own training: stored, but never measurable, never scorable, never in a tally, and never mentioned on any screen. Silent, permanent, and invisible in CI because each part was correct in isolation | **Closed by MAX-165 (A23)** for the first plan, which is where it was reachable: the suggestion now covers the earliest captured workout, and the screen states in figures what any candidate date would exclude. **The class is not closed.** A workout that syncs *after* the first plan is saved but is dated before its effective date — a late Watch sync, a Health import from another app — is stranded the same way, still silently. Named in FIRST-RUN-SPEC §7.4; not yet a ticket |
+| **R17** | **A fix written into `StandardPlanSeed` does not reach anybody who already has a plan.** D1 makes the seed authoring *input*: it supplies the bands a first plan starts from and is then out of the loop forever. That is the property that keeps thresholds out of code — and it also means a corrected band, a new band, a reordering, or any future seeded plan field is delivered to precisely nobody until an athlete authors a new version. Every half is correct in isolation, which is why it took MAX-168 refusing to open a gate to notice | Two corrections sat undeliverable for four tickets: MAX-132's lift adherence bands and MAX-146's `rest.ranAnyway` condition, the second of which stamps every unprescribed lift *"Ran on a scheduled rest day."* A seed edit reads like a fix and lands like a no-op, and nothing in CI can tell the difference — the seed's own tests pass, because they test the seed | **Mitigated, not closed, by MAX-173.** There is now a route: authoring a revision adopts the current bands, stated on screen, as a new version. **The route still needs a human to walk it** — merging a seed fix changes no device until the owner opens Plan → revise → Save, so "shipped" and "in effect" remain different words. **The class recurs by construction:** the bands were the one plan field `PlanDraft` deliberately does not carry, which is exactly why they had no route — every other seeded value (the cap, the cadence band, the two thresholds, the arc, the week, the duration floor) is editable on the authoring screen, so an athlete can reach a new seed value by typing it. The next plan field added without either a draft field or an adoption path is stranded the same way, silently. Any ticket editing `StandardPlanSeed`, or adding a field to `Plan`, must say how its change reaches a plan that already exists — or say plainly that it does not |
 | R10 | The app cannot know whether Health *read* access was granted — `authorizationStatus(for:)` reports share status only, by Apple's design | No UI can honestly display "Health connected"; a permission problem is indistinguishable from "no workouts recorded yet" | Accepted, Apple-imposed. Found at MAX-030. Any future settings or onboarding UI must not claim read access it cannot verify. **MAX-161's spec §9 turns that into a rule with a structural defence and a test, and MAX-162 built it**: `FirstRunStep` models no per-step completion and the Health step has no completed state, so there is no value a view could draw a tick from; `FailureCopyTests.testNoHealthCopyClaimsAccessWasGrantedOrRefused` was extended over `FirstRunCopy` rather than duplicated. The rule now binds MAX-163's cover and MAX-164's card by construction rather than by review. (This row appeared twice after MAX-161; the duplicate is removed) |
 
 ## Overseer failure modes
