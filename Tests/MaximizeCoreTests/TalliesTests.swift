@@ -37,6 +37,24 @@ final class TalliesTests: XCTestCase {
         return try base.annotated(with: try Fixture.annotation(points: annotationPoints, workoutID: workoutID))
     }
 
+    /// A lift scored against the day's easy-run ask (A21) — the exact MAX-143 case — with
+    /// the label `MiscategorisedScoreLabeller` would have written for it. `.easy`'s slot
+    /// discipline is `.run`, so labelling it `.lift` is the ordinary "labelled" ledger
+    /// MAX-160's exclusion is about.
+    private func labelledLedger(points: Int, workoutID: UUID, annotationPoints: Int? = nil) throws -> ScoreLedger {
+        let score = try Fixture.score(points: points, workoutID: workoutID)
+        let label = try MiscategorisedScoreLabel(
+            id: UUID(),
+            workoutID: workoutID,
+            judgedAgainst: score.scheduledSession.kind,
+            actualDiscipline: .lift,
+            recordedAt: Fixture.epoch
+        )
+        let base = try ScoreLedger(automatic: score, labels: [label])
+        guard let annotationPoints else { return base }
+        return try base.annotated(with: try Fixture.annotation(points: annotationPoints, workoutID: workoutID))
+    }
+
     private func calendar(_ plan: Plan? = nil) throws -> PlanCalendar {
         try PlanCalendar([plan ?? Fixture.plan()])
     }
@@ -188,6 +206,121 @@ final class TalliesTests: XCTestCase {
         XCTAssertEqual(tallies.effectiveDays.effectiveCount, 0)
         XCTAssertEqual(tallies.effectiveDays.eligibleCount, 1, "still counts against — the day was judged")
         XCTAssertEqual(tallies.averageScore, 40)
+    }
+
+    // MARK: - MAX-160: a labelled miscategorised score leaves the average
+
+    /// The point of the ticket. Two scored workouts, one plain and one carrying a
+    /// `MiscategorisedScoreLabel`: the average is the plain one's value alone, and the
+    /// excluded count says exactly how many were left out.
+    func testALabelledScoreIsExcludedFromTheAverageAndAnUnlabelledOneIsNot() throws {
+        let plain = UUID()
+        let mislabelled = UUID()
+        let tallies = try TalliesCalculator.compute(
+            input(
+                from: "2026-01-06", through: "2026-01-07",
+                workouts: [
+                    try workout(id: plain, on: "2026-01-06"),
+                    try workout(id: mislabelled, on: "2026-01-07"),
+                ],
+                scoreLedgers: [
+                    plain: try ledger(points: 80, workoutID: plain),
+                    mislabelled: try labelledLedger(points: 30, workoutID: mislabelled),
+                ],
+                planCalendar: try calendar()
+            )
+        )
+
+        XCTAssertEqual(tallies.averageScore, 80, "the labelled score at 30 does not pull the mean down")
+        XCTAssertEqual(tallies.averageScoreExcludedMiscategorisedCount, 1)
+    }
+
+    /// **The designed state, not a zero.** When every scored workout in the interval is
+    /// labelled, `averageScore` stays nil — "no scores to average" — rather than resolving
+    /// to `0.0`, which would read as "you scored zero" instead of the true "nothing here
+    /// counts as evidence." The excluded count still says something was scored, just not
+    /// counted, distinguishing this from the ordinary "nothing scored yet" nil.
+    func testAnAverageOverOnlyLabelledScoresIsNilRatherThanZero() throws {
+        let mislabelled = UUID()
+        let tallies = try TalliesCalculator.compute(
+            input(
+                from: "2026-01-06", through: "2026-01-06",
+                workouts: [try workout(id: mislabelled, on: "2026-01-06")],
+                scoreLedgers: [mislabelled: try labelledLedger(points: 30, workoutID: mislabelled)],
+                planCalendar: try calendar()
+            )
+        )
+
+        XCTAssertNil(tallies.averageScore, "no unlabelled score exists to average — not a fabricated 0.0")
+        XCTAssertEqual(
+            tallies.averageScoreExcludedMiscategorisedCount, 1,
+            "distinguishes this nil from the ordinary 'nothing scored yet' nil"
+        )
+    }
+
+    /// A labelled score the athlete has manually corrected is still excluded. The
+    /// correction stands (it still drives `ScoreLedger.effectiveValue` and `wasCorrected`,
+    /// unaffected by labelling — see `ScoreLedger`'s own documentation); what does not
+    /// happen is the corrected value re-entering an average that answers "how am I
+    /// training," because the workout it came from was never judged against its own
+    /// discipline's ask in the first place.
+    func testALabelledAndCorrectedScoreIsStillExcludedFromTheAverage() throws {
+        let plain = UUID()
+        let mislabelled = UUID()
+        let ledgerForMislabelled = try labelledLedger(points: 30, workoutID: mislabelled, annotationPoints: 95)
+        XCTAssertEqual(ledgerForMislabelled.effectiveValue.points, 95, "sanity: the correction is in force")
+
+        let tallies = try TalliesCalculator.compute(
+            input(
+                from: "2026-01-06", through: "2026-01-07",
+                workouts: [
+                    try workout(id: plain, on: "2026-01-06"),
+                    try workout(id: mislabelled, on: "2026-01-07"),
+                ],
+                scoreLedgers: [
+                    plain: try ledger(points: 80, workoutID: plain),
+                    mislabelled: ledgerForMislabelled,
+                ],
+                planCalendar: try calendar()
+            )
+        )
+
+        XCTAssertEqual(
+            tallies.averageScore, 80,
+            "the correction (95) does not enter the average either — the label excludes the whole workout"
+        )
+        XCTAssertEqual(tallies.averageScoreExcludedMiscategorisedCount, 1)
+    }
+
+    /// **The unchanged-history property.** A run-only week — the same one
+    /// `testTheCombinedWeekExercisesAllFiveTalliesTogether` hand-works — has no ledger a
+    /// label could attach to, so `averageScoreExcludedMiscategorisedCount` is `0` and
+    /// `averageScore` is the exact pre-MAX-160 mean. This is the fixture MAX-160's own
+    /// scope discipline promises: a single-discipline history is untouched, byte for byte.
+    func testASingleDisciplineHistoryLeavesTheAverageAndItsExcludedCountUnchanged() throws {
+        let tuesday = UUID()
+        let wednesday = UUID()
+        let sunday = UUID()
+        let tallies = try TalliesCalculator.compute(
+            input(
+                from: "2026-01-05", through: "2026-01-11",
+                workouts: [
+                    try workout(id: tuesday, on: "2026-01-06"),
+                    try workout(id: wednesday, on: "2026-01-07"),
+                    try workout(id: sunday, on: "2026-01-11"),
+                ],
+                scoreLedgers: [
+                    tuesday: try ledger(points: 80, workoutID: tuesday),
+                    wednesday: try ledger(points: 75, workoutID: wednesday),
+                    sunday: try ledger(points: 90, workoutID: sunday),
+                ],
+                planCalendar: try calendar(),
+                restDayBudget: try RestDayBudget(daysPerWeek: 1)
+            )
+        )
+
+        XCTAssertEqual(tallies.averageScoreExcludedMiscategorisedCount, 0, "no ledger here carries a label")
+        XCTAssertEqual(try XCTUnwrap(tallies.averageScore), (80.0 + 75.0 + 90.0) / 3, accuracy: 0.001)
     }
 
     // MARK: - Unscored workouts
@@ -859,6 +992,22 @@ final class TalliesTests: XCTestCase {
                 workoutDays: 0,
                 effectiveDays: try EffectiveObligationTally(effectiveCount: 0, eligibleCount: 0),
                 averageScore: nil,
+                currentStreak: 0,
+                currentWeek: try TrainingWeek(start: try day("2026-01-05"), end: try day("2026-01-11"), arcWeekIndex: nil)
+            )
+        )
+    }
+
+    func testTalliesRejectsANegativeAverageScoreExcludedMiscategorisedCount() throws {
+        assertThrows(
+            .inconsistent,
+            try Tallies(
+                from: try day("2026-01-05"),
+                through: try day("2026-01-05"),
+                workoutDays: 0,
+                effectiveDays: try EffectiveObligationTally(effectiveCount: 0, eligibleCount: 0),
+                averageScore: nil,
+                averageScoreExcludedMiscategorisedCount: -1,
                 currentStreak: 0,
                 currentWeek: try TrainingWeek(start: try day("2026-01-05"), end: try day("2026-01-11"), arcWeekIndex: nil)
             )
