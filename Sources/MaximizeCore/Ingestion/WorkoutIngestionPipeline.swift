@@ -509,17 +509,18 @@ public actor WorkoutIngestionPipeline: WorkoutIngestionSink {
         // What is still true is the case those bands do not cover: they apply to a day
         // whose **lift slot is prescribed**, and no seeded weekday prescribes one — nor
         // does any plan already on disk, all of whose lift slots decode to rest. A lift
-        // let through today therefore resolves to `.rest`, correctly, and matches
-        // `rest.ranAnyway` — which carries no conditions and reads "Ran on a scheduled
-        // rest day." That is running language on a session that was not a run, and D8
-        // makes it permanent.
+        // let through today therefore resolves to `.rest`, correctly. **It no longer
+        // matches `rest.ranAnyway`** — MAX-146 gave that band
+        // `.actualDiscipline(oneOf: [.run])`, the same fix MAX-132 gave
+        // `easy.wellOverCap`, so a lift now falls to the seed's own unconditional
+        // `fallback.recorded` instead of being labelled with running language for a
+        // session that was not a run.
         //
-        // **So removing this is its own ticket, not a line in a routing one.** It needs
-        // the seed to say something true about lifting on a day that asked for none —
-        // `.actualDiscipline(oneOf: [.run])` on `rest.ranAnyway`, or a band for the case
-        // — and it is a behaviour change beyond scoring: a lift that scores acquires a
-        // calendar colour and enters the tallies, which is MAX-134's and MAX-135's
-        // arithmetic.
+        // **The gate stays shut anyway.** Closing the seed's shadow is not the same
+        // decision as opening MAX-111's gate: a lift that scores acquires a calendar
+        // colour and enters the tallies, which is MAX-134's and MAX-135's arithmetic,
+        // now landed — but *deciding* to open the gate is still its own call, not a
+        // line in this ticket.
         //
         // Returning — rather than throwing — is what keeps this inside R11's guarantee:
         // the workout is already durable, its samples are stored, `enrich` completes
