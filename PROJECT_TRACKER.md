@@ -1107,6 +1107,7 @@ twelve and is dispatchable immediately.
 | MAX-102 | **The read-only plan screen with version history** | — | Sonnet ✅ |
 | MAX-103 | "Runs in this conversation" strip | 098 | Sonnet ✅ |
 | MAX-104 | Copy and absence voice, **app-wide** — absorbs MAX-086's other half | 098, 102 | Sonnet ✅ |
+| MAX-104 | Copy and absence voice, **app-wide** — absorbs MAX-086's other half. Split: MAX-150 took chat+dashboard, MAX-104 took plan+workout | 098, 102 | Sonnet ✅ |
 | MAX-150 | **Split from MAX-104**: the chat and dashboard half, taken now because those two surfaces are finished and drifting while lifting is still being built | 098, 102, 103 | Sonnet ✅ |
 
 Three collisions the spec calls out and the overseer must respect: **094 lands before 095**
@@ -1895,6 +1896,10 @@ free. What landed in the file:
 - **Retry is MAX-152's and stays in the transcript**, beside the failure notice that
   explains what went wrong. The composer offers none — two retry affordances in two
   registers is worse than either alone.
+| MAX-151 | **Author the duration floor** — `StandardPlanSeed` states one (600s), the authoring screen edits it, `PlanProposal` can propose it. **Closes gap P3 for real** | 149, 148 | Sonnet ✅ |
+| MAX-158 | **Schema vocabulary reaches the athlete on a rejected proposal** — `PlanProposalError.description` says things like *"The reply left out `liftKind`, which the plan schema requires."* No PII and no status code, so not a privacy defect; but it names wire fields at a person who cannot act on them. MAX-155/156 left it deliberately (MAX-151 owned the file) | 155 | Sonnet |
+| MAX-159 | **A recorded-but-unjudged workout outranks another obligation's settled miss** — a Tuesday whose lift was recorded but unscored and whose run was missed draws `.noVerdict`, and its sentence names neither. §7.2's principle says change it, but the same ordering governs single-obligation days shipped since MAX-061, so it moves historical cells and wants a designed state | 135 | **Opus** |
+| MAX-160 | **Should a labelled miscategorised score leave the athlete's own average?** MAX-143 excluded it from the scorer-quality metric only; MAX-140 confirmed the average stays per-workout and declined to widen. A product decision, then a `Tallies` change | 143, 140 | Owner / overseer |
 
 **Four collisions the overseer must respect.**
 
