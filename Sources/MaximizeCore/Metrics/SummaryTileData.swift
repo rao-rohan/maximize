@@ -38,6 +38,33 @@ import Foundation
 /// `SummaryTilesView` renders a nil by omitting the tile, never by printing a
 /// fabricated zero. `duration` is the one figure `Workout` always carries, so it is
 /// the one non-optional tile.
+///
+/// ## A lift is not a run with holes in it (LIFTING-SPEC §10.1, MAX-139)
+///
+/// Three of the seven tiles — distance, drift, grade-adjusted pace — describe a running
+/// prescription rather than a measurement that merely happened to be missing. For a
+/// lift these are gated **explicitly**, to `nil`, by discipline, rather than left to the
+/// upstream absence MAX-130 already produces for most of them. Two reasons that is not
+/// redundant:
+///
+/// - `distance` reads straight off `Workout.distanceMeters`, which `DerivedMetricKind`
+///   has no opinion about at all — nothing upstream of this type stops a captured
+///   lift from carrying one, however unlikely.
+/// - A lift ingested **before** MAX-130 shipped can carry a stored drift or
+///   grade-adjusted pace figure computed by the old, discipline-blind calculator — the
+///   same "a lift ingested before this ticket has stored numbers for fields that no
+///   longer apply" case `WorkoutFactSheet`'s `describesARun` branch guards against.
+///
+/// Explicit gating is what keeps this type's own promise — "the numbers a lift actually
+/// has, not a run's screen with holes in it" — true regardless of what a caller hands
+/// it, rather than true only by the accident of what happens to be nil today.
+///
+/// `showsRunOnlySections` and `disciplineNote` extend the same decision to the three
+/// sibling sections `WorkoutDetailView` composes around these tiles — cadence, route,
+/// splits, and the HR curve's cap line — none of which is a `SummaryTileData` tile, but
+/// all of which the ticket that added those two properties needed one tested place to
+/// decide, per CLAUDE.md's rule that a view must not branch on discipline to decide what
+/// it shows.
 public struct SummaryTileData: Hashable, Sendable {
     /// One rendered figure: a bare value and the caption that gives it meaning ("8.42"
     /// / "km"). Both are already formatted; `SummaryTilesView` only lays them out.
@@ -88,9 +115,44 @@ public struct SummaryTileData: Hashable, Sendable {
     /// not yet computed.
     public let gradeAdjustedPace: Tile?
 
+    /// Which of the plan's two prescriptions this workout belongs to (A17), read from
+    /// `Workout.activityType.discipline` — the one place that mapping lives, the same
+    /// source `WorkoutVerdict.discipline` reads, so the tiles and the header above them
+    /// cannot disagree about which workout they describe.
+    public let discipline: Discipline
+
+    /// Whether the sections `WorkoutDetailView` composes around these tiles — cadence
+    /// versus target, the route map, the pace splits, and the HR curve's cap line —
+    /// belong on this workout's screen at all (LIFTING-SPEC §10.1, MAX-139).
+    ///
+    /// `false` for a lift. All four describe a *running* prescription: a cadence target
+    /// is steps against a running gait, a route and its splits assume a distance, and
+    /// `Plan.heartRateCapBPM` is documented as the easy-run ceiling. None of the four is
+    /// meaningless by accident — MAX-130 already stopped computing the cadence and
+    /// splits figures underneath two of them — and this is the one place the decision
+    /// is made explicit and tested rather than left to whichever of those sections
+    /// happens to resolve an empty state correctly today. `WorkoutDetailView` reads
+    /// this rather than comparing `discipline` itself, so the rule pinned by the tests
+    /// below cannot drift from what the screen composes.
+    public let showsRunOnlySections: Bool
+
+    /// Said once, in place of the four sections `showsRunOnlySections` turns off,
+    /// rather than each carrying its own "not applicable" card — the summary-tile
+    /// scale reading of the same trade `WorkoutFactSheet.disciplineFraming` makes for
+    /// the prompt (MAX-136). Non-nil only for a lift; nil for a run, which has nothing
+    /// to explain.
+    ///
+    /// **Its own sentence, not `WorkoutFactSheet`'s, and not `RouteMapView`'s "no route
+    /// for an indoor run" either.** Those are facts about *this session* — the sensor
+    /// simply was not there. This is a fact about the *discipline* — the figure could
+    /// never have described this session, indoors or not — and CLAUDE.md is explicit
+    /// that the two are different statements and must not share copy.
+    public let disciplineNote: String?
+
     /// - Parameters:
-    ///   - workout: supplies `distance`, `duration`, `activeEnergy` directly. This
-    ///     initializer never derives any of the three from the others.
+    ///   - workout: supplies `distance`, `duration`, `activeEnergy` and `discipline`
+    ///     directly. This initializer never derives any of the three figures from the
+    ///     others.
     ///   - metrics: `DerivedMetrics` for this workout (D2 — read, never recomputed),
     ///     or nil if metrics have not been computed yet. Supplies `averageHeartRate`,
     ///     `maximumHeartRate`, `heartRateDrift`, `gradeAdjustedPace`.
@@ -100,10 +162,20 @@ public struct SummaryTileData: Hashable, Sendable {
     ///     call site must say explicitly which unit it means, rather than one silently
     ///     picking up a fallback (the shape MAX-049 removed for `SettingsRepository`).
     public init(workout: Workout, metrics: DerivedMetrics?, distanceUnit: DistanceUnit) {
-        self.distance = workout.distanceMeters.map {
+        let discipline = workout.activityType.discipline
+        self.discipline = discipline
+        self.showsRunOnlySections = discipline == .run
+        self.disciplineNote = discipline == .lift ? Self.disciplineNoteText : nil
+
+        // Explicit, not incidental — see the type note on why a lift's distance,
+        // drift and grade-adjusted pace are gated here rather than trusted to already
+        // be nil.
+        self.distance = discipline == .lift ? nil : workout.distanceMeters.map {
             Tile(value: Self.formattedDistance($0, unit: distanceUnit), caption: distanceUnit.abbreviation)
         }
         self.duration = Tile(value: Self.formattedDuration(seconds: workout.durationSeconds), caption: "duration")
+        // Both disciplines. A heart rate measured during a lift is a heart rate
+        // (LIFTING-SPEC §3.2), and it is the one rich signal a lift gives for free.
         self.averageHeartRate = metrics?.averageHeartRateBPM.map {
             Tile(value: Self.formattedBPM($0), caption: "avg bpm")
         }
@@ -113,16 +185,29 @@ public struct SummaryTileData: Hashable, Sendable {
         self.activeEnergy = workout.activeEnergyKilocalories.map {
             Tile(value: Self.formattedKilocalories($0), caption: "kcal")
         }
-        self.heartRateDrift = metrics?.heartRateDriftFraction.map {
+        // Explicit, not incidental — see the type note. `driftIsMeaningful` already
+        // withholds this for `.lift`/`.other`, and MAX-130 already stops the calculator
+        // computing it for a lift, so this guard only ever fires for a record ingested
+        // before either existed.
+        self.heartRateDrift = discipline == .lift ? nil : metrics?.heartRateDriftFraction.map {
             Tile(value: Self.formattedSignedPercent($0), caption: "% drift")
         }
-        self.gradeAdjustedPace = metrics?.gradeAdjustedPaceSecondsPerKilometer.map {
+        // Explicit, not incidental, for the identical reason.
+        self.gradeAdjustedPace = discipline == .lift ? nil : metrics?.gradeAdjustedPaceSecondsPerKilometer.map {
             Tile(
                 value: Self.formattedPace($0, unit: distanceUnit),
                 caption: "grade-adj. pace /\(distanceUnit.abbreviation)"
             )
         }
     }
+
+    /// Worded apart from `WorkoutFactSheet.disciplineFraming` and from `RouteMapView`'s
+    /// indoor copy — see the type note on why the three must not share a sentence.
+    /// Names the same four things the fact sheet's absence rule inverts for, at the
+    /// screen's own scale: cadence, route, splits and the heart-rate cap line.
+    private static let disciplineNoteText =
+        "This is a lift, not a run, so the figures a run is measured by — cadence, route, "
+        + "pace splits, and the heart-rate cap — are left off rather than shown empty."
 
     /// Every present tile, in FR-1.5's own order: distance, duration, avg/max HR,
     /// energy, drift %, grade-adjusted pace. `SummaryTilesView` reads only this — it

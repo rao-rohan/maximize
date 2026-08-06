@@ -248,4 +248,128 @@ final class SummaryTileDataTests: XCTestCase {
         XCTAssertEqual(data.distance?.value, "8.42")
         XCTAssertEqual(data.distance?.caption, "km")
     }
+
+    // MARK: - MAX-139: a lift's tiles, discipline-gated explicitly
+
+    /// Which tiles a lift gets: duration, avg/max heart rate and active energy, never
+    /// distance, drift or grade-adjusted pace — even when every one of the run-only
+    /// figures is fully populated in the inputs, which pins that the exclusion is a
+    /// decision this type makes rather than an accident of what happened to be nil.
+    func testALiftShowsOnlyTheFiguresThatDescribeALift() throws {
+        let workout = try Fixture.workout(
+            activityType: .traditionalStrengthTraining,
+            distanceMeters: 500,
+            hasRoute: false
+        )
+        let data = SummaryTileData(
+            workout: workout,
+            metrics: try metrics(),
+            distanceUnit: .kilometers
+        )
+
+        XCTAssertNil(data.distance, "A lift's distance is not a training figure (A20)")
+        XCTAssertNil(data.heartRateDrift, "Drift measures a held aerobic effort a lift does not hold")
+        XCTAssertNil(data.gradeAdjustedPace, "Grade-adjusted pace models the cost of running")
+        XCTAssertNotNil(data.averageHeartRate, "A heart rate measured during a lift is still a heart rate")
+        XCTAssertNotNil(data.maximumHeartRate)
+        XCTAssertNotNil(data.activeEnergy)
+        XCTAssertFalse(data.duration.value.isEmpty)
+    }
+
+    /// The defensive half of the guard: even a lift whose *stored* metrics still carry
+    /// drift and grade-adjusted pace — the shape a workout ingested before MAX-130
+    /// gated the calculator would have — must not show them. `SummaryTileData` does not
+    /// trust the metric to already be nil; it gates on discipline itself.
+    func testALiftsStaleDriftAndPaceFromBeforeMAX130StayHidden() throws {
+        let workout = try Fixture.workout(activityType: .traditionalStrengthTraining)
+        let staleMetrics = try DerivedMetrics(
+            workoutID: Fixture.workoutID,
+            averageHeartRateBPM: 140,
+            maximumHeartRateBPM: 165,
+            heartRateDriftFraction: 0.08,
+            gradeAdjustedPaceSecondsPerKilometer: 300,
+            planVersion: PlanVersion(1)
+        )
+        let data = SummaryTileData(workout: workout, metrics: staleMetrics, distanceUnit: .kilometers)
+
+        XCTAssertNil(data.heartRateDrift)
+        XCTAssertNil(data.gradeAdjustedPace)
+    }
+
+    func testALiftsTilesCountOnlyTheFiguresThatApply() throws {
+        let workout = try Fixture.workout(
+            activityType: .traditionalStrengthTraining,
+            distanceMeters: nil,
+            hasRoute: false
+        )
+        let data = SummaryTileData(workout: workout, metrics: try metrics(), distanceUnit: .kilometers)
+
+        // duration, avg bpm, max bpm, kcal — no distance, no drift, no pace.
+        XCTAssertEqual(data.tiles.count, 4)
+    }
+
+    func testARunsTilesAreUnaffectedByTheLiftGuard() throws {
+        let workout = try Fixture.workout(activityType: .running, distanceMeters: 8_420)
+        let data = SummaryTileData(workout: workout, metrics: try metrics(), distanceUnit: .kilometers)
+
+        XCTAssertEqual(data.tiles.count, 7, "Every figure MAX-045 originally shipped, unaffected by MAX-139")
+    }
+
+    // MARK: - MAX-139: `discipline`, `showsRunOnlySections`, `disciplineNote`
+
+    func testDisciplineIsReadFromTheWorkoutsActivityType() throws {
+        let run = try SummaryTileData(
+            workout: Fixture.workout(activityType: .running), metrics: nil, distanceUnit: .kilometers
+        )
+        let lift = try SummaryTileData(
+            workout: Fixture.workout(activityType: .traditionalStrengthTraining),
+            metrics: nil,
+            distanceUnit: .kilometers
+        )
+
+        XCTAssertEqual(run.discipline, .run)
+        XCTAssertEqual(lift.discipline, .lift)
+    }
+
+    /// Every named `ActivityType` that is not a strength type stays `.run` by slot
+    /// (A17) — a ride and a hike show the run-only sections exactly as a run does.
+    func testNonLiftActivityTypesAllShowTheRunOnlySections() throws {
+        for activityType: ActivityType in [.running, .treadmillRunning, .walking, .hiking, .cycling] {
+            let data = SummaryTileData(
+                workout: try Fixture.workout(activityType: activityType), metrics: nil, distanceUnit: .kilometers
+            )
+            XCTAssertTrue(data.showsRunOnlySections, "\(activityType)")
+            XCTAssertNil(data.disciplineNote, "\(activityType)")
+        }
+    }
+
+    func testALiftDoesNotShowTheRunOnlySections() throws {
+        let workout = try Fixture.workout(activityType: .traditionalStrengthTraining)
+        let data = SummaryTileData(workout: workout, metrics: nil, distanceUnit: .kilometers)
+
+        XCTAssertFalse(data.showsRunOnlySections)
+    }
+
+    /// The absence copy for the four removed sections (cadence, route, splits, cap
+    /// line): present only for a lift, and worded apart from the fact sheet's and the
+    /// route section's own absence strings, per CLAUDE.md's "different statements must
+    /// not share copy".
+    func testALiftCarriesADisciplineNoteDistinctFromOtherAbsenceCopy() throws {
+        let workout = try Fixture.workout(activityType: .traditionalStrengthTraining)
+        let data = SummaryTileData(workout: workout, metrics: nil, distanceUnit: .kilometers)
+
+        let note = try XCTUnwrap(data.disciplineNote)
+        XCTAssertTrue(note.contains("lift"))
+        XCTAssertFalse(note.contains("indoor"), "Must not read as `RouteMapView`'s indoor-run absence")
+        XCTAssertNotEqual(note, "This was a lift, not a run. The figures a run is measured by are absent below "
+            + "rather than empty: they do not describe this session and were never computed "
+            + "for it, so read nothing into their absence and do not judge the session by them.")
+    }
+
+    func testARunCarriesNoDisciplineNote() throws {
+        let workout = try Fixture.workout(activityType: .running)
+        let data = SummaryTileData(workout: workout, metrics: nil, distanceUnit: .kilometers)
+
+        XCTAssertNil(data.disciplineNote)
+    }
 }

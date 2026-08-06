@@ -25,6 +25,14 @@ import MaximizeCore
 /// meaningful for the session. This view never fills a gap with "0" or "--"; a missing
 /// tile is a tile that is not drawn. `duration` is the one figure that is never absent
 /// (a workout always has one), so the grid is never completely empty.
+///
+/// ## A lift explains its own shorter grid (MAX-139)
+///
+/// `SummaryTileData.disciplineNote` is non-nil only for a lift, and this view renders it
+/// once, below the tiles — the one sentence standing in for the run-only sections
+/// `WorkoutDetailView` leaves off this workout's screen entirely (cadence, route,
+/// splits, the HR curve's cap line). Nothing here decides *whether* to show it or what
+/// it says; both are `SummaryTileData`'s answer, tested there.
 struct SummaryTilesView: View {
     let data: SummaryTileData
 
@@ -43,6 +51,12 @@ struct SummaryTilesView: View {
                 ForEach(Array(data.tiles.enumerated()), id: \.offset) { _, tile in
                     tileView(tile)
                 }
+            }
+
+            if let disciplineNote = data.disciplineNote {
+                Text(disciplineNote)
+                    .font(.metricLabel)
+                    .foregroundStyle(Color.textSecondary)
             }
         }
         .contentSurface(.card)

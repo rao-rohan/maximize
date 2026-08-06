@@ -53,11 +53,31 @@ enum WorkoutDisplayFormatting {
         case .other:
             return session.note ?? "Other"
         case .lift:
-            // The note is where a lift's ask lives ("45 min, lower body") until
-            // `ScheduledSession` learns durations — MAX-113 closes tracker gap P3. Same
-            // shape as `.other` above, and unreachable until a template can prescribe one.
-            return session.note ?? "Lift"
+            return liftPrescriptionLabel(session)
         }
+    }
+
+    /// The lift slot's ask, in this screen's own voice — "Lift · 45:00" or
+    /// "Lift · 45:00 · Chest and shoulders" (MAX-131, A22, MAX-139).
+    ///
+    /// Not `WorkoutFactSheet`'s rendering of the identical session: that one speaks
+    /// in raw minutes and groups for Claude, by its own design, and reuses none of this
+    /// screen's formatters. This one reuses `SummaryTileData.formattedDuration` — the
+    /// same stopwatch reading every other duration on the detail screen already uses —
+    /// and `MuscleGroupEntryCopy.describe` — the same sentence construction the
+    /// muscle-group section below the header already speaks — so a lift's own ask is
+    /// never worded two different ways one screen apart.
+    private static func liftPrescriptionLabel(_ session: ScheduledSession) -> String {
+        var parts = ["Lift"]
+        if let durationSeconds = session.durationSeconds {
+            parts.append(SummaryTileData.formattedDuration(seconds: durationSeconds))
+        }
+        if !session.muscleGroups.isEmpty {
+            parts.append(MuscleGroupEntryCopy.describe(session.muscleGroups))
+        }
+        let label = parts.joined(separator: " · ")
+        guard let note = session.note, !note.isEmpty else { return label }
+        return "\(label) (\(note))"
     }
 
     private static func distanceSuffixed(_ base: String, _ session: ScheduledSession, unit: DistanceUnit) -> String {

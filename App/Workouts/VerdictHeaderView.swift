@@ -34,6 +34,24 @@ import MaximizeCore
 /// plan version in force, may do that — and a manual score is exactly a raw number with
 /// no stored band to read. Inventing a color for it here would be the same mistake
 /// `Color.scoreBand(_:)` refuses to allow at its call site, just moved one file over.
+///
+/// ## A labelled score sits beside the auto-score the same way (A21/MAX-143)
+///
+/// `WorkoutVerdict.miscategorisationLabel` is non-nil when this score was reached
+/// against the wrong discipline's ask, from a lift scored before MAX-133 taught the
+/// scorer to resolve a workout's own prescription. Nothing about the chip above moves —
+/// same value, same band, same colour, same rationale — and `miscategorisationRow`
+/// below adds one more plain-text, no-colour line, exactly the shape `annotationRow`
+/// already has for a manual correction, because a labelled score is the identical kind
+/// of fact: additive information beside an unchanged, immutable number (D8).
+///
+/// ## Which prescription "Scheduled" shows (A17, MAX-139)
+///
+/// `WorkoutVerdict.scheduledSession` now resolves through the workout's own discipline
+/// (`PlanDay.scheduledSession(for:)`), so a lift's row reads the day's *lift* ask —
+/// rest, if the plan prescribed none — never the day's run ask. This view does not
+/// branch on discipline to get that; it renders whatever `scheduledSession` already is,
+/// which is the whole point of resolving it in `MaximizeCore` rather than here.
 struct VerdictHeaderView: View {
     let verdict: WorkoutVerdict
     /// MAX-047 — the athlete's chosen `DistanceUnit`, needed here for the scheduled
@@ -201,6 +219,12 @@ struct VerdictHeaderView: View {
                 Color.scoreBand(automatic.band),
                 in: RoundedRectangle(cornerRadius: CornerRadius.tile, style: .continuous)
             )
+            // A21/MAX-143: the number and the caveat that it was reached against the
+            // wrong discipline's ask are read as one VoiceOver element, the same
+            // treatment `MuscleGroupEntryData.accessibilityLabel` gives its own prompt
+            // and reason — never as a number followed by an unrelated sentence.
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(scoreChipAccessibilityLabel(automatic))
 
             Text(automatic.rationale)
                 .font(.bodyCopy)
@@ -209,7 +233,31 @@ struct VerdictHeaderView: View {
             if let annotation {
                 annotationRow(annotation)
             }
+
+            if verdict.miscategorisationLabel != nil {
+                miscategorisationRow
+            }
         }
+    }
+
+    private func scoreChipAccessibilityLabel(_ automatic: Score) -> String {
+        let scoreLine = "\(automatic.value) points, \(automatic.isEffective ? "Effective" : "Not effective")"
+        guard verdict.miscategorisationLabel != nil else { return scoreLine }
+        return "\(scoreLine). \(MiscategorisedScoreCopy.labelledAccessibilitySuffix)"
+    }
+
+    /// A21/MAX-143: this auto-score exists, keeps its value and its band unchanged, and
+    /// was reached against the other discipline's ask — settled before the plan could
+    /// tell the two apart. Deliberately the same plain-text, no-colour treatment
+    /// `annotationRow` gives a manual correction: nothing about the score's own
+    /// presentation moves, this is an added sentence explaining it, not a second
+    /// verdict competing with the first.
+    private var miscategorisationRow: some View {
+        Text(MiscategorisedScoreCopy.labelledDetail)
+            .font(.metricLabel)
+            .foregroundStyle(Color.textSecondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentSurface(.inset)
     }
 
     /// Deliberately no color: see the type doc comment for why a manual correction
