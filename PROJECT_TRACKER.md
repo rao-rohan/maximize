@@ -4151,6 +4151,13 @@ answers the three actions: Health access in place, "Author a plan" pushed (match
 `PlanView`'s own entry point), "Add a key" presented as a Settings sheet. FIRST-RUN-SPEC
 §5, §8. No change to `Sources/MaximizeCore/`.
 
+**Landed in two passes.** First opened before MAX-163 merged, with `healthAccess` held in
+memory and the gap below reported rather than closed. MAX-163 landed
+`FirstRunPresentationRecording` shortly after, and this PR was updated in place — same
+branch, same ticket — to read it, closing the gap before merge. The section below is kept
+as "closed" rather than rewritten as if it were never open, because the reasoning for
+*why* the reconciliation below is not a plain pass-through is worth keeping on the record.
+
 ### Decided
 
 - **The card is a fixed header above every load state of the list**, not only the loaded
@@ -4173,27 +4180,54 @@ answers the three actions: Health access in place, "Author a plan" pushed (match
   this ticket's file list; both duplicates are three lines of adapter with no decision in
   them (the decision — what a result *means* — is `MaximizeCore`'s). Flagged for a future
   ticket that touches both spots to fold into one.
+- **`FirstRunModel.requestHealthAccessTapped()` also calls
+  `presentationRecording.recordHealthRequestPresented()`**, not only the launch cover.
+  This card's own Health button is reachable — the rare, crash-recovery path
+  `FirstRunCardState.healthAccessNotRequested`'s own doc comment names ("a cover dismissed
+  by a crash, a store that failed at the wrong moment") — and if a tap through *this* door
+  left the recording unwritten, `FirstRunCoverGate` would still believe the sheet had never
+  been shown and reopen the full-screen cover on top of an otherwise working install on the
+  next launch. Recording is idempotent (MAX-163's own guarantee), so this costs nothing on
+  the ordinary path where the cover already wrote it first.
 
-### Reported, not built: `healthAccess` has no device-lifetime source yet
+### Closed: `healthAccess` now reads MAX-163's device-lifetime recording
 
-MAX-162's own note above already named this "the likeliest wiring mistake in the set," and
-it is the one this ticket could not close. `FirstRunFacts.healthAccess` wants whether the
-Health sheet has **ever** been presented on this device, across launches — the fact
-`FirstRunPresentationRecording` (MAX-163's protocol, per its scope in FIRST-RUN-SPEC §12
-and MAX-162's own section above: "deliberately not defined here") is meant to supply.
-That protocol does not exist in `Sources/MaximizeCore/FirstRun/` yet, and per this
-ticket's scope discipline ("if you need something from that module that does not exist,
-report it rather than adding it"), MAX-164 does not add it either.
+MAX-162's own note had named this "the likeliest wiring mistake in the set." This PR opened
+before MAX-163 merged, with the gap reported rather than closed (`healthAccess` held in
+memory, seeded `.notRequestedYet`, per this ticket's scope discipline against adding the
+missing protocol itself). MAX-163 landed `FirstRunPresentationRecording` immediately after,
+and this same branch was updated to read it before merging — `FirstRunModel
+.resolveHealthAccess()` composes `presentationRecording.hasPresentedHealthRequest` with a
+capability check, rather than passing the recording straight through:
 
-So `FirstRunModel` holds `healthAccess` in memory, seeded `.notRequestedYet`, updated only
-by a tap on this session's own card. **Consequence, stated plainly:** an athlete who
-granted Health access on a past launch, then force-quit or was killed by the system
-without ever tapping the card that session, sees "Health access has not been requested"
-again on the next cold launch — even though every other step is done and workouts are
-arriving. This is conservative (it can only over-show a step that is actually finished,
-never hide one that is not) but it is a real, user-visible defect until `WorkoutsView` is
-wired to `FirstRunPresentationRecording` once MAX-163 lands. **Follow-up ticket, not done
-here**: thread MAX-163's protocol through `FirstRunModel`'s `healthAccess` seed.
+- Not yet presented → `.notRequestedYet` — unchanged from a fresh install's answer today.
+- Presented, and `HKHealthStore.isHealthDataAvailable()` says this device can provide
+  Health data → `.requestAnswered`. The recording only ever means "the sheet was presented
+  and answered" (its own doc comment); it never means granted or refused (R10), so
+  `.requestAnswered` is the strongest honest reading of a `true` recording.
+- **Presented, but this device has no Health store → `.healthDataUnavailable`, not
+  `.requestAnswered`.** This is the reconciliation the coordinator asked for by name:
+  MAX-163's recording is written the instant the cover's Continue button is tapped,
+  *unconditionally* — deliberately not gated on the Health call succeeding, because a
+  device with no Health store fails that call identically forever and gating the recording
+  on success would rebuild the every-launch nag through another door. Trusting the
+  recording alone here would read a `true` value on such a device as "answered" and put a
+  plan-and-key checklist in front of an athlete on hardware that can never receive a
+  workout. `isHealthDataAvailable()` is a synchronous capability check with no privacy
+  surface — "does this hardware support HealthKit," not anything about the athlete — so
+  reconciling on every `load()` costs nothing and needs no permission.
+- `.requestFailed` stays reachable only within the current session
+  (`sessionHealthAccessOverride`), never from the persisted recording: once presented, the
+  recording cannot un-present itself, so a relaunch cannot distinguish "answered" from
+  "failed for a reason other than device capability." MAX-163's own reasoning is that this
+  does not need distinguishing past the current session, because a repeat
+  `requestAuthorization` call is itself idempotent and harmless once the sheet has been
+  shown once.
+
+**Consequence, now closed:** an athlete who granted Health access on a past launch sees the
+correct downstream card (plan, key, or nothing) on the very next launch, whether or not
+they ever touched this ticket's own Health button — the cover's recording and this card's
+now agree, because both write to and read the one `FirstRunPresentationRecording`.
 
 ### Rejected
 
@@ -4215,9 +4249,12 @@ to every branch and the R10 banned-phrase list.
 CI cannot prove anything this ticket actually changed: that the card renders correctly at
 any state, any Dynamic Type size, or under Increase Contrast/Reduce Transparency; that the
 three actions reach the right screen and the card disappears on return; that the
-Health-request button actually presents the iOS sheet; or that the in-memory
-`healthAccess` gap above behaves as described on a real relaunch. See the PR's "Needs
-device verification" section for the checklist.
+Health-request button actually presents the iOS sheet; or — the one that matters most for
+this pass — that a `UserDefaults` write from this card's own Health button, or from the
+launch cover, is actually read back as `true` by the other on a real relaunch. Both
+`FirstRunCoverGateTests` (MAX-163) and this ticket's reasoning above are proven only
+against a fake; the real adapter is untested by construction (R1, no toolchain, no
+device). See the PR's "Needs device verification" section for the checklist.
 
 **`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
 Nothing in this ticket touches `Sources/MaximizeCore/`, so neither suite's *content*
