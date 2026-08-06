@@ -150,20 +150,30 @@ extension TrainingContext {
     private var talliesLines: [String] {
         var lines: [String] = []
 
+        // Also checked by MAX-157's sweep and left as "days": `workoutDays` counts
+        // distinct calendar days with at least one recorded workout (see `Tallies`'s own
+        // doc comment) — a day with a run and a lift still counts once here, so "days" is
+        // the true unit and MAX-134 never touched this figure.
         lines.append("Days with at least one workout: \(tallies.workoutDays)")
 
         let effective = tallies.effectiveDays
         if effective.rate == nil {
-            // `EffectiveDayTally` refuses to report 0 for an empty denominator, and the
+            // `EffectiveObligationTally` refuses to report 0 for an empty denominator, and the
             // prompt must not turn that refusal back into a zero: "nothing was eligible"
             // and "you failed every session" are opposite statements.
-            lines.append("Effective days: nothing in this window was eligible — the plan asked "
-                + "for rest, no plan governed these days, or their outcome is not yet known.")
+            lines.append("Effective sessions: nothing in this window was eligible — the plan "
+                + "asked for rest, no plan governed these days, or their outcome is not yet "
+                + "known.")
         } else {
-            // The exact string `TrendTileData` puts on the tile, so a figure quoted here
-            // and a figure read on the dashboard cannot differ in shape or in rounding
-            // (§3.6(a) and (c)).
-            lines.append("Effective days: \(effective.effectiveCount)/\(effective.eligibleCount)")
+            // The exact numerator/denominator shape `TrendTileData` puts on the tile, so a
+            // figure quoted here and a figure read on the dashboard cannot differ in shape or
+            // in rounding (§3.6(a) and (c)). The label itself is MAX-157's fix: since MAX-134
+            // (LIFTING-SPEC §6.2), `EffectiveObligationTally`'s denominator counts prescribed
+            // *sessions*, not calendar days — a Tuesday asking for a run and a lift is two
+            // chances — so a label still reading "days" would hand Claude a number and
+            // mislabel its unit. "Sessions" matches LIFTING-SPEC §6.2 and `PlanFormatting`,
+            // and MAX-140 gives the on-screen tile the same word for the same reason.
+            lines.append("Effective sessions: \(effective.effectiveCount)/\(effective.eligibleCount)")
         }
 
         if let averageScore = tallies.averageScore {
@@ -175,6 +185,13 @@ extension TrainingContext {
                 + "no average. That is an absence of verdicts, not a low one.")
         }
 
+        // Checked by MAX-157's sweep and left as "days": `currentStreak`'s own unit of
+        // account is genuinely the calendar day, not the obligation. LIFTING-SPEC §6.3
+        // rolls a day's obligations up with AND — a day extends the streak only if every
+        // obligation it carried was met — before the streak ever sees it, so what the
+        // streak walks is one entry per day regardless of how many sessions that day
+        // prescribed. Renaming this line's unit would itself be the drift MAX-134 warns
+        // against, not a fix for it.
         lines.append("Current streak: \(tallies.currentStreak) days")
 
         return lines

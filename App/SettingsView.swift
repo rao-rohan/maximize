@@ -40,9 +40,17 @@ struct SettingsView: View {
 
     @State private var model: SettingsModel
 
-    @State private var isKeyStored = false
+    /// MAX-154: three states, not a `Bool`. A Keychain read can fail, and this screen
+    /// used to answer that failure by setting a flag to `false` — so a device that could
+    /// not be asked stated flatly that no key was stored. See `StoredAPIKeyPresence`.
+    ///
+    /// Optional for a fourth reason the enum deliberately does not carry: nil is "not
+    /// asked yet", which is not the same as "asked, and the answer did not come back".
+    /// It holds only until `.task` runs, and it renders as a spinner rather than as a
+    /// sentence — the same shape the two settings sections below use while loading.
+    @State private var keyPresence: StoredAPIKeyPresence?
     @State private var enteredKey = ""
-    @State private var keyStatusMessage: String?
+    @State private var keyStatus: APIKeyStatusMessage?
 
     /// MAX-081. The key field is the only text entry on this screen, so one flag is
     /// enough; it exists so saving, clearing, and the keyboard's own Done button can
@@ -100,7 +108,11 @@ struct SettingsView: View {
 
             // MAX-022: Anthropic API key section (keep styled consistently)
             Section("Anthropic API key") {
-                Text(isKeyStored ? "A key is stored." : "No key is stored.")
+                if let keyPresence {
+                    Text(FailureCopy.storedKeyPresence(keyPresence))
+                } else {
+                    ProgressView()
+                }
 
                 // MAX-081. `SecureField` is single-line, so the return key really does
                 // submit: `.done` names the action the key press performs, and
@@ -119,12 +131,16 @@ struct SettingsView: View {
                 Button("Save", action: saveKey)
                     .disabled(enteredKey.isEmpty)
 
-                if isKeyStored {
+                // MAX-154: offered whenever a key *might* be stored, which now includes
+                // "the store could not be read". Withholding the only control that
+                // removes a key from a device where one may well be sitting is the
+                // wrong side to err on — see `StoredAPIKeyPresence.permitsClearing`.
+                if keyPresence?.permitsClearing == true {
                     Button("Clear", role: .destructive, action: clearKey)
                 }
 
-                if let keyStatusMessage {
-                    Text(keyStatusMessage)
+                if let keyStatus {
+                    Text(FailureCopy.apiKeyStatus(keyStatus))
                         .font(.metricLabel)
                         .foregroundStyle(Color.textSecondary)
                 }
@@ -250,7 +266,7 @@ struct SettingsView: View {
     /// rest-day budget (or any other setting) that looks editable and saved when
     /// nothing was, or could be, written.
     private var unavailableMessage: some View {
-        Text("Settings are unavailable right now, so changes here would not be saved.")
+        Text(FailureCopy.couldNotLoad(.settings))
             .font(.metricLabel)
             .foregroundStyle(Color.textSecondary)
     }
@@ -314,12 +330,18 @@ struct SettingsView: View {
 
     // MARK: - Key management
 
+    /// Reads presence, and — MAX-154 — records that it could not be read as its own
+    /// answer rather than as "no key".
+    ///
+    /// The caught error is never inspected and never logged. `AnthropicAPIKeyError`'s
+    /// associated `String` is a Keychain status description, which is safe, but nothing
+    /// about this store may reach a log at all: not a failure code, not the fact that a
+    /// key is present, not its length (CLAUDE.md, "Health and privacy").
     private func refreshStoredKeyStatus() {
         do {
-            isKeyStored = try keyStore.retrieve() != nil
+            keyPresence = try keyStore.retrieve() == nil ? .notStored : .stored
         } catch {
-            isKeyStored = false
-            keyStatusMessage = "Could not check Keychain status."
+            keyPresence = .unknown
         }
     }
 
@@ -332,25 +354,36 @@ struct SettingsView: View {
             // the keyboard up because both leave the user with something to type — an
             // empty field to fill in, or a cleared one to re-enter.
             isKeyFieldFocused = false
-            keyStatusMessage = "Key saved."
+            keyStatus = .saved
             refreshStoredKeyStatus()
         } catch AnthropicAPIKeyError.emptyKey {
-            keyStatusMessage = "Enter a key first."
-            // FIX MAX-064 defect: keep enteredKey as-is so user can retry
+            keyStatus = .enterAKeyFirst
+            // MAX-064: keep `enteredKey` as-is so the athlete can correct it.
         } catch {
-            keyStatusMessage = "Could not save the key."
-            // FIX MAX-064 defect: clear enteredKey on failure so sensitive data doesn't linger
+            // MAX-064 clears the field so key material does not linger in view state;
+            // MAX-154 makes the copy say so, because a field that empties itself with
+            // no explanation reads as the app having lost what was typed.
+            keyStatus = .couldNotSave
             enteredKey = ""
+            // The write failed, so whether a key is stored is no longer something this
+            // screen knows: an update can fail after the item existed, and an add can
+            // fail with the item never created. Re-reading is the only honest answer,
+            // and it has its own failure state.
+            refreshStoredKeyStatus()
         }
     }
 
     private func clearKey() {
         do {
             try keyStore.delete()
-            keyStatusMessage = "Key cleared."
+            keyStatus = .cleared
             refreshStoredKeyStatus()
         } catch {
-            keyStatusMessage = "Could not clear the key."
+            keyStatus = .couldNotClear
+            // Same reasoning as the failed save: a delete that threw leaves the item's
+            // fate unknown, so the presence line must be re-derived rather than left
+            // reading as it did before the attempt.
+            refreshStoredKeyStatus()
         }
     }
 }

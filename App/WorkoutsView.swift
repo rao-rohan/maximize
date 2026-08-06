@@ -30,14 +30,21 @@ struct WorkoutsView: View {
             ProgressView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .failed:
-            Text("Could not load workouts.")
+            // MAX-154. Both sentences come from `MaximizeCore` now, and the reason they
+            // are two sentences rather than one is R10: an empty list and a refused
+            // Health read are indistinguishable from inside this app, so the failure
+            // copy says it is *not* the absence, and the absence copy names the other
+            // possibility without asserting it. See `FailureCopy`.
+            Text(FailureCopy.couldNotLoad(.workoutList))
                 .font(.bodyCopy)
                 .foregroundStyle(Color.textSecondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case let .loaded(data) where data.workouts.isEmpty:
-            Text("No workouts yet.")
+            Text(FailureCopy.noWorkoutsRecorded)
                 .font(.bodyCopy)
                 .foregroundStyle(Color.textSecondary)
+                .multilineTextAlignment(.center)
+                .screenMargins()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case let .loaded(data):
             ScrollView {

@@ -36,6 +36,7 @@ final class PlanProposalTests: XCTestCase {
         cadenceHigh: String = "170",
         effective: String = "70",
         marginal: String = "45",
+        minimumSessionDurationSeconds: String? = nil,
         week: [String] = PlanProposalTests.weekEntries,
         longRunArc: String = #"[{"index": 1, "distanceMeters": 14000}, {"index": 2, "distanceMeters": 16000}]"#,
         goalStatements: String = #"["Sub-1:45 half marathon", "Stay under the cap on easy days"]"#,
@@ -52,6 +53,9 @@ final class PlanProposalTests: XCTestCase {
             #""longRunArc": \#(longRunArc)"#,
             #""goalStatements": \#(goalStatements)"#,
         ]
+        if let minimumSessionDurationSeconds {
+            fields.append(#""minimumSessionDurationSeconds": \#(minimumSessionDurationSeconds)"#)
+        }
         if let goalTargetDay {
             fields.append(#""goalTargetDay": \#(goalTargetDay)"#)
         }
@@ -442,6 +446,42 @@ final class PlanProposalTests: XCTestCase {
         XCTAssertTrue(schema.contains("liftNote"))
     }
 
+    // MARK: - The duration floor (MAX-151)
+
+    /// A plan-level value, omissible like every other optional field in this file — a
+    /// model with no opinion says nothing rather than guessing.
+    func testTheDurationFloorIsOptional() throws {
+        let proposal = try PlanProposal.parse(reply())
+        XCTAssertNil(proposal.minimumSessionDurationSeconds)
+    }
+
+    func testAStatedDurationFloorParses() throws {
+        let proposal = try PlanProposal.parse(reply(minimumSessionDurationSeconds: "600"))
+        XCTAssertEqual(proposal.minimumSessionDurationSeconds, 600)
+    }
+
+    /// The door's own rule reaching this boundary in its own vocabulary — the plan-level
+    /// twin of `testAZeroLiftDurationIsRejectedInTheDoorsWords`.
+    func testAZeroDurationFloorIsRejectedInTheDoorsWords() {
+        assertParseFails(
+            reply(minimumSessionDurationSeconds: "0"),
+            .rejectedByAuthoring(.minimumSessionDurationNotPositive)
+        )
+    }
+
+    func testANegativeDurationFloorIsRejectedInTheDoorsWords() {
+        assertParseFails(
+            reply(minimumSessionDurationSeconds: "-60"),
+            .rejectedByAuthoring(.minimumSessionDurationNotPositive)
+        )
+    }
+
+    /// The schema cannot go stale behind this field, matching the coverage every other
+    /// field in the plan-level "targets" group already has.
+    func testTheSchemaNamesTheDurationFloor() {
+        XCTAssertTrue(PlanProposal.schemaDescription.contains("minimumSessionDurationSeconds"))
+    }
+
     // MARK: - The long-run arc
 
     func testAnEmptyArcIsRefused() {
@@ -670,6 +710,7 @@ final class PlanProposalTests: XCTestCase {
         XCTAssertEqual(plan.cadenceTarget.highStepsPerMinute, proposal.cadenceHighStepsPerMinute)
         XCTAssertEqual(plan.rubric.effectiveThreshold.points, proposal.effectiveThresholdPoints)
         XCTAssertEqual(plan.rubric.marginalThreshold.points, proposal.marginalThresholdPoints)
+        XCTAssertEqual(plan.minimumSessionDurationSeconds, proposal.minimumSessionDurationSeconds)
         XCTAssertEqual(plan.goals, proposal.goals)
         XCTAssertEqual(
             plan.longRunArc.weeks.map(\.index),
@@ -759,6 +800,14 @@ final class PlanProposalTests: XCTestCase {
             reply(effective: "120"),
             .rejectedByAuthoring(.scoreThresholdOutOfRange(permitted: ScoreValue.permittedRange))
         )
+
+        var noFloor = session.draft
+        noFloor.minimumSessionDurationSeconds = 0
+        assertAuthoringRejects(session, noFloor, .minimumSessionDurationNotPositive)
+        assertParseFails(
+            reply(minimumSessionDurationSeconds: "0"),
+            .rejectedByAuthoring(.minimumSessionDurationNotPositive)
+        )
     }
 
     // MARK: - Helpers for the property above
@@ -784,7 +833,8 @@ final class PlanProposalTests: XCTestCase {
             },
             liftSessions: liftSessions,
             goalStatements: proposal.goalStatements.joined(separator: "\n"),
-            goalTargetDay: proposal.goalTargetDay
+            goalTargetDay: proposal.goalTargetDay,
+            minimumSessionDurationSeconds: proposal.minimumSessionDurationSeconds
         )
     }
 

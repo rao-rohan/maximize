@@ -491,6 +491,14 @@ public struct PlanProposal: Hashable, Sendable, Codable {
     /// Score at or above which a day is marginal rather than ineffective.
     public let marginalThresholdPoints: Int
 
+    /// The duration floor (`Plan.minimumSessionDurationSeconds`, MAX-149, MAX-151) — a
+    /// plan-level value, like `heartRateCapBPM` above, not a per-weekday one. Nil when
+    /// the proposal states no opinion, the same reading `Plan`'s own default carries and
+    /// the same "no guessed threshold" rule every other optional field in this file
+    /// follows: a model that does not know what a good floor is should say nothing
+    /// rather than invent one.
+    public let minimumSessionDurationSeconds: Double?
+
     /// Exactly seven entries, Monday-first — `WeeklyTemplate`'s and `PlanDraft.week`'s
     /// own ordering, canonicalised here so two proposals prescribing the same week are
     /// equal regardless of the order the model listed them in.
@@ -523,6 +531,7 @@ public struct PlanProposal: Hashable, Sendable, Codable {
         cadenceHighStepsPerMinute: Double,
         effectiveThresholdPoints: Int,
         marginalThresholdPoints: Int,
+        minimumSessionDurationSeconds: Double? = nil,
         week: [Day],
         longRunArc: [ArcWeek],
         goalStatements: [String] = [],
@@ -552,6 +561,11 @@ public struct PlanProposal: Hashable, Sendable, Codable {
         guard marginalThresholdPoints <= effectiveThresholdPoints else {
             throw PlanProposalError.rejectedByAuthoring(.thresholdsInverted)
         }
+        if let minimumSessionDurationSeconds {
+            guard minimumSessionDurationSeconds.isFinite, minimumSessionDurationSeconds > 0 else {
+                throw PlanProposalError.rejectedByAuthoring(.minimumSessionDurationNotPositive)
+            }
+        }
 
         // The rules a draft makes unrepresentable, which a whole-week reply can break.
         var seen: [Weekday: Int] = [:]
@@ -580,6 +594,7 @@ public struct PlanProposal: Hashable, Sendable, Codable {
         self.cadenceHighStepsPerMinute = cadenceHighStepsPerMinute
         self.effectiveThresholdPoints = effectiveThresholdPoints
         self.marginalThresholdPoints = marginalThresholdPoints
+        self.minimumSessionDurationSeconds = minimumSessionDurationSeconds
         self.week = week.sorted { $0.weekday < $1.weekday }
         self.longRunArc = longRunArc
         self.goalStatements = PlanProposal.normalizedGoalStatements(goalStatements)
@@ -712,6 +727,7 @@ public struct PlanProposal: Hashable, Sendable, Codable {
               "cadenceHighStepsPerMinute": <number>,
               "effectiveThresholdPoints": <integer>,
               "marginalThresholdPoints": <integer>,
+              "minimumSessionDurationSeconds": <number>,
               "week": [
                 {
                   "weekday": "<weekday>",
@@ -736,6 +752,12 @@ public struct PlanProposal: Hashable, Sendable, Codable {
             between \(scores.lowerBound) and \(scores.upperBound). A day scoring at or \
             above the effective threshold counted as effective; one below the marginal \
             threshold went wrong. The marginal threshold must not exceed the effective one.
+            - "minimumSessionDurationSeconds" is the shortest a recorded run may last, in \
+            seconds, before one with no distance sample is read as a mis-started fragment \
+            rather than a real session. It is a plan-wide figure, like \
+            "heartRateCapBPM" above, not a per-day one. Omit it to state no floor at all — \
+            the honest answer when nothing in the conversation or the fact sheet gives you \
+            a reason to pick a number.
             - "week" is the recurring week: exactly seven entries, one for each weekday, \
             Monday first. A week is always Monday-first, and every entry states both the \
             run ask and the lift ask — a day can carry a run, a lift, both, or neither.
@@ -928,6 +950,7 @@ public struct PlanProposal: Hashable, Sendable, Codable {
         case heartRateCapBPM
         case cadenceLowStepsPerMinute, cadenceHighStepsPerMinute
         case effectiveThresholdPoints, marginalThresholdPoints
+        case minimumSessionDurationSeconds
         case week, longRunArc, goalStatements, goalTargetDay
 
         // Never read into a proposal. Declared so `contains` can refuse a reply that
@@ -948,6 +971,10 @@ public struct PlanProposal: Hashable, Sendable, Codable {
         try container.encode(cadenceHighStepsPerMinute, forKey: .cadenceHighStepsPerMinute)
         try container.encode(effectiveThresholdPoints, forKey: .effectiveThresholdPoints)
         try container.encode(marginalThresholdPoints, forKey: .marginalThresholdPoints)
+        try container.encodeIfPresent(
+            minimumSessionDurationSeconds,
+            forKey: .minimumSessionDurationSeconds
+        )
         try container.encode(week, forKey: .week)
         try container.encode(longRunArc, forKey: .longRunArc)
         try container.encode(goalStatements, forKey: .goalStatements)
@@ -968,6 +995,10 @@ public struct PlanProposal: Hashable, Sendable, Codable {
         let cadenceHigh = try PlanProposal.decode(Double.self, .cadenceHighStepsPerMinute, from: container)
         let effective = try PlanProposal.decode(Int.self, .effectiveThresholdPoints, from: container)
         let marginal = try PlanProposal.decode(Int.self, .marginalThresholdPoints, from: container)
+        let minimumSessionDurationSeconds = try container.decodeIfPresent(
+            Double.self,
+            forKey: .minimumSessionDurationSeconds
+        )
         let week = try PlanProposal.decode([Day].self, .week, from: container)
         let arc = try PlanProposal.decode([ArcWeek].self, .longRunArc, from: container)
         let statements = try container.decodeIfPresent([String].self, forKey: .goalStatements) ?? []
@@ -989,6 +1020,7 @@ public struct PlanProposal: Hashable, Sendable, Codable {
             cadenceHighStepsPerMinute: cadenceHigh,
             effectiveThresholdPoints: effective,
             marginalThresholdPoints: marginal,
+            minimumSessionDurationSeconds: minimumSessionDurationSeconds,
             week: week,
             longRunArc: arc,
             goalStatements: statements,

@@ -234,9 +234,21 @@ final class ScoreCalendarLayoutTests: XCTestCase {
 
     /// `.missed` and `.scored(.ineffective, _)` share a fill by design (D9), so the
     /// hollow/filled distinction is the only thing separating "I didn't run" from "I ran
-    /// badly" at heatmap density. Nothing else is hollow.
-    func testOnlyAMissedDayIsDrawnHollow() throws {
+    /// badly" at heatmap density.
+    ///
+    /// **Two states are hollow since MAX-135**, not one: the mixed day joins the miss
+    /// here because at ~6pt there is no glyph to separate them, and "an obligation went
+    /// unmet" is true of both. The two are indistinguishable at this density on purpose —
+    /// see the accessor's own note — and the month grid and the spoken sentence are where
+    /// the difference lives.
+    func testOnlyAnUnmetObligationIsDrawnHollow() throws {
         XCTAssertTrue(ScoreCalendarDayState.missed(scheduledKind: .easy).isDrawnHollowAtHeatmapDensity)
+        XCTAssertTrue(
+            ScoreCalendarDayState.partiallyMet(
+                met: ScoreCalendarDayState.MetObligation(discipline: .run, kind: .easy, band: .effective),
+                unmet: ScoreCalendarDayState.UnmetObligation(discipline: .lift, kind: .lift, judgedBand: nil)
+            ).isDrawnHollowAtHeatmapDensity
+        )
 
         let notHollow: [ScoreCalendarDayState] = [
             .scored(band: .ineffective, activityType: .running),
@@ -281,6 +293,11 @@ final class ScoreCalendarLayoutTests: XCTestCase {
             .awaitingScore(activityType: .running),
             .noVerdict(activityType: .traditionalStrengthTraining),
             .missed(scheduledKind: .easy),
+            // MAX-135: half a day's asks were met, so there is something to fill it with.
+            .partiallyMet(
+                met: ScoreCalendarDayState.MetObligation(discipline: .run, kind: .easy, band: .effective),
+                unmet: ScoreCalendarDayState.UnmetObligation(discipline: .lift, kind: .lift, judgedBand: nil)
+            ),
             .convertedRest(scheduledKind: .easy),
             .scheduledRest,
             .unplanned,

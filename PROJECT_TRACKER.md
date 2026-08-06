@@ -1,6 +1,6 @@
 # Maximize — Project Tracker
 
-**Last updated:** 2026-08-05
+**Last updated:** 2026-08-06
 **Status: every PRD ticket is merged.** FR-0 through FR-4 are built and CI-green; the
 capture-to-score loop is confirmed working on a real iPhone. What remains is device
 verification of the surfaces nobody has looked at yet, and the post-PRD backlog below.
@@ -448,7 +448,7 @@ change rather than four.
 |---|---|---|---|
 | P1 | `Plan` cannot express the *shape* of classification rules, so four dimensionless ratios live in `WorkoutClassificationPolicy` | MAX-013 | Real D1 leak, but bounded: they are ratios, never a bpm, metre or minute, so changing the cap or arc still moves the thresholds. A `classification` block on a future plan version fixes it |
 | P2 | Same, for the cap-anchored zone multipliers in `HeartRateZoneModel` | MAX-012 | As P1 |
-| P3 | ~~`Plan` records **no durations at all**~~ **Expressible in both halves; not yet effective.** MAX-131 gave the plan `ScheduledSession.durationSeconds` and `RubricReference.scheduledDuration(fraction:)` (the rubric half); **MAX-149 gives `Plan.minimumSessionDurationSeconds`** and teaches `WorkoutClassifier.isFragment` to read it (the classifier half) | MAX-013 | **Do not tick this closed yet.** The plan can now *express* a duration floor, and `isFragment` reads it — but **nothing authors one**: neither `StandardPlanSeed` nor the authoring screen sets `minimumSessionDurationSeconds`, so every plan on disk has `nil` and the floor never fires. A mis-started treadmill run still reaches the scorer today. **MAX-151 wires it**; until that merges, this gap is closed in vocabulary only, which is the same shape MAX-131 and MAX-132 had between them |
+| P3 | ~~`Plan` records **no durations at all**~~ **Closed.** MAX-131 gave the plan `ScheduledSession.durationSeconds` and `RubricReference.scheduledDuration(fraction:)` (the rubric half); MAX-149 gave `Plan.minimumSessionDurationSeconds` and taught `WorkoutClassifier.isFragment` to read it (the classifier half); **MAX-151 authors it** — `StandardPlanSeed` states 600 s, the authoring screen edits it, `PlanProposal` can propose it | MAX-013 | **Genuinely closed, not only expressible.** A first-time athlete's app now seeds a floor, an athlete can edit or clear it, and a mis-started HR-only treadmill run under the seeded plan classifies as a fragment end to end (`FragmentDurationFloorTests`). Every plan already on disk still keeps `nil` (D1, no migration) — a stored plan authored before MAX-151 states no opinion until its athlete revises it |
 | P4 | `ScheduledSession` cannot express interval structure (e.g. 6×800m) | MAX-013 | The scorer sees "hard" but not the prescribed shape, so it cannot judge whether the session was executed as written |
 
 Separately, `CalendarDay` lacks day/week arithmetic — MAX-013 carried a private day
@@ -553,6 +553,12 @@ feature was governed by a plan that could not exist).
 | MAX-128 … MAX-143 | The lifting build, decomposed from MAX-109 | MAX-109 | see below ✅ |
 | MAX-126 | **"No verdict by design" is a state** — a lift stops being drawn and spoken as a run awaiting a score | MAX-111 | **Opus** ✅ |
 | MAX-150 | **Copy and absence voice: the chat and dashboard surfaces** — split from MAX-104 so the finished half does not wait behind the lifting build | MAX-104, split | Sonnet ✅ |
+| MAX-152 | **The chat's waiting and streaming states** — the full ladder between "sent" and "answered", and every stream failure as a designed state with words | Owner | **Opus** |
+| MAX-154 | **Error handling, audited app-wide** — every failure path outside chat swept as a set, the failure-to-copy mapping moved into the core, and the inventory recorded below | Owner | **Opus** |
+| MAX-155 | **An HTTP status code reaches the athlete's screen** — `PlanDraftingFailure.description` interpolates `PlanProposalModelError.description` in `ChatModel.noteDraftingFailure`, so "…returned an unexpected status (400)." renders on the plan proposal card. Fixed with a sibling to `ChatFailureNotice` (`PlanDraftingNotice`) rather than a case added to it — see write-up below | MAX-154 | Sonnet ✅ |
+| MAX-156 | **`ScoringError.description` interpolates a workout identifier and a date** — latent, not leaking today, and one `.public` log line away from being a real one. Fixed: the two payloads are gone from `description`; the enum's own associated values are the deliberate channel a caller reaches for instead — see write-up below | MAX-154 | Sonnet ✅ |
+| MAX-153 | **The chat shell** — composer, thread list, sheet chrome. The design pass the chat's *shell* never had | Owner | **Opus** |
+| MAX-157 | **The fact sheet tells Claude "days" over a count of obligations** — `TrainingFactSheet`'s "Effective days" line is the same MAX-134 caption bug one layer into the prompt, not just on screen | MAX-140 | Sonnet ✅ |
 
 **MAX-066.** Splits currently need a GPS track, so a treadmill run has none — correctly
 rendered as an absence rather than fabricated. `distanceWalkingRunning` is already
@@ -1064,6 +1070,7 @@ twelve and is dispatchable immediately.
 | MAX-101 | Conversational plan authoring; proposal card; handoff | 098, 100 | **Opus** ✅ |
 | MAX-102 | **The read-only plan screen with version history** | — | Sonnet ✅ |
 | MAX-103 | "Runs in this conversation" strip | 098 | Sonnet ✅ |
+| MAX-104 | Copy and absence voice, **app-wide** — absorbs MAX-086's other half | 098, 102 | Sonnet ✅ |
 | MAX-104 | Copy and absence voice, **app-wide** — absorbs MAX-086's other half. Split: MAX-150 took chat+dashboard, MAX-104 took plan+workout | 098, 102 | Sonnet ✅ |
 | MAX-150 | **Split from MAX-104**: the chat and dashboard half, taken now because those two surfaces are finished and drifting while lifting is still being built | 098, 102, 103 | Sonnet ✅ |
 
@@ -1526,6 +1533,112 @@ line-by-line read can confirm. **This is "it compiles and its tests pass, as far
 reading the diff can tell" — not a claim CI has confirmed**, per CLAUDE.md's own
 distinction between the two sentences.
 
+**MAX-152 — the chat's waiting and streaming states, and what a failure says.** The owner
+asked for a loading state on a par with Claude's own, and — mid-ticket — for error
+handling good enough that "the app should be good to use". Those turn out to be one
+ticket, because both are the same question: between pressing send and reading an answer,
+what does the app actually know, and does it say so.
+
+**Before: one bit, three states, and a diagnostic.** `ChatModel.isStreaming` was asked to
+mean "the request is open and nothing has come back", "text is arriving" and "text stopped
+arriving but the connection is alive" simultaneously, and `WorkoutChatStreamingBubble`
+drew the only thing available from a bit and a string — an ellipsis — for all three. On
+the failure side, every `ChatStreamError` but one reached the transcript as
+`ChatStreamError.description`: a `CustomStringConvertible` written for a developer reading
+a value, complete with `(401)`, `stop_reason: refusal`, and the sentence the owner
+actually hit on a device, *"The response was not a recognizable streaming reply"*.
+
+**`ChatReplyPhase` is the ladder and `ChatReplyProgress` the only thing that moves it** —
+eight rungs, in the core, decided from stream events and nothing else. The view branches
+on the rung it is handed; it reads no timing and inspects no stream internals, which is
+CLAUDE.md's central rule applied to a loading state rather than to a calculation.
+`isStreaming` survives as a computed `replyPhase.isLive`, because two flags describing one
+request are two flags that can disagree, and this one gates the composer.
+
+**How a stall is detected, and the alternative that was rejected.** The obvious design is
+a wall-clock watchdog: start a `Task.sleep`, call it stalled after N seconds of silence.
+It was rejected because it puts the decision behind a task racing a stream, which is the
+one shape this repo's CI cannot verify honestly — a test either sleeps (slow, flaky) or
+injects a fake clock and proves only that the fake was called. The Messages API already
+sends `ping` frames on an open stream, and a ping *is* the transport saying "I am here and
+I have nothing for you" — the exact fact that separates a stalled reply from a working
+one, delivered as an event rather than inferred from elapsed time. So `ChatStreamDecoder`
+forwards it (it was dropped before), `ChatStreamEvent` gains a payload-free `.heartbeat`,
+and `ChatReplyProgress.heartbeatsBeforeStall` — **two** consecutive beats with no token
+between them, because the API may legitimately ping mid-reply and one beat would flag a
+healthy stream — turns them into `.stalled`. The whole rule is a pure function tested to
+the beat. **The cost is stated rather than hidden:** a connection that hangs and sends no
+pings stays `.streaming` until the client's own idle timeout turns it into
+`.failed(.interrupted)`, and whether real pings arrive during a real stall is a device
+question, in the PR.
+
+**A beat before the first token is not a stall.** "The model has not started speaking" is
+what waiting already says truthfully, and calling that stalled would invent a fault out of
+a model that is thinking — the state the indicator exists for. A stall is specifically a
+reply that started and stopped.
+
+**Why the animation is a shimmer, what was taken from Claude, and where it differs.**
+Claude marks thinking with a gradient sweep travelling through text rather than with
+pulsing dots or three bouncing ones, and that is the choice worth taking — for a reason
+that is structural rather than aesthetic. **A shimmer needs words underneath it to travel
+across.** Dots say "something is happening" and nothing else; a sweep over
+`ChatConversationCopy.awaitingFirstReply` carries the state in copy first and motion
+second, which is CLAUDE.md's "no information carried by hue alone" one channel over — a
+state carried only by an animation vanishes the moment somebody turns animation off. It is
+also ambient rather than metronomic: a pulse has a beat, and a beat in the corner of the
+eye is what makes a loader nag. **Where it deliberately differs:** there is a live
+accessibility complaint against Claude's own shimmer for being distracting
+(anthropics/claude-code#6038), so this one runs slower than the usual implementations of
+the technique (`Motion.waitingSweep`, 1.4s linear, no autoreverse), is **withheld
+entirely** under both Reduce Motion and Reduce Transparency rather than shortened, and
+ends hard — the instant the first token lands the indicator is gone, replaced by the
+words, because an indicator that keeps shimmering beside arriving text is an app talking
+over its own answer. **Rejected: staggered dots at 100–150ms**, which is the generic
+loader this is deliberately not, and which fails the "words underneath" test outright.
+**Rejected: `markiv/SwiftUI-Shimmer` as a dependency** — read for the technique (gradient,
+mask, offset animated across the width), not added; this package has none.
+
+`App/DesignSystem/Motion.swift` gains the `Motion` ramp alongside MAX-070's
+`accessibleAnimation` seam, for the reason `Spacing` and the colour tokens exist: a call
+site should say which motion it is, not how many milliseconds. Four entries, one per job.
+
+**Every failure is now a designed state with words, and no case falls through.**
+`ChatFailureNotice` is the single mapping from `ChatStreamError` to a sentence, exhaustive
+with no `default`, plus three notices for the failures that are not stream failures (an
+empty reply, a reply that could not be saved, a message that could not be sent). The copy
+rules are tested mechanically: no numerals anywhere (the two cases carrying a status code
+never print it), no wire vocabulary, no parentheticals, nothing interpolated — so no
+health data can reach a notice by construction — every sentence distinct, and none of them
+equal to the `description` it replaced. The four states of a key are four sentences: no
+key stored (the shipped subject-worded sentences, moved rather than rewritten), a
+keychain that would not answer, a key the server rejected, and — separately — being rate
+limited. "Add a key" and "replace the key you have" are different actions, and a single
+"check your API key" would send the athlete to stare at something present and
+correct-looking.
+
+**Retry is decided, not defaulted: no failure ever re-asks itself.**
+`PlanProposalDrafting`'s one-automatic-retry policy was read and deliberately **not**
+followed, on that type's own reasoning: its retry exists to put a *correction* in front of
+the model when a reply's content could not be used, and none of these failures are content
+failures. There is nothing to correct in "you are offline", so a second automatic call is
+the same call, and a loop of them is A14's named failure mode — spending the owner's
+credit unasked. So `canRetry` gates a button, one call per tap, and it is false wherever
+`ChatStreamError.isWorthRetrying` is false: a missing key, a rejected key, a refusal and
+an unreadable response all say what to do instead rather than offering a button guaranteed
+to fail identically. A retry asks the same question from the same history (the failed turn
+was never persisted, so nothing moved), appends no second question bubble, and **erases
+nothing** — the dropped attempt and its notice stay above the answer that finally arrives,
+which is the additive treatment D8 gives a correction one surface over.
+
+**Reported, not done.** The two files outside this ticket's named scope that it had to
+touch are `ChatStreamEvent.swift` and `ChatStreamDecoder.swift` — a payload-free case and
+one `switch` arm, both additive, plus the two MAX-107 regression tests whose expectations
+now name the `ping` they always contained. Nothing else in the stream path moved. And the
+stalled rung is the one part of the ladder CI cannot reach end to end: `ChatStreamDecoder`
+is proved to emit heartbeats and `ChatReplyProgress` is proved to fold them into
+`.stalled`, but whether the live API emits them during a genuine stall is only answerable
+on a device.
+
 ### Phase 9 — Lifting (MAX-109)
 
 **MAX-144 is decided, by the owner: A22.** *"You can set the muscle group in the detail view
@@ -1606,8 +1719,15 @@ The three decisions worth knowing without reading all of it:
   lift is two obligations; meeting one is not meeting the day. Two *attempts at one*
   obligation still resolve generously (the warm-up-jog reasoning is untouched). The
   landable property is that on a day prescribing at most one session the two countings are
-  identical — so **no historical figure moves**, and that is an acceptance criterion with
-  fixtures behind it.
+  identical — so **almost no historical figure moves**, and that is an acceptance criterion
+  with fixtures behind it. **Corrected by MAX-134, which built it:** the unqualified claim
+  is false, because §6.2 also resolves each obligation *against the workouts of its own
+  discipline*, and a scheduled run day whose only recorded workout was a lift therefore
+  moves from "recorded but unscored" (neutral, excluded) to a genuine miss. That is A19's
+  own argument arriving from the other side — a lift silently covering a skipped run — so
+  it is a correction, taken deliberately. The accurate statement of the criterion is **no
+  historical day moves whose recorded workouts all belong to the discipline that day
+  prescribed**, and that is the property MAX-134's sweep pins.
 - **Lifting is scored on adherence, not volume (A20).** HealthKit has no sets, reps or
   load, so the alternative is manual entry — PRD §3's *"the thing being killed"*. The
   non-goal is **not** spent. The honest cost is stated: adherence cannot tell a hard
@@ -1649,9 +1769,96 @@ is the overseer's, not a ticket's — flagged here rather than done.
 | MAX-143 | ~~Decide what to do with lifts already scored as runs~~ — **owner chose: label them**, and it is built | 128 | **Opus** ✅ |
 | MAX-144 | ~~How adherence to a muscle-group prescription is judged~~ — **decided (A22)** | 129 | Owner ✅ |
 | MAX-145 | **Enter muscle groups on a strength workout's detail screen** (A22) | 129, 144 | **Opus** ✅ |
+| MAX-146 | Close the `rest.ranAnyway` shadow — the same defect as `easy.wellOverCap`, one band down (source: MAX-133) | 132, 133 | Sonnet |
 | MAX-147 | The scorer's task text learns discipline (source: MAX-133) | 133, 136 | Sonnet ✅ |
 | MAX-148 | A lift's duration and note become editable, proposable, and type-safe | 137, 141 | Sonnet ✅ |
 | MAX-149 | Duration floor for fragments — **the classifier half of gap P3**; not yet wired to any author | 013, 131 | Sonnet ✅ |
+| MAX-151 | **Author the duration floor** — `StandardPlanSeed` states one, the authoring screen edits it, `PlanProposal` can propose it. Without this MAX-149 never fires. (Depended on 146 only for file ownership of `StandardPlanSeed`, which is now released) | 149, 148 | Sonnet |
+| MAX-151 | **Author the duration floor** — `StandardPlanSeed` states one, the authoring screen edits it, `PlanProposal` can propose it. Without this MAX-149 never fires — **closes gap P3 for real** | 149, 146, 148 | Sonnet ✅ |
+| MAX-153 | **The chat shell: composer, thread list, sheet chrome** — the design pass MAX-092–103 never had over the shell its features sit in | Owner, 092–103 | **Opus** |
+
+**MAX-153 — what was decided, what was rejected, and what it is blocked on.**
+
+The owner's ask was "ensure our chat interface is top shelf; look online for examples",
+plus, mid-ticket, "make sure the input is a Liquid Glass input with good button sizing"
+and "the app should be good to use."
+
+**Decided, and in the core where CI can see it.**
+
+- **`ChatComposerSendControl`** — four states for one 44pt box (`.send`, `.unavailable`,
+  `.awaitingReply`, `.stop`), resolved from `canSend`/`isStreaming` plus a
+  `ChatComposerCancellation` parameter. Streaming outranks `canSend` unconditionally.
+  Enabled and disabled send draw the **same glyph** so the target never changes shape
+  under a keystroke; every state is spoken distinguishably, because the visual difference
+  between two of them is a tint and `CLAUDE.md`'s hue rule applies to controls as much as
+  to charts.
+- **`ChatTranscriptFollow`** — follow-or-hold. Your own message always scrolls; incoming
+  content scrolls only if you were already at the bottom; **focusing the composer no
+  longer drags a scrolled-up reader down**, which is a deliberate departure from the
+  pre-153 behaviour and the ticket's most user-visible change. Unseen activity is a
+  **flag, not a count**, because the unit of arrival in a stream is a token — a counter
+  would read "New (417)".
+- **`ChatThreadListPresentation`** — recency banding (Today / Yesterday / Previous 7 days
+  / Previous 30 days / Earlier), newest band first, empty bands never emitted; a
+  Messages-style compact timestamp ladder (`now`, `12m`, `5h`, `Yesterday`, `Tue`,
+  `3 Aug`, `3 Aug 2025`) built from `CalendarDay` arithmetic rather than `DateFormatter`
+  so it is assertable on Linux CI; the row's scope line; and the whole VoiceOver sentence.
+- **Copy moved to `ChatThreadListCopy`** — the empty and failed sentences the view held as
+  literals, following MAX-150's precedent rather than opening a second voice.
+
+**Rejected, with reasons.**
+
+- **A tinted badge for "something arrived while you were away."** Information by hue
+  alone. The label carries it: "Jump to latest" against "New reply".
+- **A stop button during a stream, today.** `ChatModel` has no cancellation, and a stop
+  that does not stop is worse than none. `.awaitingReply` shows progress; the `.stop`
+  state exists, is tested, and turns on when one call site passes
+  `cancellation: .available`.
+- **`Text(_:style:.relative)` on a list row.** Wider than the title it competes with above
+  default Dynamic Type, re-lays-out every minute, and says "0 seconds ago". Kept for
+  VoiceOver, where width is free.
+- **A counter of unread messages.** See above.
+- **Scope on every row.** Nil for a workout thread (the title is already the run's date)
+  and for a training thread still titled by its own window — otherwise the row prints one
+  string twice.
+
+**Research citations** (all in the PR, all read for this ticket): Apple's HIG 44×44pt
+minimum tap target with the visible control permitted to be smaller than the region;
+`GlassEffectContainer` + `glassEffect` as the iOS 26 way to let the system merge and morph
+adjacent glass rather than hand-rolling a blur; `ScrollPosition` /
+`defaultScrollAnchor(.bottom)` and the jump-to-latest pattern for transcripts;
+Messages/Mail/Notes for the recency bands and the compact timestamp ladder; the
+grow-to-a-ceiling-then-scroll composer behaviour common to iMessage, WhatsApp and
+Telegram.
+
+**Installed, after MAX-152 merged.** The composer and the transcript's `onChange` handlers
+live in `App/Chat/ChatConversationView.swift`, which MAX-152 held while it was in flight;
+MAX-153 wrote the views against a documented seam and installed them once that file was
+free. What landed in the file:
+
+- The hand-rolled `TextField` + `Image` row and the `.glassChrome(.toolbar)` wrapped round
+  it are gone, replaced by `ChatComposerView`. **The outer glass went with them** —
+  `ChatComposerView` carries its own `GlassEffectContainer`, and a second glass modifier
+  round a view that glasses itself is chrome over chrome.
+- The send control resolves from **MAX-152's `replyPhase`**, not from a boolean:
+  `ChatComposerSendControl.resolve(canSend:replyPhase:)`. `ChatModel.isStreaming` is
+  itself `replyPhase.isLive`, so there is one authority on "a reply is in flight". The
+  composer does not distinguish waiting / streaming / stalled — those are three things to
+  say in the transcript, and `ChatPendingReplyView` says them there.
+- Every unconditional `scrollToBottom` became a `ChatTranscriptFollow` directive, including
+  the focus handler that used to drag a scrolled-up reader to the end.
+- **A third change kind, `.reflow`,** was added for MAX-152's shimmer. The waiting
+  indicator appearing and a stall caption growing both move the content, so a reader at
+  the bottom stays pinned — but neither is a reply, so neither may badge somebody who
+  scrolled away. Telling them "New reply" because a placeholder resized is the app crying
+  wolf about its own layout.
+- `.defaultScrollAnchor(.bottom, for: .initialOffset)` so a thread with history opens at
+  its newest turn. `for: .initialOffset` deliberately: where the scroll view *starts* is
+  the platform's question; what it does when content grows is `ChatTranscriptFollow`'s,
+  and two mechanisms answering one behaviour is how they drift.
+- **Retry is MAX-152's and stays in the transcript**, beside the failure notice that
+  explains what went wrong. The composer offers none — two retry affordances in two
+  registers is worse than either alone.
 | MAX-151 | **Author the duration floor** — `StandardPlanSeed` states one (600s), the authoring screen edits it, `PlanProposal` can propose it. **Closes gap P3 for real** | 149, 148 | Sonnet ✅ |
 | MAX-158 | **Schema vocabulary reaches the athlete on a rejected proposal** — `PlanProposalError.description` says things like *"The reply left out `liftKind`, which the plan schema requires."* No PII and no status code, so not a privacy defect; but it names wire fields at a person who cannot act on them. MAX-155/156 left it deliberately (MAX-151 owned the file) | 155 | Sonnet |
 | MAX-159 | **A recorded-but-unjudged workout outranks another obligation's settled miss** — a Tuesday whose lift was recorded but unscored and whose run was missed draws `.noVerdict`, and its sentence names neither. §7.2's principle says change it, but the same ordering governs single-obligation days shipped since MAX-061, so it moves historical cells and wants a designed state | 135 | **Opus** |
@@ -1739,8 +1946,8 @@ lift slot — but each currently answers about the day's *run* while calling it 
 | Reader | What it reads | Ticket |
 |---|---|---|
 | `RubricEvaluator.evaluate` | ~~`planDay.scheduledSession.kind` picks the bands~~ **the workout's own discipline's ask, as of MAX-133** | MAX-133 ✅ |
-| `RestDayBudgeting` / `TalliesCalculator` | `PlanDay.canBeMissed`, `costTier` | MAX-134 |
-| `ScoreCalendar.dayState` / `agreement` | the day's single prescribed kind | MAX-135 |
+| `RestDayBudgeting` / `TalliesCalculator` | ~~`PlanDay.canBeMissed`, `costTier`~~ **each day's obligations, as of MAX-134** | MAX-134 ✅ |
+| `ScoreCalendar.dayState` / `agreement` | ~~the day's single prescribed kind~~ **each day's obligations, and the scored workout's own slot, as of MAX-135** | MAX-135 ✅ |
 | `WorkoutFactSheet` | ~~`planDay.scheduledSession`~~ **the workout's own slot, as of MAX-136** | MAX-136 ✅ |
 | `TrainingFactSheet` plan block | `entry.session` — the lift slot is still unrendered | **open, see MAX-136** |
 | `PlanDraft` setters, `PlanAuthoringError` | ~~the run slot only~~ **both, as of MAX-137** | MAX-137 ✅ |
@@ -2130,10 +2337,86 @@ rather than building it, because its brief forbade a behaviour change.
   `PlanDraft`, and `PlanDraft`/`PlanAuthoring.swift` are owned by MAX-148, in flight in
   parallel — out of this ticket's scope to touch. So a plan revision saved through the
   authoring screen today always produces `minimumSessionDurationSeconds == nil`, same as
-  `StandardPlanSeed` (MAX-146, also out of scope here) never setting one. The domain type
+  `StandardPlanSeed` (owned by MAX-146 at the time, and out of scope here) never setting
+  one — **authoring the floor is MAX-151, not MAX-146**, which was the `rest.ranAnyway`
+  shadow and is now merged. The domain type
   and the classifier are ready; nothing in this build can author a floor yet. That is
   follow-on ticket work, the same shape MAX-131 left `durationSeconds` in before MAX-137
   gave it an editor.
+
+**MAX-151 — the three places the floor gets authored, and the value chosen for the
+first one.** MAX-149 gave `Plan` the field and taught the classifier to read it, and
+then reported, honestly, that nothing set it: `StandardPlanSeed` stayed silent, the
+authoring screen had no control, and `PlanProposal` had no wire field — so every plan
+on disk kept `minimumSessionDurationSeconds == nil` and the floor never fired. This
+ticket is the follow-on MAX-149 named, taken in MAX-148's own shape (seed, screen,
+proposal) rather than a new approach.
+
+- **The seeded value is 600 seconds (ten minutes), and it is the real decision here.**
+  A watch session carrying heart-rate data and no distance at all is overwhelmingly one
+  of two things: a mis-started or HealthKit-split treadmill run — belt not moving yet,
+  GPS never acquiring indoors, a stop tapped seconds after start — or a deliberate short
+  session that genuinely has no distance sample, an indoor track with no GPS lock chief
+  among them. The first shape is seconds to a couple of minutes; the second is rarely
+  under ten. Ten minutes sits between them, and it is cross-checked rather than picked
+  in isolation: `fragmentDistanceFraction` (0.25) against the seed's own shortest
+  prescribed run — Saturday's 6 km — works out to 1 500 m, which an easy effort covers
+  in roughly ten minutes, so the plan's two fragment floors read as one policy instead
+  of two unrelated guesses. **Rejected: a plan-relative fraction**, for the reason
+  `Plan.minimumSessionDurationSeconds`'s own doc already gives — the run slot's
+  `durationSeconds` is still carried-but-uneditable, so a relative floor would have
+  nothing to be relative *to* on any plan an athlete can actually author. **Rejected:
+  leaving the seed at nil**, which was MAX-149's own stopgap and is precisely the "closed
+  in vocabulary only" state this ticket exists to end — a seed that states no opinion
+  ships an app whose central mis-start case, LIFTING-SPEC §9.2's worked example, is
+  never caught on a fresh install.
+- **A lift is still never caught, unchanged from MAX-149 and pinned again.** The seed
+  choosing a number does not touch `WorkoutClassifier.classify`, which still answers
+  `.other` for any non-run before `isFragment` runs at all — a lift has no distance by
+  definition, and nothing in this ticket gives the floor a path to one.
+  `FragmentDurationFloorTests.testALiftIsNeverClassifiedAsAFragmentByTheDurationFloor`
+  (MAX-149's own test) still passes unmodified, and a new end-to-end test runs the same
+  claim against the plan `StandardPlanSeed` actually produces rather than a hand-built
+  fixture.
+- **The screen: a plan-level control beside the cap, not a per-weekday one.**
+  `PlanDraft` gains `minimumSessionDurationSeconds: Double?` as a plain `var` — the same
+  shape `heartRateCapBPM` already has, no setter method, because there is no illegal
+  combination for it to protect against the way a rest day and a distance protect each
+  other. `PlanAuthoringView` gets one new section, "Fragment duration floor", between
+  the HR cap and the cadence target — a stepper in whole minutes (0–30), zero reading as
+  "no floor stated" the same convention the lift duration stepper already set.
+  `PlanAuthoringSession.plan(from:effectiveFrom:)` validates it exactly like every other
+  plan-level number (`Validate.optionalPositive`'s rule, translated to a new
+  `PlanAuthoringError.minimumSessionDurationNotPositive`) — nil is the one legal
+  "no opinion" answer, a stated zero or negative is not.
+- **The proposal: a new top-level wire field, not a per-day one.** `PlanProposal` gains
+  `minimumSessionDurationSeconds: Double?`, coded and validated the same way
+  `heartRateCapBPM` is, with its own line in `schemaDescription`'s JSON shape and prose —
+  "omit it to state no floor at all," matching every other optional field's instruction
+  in that file. `PlanDraft.applying(_:)` takes it directly from the proposal, the same
+  "plan-level field, no carry-forward helper" shape `heartRateCapBPM` already has —
+  unlike the run slot's own `durationSeconds`, which still has no wire field and still
+  needs `carriedDurationSeconds(from:proposing:)`. `PlanProposalReview.targetsSection`
+  gains a fifth row, "Fragment duration floor", beside the cap and the two thresholds,
+  rendering "None" for an absent floor — the same word the run slot's distance row and
+  the lift slot's duration row already use for an unset numeric field.
+- **Nothing stored moves (D1).** `StandardPlanSeed` is authoring input the scoring path
+  never reads — see the file's own top-of-file note — so seeding a floor changes only
+  what the *next* plan version starts from. `FragmentDurationFloorTests`' pre-MAX-149
+  hand-written payload still decodes to a plan with no floor and still re-encodes
+  without the key; nothing in this ticket touches that fixture or its assertions.
+  `PlanAuthoringTests.testRevisionDraftReproducesTheStoredPlanExactly` now also asserts
+  the floor carries forward unchanged on a revision, the same as the cap does.
+- **The end-to-end proof the ticket exists for.** A new test builds a plan through
+  `PlanAuthoring.session(revising: nil, ...)` — the exact path a first-time athlete's
+  app takes — and classifies a 90-second, heart-rate-only, no-distance workout against
+  it: `.other`. Before this ticket the seeded plan's floor was nil, `isFragment`'s
+  duration branch never fired, and the same workout would have reached the scorer as a
+  real session. A sibling test pins the other side: a genuine 15-minute no-distance run
+  still classifies `.easy` under the same seeded plan.
+
+**Tracker gap P3 is now genuinely closed**, not only expressible: the row above is
+updated to say so.
 
 **MAX-132 — `StandardPlanSeed` learns to speak the vocabulary MAX-131 gave it, and closes
 the shadow §11.4 escalates.** Two changes to `Sources/MaximizeCore/Plan/StandardPlanSeed.swift`,
@@ -2241,6 +2524,133 @@ is never shown an easy-run day's bands, whatever conditions that band carries.
   band. The comment at the gate now states this reason rather than the mechanism this
   ticket removed, and a test pins that a lift under a rubric with no band for it is
   *refused* rather than mis-scored.
+
+**MAX-146 — closes the `rest.ranAnyway` shadow MAX-133 named.** One line in
+`Sources/MaximizeCore/Plan/StandardPlanSeed.swift`: `rest.ranAnyway` gains
+`.actualDiscipline(oneOf: [.run])`, the identical condition and the identical reasoning
+MAX-132 already used to close `easy.wellOverCap`. Same identifier, same score range
+(50–75), same rationale string — only the condition list grew, so a `Score` this band
+already produced for an actual run on a scheduled rest day is unaffected.
+
+- **Chosen over a new band, and here is why.** MAX-133's report named two candidates: the
+  condition above, or a dedicated band for "a lift on a day whose lift slot prescribes
+  nothing." The report also flagged the risk worth checking before picking either — that
+  narrowing `rest.ranAnyway` might leave such a lift matching *nothing*, which would be a
+  `noBandMatched` refusal instead of a mis-score, possibly a worse outcome. Reading
+  `RubricEvaluator` settles it: `bands(for: .rest)` still includes `fallback.recorded`
+  (`appliesTo` empty, no conditions, last in the seed's order), so a narrowed
+  `rest.ranAnyway` does not throw — the lift falls through to the seed's own unconditional
+  catch-all, 40–69, *"Recorded, but the plan has no specific rule for this session."* That
+  is already honest for this case, and it is the seed's designed answer for exactly this
+  shape of gap (see the type's own note on why the catch-all's range sits below the
+  effective threshold). A dedicated band was rejected on that basis: it would need its own
+  score range, and choosing one is a product opinion about how much an unscheduled lift
+  should count for — not a shadow-closing decision, and not this ticket's to make.
+  `testALiftOnADayThatDoesNotPrescribeOneNoLongerMatchesRestRanAnyway` is the test that
+  fails without the fix, pinning both facts: no longer `rest.ranAnyway`, and specifically
+  `fallback.recorded` rather than a thrown error.
+  `testARunOnAScheduledRestDayStillMatchesRestRanAnywayExactlyAsBefore` is the paired
+  regression, on the historical Monday-run case `DisciplineMatchedEvaluationTests` and the
+  seed's own tests already exercise elsewhere, both live in `LiftRubricVocabularyTests.swift`.
+- **The rest of the seed, audited for the same shape.** Every remaining band was checked
+  against "does this band's `appliesTo` reach a discipline it was never written about."
+  `.easy`/`.long`/`.hard`/`.other` are unreachable by a lift regardless of any band's own
+  conditions: `ScheduledSessionKind.liftPrescribable` restricts the **lift** slot to
+  `[.rest, .lift]` only, so a lift's own-discipline ask (the only session
+  `RubricEvaluator` shows it, since MAX-133) can never resolve to any of those four kinds
+  — the routing itself closes the door, not the band. `.lift`-scoped bands
+  (`lift.completed`, `lift.short`, `lift.happened`) already carry
+  `.actualDiscipline(oneOf: [.lift])`, MAX-132's own guard. `.rest` was the one exception
+  worth finding, because it is the *default* both slots share: every weekday starts `.rest`
+  unless prescribed otherwise, so it is the only scheduled kind a workout of either
+  discipline can land on through no plan decision at all. `fallback.recorded` and
+  `skipped` are both intentionally unconditional/unreachable by the seed's own design (see
+  the type's top-of-file note) and are not shadows — they are declared catch-alls, not
+  accidents of placement. **Finding: `rest.ranAnyway` was the only band with this defect;
+  nothing else in the seed needs the same fix.**
+- **D1, restated for this file specifically.** This is a change to the *seed* —
+  `StandardPlanSeed.rubricBands()` — which only ever supplies the bytes a **new** first
+  plan version starts from. It cannot reach a plan already saved, and it does not try to:
+  every plan on disk keeps the bands it was saved with. Nothing here migrates or
+  rescores anything already written; the label MAX-143 built handles what already exists
+  under D8's constraint, and this ticket does not touch it.
+- **What is still true.** MAX-111's ingestion gate stays shut — this ticket does not open
+  it, and opening it remains its own decision, independent of this fix.
+
+**MAX-134 — the unit of account is the obligation.** A19/LIFTING-SPEC §6. A Tuesday asking
+for a run *and* a lift is two obligations: it contributes two to the effective ratio's
+denominator, both must be met for the day to extend the streak, and the rest-day budget
+forgives one of them at a time rather than converting the whole day. Two *attempts at one*
+obligation are untouched and still resolve best-of — §5's warm-up jog — which is
+deliberately the opposite rule, because "was every attempt at my run good" and "did I do
+everything the plan asked today" are different questions.
+
+- **The shared roll-up §7.3 demands is `DayObligationResolver.resolve`, returning
+  `DayObligations`.** One core function answering "what did this day come to", read by the
+  tallies and the streak here and by the calendar's mixed day next. **MAX-135 calls
+  `DayObligationResolver.resolve(date:planDay:workouts:scoreLedgers:convertedObligations:outcomeIsKnown:)`
+  and maps the result to a `ScoreCalendarDayState`** — it must not compute a roll-up of its
+  own, which is the whole reason §6 and §7 were decided together. `DayObligations` gives it
+  `resolutions` (ordered run-then-lift), `metObligations`, `unmetObligations`, `isFullyMet`
+  and `streakContribution`; each `ObligationResolution` carries the outcome, the ask, the
+  band and the deciding workout's id — the three facts §7.2's `partiallyMet` state is built
+  from. **No verdict enum and no severity ordering were shipped**: §7.2 says in terms that
+  it is not specifying the visual, so this ticket fixed the arithmetic and left the state
+  to the ticket that can see a pixel.
+- **Two reads are carried side by side on purpose.** `outcome` uses
+  `ScoreLedger.isEffective` (the annotation where one exists, §8); `band` uses
+  `automatic.band` of the best-banded workout (D1/D4/D8 — the calendar never colours from a
+  correction). They can legitimately disagree, and collapsing them would have silently
+  broken whichever surface lost. `ScoreCalendar.bestScoredPair` now delegates to the
+  resolver's `bestScored`, so "the day's best session" is one implementation, not two.
+- **The budget converts obligations; `costTier` was not touched.** A19 names reordering the
+  tiers as the trap, so the function is byte-for-byte what MAX-128 left — the change is
+  entirely in *what is offered* to the ranking. Adjacency generalises per discipline's own
+  row (§6.4): a missed lift is framed by the lift slot's neighbours, not the run slot's.
+  N stays N conversions per week, so a two-obligation day can consume a budget of 1 and
+  leave its other half missed. `RestDayOverride` (the stored §8 record) is untouched; the
+  budget now returns `ConvertedObligation`, which is not persisted and nothing writes.
+- **One class of historical day moves, deliberately — the A19 paragraph above is corrected
+  to say so.** §6.2 resolves each obligation against the workouts of *its own discipline*,
+  so a scheduled run day whose only recorded workout was a lift is now a miss, where the
+  old discipline-blind "was anything recorded" test left it neutral and excluded from both
+  sides of the ratio. Preserving that would have preserved a bug: a lift silently covering
+  a skipped run is exactly the failure A19 exists to name, in mirror image. **How much this
+  affects, measured rather than guessed:** zero days in the existing tallies and budgeting
+  fixtures have this shape (every workout in both suites is a run), and the one instance in
+  `ScoreCalendarTests` asserts a cell state that a recorded workout still wins, so it is
+  unmoved. On real data it affects only days where the athlete lifted *instead of* running
+  on a prescribed run day. A ride, walk or hike is unaffected — `ActivityType.discipline`
+  makes `.run` the residual (A17), so only strength training is attributed elsewhere.
+- **The regression evidence is a reference implementation, not hand-picked numbers.**
+  `legacyDayCounting` and `legacyConversions` in `ObligationTalliesTests` are the
+  pre-MAX-134 rules transcribed, and the sweep runs **every** combination of outcomes over
+  a run-only week — nothing recorded / recorded-unscored / scored-effective /
+  scored-ineffective on each of five prescribed days, against two budgets, 2,048 weeks —
+  asserting eligible, effective and streak agree exactly. The budget gets the same
+  treatment over every subset of the week. 2,048 hand-worked weeks is not something anyone
+  would write or trust; a transcribed oracle is.
+- **`EffectiveDayTally` is now `EffectiveObligationTally`**, as §6.2 asks. Field names are
+  unchanged and `Tallies.effectiveDays` keeps its name — the tile that reads `4/5` today
+  and `6/8` on a week with three lifts needs one line of copy saying the denominator is
+  sessions, and **that copy is MAX-140's**, not this ticket's.
+- **`PlanDay.canBeMissed` was deliberately not widened.** It is also the calendar's
+  predicate (`.scheduledRest`, `prescribesASession`), so widening it would have changed
+  what a cell draws without a designed state — MAX-135's job. The obligation-level question
+  is `prescribedDisciplines` / `hasObligations` instead. The two agree on every day either
+  has seen, because every plan on disk rests its lift slot.
+- **`ScoreCalendar` changed by the minimum the shared budget forces.** It reads the run
+  slot's conversions only (a forgiven *lift* has no cell state until MAX-135) and builds
+  the same `workoutDisciplines` mapping the tallies do, so the two cannot disagree about
+  what the budget was offered — D2's drift with a colour attached is exactly what §7.3 is
+  about.
+- **Reported, not done: whether a miscategorised score should leave the athlete's own
+  averages.** MAX-143 added `ScoreLedger.countsTowardScorerQuality` and explicitly left
+  this open, flagging it as MAX-134's. It was **not taken**: `Tallies.averageScore` is a
+  mean over scored workouts and has no unit of account to change, so deciding it here would
+  have mixed a second, unrelated judgement into this PR. The question is live and worth a
+  ticket — a lift scored 25 against a running rubric currently drags the athlete's average
+  down, and A21 says that score was the answer to the wrong question.
 - **No existing run's score moves, proven with fixtures rather than by argument.** Ten
   historical (day, execution) rows — every scheduled kind the fixture week prescribes and
   every row of §10.3's ladder — are scored through the new routing and compared against the
@@ -2255,6 +2665,76 @@ is never shown an easy-run day's bands, whatever conditions that band carries.
   lift can reach it while MAX-111's gate stands. Rewording it is prompt content, which wants
   the ticket that owns the lift's fact sheet (MAX-136) and its own security review — not a
   routing ticket.
+
+**MAX-135 — the calendar's mixed day.** LIFTING-SPEC §7. A day can prescribe two
+obligations, and a ~42pt cell has to be able to say "one of two met" without gaining a
+colour channel — §7.2 is explicit that it gains a **state**, and MAX-084, MAX-087 and
+MAX-105 have already spent the cell's budget between them.
+
+- **`ScoreCalendarDayState.partiallyMet(met:unmet:)`, and it computes no roll-up of its
+  own.** `ScoreCalendar.resolve` calls `DayObligationResolver.resolve` per day and reads
+  `metObligations`/`unmetObligations` off the result — §7.3's requirement, so the cell and
+  the effective-obligations tile cannot disagree about the same Tuesday. A test asserts
+  that agreement directly rather than trusting the arrangement. The payload is two small
+  structs rather than §7.2's sketched triple: the unmet half carries the band it earned
+  where one was reached and **nil where nothing was recorded**, which is the difference
+  between "you lifted and it fell short" and "you did not lift" — the one thing a single
+  fill and a single glyph cannot carry, and which the spoken sentence therefore must.
+- **The visual is a shape, and that was the honest answer rather than the cheap one.**
+  The fill is D9's red — the same token `.missed` draws, so the three red states measure
+  **1.00:1** against each other, computed in `WCAGContrastTests` rather than asserted —
+  and the whole separation is the glyph: an activity figure for a run that went badly, an
+  "×" for a day nothing happened on, a half-filled disc for a day that did one of two
+  things. Shape survives greyscale, every kind of colour vision, Increase Contrast and
+  Reduce Transparency alike, which is the same argument MAX-126 used to give `.noVerdict`
+  no colour of its own. **Rejected: reusing MAX-084's corner pip** for the met half — that
+  slot's vocabulary is "which band is this fill", and this fill is not a band; and
+  **rejected: a split fill**, which is a second colour channel by another name.
+- **`testNoTwoScoreBandsAreDistinguishedByHueAlone` was widened, not duplicated.** Its
+  universe is now the *cells* the calendar draws — fill token plus glyph, corner pip and
+  fill/no-fill in the day grid; hollow and inset size at year density — so band-versus-band
+  coverage is unchanged (the three `.scored` cells share an activity glyph by construction
+  and still have to pass on the pip) and every new state is held to the same rule. It is
+  renamed `testNoTwoCalendarCellsAreDistinguishedByHueAlone`.
+- **Two decisions moved into the core to make that test possible**, and they are the
+  ticket's real architecture change. The glyph table is now
+  `MaximizeCore.ScoreCalendarGlyph` (the app is a passthrough) and the mixed day's spoken
+  sentence is `ScoreCalendarCopy`, on `PlanCopy`'s vocabulary. Both are load-bearing
+  channels for this state, and while they sat in the app target nothing could check them —
+  `swift test` never compiles it. The rest of `ScoreCalendarFormatting`'s copy stayed put:
+  moving it needs `WorkoutDisplayFormatting`, which is `App/Workouts/` and another ticket's
+  file this session.
+- **At year density the mixed day collapses onto the miss, deliberately.** No glyph exists
+  at ~6pt, and the two alternatives were a band colour it did not earn or a full-footprint
+  red reading against `.effective`'s full-footprint green on hue alone. Hollow is true of
+  both states; the spoken sentence carries the rest, exactly as `.scheduledRest` and
+  `.convertedRest` are already left to it.
+- **Three one-slot readings were widened with it, and no historical cell moves.**
+  `prescribesASession` and the `.scheduledRest`/`.missed`/`.convertedRest`/`.forthcoming`
+  empties now read both slots (a lift-only day drew *"scheduled rest day"* over an
+  outstanding ask before), `ScoreCalendar` stops filtering the rest-day budget's
+  conversions to the run slot — the workaround MAX-134 left for this ticket — and
+  `agreement` compares a scored workout against **its own discipline's** ask. Every plan on
+  disk rests its lift slot, so all four agree with what they replaced on every day the app
+  has ever seen; a run-only week is asserted cell by cell to say so.
+- **A both-met day is coloured by the worse of its two bands.** §7.2's rule applied to the
+  day that met everything: across obligations the calendar is all-of, the same as the
+  streak (§6.3), while two attempts at *one* obligation still resolve best-of (§5) inside
+  the resolver. Unreachable until something scores lifts, and tested through an obligation
+  met by a *correction* over a marginal auto-score, which pins the other half of it — the
+  cell colours from the immutable auto-score, never from the annotation (D1/D4/D8).
+- **Reported, not done: a recorded-but-unjudged workout still outranks another
+  obligation's settled miss.** A Tuesday whose lift was recorded and unscored and whose run
+  was missed draws `.noVerdict`, and its spoken sentence names neither the miss nor the
+  second ask. §7.2's principle points at changing it, but the same ordering governs
+  single-obligation days that have been on screen since MAX-061 — a ride on a missed run
+  day reads the same way — so changing it here would have moved historical cells under
+  cover of a lifting ticket. It wants its own ticket, and probably a designed state rather
+  than a reordering.
+- **Not verified, and it is the interesting half.** No pixel was drawn. Whether
+  `circle.lefthalf.filled` reads as "half of it happened" at 42pt rather than as noise, and
+  whether a mixed day reads as *worse* than a plain miss when the two share a fill, are
+  device questions. See the PR's device list.
 
 **MAX-145 — the athlete says what a lift worked, and the app learns to wait for it.**
 A22 built. The picker is the small half; the two consequences the amendment named are the
@@ -2418,6 +2898,169 @@ settings, and they were being printed under "The plan" as though they governed a
   is stated once or per weekday; this ticket's brief scoped it to `WorkoutFactSheet`,
   `WorkoutContext` and `WorkoutContextBuilder`, so it was left alone.
 
+**MAX-139 — the workout detail screen stops drawing a lift as a run with holes in it.**
+LIFTING-SPEC §10.1's other half. The fact sheet stopped describing a lift in running
+vocabulary at MAX-136; this is the screen.
+
+- **The verdict header now reads the workout's own discipline's ask, not the run
+  slot's.** `WorkoutVerdict.scheduledSession` used to be `planDay?.scheduledSession`
+  unconditionally — the run slot, whatever the workout was — which is why a lift's
+  header showed the day's run ask (an easy run it did not do) instead of its own lift
+  ask. It now resolves through `PlanDay.scheduledSession(for:)`, keyed on a new public
+  `WorkoutVerdict.discipline` read from `Workout.activityType.discipline`. A day
+  prescribing a run and no lift now reports `.rest` for a lift on it — the honest
+  answer, per §5's "a workout of a discipline the day did not prescribe" — never the
+  run's easy-run ask. Regression-tested (`testALiftOnAGovernedDayReportsTheLiftAskNot
+  TheRunAsk`) against the exact scenario the pre-existing test asserted the *old*, wrong
+  behaviour for; that test is rewritten rather than left contradicting the fix. A second
+  test pins a day prescribing both slots resolving each workout to its own ask.
+- **Four run-only things stop appearing on a lift's screen, and one sentence stands in
+  their place.** Cadence versus target, the route map, the pace splits, and the HR
+  curve's cap line describe a running prescription (a cadence target is steps against a
+  running gait; `Plan.heartRateCapBPM` is documented as the easy-run ceiling) and none
+  belongs on a lift's screen — not even in its own "no data" state, which is what
+  `CadenceBandView` draws today for any workout with no cadence average, lift or not.
+  **Decision: the decision of which sections apply lives in `SummaryTileData`, not in
+  the view.** A new `SummaryTileData.showsRunOnlySections: Bool` (false for a lift) is
+  what `WorkoutDetailView` reads to skip `CadenceBandView`, `RouteMapView` and
+  `SplitsView` entirely, and a new `SummaryTileData.disciplineNote: String?` (non-nil
+  only for a lift) is the one sentence `SummaryTilesView` renders in their place —
+  worded apart from `WorkoutFactSheet.disciplineFraming` and from `RouteMapView`'s
+  indoor-run copy, per CLAUDE.md's "different statements must not share copy" (the
+  discipline not applying and the sensor not being there are different facts). Both are
+  tested directly on `SummaryTileData`, not inferred from a view.
+- **The lift's summary tiles are gated explicitly, not left to accident.** Distance,
+  drift and grade-adjusted pace are now `nil` for a lift by an explicit discipline check
+  in `SummaryTileData.init`, not merely trusted to already be nil from upstream. Two
+  reasons that is not redundant: `distance` reads `Workout.distanceMeters` directly,
+  which `DerivedMetricKind` has no opinion about at all, so nothing upstream stops a
+  captured lift from carrying one; and a lift ingested **before** MAX-130 gated the
+  calculator can carry a stored drift or grade-adjusted pace figure the old,
+  discipline-blind calculator computed — the identical "stale figure from before this
+  ticket" case `WorkoutFactSheet`'s `describesARun` branch already guards against. A
+  dedicated test constructs exactly that stale-metrics case and asserts both tiles stay
+  hidden. What a lift keeps: duration, active energy, and average/maximum heart rate — a
+  heart rate measured during a lift is still a heart rate (LIFTING-SPEC §3.2).
+- **The HR curve stays for a lift; only its cap line goes.** `HRCurveView` is unchanged
+  and untouched — the curve and the avg/max HR figures apply to both disciplines. What
+  changed is `WorkoutDetailModel.heartRateChart`, which used to hand every workout the
+  plan's `heartRateCapBPM` unconditionally: a single plan-level field with no
+  per-discipline sibling, so a lift on a day a plan governs was drawing the running cap
+  as a dashed line with a "Cap N bpm" annotation. It now passes `nil` for a lift's
+  `capBPM`, the same absence `HRCurveView` already renders correctly for "no plan
+  governs this day." **Known imperfection, left as found**: on a lift day a plan *does*
+  govern, `HRCurveView`'s own copy for a nil cap still reads "No plan governs this day,
+  so there's no cap to compare against" — technically true of the run slot's cap, not of
+  the day. Fixing the sentence needs a discipline-aware copy branch inside
+  `HRCurveView.swift`, which is outside this ticket's five listed files; reported rather
+  than done.
+- **The verdict header now says when a score was reached against the wrong
+  discipline's ask (A21/MAX-143).** MAX-143 shipped `MiscategorisedScoreLabel` and
+  `MiscategorisedScoreCopy` and explicitly left wiring them to a surface to "whichever
+  of MAX-139 or MAX-150 lands second" — MAX-150 landed first, so this ticket took it. A
+  new `WorkoutVerdict.miscategorisationLabel` reads `ScoreLedger.miscategorisationLabel`
+  straight through (never re-derived), and `VerdictHeaderView` renders
+  `MiscategorisedScoreCopy.labelledDetail` as one more plain-text, no-colour line below
+  the rationale — the identical treatment `annotationRow` already gives a manual
+  correction, because a label is the same kind of fact: additive information beside an
+  unchanged, immutable score (D8). The score chip's own VoiceOver label is combined into
+  one element and gains `labelledAccessibilitySuffix` when a label is present, so the
+  number and the caveat read as one sentence rather than two unrelated labels.
+- **The last view literal adopts `FailureCopy`.** MAX-154 defined
+  `LoadFailureSurface.workoutDetail` and left `App/Workouts/WorkoutDetailView.swift`
+  alone because this ticket was in flight; the `.failed` case now reads
+  `FailureCopy.couldNotLoad(.workoutDetail)`.
+- **Two files beyond this ticket's listed five were touched, both minimally and both
+  unowned by any parallel ticket.** `App/Workouts/WorkoutDetailModel.swift` gained the
+  discipline parameter `heartRateChart` needed to gate the cap line (above) — the value
+  is assembled there and nowhere else reachable from the five listed files.
+  `App/Workouts/WorkoutDisplayFormatting.swift`'s `describeScheduledSession(_:unit:)` is
+  the one formatter `VerdictHeaderView` calls for the "Scheduled" row, and its `.lift`
+  case still read `session.note ?? "Lift"` — written before MAX-131/MAX-145 gave a lift
+  session a duration and muscle groups to show. Left as `"Lift"` alone, the header's
+  discipline fix would have been structurally correct (the right `ScheduledSession`) but
+  said almost nothing about it; it now reads "Lift · 45:00 · Chest and shoulders",
+  reusing `SummaryTileData.formattedDuration` and `MuscleGroupEntryCopy.describe` so a
+  lift's ask is never worded two different ways one screen apart.
+- **Considered and rejected: a numeric lifting-progression tile, and a zone-splits
+  view.** LIFTING-SPEC §4.2 ships no numeric lifting progression — nothing measures load
+  or volume — so there is no target for a tile to show against, and a `— / — ` tile is
+  worse than no tile. Zone splits (§3.3's recommendation to keep them for a lift) have no
+  summary-tile or chart surface anywhere in the app today, for *any* discipline — only
+  the fact sheet renders them as prose — so adding one would be new-feature scope for a
+  ticket titled "workout detail for a lift," not a removal-and-replacement. Reported,
+  not built.
+- **Not verified by CI beyond compilation.** Every section composed by
+  `WorkoutDetailView`, the cadence/route/splits omission, the HR curve's cap line, and
+  the verdict header's rendering are App-layer (tracker R2, R13) — CI compiles them and
+  never draws a pixel. **Needs device verification**: open a lift's detail screen and
+  confirm no cadence card, no route card, no splits card, and no dashed cap line appear;
+  confirm the discipline-note sentence reads correctly below the summary tiles; confirm
+  the "Scheduled" row shows the lift's own ask (duration and muscle groups, where
+  prescribed) rather than the day's run ask; open a run's detail screen and confirm
+  nothing changed. A device with a historical miscategorised lift score would also
+  confirm the new label row, but none is known to exist on this account yet.
+
+**MAX-140 — the trend tiles stop calling obligations days, and the average score is
+decided to be per-workout.** LIFTING-SPEC §14 named three jobs; here is what happened to
+each.
+
+- **The effective-days caption was a lie on screen, and now is not.** Since MAX-134,
+  `Tallies.effectiveDays` (`EffectiveObligationTally`) counts prescribed *obligations*,
+  not calendar days — a Tuesday asking for a run and a lift is two chances, and a week
+  with three lifts reads `6/8` where it used to read `4/5` for the same training. The
+  number was already right (MAX-134's own byte-for-byte regression proved that); the
+  caption still said "effective days" over a denominator that no longer counted days.
+  Fixed in `TrendTileData.swift`: "effective sessions" at week/month, "effective, of N
+  eligible sessions" at year — "sessions" rather than "obligations" because it is the
+  word LIFTING-SPEC §6.2 itself uses for this exact cost, and the word `PlanFormatting`
+  already uses on the plan screen. Two new tests exercise this through the real
+  `TalliesCalculator`/`DayObligationResolver` pipeline rather than a hand-built `Tallies`
+  — a mixed run+lift day reading `1/2`, and a run-only week reading the same `4/5` a
+  reader would have gotten before MAX-134, proving the single-discipline-history
+  invariant at the tile layer and not only at `Tallies`'.
+- **"Days run" was already fixed.** MAX-150 landed "days trained" ahead of this ticket
+  starting. Checked, not redone: `workoutDays`' doc comment now says so explicitly, and
+  the existing `testAMonthAddsDaysTrainedAndKeepsTheArcComparison` is the pin.
+- **Average score: decided per-workout, deliberately.** `Tallies.averageScore` already
+  means "mean of every scored workout's `effectiveValue` in the interval" —
+  `TalliesCalculator.computeAverageScore` (unmoved, MAX-134's file) sums one term per
+  scored workout, so a day that completed and scored both a run and a lift already
+  contributed two terms before this ticket, the same as two scored attempts at one
+  obligation always have. **Decision: keep it, and say why in the type's own
+  documentation rather than leave the reader to infer it.** "How good was each thing I
+  did" (this tile) and "did I meet each thing the plan asked of me" (`effectiveDays`,
+  best-of-per-obligation then AND-across-day) are different questions, and collapsing
+  the average to one best-of figure per day would discard a second scored effort's own
+  grade — data the athlete asked to see — to buy a distinction that belongs to the other
+  question. D2 is respected by construction: this ticket touches no arithmetic, only
+  documents the arithmetic `Tallies` already runs.
+- **Reported, not decided: whether a MAX-143-labelled miscategorised score (a lift
+  scored against the running rubric, A21) should leave this average.**
+  `ScoreLedger.countsTowardScorerQuality` already excludes it from PRD §2's
+  scorer-quality signal; whether it should *also* stop dragging down the athlete's own
+  average score is a live question MAX-134's own tracker note flagged and explicitly did
+  not take, on the grounds that it belongs to `Tallies`/`TalliesCalculator`. This
+  ticket's scope names those exact files off-limits (`Tallies/`, `Domain/Tallies.swift`
+  — MAX-134's), so it is reported rather than done here: building a second, competing
+  average inside `TrendTileData` to work around the boundary would be exactly the D2
+  drift this file exists to avoid. **Filed here as a candidate follow-up ticket** —
+  "exclude miscategorised scores from `Tallies.averageScore`" — rather than picked up.
+- **Found in passing, reported, not touched:** `Context/TrainingFactSheet.swift` prints
+  the identical string, "Effective days: N/M", straight from the same
+  `EffectiveObligationTally` — the same caption bug, one layer over. Out of this ticket's
+  named files (`Metrics/TrendTileData.swift`, `App/Dashboard/TrendTilesView.swift`), and
+  it is prompt content, which CLAUDE.md requires a `/security-review` for regardless of
+  how small the wording change. Left alone; flagged for whoever owns the fact sheet next
+  (MAX-136/147's territory).
+- **`App/Dashboard/TrendTilesView.swift` needed no change.** Every string it renders
+  comes from `TrendTileData.tiles`; the view lays tiles out and reads captions, it does
+  not know their words. Listed in the ticket's file scope, read, left untouched.
+
+**Needs device verification: none.** Every change in this ticket is a string returned by
+`MaximizeCore`, pinned by tests that run in CI; nothing here reaches a view, a gesture or
+a rendering decision no test can see.
+
 **MAX-147 — the task text learns discipline too.** MAX-133's report named this exactly:
 `WorkoutScorer`'s stable half still opened *"You are scoring one running workout"* for
 every call, lift included. This is the fix, one level up from MAX-136's fact sheet.
@@ -2503,6 +3146,563 @@ scope, newest `lastActivityAt` with `id` breaking a tie, the same rule
 
 ---
 
+## MAX-154 — the app-wide error-handling audit
+
+**Scope: every failure path outside chat.** Chat's own failure states are MAX-152/153's
+and were not touched. The audit was a full sweep of `App/` and `Sources/MaximizeCore/`
+for the three defect classes the ticket named: a failure that reaches the person as
+nothing, a failure that reaches them as noise, and a failure the code claims cannot
+happen. **The inventory below is the deliverable, including the rows nothing was done
+to** — an audit whose findings vanish into a diff is not reviewable.
+
+### 1. Failures the code claims cannot happen — the ban holds
+
+Scanned across `App/` and `Sources/MaximizeCore/` (excluding `Tests/`, where these are
+permitted):
+
+| Construct | Count in non-test code | Verdict |
+|---|---|---|
+| Force unwrap (`x!`) | **0** | CLAUDE.md's rule is actually kept, not merely stated |
+| `try!` | **0** | Five source comments *mention* `try!` to explain why a defensive enum case exists instead of one |
+| `fatalError` | **0** | One comment, same shape (`PlanProposalDrafting`) |
+| `as!` | **0** | — |
+| Implicitly-unwrapped optional (`: T!`) | **0** | — |
+| `assertionFailure` | 1 | `Surfaces.swift:252` — the debug-only glass-over-data tripwire, a logged decision, compiles out of release |
+| Array subscripting | 2 | Both guarded: `ScoreCalendarView.door` subscripts `[0]` only inside `where workoutIDs.count == 1`; `DayWorkoutsView.step(by:)` guards on `indices.contains(next)` first |
+
+Nothing in this class needed fixing. Recording it matters anyway: the claim "the ban
+holds" had never been checked, and the checks above are what makes it a fact rather than
+an assumption.
+
+### 2. Failures that reached the person as nothing — fixed
+
+- **The dashboard drew a blank three sections deep.** `DashboardView` rendered
+  `ScoreCalendarView`, `DriftOverlayView` and `TrendTilesView` inside `if let interval =
+  intervalModel.state.interval`, with **no `else`**. When the interval model is `.failed`
+  — a system clock outside `CalendarDay`'s domain — the entire dashboard below the
+  selector was absent, with a one-line caption on a control above it the only hint.
+  Fixed: an `else` branch carrying `FailureCopy.dashboardUnavailableWithoutToday`.
+- **The store failing to open discarded its reason entirely.**
+  `PersistenceComposition.modelContainer` was `try? MaximizeModelContainer.makeOnDisk()`.
+  This is the most consequential failure in the app — every screen degrades, ingestion
+  falls back to the anchor-pinning sink, nothing is written — and the error went nowhere.
+  Fixed: a `do`/`catch` logging `domain` and `code` `.public` and the error itself
+  `.private`, following `IngestionComposition`'s established split for exactly this
+  reason (a Core Data error's `userInfo` can carry stored row values, i.e. health data).
+
+### 3. Failures that reached the person as noise, or as a false claim — fixed
+
+- **A failed Keychain read was reported as "No key is stored."** `SettingsView` held a
+  `Bool` and set it to `false` in the `catch`, so a device that could not be asked stated
+  flatly that nothing was there — and, because the **Clear** button was gated on that
+  flag, the only control that removes a key was withdrawn on exactly the device where one
+  might still be sitting. Fixed: `StoredAPIKeyPresence` is three states
+  (`stored`/`notStored`/`unknown`), `permitsClearing` is true for two of them, and a
+  failed save or clear now re-reads presence rather than leaving the line reading as it
+  did before the attempt.
+- **"No workouts yet." asserted something R10 says the app cannot know.** An empty list
+  and a refused Health *read* are indistinguishable from inside this app. Fixed: the copy
+  states the ordinary reading, then names the other possibility and where to check it —
+  **without** claiming Health is or is not connected, which is the claim R10 forbids. A
+  test asserts the words "connected" and "denied" appear in no Health-related string.
+- **Four verbs for one event.** "Could not load workouts.", "Couldn't load the plan.",
+  "Couldn't load the calendar.", "Couldn't load this plan version.", "Couldn't load the
+  runs in this interval." — five screens, four spellings, none of them the one
+  `ChatConversationCopy.failedToLoad` had already established at MAX-150. Fixed: one verb,
+  asserted against chat's by test, so the app has a single failure voice rather than a
+  chat one and a not-chat one.
+- **Two dozen athlete-facing string literals, across eleven files, were being chosen in
+  `App/` — in `catch` blocks and `switch` arms CI compiles and never runs.** CLAUDE.md is explicit that this is the defect and not the fix: the layer is
+  compiled by CI and never executed (R2, R13), so nothing but a reader could tell whether
+  an edit kept the care the comments described. All of them now read a value from
+  `MaximizeCore.FailureCopy`, which has tests.
+
+### 4. Acceptable with reason — inspected, left alone
+
+Every one of these was read in full and is deliberate. Listing them is the point: a later
+audit should not have to re-derive that they are fine.
+
+- **`AnchoredWorkoutIngester:229` — `try? await anchorStore.clearAnchor()`.** Discarding a
+  clear failure is correct: the fetch is already retrying without an anchor, and failing
+  the pass over a failed *cleanup* would pin the pipeline on the corrupt byte the code is
+  in the middle of routing around.
+- **`WorkoutIngestionPipeline:234, 498` — `try? await scores.ledger(...)`.** A ledger read
+  that fails is not evidence a score is absent, and the pipeline treats "unknown" the same
+  as "present" — it declines to score rather than risking a second auto-score (D8).
+- **`WorkoutIngestionPipeline:636` — `try? await Task.sleep(...)`.** A cancelled sleep
+  means the model already answered. Commented as such.
+- **`MaximizeModelContainer:248, 290` — per-file `try? setAttributes`.** One file in a
+  transient state must not cost every other file its protection class; the enumerator's
+  `errorHandler` returns `true` for the same reason.
+- **`MiscategorisedScoreLabelling:115` — `try? ... else { continue }`.** One unreadable
+  ledger skips one score, not the pass. The pass is idempotent, so the skipped row is
+  labelled on the next launch.
+- **`WorkoutSampleExtractor:343, 435, 495` — `try?` per sample.** Rejecting one implausible
+  reading and keeping the series is the documented policy; a whole-series throw would lose
+  a run's curve permanently.
+- **`SettingsView:196` — `guard let budget = try? RestDayBudget(daysPerWeek:) else
+  { return }`.** Unreachable: the picker offers `0...7` and that is the type's whole
+  permitted domain. A silent `return` on an unreachable branch is preferable to inventing
+  copy for a state that cannot occur.
+- **`ScoringModelError` / `ScoringError` / `DomainError` `description`s.** Diagnostic by
+  design and correctly so — they are read in a debugger, and none reaches a screen. See
+  the finding below for the one place that is *nearly* untrue.
+- **R11's escape is implemented.** `WorkoutIngestionPipeline` reports
+  `.workoutAbandoned(step:)` at both `storingTheWorkout` and `discardingTheWorkout`, and
+  `IngestionComposition` logs it loudly, so a permanently unacceptable workout no longer
+  wedges the pipeline. The audit touched none of it. **The R11 row below still reads
+  "MAX-033 must handle this" and is now stale** — left for whoever owns that row to tick,
+  rather than re-graded by a ticket that only read the code.
+- **`ScoreProposal:75`, `PlanProposal:666`** interpolate a decoding error into a
+  `malformedResponse(reason:)` payload. Developer-facing, never rendered.
+
+### 5. Found, reported, not taken
+
+Each of these is a real finding in a file another ticket in flight owns, or on a surface
+another ticket owns. Per the brief, they are reported rather than taken.
+
+- **A status code can reach the athlete's screen.** `PlanProposalDrafting.description`
+  returns `"The plan could not be drafted. \(error.description)."`, where `error` is a
+  `ScoringModelError` — so "The Anthropic API returned an unexpected status (400)." is
+  rendered verbatim on the plan proposal card. That is defect class 2 exactly: an HTTP
+  status and a vendor name where a description of what happened belongs. **Not taken**:
+  the sentence is displayed on a chat surface and MAX-152 owns chat's failure states.
+  Filed as **MAX-155**.
+- **`ScoringError.description` interpolates a workout UUID and a `CalendarDay`.**
+  `contextAlreadyScored(workoutID:)` renders the identifier; `noPlanInEffect(day:)`
+  renders a date. Neither reaches a screen today, and the one log that could carry them
+  is `.private`, so this is a latent hazard rather than a live leak — but CLAUDE.md rules
+  identifiers and dates out of error strings without a "probably fine" exception, and the
+  distance between this and a leak is one future `.public` log line. Filed as **MAX-156**.
+- **`App/Workouts/WorkoutDetailView.swift:64`** still carries `Text("Could not load this
+  workout.")`, the last view literal of the five. `LoadFailureSurface.workoutDetail` and
+  its sentence are defined and tested; adopting them is one line. **Not taken**:
+  `App/Workouts/*` is MAX-139's.
+- **No surface in the app offers a retry.** Every `.failed` state is terminal until the
+  view is rebuilt, including the ones caused by something that plainly could succeed on a
+  second attempt. New risk row **R15** below.
+
+### What CI proves about this ticket, and what it does not
+
+CI compiles `App/` and runs `FailureCopyTests`. That proves every sentence exists, that no
+two cases share one, that none carries a digit or names a type, and that the Health copy
+claims nothing R10 forbids. **It proves nothing about any of the failures themselves.** CI
+opens no socket, touches no Health store, reads no Keychain and opens no SwiftData store,
+so every path this ticket touches is device-verified only. The PR lists how to provoke each one.
+
+---
+
+## MAX-155/156 — error descriptions stop leaking codes and identifiers
+
+Both filed by MAX-154's audit (§5, "found, reported, not taken"), both fixed the same
+shift: a `description` that used to double as screen or log text now stays a debugger
+diagnostic on the type that already had one, and a new, narrower channel carries the
+words that are actually safe to show or store. **Corrected from the tracker rows that
+filed them:** MAX-155's row names `PlanProposalDrafting.description` interpolating a
+`ScoringModelError` — that description lives on `PlanDraftingFailure`
+(`Plan/PlanProposalDrafting.swift`), and the interpolated type is `PlanProposalModelError`,
+not `ScoringModelError`. Trusted the code over the row, per the ticket's own instruction.
+
+### MAX-155 — the plan proposal card
+
+**Decision: a sibling to `ChatFailureNotice`, not a case added to it.**
+`ChatFailureNotice` maps exactly one input type (`ChatStreamError`) and its own doc
+comment states that as the reason its exhaustiveness claim is meaningful.
+`PlanDraftingFailure` wraps two types `ChatStreamError` knows nothing about
+(`PlanProposalModelError` for a transport failure, `PlanProposalError` for a rejected
+proposal), so folding it in would mean either widening `ChatFailureNotice`'s signature
+to a third, unrelated error type, or bolting a second entry point onto a type whose
+whole design is "one mapping, one input." `PlanDraftingNotice`
+(`Sources/MaximizeCore/Plan/PlanDraftingNotice.swift`) is the sibling instead, same
+shape, same rules, its own exhaustive `switch` with no `default`.
+
+**A 400 from the drafting endpoint and a 400 from the stream get the same words, by
+different code.** Both `unexpectedStatus` cases mean the same thing to an athlete —
+"this app built a request Anthropic rejected, and asking again will not help" — so the
+sentences read alike on purpose. But `ChatStreamError.unexpectedStatus` and
+`PlanProposalModelError.unexpectedStatus` are different types, so the sentence is
+written twice, once per `switch`, the same way each type already writes its own
+`.noAPIKeyStored` sentence rather than sharing a helper across two enums that happen to
+share a case name.
+
+**`PlanDraftingFailure.description` is unchanged**, payload and all — it still
+interpolates `PlanProposalModelError.description`, status codes included. That is
+deliberate, not an oversight: `ChatStreamError.description` was already accepted as a
+developer diagnostic before MAX-152, on the reasoning `FailureCopy` states explicitly
+("`ScoringModelError.description` and friends stay as they are ... written for a
+developer reading a debugger"). Rewriting `PlanDraftingFailure.description` in place
+would only be right if nothing else read it; something did —
+`ChatModel.noteDraftingFailure` — and that is the one line this ticket changed, to read
+`PlanDraftingNotice.notice(for:).message` instead. The doc comment that used to claim
+`description` was screen-safe (the actual bug — see MAX-154's finding) is corrected to
+say the opposite and point at the new type.
+
+**`.rejected(PlanProposalError)` is the deliberate, documented exception** to "nothing
+here is interpolated": `PlanProposalError.description` is correction text, not a wire
+diagnostic — the same string `PlanProposalInstruction(retryingAfter:)` already puts in
+front of the model, and MAX-101's own documentation calls it "the one the athlete should
+read verbatim." It is carried into `PlanDraftingNotice` unchanged. Rewriting it would be
+a second opinion about a file this ticket does not own (`Plan/PlanProposal.swift`,
+MAX-151) — flagged, not touched, per this ticket's scope discipline.
+
+**Retry: no new flag.** `ChatFailureNotice.offersRetry` gates `ChatModel.canRetry`, but
+nothing gates "Draft a plan from this conversation" on the failure kind — the same
+button that failed is the only affordance for every case, and tapping it is what asks
+again. That already satisfies MAX-152's rule (a button, never an automatic policy)
+without a property, so `PlanDraftingNotice` does not add one; adding a flag nothing
+reads would be a second, unenforced decision.
+
+**Tests:** `Tests/MaximizeCoreTests/PlanDraftingNoticeTests.swift`, exhaustive over
+`PlanProposalModelError` — every case a distinct, non-empty sentence, no digit anywhere
+(the exact MAX-155 regression, checked by name for 400 and every other status this
+client can receive), no wire vocabulary, no case name. Plus
+`ChatPlanDraftingTests.testAnUnexpectedStatusNeverReachesTheTranscriptAsANumber`, driving
+the failure through `ChatModel.draftPlan()` end to end. One existing assertion was
+updated rather than left to rot:
+`ChatPlanDraftingTests.testEveryFailureGetsASentenceInTheTranscript`'s `.requestFailed`
+fragment moved from "connectivity" (a wire word that reached the screen by the bug this
+ticket fixes) to "connection" (what the transcript now actually says) — documented in
+place, not silently changed. `PlanProposalDraftingTests`' two assertions against
+`.description` directly (`testTwoUnusableRepliesStopRatherThanLooping`,
+`testTheNoKeySentencePointsAtTheFix`) were left untouched, because `.description`'s
+behaviour for those two cases is unchanged.
+
+### MAX-156 — `ScoringError.description`
+
+**Decision: delete the payload from the two affected sentences; no new property.**
+`noPlanInEffect(day:)` and `contextAlreadyScored(workoutID:)` no longer interpolate
+their associated values into `description` — full stop, not "unless the caller is
+`.private`". CLAUDE.md's health-and-privacy rule has no "the current caller happens to
+be careful" clause, and a `description` is a plain `String`: nothing stops a future
+`.public` log call, a screen, or a crash reporter from reading it, so the fix had to
+make the leak structurally impossible rather than rely on today's one call site staying
+careful.
+
+**No second "diagnostic" channel was added, because one already exists.** The ticket
+brief allows for "a separate non-`description` channel that callers must reach for
+deliberately" if a diagnostic genuinely needs the value. It does not: the day and the
+workout ID are still sitting on the case as ordinary associated values, and a caller
+that wants one switches on `.noPlanInEffect(let day)` or
+`.contextAlreadyScored(let workoutID)` directly — already deliberate, already typed,
+and adding a mirrored property would only duplicate a channel the enum already provides
+for free.
+
+**The other five cases were left alone.** `noBandMatched` interpolates a
+`ScheduledSessionKind` and `WorkoutClassification` raw value ("easy", "hard") — plan
+vocabulary, not an identifier or a date — and the model-fault cases
+(`malformedResponse`, `scoreOutOfPermittedRange`, `scoreOutsideBand`,
+`rationaleRejected`) interpolate a score, a range, or a caller-supplied reason string,
+none of which name a specific workout. MAX-156's brief is the identifier and the date
+specifically; widening the diagnostic-copy rewrite to every case was not asked for and
+was not done.
+
+**Tests:** `Tests/MaximizeCoreTests/ScoringErrorPrivacyTests.swift`, one instance of
+every `ScoringError` case built with a distinctive UUID and `CalendarDay`, asserting
+`description` contains neither the identifier's `uuidString` nor the date's ISO string
+(nor its bare year) for any of the seven cases — not just the two that used to leak. A
+companion test confirms the two affected sentences still say something a debugger reader
+can act on, and another confirms the day and workout ID are still reachable by matching
+the specific case, which is the "separate channel" this decision relies on.
+
+### What CI can and cannot prove, for both
+
+CI proves: every notice/description exists, is non-empty, is distinct from its
+siblings, and — mechanically, by regex over the rendered strings — carries no digit and
+none of the banned wire/enum tokens. It cannot prove the two athlete-facing surfaces
+(the plan proposal card, and anything that ever renders a `ScoringError` — nothing does
+today) look right, or that provoking a real 400 from `AnthropicPlanProposalClient`
+against a live server produces exactly the case this ticket assumes. See the PR's
+**Needs device verification**.
+
+---
+
+## MAX-157 — the fact sheet counts sessions, not days
+
+**Source: MAX-140's report.** MAX-140 fixed `TrendTileData`'s on-screen "effective days"
+caption to "effective sessions" and found, in passing, that `Context/TrainingFactSheet.swift`
+prints the identical mislabelled string straight from the same `EffectiveObligationTally` —
+one layer deeper, in what Claude is told rather than what the athlete reads. Since MAX-134
+(A19/LIFTING-SPEC §6.2), that count is prescribed *obligations*: a Tuesday asking for a run
+and a lift contributes two. A prompt that hands Claude a number and calls it "days" invites
+Claude to reason and answer in days, to the athlete, about a figure that is not days — worse
+than a wrong on-screen caption, because the athlete has no label in front of them to correct
+for it.
+
+**The fix: two lines relabelled, in `TrainingFactSheet.talliesLines`.** Both branches of the
+`effective.rate == nil` check now read "Effective sessions" instead of "Effective days" —
+the populated case (`"Effective sessions: \(effectiveCount)/\(eligibleCount)"`) and the
+absence case (`"Effective sessions: nothing in this window was eligible — …"`). "Sessions"
+rather than "obligations", matching LIFTING-SPEC §6.2's and `PlanFormatting`'s own word, and
+the exact word MAX-140 gives the dashboard tile for the same reason. No arithmetic moved —
+`effective.effectiveCount`/`effective.eligibleCount` are read from the `EffectiveObligationTally`
+`Tallies` already computed (D2); only the label changed.
+
+**Prompt text, before and after** (for the security review this PR carries):
+
+```
+- Effective days: 4/5
++ Effective sessions: 4/5
+
+- Effective days: nothing in this window was eligible — the plan asked for rest, no plan
+-     governed these days, or their outcome is not yet known.
++ Effective sessions: nothing in this window was eligible — the plan asked for rest, no
++     plan governed these days, or their outcome is not yet known.
+```
+
+**No new field of health data enters the prompt.** This changes two words on two lines
+that were already there; the numbers, their source (`Tallies.effectiveDays`), and every
+other line of the fact sheet are unchanged.
+
+**Swept the whole file for the same class of drift, not just the two named lines:**
+
+- **"Days with at least one workout: N" (`tallies.workoutDays`) — left alone.** `workoutDays`
+  counts distinct calendar days with at least one recorded workout of any discipline
+  (`Tallies`'s own doc comment); a day carrying both a run and a lift still counts once.
+  MAX-134 never touched this figure, so "days" is still its true unit. A comment now says
+  so in place, so the next sweep does not have to re-derive it.
+- **"Current streak: N days" (`tallies.currentStreak`) — left alone, and this is the one
+  worth explaining rather than just checking.** LIFTING-SPEC §6.3 rolls a day's obligations
+  up with AND *before* the streak ever sees it — a day extends the streak only if it had at
+  least one obligation and every obligation on it was met. So what the streak walks is one
+  entry per calendar day regardless of how many sessions that day prescribed, and its unit
+  of account is genuinely the day. Relabelling this line would have been the same defect in
+  the opposite direction — stating an obligation count in day words is wrong, but so is
+  stating a genuine day count in some other word to look consistent. A comment now says why
+  it stays "days," so a future editor does not "fix" it back into the same class of bug.
+- **The rest-day budget — no line to fix.** `TrainingFactSheet.swift` does not render a
+  rest-day-budget figure at all (checked: no "budget" line anywhere in the file or in
+  `TrainingContext.swift`). `ContextBuilder.Inputs.restDayBudget` reaches the training
+  context's tallies computation but nothing prints the budget itself or its conversions
+  today, so there is nothing here mislabelled and nothing to add — adding one would be a
+  new field of prompt content, which this ticket's brief rules out.
+- **The per-session lines already say "session," not "day."** `sessionLines`' preamble
+  ("One line per session — per session, not per day, because a day can hold both a run and
+  a lift and the plan asks for each separately") and every per-session field were already
+  discipline- and session-aware as of MAX-095/MAX-136. Read, left untouched.
+- **The window and plan blocks — no obligation counts to mislabel.** `windowLines` and
+  `planLines` state calendar-day spans and plan settings, never a count of obligations, so
+  none of A19's unit change reaches them.
+
+**Tests.** `Tests/MaximizeCoreTests/TrainingContextAgreementTests.swift` pinned the old
+"Effective days" wording in two places — `testEveryTalliedFigureAgreesWithTheDashboardsOwn`
+(the populated case, against the tile's own value) and
+`testAnEmptyEffectiveDayRatioIsWithheldOnBothSurfaces` (the absence case, and the "not 0/0"
+negative assertion). Both updated in place to assert "Effective sessions" instead, and the
+absence-case test gained an explicit `XCTAssertFalse(sheet.contains("Effective days:"))` so
+a regression back to the old label fails even if a future rewrite stops matching the exact
+absence sentence.
+
+**What CI can and cannot prove.** CI can prove: the package compiles and
+`TrainingContextAgreementTests` — including the two updated assertions — passes, which
+pins the corrected wording as a literal string a future edit cannot silently drift. CI
+cannot prove anything about how Claude actually reasons over the corrected label; that is
+inherent to prompt-wording changes and not something a unit test can close. **Needs device
+verification: none** — this ticket touches no view, no gesture and no HealthKit path; the
+only way to observe the change is to read a rendered fact sheet or a training-thread
+transcript, and CI already asserts the string it contains.
+
+**`swift build`/`swift test` were not run.** There is no Swift toolchain in this container
+(R1); CI is the actual compiler. The change is two string literals and their surrounding
+comments, both call sites still take the same two `Int`s they took before, and the touched
+test file's assertions were re-read line by line against the new strings. That is "reads
+correctly and should compile," not "compiles" — stated at that strength deliberately.
+
+---
+
+## MAX-104 — copy and absence voice: the plan and workout screens
+
+**MAX-150's accurate remainder.** MAX-150 took the chat and dashboard half of the
+app-wide copy pass early and left `App/Plan/*` and `App/Workouts/*` in full for this
+ticket, plus one already-checked item (`ChatEntryPoint`'s workout-subject strings — see
+MAX-150's own note). By the time this ticket ran, the lifting build (128–150) had landed
+across both directories, so the brief was not just "match MAX-150's voice" but "check
+what the lifting build left wrong" — MAX-139 and MAX-134/140/157 each reported or implied
+a specific defect in a file they were not allowed to touch.
+
+**The voice is MAX-150's, unchanged, not re-derived:** say what's true, in one plain
+sentence, using the noun the underlying data actually counts; absence gets a real
+sentence naming what's missing and why; two different facts stay two different sentences;
+never restate a fact the surface already stated a few lines away.
+
+### Inventory
+
+Every string in `App/Plan/*` and `App/Workouts/*` was traced to its source and
+classified. Most of both directories was already correct: `SummaryTilesView`,
+`WorkoutChatSectionView`, `MuscleGroupEntryView`, `CadenceBandView`, `SplitsView`,
+`WorkoutRow`, `DayWorkoutsView`, `WorkoutsListModel`, `PlanView`, `PlanDetailSections`,
+`PlanVersionDetailView`, `PlanViewModel` read every string off a core type MAX-095–150
+already got right, and `CadenceBandView`/`SplitsView`/`RouteMapView`'s own "no plan
+governs this day" / "no splits" / "no route" sentences are true exactly because those
+three sections are gated off a lift's screen entirely
+(`SummaryTileData.showsRunOnlySections`, MAX-139) — a run-only view speaking in run
+vocabulary is not a bug. Four things were not fine:
+
+1. **`App/Workouts/WorkoutDetailView.swift`'s failure literal — already fixed.** MAX-154
+   reported this as the one un-adopted `LoadFailureSurface.workoutDetail` call site, but
+   MAX-139 landed touching this exact file in between and adopted it
+   (`Text(FailureCopy.couldNotLoad(.workoutDetail))` is already the `.failed` case's
+   body). Checked, confirmed, no action — recorded here so the next reader does not
+   re-open it.
+2. **`HRCurveView`'s cap-absence sentence conflated two different facts (MAX-139's
+   report).** "No plan governs this day, so there's no cap to compare against." was
+   shown whenever `capBPM` was nil — for a run with no governing plan, correctly, and
+   for **every lift**, incorrectly: `Plan.heartRateCapBPM` is the easy-run ceiling and is
+   withheld from a lift's curve regardless of whether a plan governs the day
+   (`WorkoutDetailModel.heartRateChart`). A lift on a plan-governed day was told a false
+   thing about its own plan. Fixed — see below.
+3. **Two spots had drifted onto `CalendarDay.description`'s bare `YYYY-MM-DD` wire
+   format** instead of the plan screens' own "Aug 5, 2026" (`PlanFormatting.dayLabel`,
+   established at MAX-102): `PlanAuthoringView`'s governed-day preview row
+   (`planDay.date.description`) and `PlanAuthoringModel`'s save confirmation
+   (`"…effective from \(saved.effectiveFrom)."`). Neither is new to the lifting build —
+   both predate it — but both are exactly CLAUDE.md's "one consistent voice," broken on
+   the one screen whose whole job is showing dates.
+4. **The same wire-format leak was inside a core-declared error message.**
+   `PlanAuthoringError.effectiveFromTooEarly`'s `description` interpolated
+   `\(earliest)` directly — a `CalendarDay`, which is `.description`'s bare wire
+   format — so the athlete-facing validation message read "…take effect is
+   2026-06-02." on the one screen everything else calls "Jun 2, 2026." A core file's
+   own string had the same bug the App layer did.
+
+**Two more, not wrong, but not where MAX-150's own rule says they belong:**
+
+5. **`RouteMapView`'s and `SplitsView`'s `.unavailable` sentences were view literals
+   selected by a case of a core-declared enum** (`RouteMapData`, `SplitsListData`) —
+   exactly the shape MAX-150 wrote down as its rule for what moves to the core ("a
+   string whose selection is driven by a case of a core-declared type belongs beside
+   that type"). Neither sentence was factually wrong; both were in the wrong layer for
+   CI to pin them against a future edit to either enum.
+
+### What changed
+
+**HR curve (`Sources/MaximizeCore/Metrics/HeartRateChartData.swift`).** Added
+`discipline: Discipline` to the initializer (no default — every call site says
+explicitly which discipline this is, `SummaryTileData`'s own convention) and a computed
+`capAbsenceReason: CapAbsenceReason?` (`.notApplicableToDiscipline` / `.noPlanForDay`),
+resolved from `discipline` and `capBPM` so the two can never disagree — a cap present
+and a reason for its absence is not a state the type can represent. `HRCurveView` now
+reads the computed `capAbsenceExplanation: String?` instead of hand-testing `capBPM ==
+nil` and printing one hard-coded sentence. `WorkoutDetailModel`'s one call site passes
+`discipline:`, which it already had in scope. Four new tests in
+`HeartRateChartDataTests.swift` pin both sentences, that they differ, and that a present
+cap yields neither.
+
+**Plan-screen dates.** Moved the "Aug 5, 2026" formatter itself from
+`App/Plan/PlanFormatting.swift` down to `PlanCopy.day(_:)` (core) — GMT-pinned,
+unchanged algorithm — so a core-declared error and every plan view read a date the same
+way. `PlanFormatting.dayLabel` now calls straight through, matching every other function
+in that file. `PlanAuthoringError.effectiveFromTooEarly` and the two drifted call sites
+(`PlanAuthoringView`'s preview row, `PlanAuthoringModel`'s confirmation) now go through
+`PlanCopy.day(_:)` / `PlanFormatting.dayLabel(_:)`. While in the file, also moved
+`PlanAuthoringError`'s three weekday interpolations off `String(describing: weekday)
+.capitalized` (a second, reflection-based spelling of the same vocabulary
+`PlanCopy.weekday(_:)` already owns) onto `PlanCopy.weekday(_:)` directly — output
+unchanged, one fewer place the weekday's name could drift. `PlanCopyTests.swift` (new)
+pins `day(_:)` against a mid-month date, a year boundary, and the exact wire-format
+regression this ticket found. `PlanAuthoringTests.swift`'s
+`testBackDatingErrorNamesTheEarliestPermittedDay` — the one test that had pinned the old
+`2026-06-02` wire format as the *expected* value — updated to assert `"Jun 2, 2026"` and
+assert the wire format is now absent.
+
+**Route and splits absence text.** `RouteMapData.unavailableExplanation` and
+`SplitsListData.unavailableExplanation` (both core, both `public static let`) now own
+the sentences `RouteMapView` and `SplitsView` used to hard-code. Each has a test
+(`RouteMapDataTests`, `SplitsListDataTests`) pinning the exact string.
+
+### `session`/`day` sweep
+
+Checked every "day"/"days" occurrence in both directories against what it counts, per
+MAX-134/140/157's own concern. All of them are calendar-day references (a weekday-picker
+label, a plan's effective-from date, `WorkoutDisplayFormatting`'s "Rest day") rather than
+a *count* of something MAX-134 redefined the unit of — neither directory renders a
+tally-style figure (an "N days"/"N sessions" count) at all; those live on the dashboard,
+which is MAX-150's and MAX-157's. Nothing to relabel here.
+
+### Reviewed and left alone, on purpose
+
+- **`WorkoutDisplayFormatting.swift`'s switches on `ActivityType`/`WorkoutClassification`
+  /`ScheduledSession` (all core-declared types) stay in the App layer**, the same
+  exception MAX-150 recorded for `ScoreCalendarFormatting.swift`: it predates MAX-150's
+  own "belongs beside the core type" rule, every string in it is correct today, and
+  relocating a formatter this central (read by `WorkoutRow`, `VerdictHeaderView`, and
+  `PlanFormatting`'s own weekday-line rendering) is an architecture change, not a copy
+  fix. Flagged rather than silently left, per MAX-150's own precedent.
+- **`PlanAuthoringFormatting.describe(_ mode:)`/`.explain(_ mode:)`** switch on
+  `PlanAuthoringSession.Mode`, a core-declared type, and by MAX-150's rule belong beside
+  it — but MAX-101 already gave a reasoned, deliberate account for keeping them in the
+  App layer ("so this file stays the one place the authoring screen's own copy is
+  written"), the text is correct, and there are exactly two call sites, both already
+  reading through this one function (no duplication risk to close). Not moved; noted so
+  a future copy pass does not have to re-discover the tension between the two rules.
+- **`PlanAuthoringFormatting.explain(.firstPlan)`'s "runs are captured but not measured
+  against anything"** — checked against whether a first-plan's consequences read
+  correctly now that lifts exist. It still does: a lift is never scored regardless of
+  whether a plan exists (MAX-111), and the sentence is specifically about what a first
+  plan unlocks for scoring, which is unchanged. Not a finding.
+- **`VerdictHeaderView`'s `awaitingScoreSection`/`noVerdictSection` run-vocabulary
+  strings** ("Scoring runs automatically once the run is captured.", "The plan scores
+  runs, so there's no score for this workout.") — checked against `WorkoutVerdict.init`:
+  `.awaitingScore` is reachable only when `activityType.isRun`, and `.noVerdict` only for
+  a non-run, non-lift discipline still classified `.other` (a ride, a hike). Both
+  sentences are true of every workout that can reach them. Not a finding.
+- **`CadenceBandView`/`SplitsView`/`RouteMapView`'s own run-vocabulary absence
+  sentences** — all three sections are omitted from a lift's screen entirely
+  (`SummaryTileData.showsRunOnlySections`, MAX-139), so "no plan governs this day, so
+  there's no target band to compare against" and "no splits/route recorded for this
+  run" are never shown for anything but a run. Not a finding — this is the one place
+  "no plan governs this day" is still the correct, undifferentiated sentence, because
+  the discipline ambiguity `HRCurveView` had cannot arise here.
+
+### Tests
+
+`HeartRateChartDataTests.swift` (4 new), `PlanCopyTests.swift` (new file, 3 tests),
+`RouteMapDataTests.swift` (1 new), `SplitsListDataTests.swift` (1 new),
+`PlanAuthoringTests.swift` (1 updated to assert the corrected wording and the absence of
+the old wire format). Every new or changed string with a data dependency has a test
+asserting its exact value, following `FailureCopy`/`PlanCopy`'s own bar.
+
+### What CI can and cannot prove
+
+CI can prove: the package compiles, and the ten new/updated tests above pass, pinning
+both `HeartRateChartData` absence sentences (and that they differ), `PlanCopy.day(_:)`'s
+formatting including the year-boundary case, and the two moved absence sentences on
+`RouteMapData`/`SplitsListData`. CI cannot prove that `HRCurveView` actually renders the
+right sentence for a real lift on a real device, that `PlanAuthoringView`'s governed-day
+preview reads correctly against Dynamic Type, or anything about how either screen looks —
+see CLAUDE.md's own distinction.
+
+**Needs device verification:**
+- Open a lift's workout detail screen on a day a plan governs (any weekday with a lift
+  prescribed and rest on the run slot) and confirm the HR curve's note reads "This is a
+  lift, not a run, so there's no heart-rate cap to compare against." — not "No plan
+  governs this day."
+- Open a run's workout detail on a day no plan governs (before the plan's
+  `effectiveFrom`, if reachable, or by design a run with no stored plan) and confirm the
+  HR curve still reads "No plan governs this day, so there's no cap to compare against."
+- Open the plan-authoring screen (Plan tab → Author a revision), scroll to "The first
+  week this version governs," and confirm each row's date reads "Aug 5, 2026" style, not
+  "2026-08-05".
+- Save a plan revision and confirm the on-screen confirmation ("Saved plan v_N_,
+  effective from …") reads the same date style.
+- Trigger the back-dating rejection (attempt to set "Takes effect" earlier than
+  permitted, if the picker's own bound can be bypassed, or read the message on a device
+  where it fires) and confirm the earliest-permitted date reads "Aug 5, 2026" style.
+- An outdoor run with a `hasRoute` flag but no stored route, and an outdoor run with no
+  stored splits breakdown — confirm both still read exactly as before ("This run's route
+  could not be loaded.", "No splits recorded for this run."); this is a pure relocation,
+  not a wording change, and worth a device glance since neither test suite renders a
+  view.
+
+**`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1);
+CI is the actual compiler. Every change is a string relocation, a new computed property
+resolved from existing stored data, or a wording fix with no branch or control-flow
+change; every touched call site was re-read line by line against its new signature. That
+is "reads correctly and should compile, and ten tests are written to prove the strings
+once it does" — not "compiles," stated at that strength deliberately, per CLAUDE.md's own
+distinction between the two sentences.
+
+---
+
 ## Risks
 
 | # | Item | Impact | Status |
@@ -2519,6 +3719,7 @@ scope, newest `lastActivityAt` with `id` breaking a tie, the same rule
 | **R9** | **MAX-030 acknowledges every background wake, including failed ones — so iOS never retries.** This is only safe because a missed wake is recovered by the next anchored fetch | If MAX-031 lands a fetch that is not anchored or not idempotent, missed workouts are lost permanently and silently | **Constraint on MAX-031, not a risk to monitor.** The reasoning is documented in `WorkoutObservationCoordinator`; if the anchor guarantee changes, that decision must be revisited |
 | **R11** | **A permanently unacceptable workout wedges the whole pipeline.** If the sink throws deterministically for one workout, the anchor never advances past it, so it is refetched and rethrown on every pass forever — and every later workout queues behind it | Zero-touch capture stops entirely, and the symptom is silence | **MAX-033 must handle this.** Found by MAX-031, which deliberately did not build a poison-pill escape: "give up on this workout" is a data decision belonging to whoever owns the store. The obligation is documented on `WorkoutIngestionSink` |
 | R12 | The anchor write and the workout write are two separate stores, so the window between them exists by construction | A crash between them re-delivers the batch — absorbed by dedupe, so this is the safe side | **Accepted permanently. Do not "fix" this.** ~~MAX-020 can close it by moving the anchor into the same SwiftData transaction~~ — that earlier note was wrong and MAX-020 correctly refused it. See below |
+| **R15** | **No failure state in the app offers a retry, and a whole-store failure is never named as one.** Every `.failed` state is terminal until the view is rebuilt — including the ones a second attempt would plainly clear (a scoring call that timed out, a Keychain read during the moment the device was locked). And when the *store* is what failed, every screen independently says its own content could not be loaded, which reads as five separate problems rather than the one that it is; nothing tells the athlete that nothing at all is being saved | An athlete's only recovery from a transient failure is to guess that backing out and re-entering a screen will help, and their only signal for a permanent one is that the whole app looks broken in five different ways | **Open.** MAX-154 made every failure legible and put the store-open reason in the log (it previously went nowhere), but deliberately did not add controls or an app-level banner — that is a design decision about affordances, not an error-handling audit. Found by MAX-154 |
 | R10 | The app cannot know whether Health *read* access was granted — `authorizationStatus(for:)` reports share status only, by Apple's design | No UI can honestly display "Health connected"; a permission problem is indistinguishable from "no workouts recorded yet" | Accepted, Apple-imposed. Found at MAX-030. Any future settings or onboarding UI must not claim read access it cannot verify |
 
 ## Overseer failure modes

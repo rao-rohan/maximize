@@ -260,6 +260,17 @@ public struct PlanDraft: Hashable, Sendable {
     public var effectiveThresholdPoints: Int
     /// Score at or above which a day is marginal rather than ineffective.
     public var marginalThresholdPoints: Int
+
+    /// The shortest a recorded run may last, in seconds, before `WorkoutClassifier`
+    /// reads it as a fragment when it carries no distance to test instead
+    /// (`Plan.minimumSessionDurationSeconds`, MAX-149, MAX-151).
+    ///
+    /// A plan-level value like `heartRateCapBPM` above, not a per-weekday one — it
+    /// answers "how short is too short for a run this plan governs", the same question
+    /// for every day, not a per-day ask. Nil states no opinion, matching `Plan`'s own
+    /// default; `StandardPlanSeed` is the first place anything sets it to something else.
+    public var minimumSessionDurationSeconds: Double?
+
     /// The athlete's goals, one per line, as narrative context for the scorer and chat
     /// (`PlanGoals`). Blank lines are dropped when the plan is built.
     public var goalStatements: String
@@ -291,7 +302,8 @@ public struct PlanDraft: Hashable, Sendable {
         longRunArcWeeks: [ArcWeekDraft],
         liftSessions: [Weekday: ScheduledSession] = [:],
         goalStatements: String = "",
-        goalTargetDay: CalendarDay? = nil
+        goalTargetDay: CalendarDay? = nil,
+        minimumSessionDurationSeconds: Double? = nil
     ) throws {
         guard !longRunArcWeeks.isEmpty else {
             throw DomainError.empty(field: "PlanDraft.longRunArc")
@@ -306,6 +318,7 @@ public struct PlanDraft: Hashable, Sendable {
         self.cadenceHighStepsPerMinute = cadenceHighStepsPerMinute
         self.effectiveThresholdPoints = effectiveThresholdPoints
         self.marginalThresholdPoints = marginalThresholdPoints
+        self.minimumSessionDurationSeconds = minimumSessionDurationSeconds
         self.goalStatements = goalStatements
         self.goalTargetDay = goalTargetDay
         self.week = Weekday.allCases.sorted().map {
@@ -342,7 +355,8 @@ public struct PlanDraft: Hashable, Sendable {
             },
             liftSessions: liftSessions,
             goalStatements: plan.goals.statements.joined(separator: "\n"),
-            goalTargetDay: plan.goals.targetDay
+            goalTargetDay: plan.goals.targetDay,
+            minimumSessionDurationSeconds: plan.minimumSessionDurationSeconds
         )
     }
 
@@ -425,7 +439,12 @@ public struct PlanDraft: Hashable, Sendable {
             // is a round trip through the draft's own newline-joined shape rather than a
             // second opinion about what a goal statement is.
             goalStatements: proposal.goalStatements.joined(separator: "\n"),
-            goalTargetDay: proposal.goalTargetDay
+            goalTargetDay: proposal.goalTargetDay,
+            // A plan-level value taken directly from the proposal, exactly like
+            // `heartRateCapBPM` above — no carry-forward helper, because MAX-151 gave
+            // `PlanProposal` a wire field for it from day one, unlike the run slot's
+            // `durationSeconds` below (MAX-131), which had no such field to begin with.
+            minimumSessionDurationSeconds: proposal.minimumSessionDurationSeconds
         )
     }
 

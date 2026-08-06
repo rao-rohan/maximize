@@ -35,7 +35,10 @@ struct TrendIntervalSelectorView: View {
             case .ready(let interval):
                 header(for: interval)
             case .failed:
-                Text("Couldn't resolve today's date.")
+                // MAX-154: the sentence is `MaximizeCore`'s, so it is pinned by a test
+                // and so it cannot drift from the fuller explanation `DashboardView`
+                // now draws below this control in the same state.
+                Text(FailureCopy.todaysDateUnresolved)
                     .font(.metricLabel)
                     .foregroundStyle(Color.textSecondary)
             }

@@ -60,10 +60,7 @@ struct PlanAuthoringView: View {
                 ProgressView()
             case .failed:
                 Section {
-                    quietText(
-                        "The plan store is unavailable right now, so a plan could not be "
-                            + "loaded and nothing written here would be saved."
-                    )
+                    quietText(FailureCopy.couldNotLoad(.planAuthoring))
                 }
             case let .editing(editing):
                 editingSections(editing)
@@ -82,6 +79,7 @@ struct PlanAuthoringView: View {
             statusSection(editing)
             effectiveFromSection(editing)
             capSection(editing)
+            durationFloorSection(editing)
             cadenceSection(editing)
             thresholdsSection(editing)
         }
@@ -187,6 +185,50 @@ struct PlanAuthoringView: View {
                     + "against — moving it moves them with it."
             )
         }
+    }
+
+    /// A plan-level value (MAX-151), so it sits beside the cap rather than in the weekly
+    /// grid — see `PlanProposalReview.targetsSection`'s own row for the same field, so
+    /// the card and this screen never say a plan's floor two different things.
+    @ViewBuilder
+    private func durationFloorSection(_ editing: PlanAuthoringModel.Editing) -> some View {
+        Section("Fragment duration floor") {
+            Stepper(
+                value: durationFloorMinutesBinding(
+                    seconds: editing.draft.minimumSessionDurationSeconds
+                ),
+                in: 0...30,
+                step: 1
+            ) {
+                row(
+                    "Floor",
+                    editing.draft.minimumSessionDurationSeconds
+                        .map { PlanAuthoringFormatting.duration($0) } ?? "None"
+                )
+            }
+
+            quietText(
+                "A recorded run with heart-rate data but no distance sample — a treadmill "
+                    + "started before the belt moved, an indoor track with no GPS lock — "
+                    + "shorter than this reads as a mis-started session rather than a real "
+                    + "one. A run that does carry a distance is judged on distance instead; "
+                    + "this only ever applies when there is none to test."
+            )
+        }
+    }
+
+    /// Steps in whole minutes, stored in seconds. Zero reads as "no floor stated" rather
+    /// than a floor of zero seconds, matching `liftDurationMinutesBinding`'s own "None"
+    /// convention below.
+    private func durationFloorMinutesBinding(seconds: Double?) -> Binding<Double> {
+        Binding(
+            get: { ((seconds ?? 0) / 60).rounded() },
+            set: { minutes in
+                model.edit {
+                    $0.minimumSessionDurationSeconds = minutes <= 0 ? nil : minutes * 60
+                }
+            }
+        )
     }
 
     @ViewBuilder
@@ -491,7 +533,7 @@ struct PlanAuthoringView: View {
             } else {
                 ForEach(editing.governedDays) { planDay in
                     row(
-                        planDay.date.description,
+                        PlanFormatting.dayLabel(planDay.date),
                         PlanAuthoringFormatting.describeBothSessions(
                             planDay,
                             unit: editing.distanceUnit

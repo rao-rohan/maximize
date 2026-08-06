@@ -48,7 +48,7 @@ struct PlanView: View {
             ProgressView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .failed:
-            Text("Couldn't load the plan.")
+            Text(FailureCopy.couldNotLoad(.plan))
                 .font(.metricLabel)
                 .foregroundStyle(Color.textSecondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

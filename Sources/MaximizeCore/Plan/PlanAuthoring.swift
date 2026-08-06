@@ -25,6 +25,17 @@ public enum PlanAuthoringError: Error, Hashable, Sendable, CustomStringConvertib
     case scheduledDistanceNotPositive(weekday: Weekday)
     case longRunDistanceNotPositive(week: Int)
 
+    /// The duration floor (`PlanDraft.minimumSessionDurationSeconds`, MAX-151) is set but
+    /// not a positive, finite number of seconds.
+    ///
+    /// Reachable through the screen: a stepper's minutes are converted to seconds and
+    /// clamped at zero the way the lift's own duration stepper is (`0` reads as "no
+    /// floor" rather than a floor of zero) — but `PlanDraft`'s own property is a plain
+    /// `var`, not gated behind a setter the way `DayDraft`'s fields are, so nothing stops
+    /// a caller assembling a draft by hand from setting one non-positive. Checked here for
+    /// the same belt-and-braces reason `liftSessionInvalid` is.
+    case minimumSessionDurationNotPositive
+
     /// The run slot's kind is not one `ScheduledSessionKind.prescribable` permits — in
     /// practice, `.lift` (MAX-148).
     ///
@@ -58,7 +69,7 @@ public enum PlanAuthoringError: Error, Hashable, Sendable, CustomStringConvertib
         switch self {
         case let .effectiveFromTooEarly(earliest):
             return "A new plan version has to start after the current one does. "
-                + "The earliest date this version can take effect is \(earliest)."
+                + "The earliest date this version can take effect is \(PlanCopy.day(earliest))."
         case let .heartRateCapImplausible(permitted):
             return "The heart-rate cap has to be between \(Int(permitted.lowerBound)) and "
                 + "\(Int(permitted.upperBound)) bpm."
@@ -72,17 +83,19 @@ public enum PlanAuthoringError: Error, Hashable, Sendable, CustomStringConvertib
             return "Score thresholds have to be between \(permitted.lowerBound) and "
                 + "\(permitted.upperBound)."
         case let .scheduledDistanceNotPositive(weekday):
-            let name = String(describing: weekday).capitalized
-            return "\(name) prescribes a distance of zero. Give it a distance, or leave "
-                + "the distance off entirely."
+            return "\(PlanCopy.weekday(weekday)) prescribes a distance of zero. Give it a distance, "
+                + "or leave the distance off entirely."
         case let .longRunDistanceNotPositive(week):
             return "Week \(week) of the long-run arc prescribes a distance of zero."
+        case .minimumSessionDurationNotPositive:
+            return "The duration floor has to be a positive number of seconds, or left "
+                + "unset to state no floor at all."
         case let .scheduledKindNotPrescribable(weekday):
-            let name = String(describing: weekday).capitalized
-            return "\(name)'s run slot cannot prescribe a lift. Use the lift slot below it."
+            return "\(PlanCopy.weekday(weekday))'s run slot cannot prescribe a lift. Use the lift "
+                + "slot below it."
         case let .liftSessionInvalid(weekday):
-            let name = String(describing: weekday).capitalized
-            return "\(name)'s lift prescription is not valid. Reopen the screen and try again."
+            return "\(PlanCopy.weekday(weekday))'s lift prescription is not valid. Reopen the "
+                + "screen and try again."
         case .wouldRewriteHistory:
             return "This version would change days an earlier plan version already governs, "
                 + "so it cannot be saved. Reopen the screen and try again."
@@ -207,7 +220,8 @@ public struct PlanAuthoringSession: Hashable, Sendable {
             heartRateCapBPM: try heartRateCap(from: draft),
             cadenceTarget: try cadenceBand(from: draft),
             rubric: try rubric(from: draft),
-            goals: goals(from: draft)
+            goals: goals(from: draft),
+            minimumSessionDurationSeconds: try minimumSessionDurationSeconds(from: draft)
         )
 
         _ = try calendar(including: plan)
@@ -270,6 +284,18 @@ public struct PlanAuthoringSession: Hashable, Sendable {
             throw PlanAuthoringError.heartRateCapImplausible(permitted: HeartRateSample.plausibleBPM)
         }
         return draft.heartRateCapBPM
+    }
+
+    /// The duration floor, validated the same way `Plan.init` validates it
+    /// (`Validate.optionalPositive`). Unlike every other plan-level number this session
+    /// translates, nil is itself a legal answer — "no opinion" — matching `Plan`'s own
+    /// default; only a *stated* value has to be positive.
+    private func minimumSessionDurationSeconds(from draft: PlanDraft) throws -> Double? {
+        guard let value = draft.minimumSessionDurationSeconds else { return nil }
+        guard value.isFinite, value > 0 else {
+            throw PlanAuthoringError.minimumSessionDurationNotPositive
+        }
+        return value
     }
 
     private func cadenceBand(from draft: PlanDraft) throws -> CadenceBand {

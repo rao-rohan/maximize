@@ -178,6 +178,7 @@ final class WorkoutDetailModel {
                 workoutRepository: workoutRepository,
                 planCalendar: planCalendar,
                 day: day,
+                discipline: workout.activityType.discipline,
                 metrics: metrics
             )
             let cadence = CadenceChartData(
@@ -228,17 +229,31 @@ final class WorkoutDetailModel {
     /// series but no governing plan, or a series but not-yet-computed metrics, still
     /// yields a `HeartRateChartData`; `capBPM` and `timeAboveCapSeconds` simply carry nil
     /// through it, and `HRCurveView` is what turns those into the right on-screen state.
+    ///
+    /// **`capBPM` is withheld for a lift (MAX-139, LIFTING-SPEC §10.1).**
+    /// `Plan.heartRateCapBPM` is documented as the easy-run ceiling, and it is a single
+    /// plan-level field with no per-discipline sibling — so without this guard, any day
+    /// a plan governs hands a lift's curve the running cap regardless of which slot the
+    /// day actually prescribed for lifting. `metrics?.timeAboveCapSeconds` needs no
+    /// matching guard: `DerivedMetricKind` already gates that figure to `.runDiscipline`
+    /// at ingestion, so it is nil for a lift already.
     private func heartRateChart(
         workoutRepository: any WorkoutRepository,
         planCalendar: PlanCalendar?,
         day: CalendarDay,
+        discipline: Discipline,
         metrics: DerivedMetrics?
     ) async throws -> HeartRateChartData? {
         guard let series = try await workoutRepository.heartRateSeries(forWorkout: workoutID) else {
             return nil
         }
-        let capBPM = planCalendar?.plan(on: day)?.heartRateCapBPM
-        return HeartRateChartData(series: series, capBPM: capBPM, timeAboveCapSeconds: metrics?.timeAboveCapSeconds)
+        let capBPM = discipline == .run ? planCalendar?.plan(on: day)?.heartRateCapBPM : nil
+        return HeartRateChartData(
+            series: series,
+            discipline: discipline,
+            capBPM: capBPM,
+            timeAboveCapSeconds: metrics?.timeAboveCapSeconds
+        )
     }
 
     /// R8's lazy path (MAX-033): scores a run the background wake could not score.

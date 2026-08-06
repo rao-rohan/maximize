@@ -128,13 +128,26 @@ import Observation
 /// `wasInterruptedByFailure` set, appended right alongside a notice describing what
 /// happened. Nothing here ever clears a bubble because the connection dropped.
 ///
+/// ## MAX-152 — the surface knows which waiting it is doing
+///
+/// `replyPhase` is the whole ladder between "sent" and "answered": waiting with nothing
+/// back, streaming, stalled with the connection open, and the four ways a turn stops.
+/// The decision of which rung is showing is made here, by `ChatReplyProgress`, from
+/// stream events only — a view renders the rung it is handed and inspects no timings and
+/// no stream internals, which is the whole of CLAUDE.md's thin-shell rule applied to a
+/// loading state. Every failure's words come from `ChatFailureNotice`, the one place a
+/// `ChatStreamError` becomes a sentence, and `retry()` is the only path back to the
+/// model after one — one call per tap, never automatic.
+///
 /// ## A14 — nothing here calls the model unattended
 ///
-/// `send()` is the only path to `StreamingChatModelInvoking`, and `draftPlan()` the only
-/// path to `PlanProposalModelInvoking`; both are reached only from a view forwarding a
-/// tap. `load()` reads storage and returns; it never streams and never drafts. There is
-/// no timer, no on-appear call, and no background wake anywhere in this file, and
-/// nothing pre-drafts a proposal in case one is wanted.
+/// `send()` and `retry()` are the only paths to `StreamingChatModelInvoking`, and
+/// `draftPlan()` the only path to `PlanProposalModelInvoking`; all three are reached only
+/// from a view forwarding a tap. `load()` reads storage and returns; it never streams and
+/// never drafts. There is no timer, no on-appear call, and no background wake anywhere in
+/// this file; nothing pre-drafts a proposal in case one is wanted, and **no failure ever
+/// re-asks itself** — MAX-152's retry is a button, and `ChatFailureNotice` carries the
+/// argument for why it is not a policy.
 @MainActor
 @Observable
 public final class ChatModel {
@@ -222,11 +235,23 @@ public final class ChatModel {
     /// notices interleaved in the order they actually happened.
     public private(set) var messages: [DisplayMessage] = []
 
-    /// True from the moment `send()` opens the stream until its terminal event, always
-    /// — the `ChatStreamEvent` contract guarantees exactly one terminal event, so this
-    /// can never get stuck true (FR-2.4's reveal is real progress, not a spinner that
-    /// never resolves).
-    public private(set) var isStreaming = false
+    /// Where the reply in flight stands, or how the last one ended (MAX-152).
+    ///
+    /// The whole ladder — waiting, streaming, stalled, and the four ways a turn stops —
+    /// decided here and rendered without re-decision by the view. See `ChatReplyPhase`
+    /// for why it is an enum in the core rather than a bit and a timer in a view.
+    public var replyPhase: ChatReplyPhase { progress.phase }
+
+    /// True from the moment a request opens until its terminal event, always — the
+    /// `ChatStreamEvent` contract guarantees exactly one terminal event, so this can
+    /// never get stuck true (FR-2.4's reveal is real progress, not a spinner that never
+    /// resolves).
+    ///
+    /// Computed from `replyPhase` rather than stored alongside it (MAX-152). Two flags
+    /// describing one request are two flags that can disagree, and this one is read by
+    /// `canSend`: a phase that said "finished" while this said "still going" would leave
+    /// the composer disabled with nothing in flight.
+    public var isStreaming: Bool { replyPhase.isLive }
 
     /// The reply as it arrives, token by token. Cleared the moment the stream ends,
     /// whichever way — by then its contents have become a `DisplayMessage`.
@@ -238,6 +263,46 @@ public final class ChatModel {
     public var canSend: Bool {
         loadState == .ready && !isStreaming
             && !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// The ladder itself. Private because the only legal way to move it is through the
+    /// stream this type is consuming — a caller that could `apply(.textArrived)` could
+    /// make the surface claim a reply is arriving when none is.
+    private var progress = ChatReplyProgress()
+
+    /// The question whose answer has not landed, kept in memory so `retry()` can ask it
+    /// again without the athlete retyping it (MAX-152).
+    ///
+    /// **Not persistence, and not a queue.** It holds exactly one turn — the last one
+    /// sent — is cleared the moment a reply is stored, and never reaches disk: a question
+    /// whose reply failed is deliberately not written to the thread (see "Only completed
+    /// turns are persisted"), and this does not smuggle it there. It exists because the
+    /// alternative for a dropped connection is retyping a question that is still visible
+    /// on screen.
+    private var pendingTurn: PendingTurn?
+
+    /// One question, and the exact request that was built from it.
+    ///
+    /// The instruction is kept rather than rebuilt, so a retry asks the identical
+    /// question with the identical history: the failed turn was never persisted, so the
+    /// thread has not moved underneath it, and rebuilding would be a second assembly of
+    /// something D3 says is assembled once.
+    private struct PendingTurn {
+        let message: ChatMessage
+        let instruction: ChatInstruction
+    }
+
+    /// Whether "Try again" is offered (MAX-152).
+    ///
+    /// Four conditions, all of them necessary: the surface is loaded, nothing is in
+    /// flight, there is a question to ask again, and the failure is one where asking
+    /// again could plausibly help (`ChatReplyPhase.offersRetry`, which reads
+    /// `ChatStreamError.isWorthRetrying`). A missing key, a rejected key, a refusal and
+    /// an unreadable response all fail that last test, and offering a button that
+    /// re-runs a call guaranteed to fail identically would spend the owner's credit to
+    /// tell the athlete the same thing twice.
+    public var canRetry: Bool {
+        loadState == .ready && !isStreaming && pendingTurn != nil && replyPhase.offersRetry
     }
 
     /// §4, MAX-101. Nothing here ever sets this to anything but `.idle` on its own.
@@ -458,6 +523,12 @@ public final class ChatModel {
         // that conversation over, so a card left on screen would be a diff against a
         // transcript that is no longer there.
         planDrafting = .idle
+        // Same reasoning one axis over (MAX-152): a phase describes a request, and a
+        // reload has abandoned the request it described. Leaving `.failed` set would
+        // offer a retry for a question that is no longer in the transcript.
+        progress.reset()
+        pendingTurn = nil
+        streamingText = ""
         if case .threadID = opening {
             // A subject-opened model's `subject` never changes (set once, at init).
             // A thread-id-opened one clears it here so a second `load()` — after the
@@ -713,52 +784,124 @@ public final class ChatModel {
         let question = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canSend, let context, let thread, let chatThreadRepository else { return }
 
-        let userMessage: ChatMessage
-        let instruction: ChatInstruction
+        let pending: PendingTurn
         do {
-            userMessage = try ChatMessage(id: UUID(), role: .user, content: question, timestamp: now())
+            let userMessage = try ChatMessage(id: UUID(), role: .user, content: question, timestamp: now())
             let priorTurns = try thread.visibleMessages.map(Self.turn(for:))
             let turns = priorTurns + [try Self.turn(for: userMessage)]
             // The whole conversation goes in; `ChatInstruction` applies §8.2's cap and
             // says so inside the transcript when it bites. Nothing is trimmed here, so
             // there is exactly one place that bound lives.
-            instruction = try ChatInstruction(
-                task: Self.task(for: context.subjectKind),
-                factSheet: context.factSheet(),
-                turns: turns
+            pending = PendingTurn(
+                message: userMessage,
+                instruction: try ChatInstruction(
+                    task: Self.task(for: context.subjectKind),
+                    factSheet: context.factSheet(),
+                    turns: turns
+                )
             )
         } catch {
             // Unreachable in practice — `question` is non-empty (the `canSend` guard
             // above), and every stored `ChatMessage` already satisfies `ChatTurn`'s
             // own non-empty rule. Handled rather than force-unwrapped so a genuinely
             // surprising input becomes a visible notice, not a crash mid-conversation.
-            messages.append(DisplayMessage(kind: .notice, text: "That message could not be sent."))
+            note(ChatFailureNotice.couldNotSendMessage)
             return
         }
 
         composerText = ""
-        messages.append(Self.displayMessage(for: userMessage))
+        messages.append(Self.displayMessage(for: pending.message))
+        pendingTurn = pending
 
-        isStreaming = true
+        await stream(pending, thread: thread, chatThreadRepository: chatThreadRepository)
+    }
+
+    /// Asks the same question again, after a failure that is worth asking again
+    /// (MAX-152, `canRetry`).
+    ///
+    /// A no-op when `canRetry` is false, so a view may call this unconditionally from a
+    /// button's action — the same shape `send()` and `draftPlan()` have.
+    ///
+    /// **One call per tap, and never a call this app decided to make.** There is no
+    /// timer here, no automatic second attempt and no loop: A14's rule that nothing
+    /// reaches the model unattended holds for retries exactly as it holds for the first
+    /// send, and `ChatFailureNotice`'s retry note carries the argument for why this
+    /// deliberately does not follow `PlanProposalDrafting`'s one-automatic-retry policy.
+    ///
+    /// **Nothing is erased.** The failed attempt's partial reply and its notice stay in
+    /// the transcript above the new answer, because they happened — this is the additive
+    /// treatment D8 gives a correction, one surface over. Neither was ever persisted, so
+    /// a reload shows the question and the reply that finally arrived, and nothing else.
+    public func retry() async {
+        guard canRetry, let pending = pendingTurn, let thread, let chatThreadRepository else { return }
+        await stream(pending, thread: thread, chatThreadRepository: chatThreadRepository)
+    }
+
+    /// Opens one request and consumes it to its terminal event.
+    ///
+    /// The one place events reach the ladder. Every `progress.apply` in this type is
+    /// here or in `resolve`, which is what keeps "which state is showing" a single
+    /// derivation rather than something reconstructed at each call site.
+    private func stream(
+        _ pending: PendingTurn,
+        thread: ChatThread,
+        chatThreadRepository: any ChatThreadRepository
+    ) async {
+        progress.apply(.requestOpened)
         streamingText = ""
         var accumulated = ""
         var outcome: StreamOutcome?
-        for await event in chatClient.stream(instruction) {
+        for await event in chatClient.stream(pending.instruction) {
             switch event {
             case let .text(delta):
                 // Contract #1 (`ChatStreamEvent`): text only ever appends.
                 accumulated += delta
                 streamingText = accumulated
+                // The ladder's second rung, and the reason the waiting indicator cannot
+                // linger beside the words: the first token is what ends waiting.
+                progress.apply(.textArrived)
+            case .heartbeat:
+                // The connection is open and nothing is being said. How many of these
+                // amount to a stall is `ChatReplyProgress`'s decision (MAX-152).
+                progress.apply(.heartbeat)
             case let .completed(completion):
                 outcome = .completed(completion)
             case let .failed(streamError):
                 outcome = .failed(streamError)
             }
         }
-        isStreaming = false
+
+        // The assistant's message is built once, here, and both the phase and the
+        // transcript read that one attempt. Deciding "was there a usable reply" twice —
+        // once for the phase and once for the row — is the drift D2 warns about in
+        // miniature: the surface would say the reply completed while the transcript said
+        // nothing arrived.
+        let assistantMessage: ChatMessage? = accumulated.isEmpty
+            ? nil
+            : try? ChatMessage(id: UUID(), role: .assistant, content: accumulated, timestamp: now())
+
+        switch outcome {
+        case let .completed(completion):
+            progress.apply(assistantMessage == nil ? .producedNoUsableText : .completed(completion))
+        case let .failed(streamError):
+            progress.apply(.failed(streamError))
+        case nil:
+            progress.apply(.endedWithoutTerminalEvent)
+        }
+        // Cleared only once the phase is terminal. The other order would leave the view
+        // rendering a `.streaming` bubble with no text in it for however long the store
+        // write below takes — the "streaming" rung showing exactly what the "waiting"
+        // rung is for.
         streamingText = ""
 
-        await resolve(outcome, accumulated: accumulated, userMessage: userMessage, thread: thread, chatThreadRepository: chatThreadRepository)
+        await resolve(
+            outcome,
+            accumulated: accumulated,
+            assistantMessage: assistantMessage,
+            pending: pending,
+            thread: thread,
+            chatThreadRepository: chatThreadRepository
+        )
     }
 
     private enum StreamOutcome {
@@ -769,23 +912,24 @@ public final class ChatModel {
     private func resolve(
         _ outcome: StreamOutcome?,
         accumulated: String,
-        userMessage: ChatMessage,
+        assistantMessage: ChatMessage?,
+        pending: PendingTurn,
         thread: ChatThread,
         chatThreadRepository: any ChatThreadRepository
     ) async {
         switch outcome {
         case let .completed(completion):
-            guard !accumulated.isEmpty,
-                  let assistantMessage = try? ChatMessage(id: UUID(), role: .assistant, content: accumulated, timestamp: now())
-            else {
+            guard let assistantMessage else {
                 // The decoder only ever emits `.text` for non-empty deltas, so an
                 // entirely empty completed reply is not expected — handled rather than
-                // assumed impossible.
-                messages.append(DisplayMessage(kind: .notice, text: "Claude did not return a reply."))
+                // assumed impossible, and said as the distinct thing it is: the request
+                // worked and produced nothing, which is neither a dropped connection nor
+                // an answer.
+                note(.emptyReply)
                 return
             }
             do {
-                var updated = try thread.appending(userMessage)
+                var updated = try thread.appending(pending.message)
                 updated = try updated.appending(assistantMessage)
                 // The only write this type performs (§2.5), and only a completed turn
                 // reaches it — see "Only completed turns are persisted."
@@ -796,6 +940,8 @@ public final class ChatModel {
                     text: accumulated,
                     wasTruncated: completion == .truncated
                 ))
+                // The question has an answer on disk; there is nothing left to ask again.
+                pendingTurn = nil
             } catch {
                 // The reply is real and already read; only the write failed. Keeping it
                 // on screen follows the same reasoning as a stream failure — a local
@@ -807,22 +953,35 @@ public final class ChatModel {
                     text: accumulated,
                     wasTruncated: completion == .truncated
                 ))
-                messages.append(DisplayMessage(kind: .notice, text: "This reply could not be saved."))
+                note(.couldNotSaveReply)
+                // Deliberately keeps `pendingTurn`, and deliberately does not offer a
+                // retry: `.complete`/`.truncated` do not (`ChatReplyPhase.offersRetry`),
+                // because asking Claude again cannot fix a failed local write and would
+                // spend a call on a problem that is not Claude's.
             }
 
-        case let .failed(streamError):
+        case .failed, nil:
             // Constraint: partial text survives a failure, on screen — never persisted.
+            // `pendingTurn` is kept, which is what makes "Try again" possible for the
+            // failures worth asking again.
             if !accumulated.isEmpty {
                 messages.append(DisplayMessage(kind: .assistant, text: accumulated, wasInterruptedByFailure: true))
             }
-            messages.append(DisplayMessage(kind: .notice, text: userFacingMessage(for: streamError)))
-
-        case nil:
-            // Unreachable per `ChatStreamEvent`'s "exactly one terminal event" contract
-            // — handled rather than trusted, since nothing in the type system enforces
-            // it on this side of the seam.
-            messages.append(DisplayMessage(kind: .notice, text: "The reply stream ended unexpectedly."))
+            // Read off the phase rather than off `outcome`, so the words and the state
+            // the surface is in cannot describe different failures. A stream that ended
+            // with no terminal event at all — forbidden by `ChatStreamEvent`'s contract,
+            // handled anyway — has already been folded into `.interrupted` above, which
+            // is the same thing said in the vocabulary the athlete reads.
+            if case let .failed(streamError) = replyPhase {
+                note(ChatFailureNotice.notice(for: streamError, subject: subject?.kind))
+            }
         }
+    }
+
+    /// Appends a failure's sentence to the transcript as a `.notice` — never a turn,
+    /// never persisted (see `DisplayMessage.Kind.notice`).
+    private func note(_ notice: ChatFailureNotice) {
+        messages.append(DisplayMessage(kind: .notice, text: notice.message))
     }
 
     // MARK: - Drafting a plan from this conversation (MAX-101, §4)
@@ -929,9 +1088,15 @@ public final class ChatModel {
     /// §4.5 step 2, and the ticket's "failure is a state": every way this can fail gets
     /// one honest sentence in the transcript, as a notice — never written to the thread,
     /// exactly like a dropped stream's.
+    ///
+    /// Reads `PlanDraftingNotice`, not `PlanDraftingFailure.description` (MAX-155):
+    /// `description` is a developer diagnostic — it carries `PlanProposalModelError`'s
+    /// bare HTTP status number — and `PlanDraftingNotice` is the type that turns the
+    /// failure into words safe for this transcript, the same split `ChatFailureNotice`
+    /// keeps for a dropped stream.
     private func noteDraftingFailure(_ failure: PlanDraftingFailure) {
         planDrafting = .idle
-        messages.append(DisplayMessage(kind: .notice, text: failure.description))
+        messages.append(DisplayMessage(kind: .notice, text: PlanDraftingNotice.notice(for: failure).message))
     }
 
     /// Rejecting a proposal. Leaves the plan in force **completely** untouched, which
@@ -970,34 +1135,6 @@ public final class ChatModel {
 
     private static func displayMessage(for message: ChatMessage) -> DisplayMessage {
         DisplayMessage(id: message.id, kind: message.role == .user ? .user : .assistant, text: message.content)
-    }
-
-    /// FR-2.4's "no key stored" ordinary state, pointed at the fix rather than left as
-    /// a diagnostic string. Every other case reads `ChatStreamError.description`
-    /// (`AnthropicStreamingChatClient`'s doc: it "never carries a response body," so
-    /// this is always safe to show).
-    private func userFacingMessage(for error: ChatStreamError) -> String {
-        switch error {
-        case .noAPIKeyStored:
-            // Worded from the subject, because "this workout" is a lie on a thread about
-            // a month. The two strings differ only in their last few words, and saying
-            // the right one is the whole reason they are two.
-            switch subject?.kind {
-            case .workout:
-                return "Add an Anthropic API key in Settings to chat about this workout."
-            case .training:
-                return "Add an Anthropic API key in Settings to chat about your training."
-            case nil:
-                // Unreachable in practice: `send()` only runs once `canSend` is true,
-                // which requires `.ready`, which requires `subject` to already be
-                // resolved. Handled rather than force-unwrapped so a genuinely
-                // surprising order of operations produces a correct-but-generic
-                // notice instead of a crash.
-                return "Add an Anthropic API key in Settings to chat."
-            }
-        default:
-            return error.description
-        }
     }
 
     // MARK: - What Claude is asked to do

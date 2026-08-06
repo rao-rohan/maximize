@@ -33,6 +33,12 @@ public enum RouteMapData: Hashable, Sendable {
     case unavailable
     case available(Content)
 
+    /// What `RouteMapView` says for `.unavailable` — moved here (MAX-104) for the reason
+    /// every `*Copy` type in this package gives: the sentence is selected by a case of
+    /// this core-declared enum, so it belongs beside the type CI can pin it against
+    /// rather than as a view literal.
+    public static let unavailableExplanation = "This run's route could not be loaded."
+
     /// The stored route, prepared for drawing.
     public struct Content: Hashable, Sendable {
         /// One GPS fix, in the plain (lat, lon) a map draws — altitude and speed are

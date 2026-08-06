@@ -208,9 +208,10 @@ final class DisciplineTests: XCTestCase {
         ]
 
         let budget = try RestDayBudget(daysPerWeek: 3)
-        let overrides = try RestDayBudgeting.convertingMissedDays(
+        let overrides = try RestDayBudgeting.convertingMissedObligations(
             planDays: week,
-            workoutDays: [],
+            // Nothing recorded anywhere, in either slot.
+            workoutDisciplines: [:],
             budget: budget,
             createdAt: Date(timeIntervalSince1970: 1_767_312_000)
         )

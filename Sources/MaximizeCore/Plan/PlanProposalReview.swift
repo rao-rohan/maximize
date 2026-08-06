@@ -301,6 +301,16 @@ public struct PlanProposalReview: Hashable, Sendable {
                     after: PlanCopy.scorePoints(after.marginalThresholdPoints),
                     isRevision: isRevision
                 ),
+                // MAX-151: a plan-level value, so it sits here beside the cap rather than
+                // in `weekSection` — it answers "how short is too short", the same
+                // question for every day this plan governs, not a per-weekday ask.
+                row(
+                    id: "minimumSessionDurationFloor",
+                    label: "Fragment duration floor",
+                    before: before.map { durationFloorText($0.minimumSessionDurationSeconds) },
+                    after: durationFloorText(after.minimumSessionDurationSeconds),
+                    isRevision: isRevision
+                ),
             ]
         )
     }
@@ -473,6 +483,14 @@ public struct PlanProposalReview: Hashable, Sendable {
 
     private static func weekCount(_ count: Int) -> String {
         count == 1 ? "1 week" : "\(count) weeks"
+    }
+
+    /// "10 min", or "None" — matching the run slot's own distance row and the lift
+    /// slot's duration row, both of which read an unset numeric field as "None" rather
+    /// than as a designed-absence sentence (MAX-151).
+    private static func durationFloorText(_ seconds: Double?) -> String {
+        guard let seconds else { return "None" }
+        return PlanCopy.duration(seconds)
     }
 
     private static func goalText(_ statements: String) -> String {

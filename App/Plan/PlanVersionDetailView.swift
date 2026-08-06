@@ -43,7 +43,7 @@ struct PlanVersionDetailView: View {
             // version already read off a stored calendar — and folded into the same
             // failure copy as an opened store rather than given a distinct, dead
             // branch to maintain.
-            Text("Couldn't load this plan version.")
+            Text(FailureCopy.couldNotLoad(.planVersion))
                 .font(.metricLabel)
                 .foregroundStyle(Color.textSecondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

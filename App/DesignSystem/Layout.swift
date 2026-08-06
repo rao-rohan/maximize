@@ -150,6 +150,41 @@ enum LayoutMetrics {
     static let heatmapMarkMajorInsetFraction: CGFloat = 0.64
     static let heatmapMarkMinorInsetFraction: CGFloat = 0.4
 
+    /// How many lines the chat composer grows to before it starts scrolling its own
+    /// text (MAX-153).
+    ///
+    /// Six, up from the four this app shipped before. Four is enough for "why did my HR
+    /// climb on Tuesday" and not enough for the paragraph a plan-generating conversation
+    /// actually opens with (§4.2: "describe the block you want in a sentence" is
+    /// optimistic — the real thing is four or five). Six lines of `bodyCopy` is roughly
+    /// 130pt, which still leaves the transcript visible above a raised keyboard on the
+    /// narrowest device this app supports.
+    ///
+    /// There is a ceiling at all — rather than growing to fill the screen — because a
+    /// composer that eats the transcript takes away the thing you are writing about.
+    /// Past the ceiling the field scrolls internally, which is what every well-made
+    /// chat composer does and what `lineLimit(_:)` with a range gives for free.
+    ///
+    /// `ChatComposerView` lowers this at accessibility text sizes; see its own note.
+    static let composerLineCeiling = 6
+
+    /// The same ceiling once Dynamic Type is at an accessibility size (MAX-153).
+    ///
+    /// Three, because the lines themselves are two to three times taller there: six of
+    /// them would be most of the screen, and the transcript above would be a strip. The
+    /// field still scrolls past three, so nothing is unreachable — only the resting
+    /// height changes.
+    static let composerLineCeilingAtAccessibilitySizes = 3
+
+    /// The drawn diameter of the composer's send glyph (MAX-153).
+    ///
+    /// Smaller than the 44pt box it sits in, on purpose: `minimumTapTarget` is a *hit*
+    /// target, and Apple's own guidance is that the visible control may be smaller than
+    /// the region that responds to it. 28pt is about where `arrow.up.circle.fill` still
+    /// reads as an arrow in a ring rather than as a dot, and it leaves 8pt of slack on
+    /// each side of the glyph inside the target.
+    static let composerSendGlyphSize: CGFloat = 28
+
     /// Apple's own minimum tap target, in points (MAX-108).
     ///
     /// A calendar day cell is roughly 42–47pt, driven by seven columns sharing a

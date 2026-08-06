@@ -36,6 +36,12 @@ final class RouteMapDataTests: XCTestCase {
         XCTAssertEqual(RouteMapData.resolve(hasRoute: true, route: nil), .unavailable)
     }
 
+    /// MAX-104: moved down from `RouteMapView`'s own view literal so the sentence lives
+    /// beside the enum case that selects it.
+    func testUnavailableExplanationNamesTheRunNotAWorkout() {
+        XCTAssertEqual(RouteMapData.unavailableExplanation, "This run's route could not be loaded.")
+    }
+
     func testOutdoorRunWithAStoredRouteResolvesToAvailable() throws {
         let route = try Fixture.route(points: [(0, 40.0, -74.0), (60, 40.001, -74.001)])
         guard case .available(let content) = RouteMapData.resolve(hasRoute: true, route: route) else {

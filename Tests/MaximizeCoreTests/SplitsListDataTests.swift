@@ -70,6 +70,12 @@ final class SplitsListDataTests: XCTestCase {
         )
     }
 
+    /// MAX-104: moved down from `SplitsView`'s own view literal so the sentence lives
+    /// beside the enum case that selects it.
+    func testUnavailableExplanationNamesTheRunNotAWorkout() {
+        XCTAssertEqual(SplitsListData.unavailableExplanation, "No splits recorded for this run.")
+    }
+
     // MARK: - Rows
 
     func testCompleteSplitsAreNumberedAndPacedInTheChosenUnit() throws {
