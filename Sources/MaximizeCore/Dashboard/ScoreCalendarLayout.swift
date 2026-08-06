@@ -210,9 +210,18 @@ extension ScoreCalendarDayState {
     /// red that reads against `.effective`'s full-footprint green on hue alone. So the two
     /// states look identical at this density and the spoken sentence carries the
     /// difference, exactly as `.scheduledRest` and `.convertedRest` are already left to it.
+    ///
+    /// **`.missedWithUnjudgedSession` collapses onto the miss too** (MAX-159), and the
+    /// choice is between the same two readings with the same answer: the day holds a
+    /// settled, unforgiven miss, and hollow is what a settled miss looks like here. Solid
+    /// was the alternative and it fails the same way it failed for the mixed day — this
+    /// state carries no band, so a solid cell is a full-footprint red reading against
+    /// `.effective`'s full-bleed green on hue alone. The half of the day hollow loses at
+    /// ~6pt — that the athlete trained at something — is the half the spoken sentence
+    /// carries, as it already does for `.partiallyMet`.
     public var isDrawnHollowAtHeatmapDensity: Bool {
         switch self {
-        case .missed, .partiallyMet: return true
+        case .missed, .partiallyMet, .missedWithUnjudgedSession: return true
         case .scored, .awaitingScore, .noVerdict, .convertedRest, .scheduledRest,
              .forthcoming, .unplanned: return false
         }

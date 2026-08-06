@@ -272,7 +272,11 @@ final class DesignPaletteContrastTests: XCTestCase {
         // its worse verdict, and takes *the same token* rather than a ninth one because
         // the budget for a new saturated colour is not there — which is precisely why the
         // pairs below have to pass on shape.
-        case .partiallyMet, .missed:
+        // `.missedWithUnjudgedSession` (MAX-159) is the fourth on this token: the settled
+        // half of the day is a miss, and the day it describes is red for the same reason a
+        // whole miss is. Nothing new for this suite to hold, and everything therefore
+        // riding on the glyph below.
+        case .partiallyMet, .missed, .missedWithUnjudgedSession:
             return DesignPalette.scoreIneffective
         // Drawn with no fill at all in the day grid, so what a reader sees behind its
         // glyph is the calendar card (`isDrawnUnfilledInTheDayGrid`).
@@ -305,6 +309,15 @@ final class DesignPaletteContrastTests: XCTestCase {
                 unmet: ScoreCalendarDayState.UnmetObligation(discipline: .lift, kind: .lift, judgedBand: nil)
             ),
             .missed(scheduledKind: .easy),
+            // MAX-159, one representative and deliberately not two. Its mark is the
+            // *state's*, not the recorded activity's, so every payload draws the same cell
+            // and a second entry would assert a distinction the design does not make —
+            // which is also the point being made: a **run** recorded on a day the lift was
+            // skipped draws this ringed "×", not `figure.run`, so it cannot collapse onto
+            // `.scored(.ineffective, .running)` above. Which ask was missed, what was
+            // recorded, and whether a score is still coming for it live in the spoken
+            // sentence (`ScoreCalendarSettledMissCopyTests`).
+            .missedWithUnjudgedSession(scheduledKind: .easy, recorded: .traditionalStrengthTraining),
             .awaitingScore(activityType: .running),
             .noVerdict(activityType: .traditionalStrengthTraining),
             .convertedRest(scheduledKind: .easy),
@@ -329,11 +342,13 @@ final class DesignPaletteContrastTests: XCTestCase {
     /// The year heatmap's cells: no glyph at this size, so the channels are the hollow
     /// outline `.missed` draws and MAX-087's mark size.
     ///
-    /// **`.partiallyMet` is deliberately absent.** It draws exactly what `.missed` draws
-    /// here — see `ScoreCalendarDayState.isDrawnHollowAtHeatmapDensity`, which argues why
-    /// the collapse is the honest rendering at ~6pt with no glyph — so listing it would
-    /// assert a distinction the design has decided not to make, rather than the rule this
-    /// test is about. `ScoreCalendarMixedDayTests` pins the collapse itself.
+    /// **`.partiallyMet` and `.missedWithUnjudgedSession` are deliberately absent.** Both
+    /// draw exactly what `.missed` draws here — see
+    /// `ScoreCalendarDayState.isDrawnHollowAtHeatmapDensity`, which argues why the collapse
+    /// is the honest rendering at ~6pt with no glyph — so listing either would assert a
+    /// distinction the design has decided not to make, rather than the rule this test is
+    /// about. `ScoreCalendarMixedDayTests` and `ScoreCalendarSettledMissTests` pin the two
+    /// collapses themselves.
     private var heatmapCells: [DrawnCalendarCell] {
         let states: [ScoreCalendarDayState] = [
             .scored(band: .effective, activityType: .running),
@@ -386,11 +401,16 @@ final class DesignPaletteContrastTests: XCTestCase {
         }
     }
 
-    /// The three states that share D9's red, stated as its own measurement so a failure
+    /// The four states that share D9's red, stated as its own measurement so a failure
     /// reads as what it is. They are not *nearly* the same colour, they are the same
     /// token — 1.00:1 — so every bit of "ran badly" versus "did not run" versus "did one
-    /// of two" is carried by the glyph, and this is the assertion that says so.
-    func testTheThreeRedCalendarStatesShareOneTokenAndAreSeparatedOnlyByGlyph() {
+    /// of two" versus "missed it and trained anyway" is carried by the glyph, and this is
+    /// the assertion that says so.
+    ///
+    /// **Four since MAX-159**, and the count is the point: each new red state spends none
+    /// of the contrast budget and all of the shape budget, so the set of distinct marks
+    /// has to grow exactly as fast as the set of red states does.
+    func testTheFourRedCalendarStatesShareOneTokenAndAreSeparatedOnlyByGlyph() {
         let red: [ScoreCalendarDayState] = [
             .scored(band: .ineffective, activityType: .running),
             .missed(scheduledKind: .easy),
@@ -398,6 +418,7 @@ final class DesignPaletteContrastTests: XCTestCase {
                 met: ScoreCalendarDayState.MetObligation(discipline: .run, kind: .easy, band: .effective),
                 unmet: ScoreCalendarDayState.UnmetObligation(discipline: .lift, kind: .lift, judgedBand: nil)
             ),
+            .missedWithUnjudgedSession(scheduledKind: .easy, recorded: .traditionalStrengthTraining),
         ]
         for appearance in Appearance.allCases {
             for state in red {

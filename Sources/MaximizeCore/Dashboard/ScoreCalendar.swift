@@ -2,7 +2,7 @@ import Foundation
 
 /// What one day on the score-colored calendar (D4, FR-3.2) actually is.
 ///
-/// ## Why nine cases, not "good / bad / empty"
+/// ## Why ten cases, not "good / bad / empty"
 ///
 /// The PRD treats these as different facts, and collapsing them would throw away
 /// information the athlete can act on:
@@ -20,6 +20,10 @@ import Foundation
 ///   the plan scores runs and this was not one (MAX-111). The same absence of a score
 ///   as `.awaitingScore`, and the opposite tense: one is a wait, the other is a
 ///   settled fact. See the case's own documentation for why they are not one state.
+/// - `.missedWithUnjudgedSession` — the plan asked for something, nothing of that
+///   discipline happened, *and* the athlete trained anyway at something the app cannot
+///   judge yet. Two facts of opposite sign on one day (MAX-159); see the case's own
+///   documentation for why neither `.missed` nor `.noVerdict` could carry it alone.
 /// - `.missed` — the plan asked for something and nothing happened, and the weekly
 ///   rest-day budget did not stretch to cover it (D9). A real failure to execute.
 /// - `.forthcoming` — the plan asks for something on a day that **has not happened
@@ -138,8 +142,69 @@ public enum ScoreCalendarDayState: Hashable, Sendable {
     /// already told apart.
     case noVerdict(activityType: ActivityType)
 
+    /// The plan asked for `scheduledKind`, nothing of that discipline was recorded and
+    /// the weekly budget did not cover it — **and something else was recorded on the day
+    /// that carries no judgement** (MAX-159, LIFTING-SPEC §7.2).
+    ///
+    /// ## The defect this replaces
+    ///
+    /// A Tuesday whose lift was recorded but unscored and whose run was missed used to
+    /// draw `.noVerdict`: a neutral cell, on a sentence that named the recorded lift and
+    /// said nothing about the skipped run. `dayState`'s rule was *"a pending answer
+    /// outranks a settled absence"*, written for a day holding a run and a lift where the
+    /// run's score is minutes away — and there it is right. It does not transfer to a day
+    /// where the absence belongs to a **different obligation**, because there the pending
+    /// answer will never say anything about the miss. A score arriving for the lift does
+    /// not un-skip the run, so the cell that waited for it was waiting for a fact it was
+    /// never going to be told.
+    ///
+    /// This is §7.2's rule with the tenses swapped in: *a settled outcome on one
+    /// obligation outranks a pending one on another*, exactly as `.partiallyMet` made a
+    /// settled miss outrank a met obligation's colour. A miss is a fact; an unjudged
+    /// session is not yet anything.
+    ///
+    /// ## Why a state rather than a reordering
+    ///
+    /// Reordering alone — letting `.missed` win — would have swapped one half-truth for
+    /// its mirror image: a cell reading *"missed easy run"*, with an "×" on it, on a day
+    /// the athlete trained. Both halves are true and neither implies the other, so the
+    /// cell has to be able to say both, which is what §7.2 means by *the cell gains a
+    /// state, not a channel*. The fill is the miss's red (the worse verdict colours the
+    /// day, as on `.partiallyMet`) and the whole separation is the glyph — see
+    /// `ScoreCalendarGlyph` — so this state costs nothing from the contrast budget
+    /// MAX-084 and MAX-087 spent.
+    ///
+    /// ## What the payload is, and is not
+    ///
+    /// `scheduledKind` is the **missed** ask, the same value `.missed` carries and named
+    /// the same way; `recorded` is the activity that happened, the same value
+    /// `.awaitingScore` and `.noVerdict` carry. The state is literally the two cells this
+    /// day used to have to choose between, held together.
+    ///
+    /// It carries no band, because nothing on the day is scored: this state is only ever
+    /// reached once the day's every workout is unjudged (see `dayState`), so the unmet
+    /// obligation is always `.missed` and never `.notMet`, and there is no auto-score for
+    /// a pip to mark.
+    ///
+    /// **Whether a verdict is still coming for `recorded` is read off
+    /// `ActivityType.isRun`**, the same predicate that splits `.awaitingScore` from
+    /// `.noVerdict` — a recorded run's score may still arrive, a lift's never will — and
+    /// `ScoreCalendarCopy` says which in the spoken sentence. It is not a second stored
+    /// fact here, because two notions of "is a score coming" is exactly the drift D2
+    /// warns about.
+    ///
+    /// **Never reachable on a day ahead of `today`.** It takes a `.missed` obligation, and
+    /// an obligation whose outcome is not in cannot be missed (`ObligationOutcome
+    /// .notYetDue`) — so the standing rule that no future day shows red survives this
+    /// state, and `ScoreCalendarSettledMissTests` asserts it rather than assuming it.
+    case missedWithUnjudgedSession(scheduledKind: ScheduledSessionKind, recorded: ActivityType)
+
     /// The plan asked for `scheduledKind` (never `.rest` — see `PlanDay.canBeMissed`)
     /// and nothing was recorded; the weekly budget did not cover it.
+    ///
+    /// **Nothing at all, as of MAX-159**: a day whose ask was missed but which holds an
+    /// unjudged session of the *other* discipline is `.missedWithUnjudgedSession`, so this
+    /// case now means an empty day rather than merely an unmet one.
     case missed(scheduledKind: ScheduledSessionKind)
 
     /// The plan asked for `scheduledKind` and nothing was recorded, but MAX-016's
@@ -597,27 +662,56 @@ public enum ScoreCalendar {
         // athlete ran through, or a day before the first plan version. D4 colors by what
         // was done, and that is a fact worth surfacing honestly rather than hiding behind
         // "scheduled rest".
+        //
+        // **Deliberately still ahead of a settled miss, unlike the unjudged case below**
+        // (MAX-159). One shape reaches here over an unmet obligation: a *scored* workout
+        // whose own slot the plan rested, on a day the other slot was missed — a pre-MAX-111
+        // lift carrying a running-rubric score (A21/MAX-143) on a skipped run day is the
+        // real instance. Moving it would recolour stored scores' cells, which is a wider
+        // decision than the one this ticket was scoped to and cuts against MAX-143's
+        // stance that those scores keep being reported. Reported on the board rather than
+        // changed here; `ScoreCalendarSettledMissTests` pins today's answer so the boundary
+        // is a decision on the record rather than an oversight.
         if let best = bestScored {
             return .scored(band: best.1.automatic.band, activityType: best.0.activityType)
         }
         // Nothing on this day carries a score, so every workout below is unscored.
         //
-        // **A pending answer outranks a settled absence.** A day holding a run and a
-        // lift — the ordinary day once MAX-109 lands — is a day whose cell is about to
-        // change: the run's score arrives and the fill becomes a band. Calling that day
-        // "no verdict" would be false the moment scoring completes, while calling it
-        // "awaiting" is true of the obligation that is actually outstanding. The reverse
-        // ordering has no such reading.
+        // **A pending answer outranks a settled absence — within one obligation.** A day
+        // holding a run and a lift is a day whose cell is about to change: the run's score
+        // arrives and the fill becomes a band. Calling that day "no verdict" would be false
+        // the moment scoring completes, while calling it "awaiting" is true of the
+        // obligation that is actually outstanding. The reverse ordering has no such reading.
         //
-        // Within each group the earliest start wins, the same tiebreak `bestScoredPair`
-        // and `destination` both use, so three reads of "which workout is first" cannot
-        // disagree.
+        // The earliest start breaks the tie inside each group, the same tiebreak
+        // `bestScoredPair` and `destination` both use, so three reads of "which workout is
+        // first" cannot disagree.
         let earliestFirst = dayWorkouts.sorted { $0.start < $1.start }
-        if let earliestRun = earliestFirst.first(where: { $0.activityType.isRun }) {
-            return .awaitingScore(activityType: earliestRun.activityType)
-        }
-        if let earliest = earliestFirst.first {
-            return .noVerdict(activityType: earliest.activityType)
+        let recorded: Workout? = earliestFirst.first { $0.activityType.isRun } ?? earliestFirst.first
+        if let recorded {
+            // **And a settled outcome on a *different* obligation outranks that pending
+            // one** (MAX-159, §7.2). The precedence above is about which of the day's own
+            // workouts speaks for it; this is about a fact none of them will ever speak to.
+            // A miss is decided and a missing score is not, so the cell says the miss and
+            // names the session alongside it rather than reporting only one of the two.
+            //
+            // `.notMet` cannot appear in `unmetObligations` here: it takes a scored workout
+            // of that discipline, and reaching this line means nothing on the day carries a
+            // score at all. So the unmet half is always a genuine, unforgiven `.missed` —
+            // a converted one is not in this list (D9/A6 forgave it, so there is nothing
+            // settled against the athlete to report).
+            if let unmet = obligations.unmetObligations.first {
+                return .missedWithUnjudgedSession(
+                    scheduledKind: unmet.scheduledSession.kind,
+                    recorded: recorded.activityType
+                )
+            }
+            // The invariant the calendar's glyph channel is paid for by, expressed once:
+            // `.awaitingScore` holds runs and `.noVerdict` holds everything else, split on
+            // the same `ActivityType.isRun` the picker above uses.
+            return recorded.activityType.isRun
+                ? .awaitingScore(activityType: recorded.activityType)
+                : .noVerdict(activityType: recorded.activityType)
         }
 
         guard planDay != nil else { return .unplanned }

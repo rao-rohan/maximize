@@ -7,9 +7,11 @@ import Foundation
 /// The same argument `DesignPalette` makes for hex values (MAX-070). The calendar's
 /// accessibility claim is that two states sharing a fill are always told apart by
 /// something other than colour — a red cell showing an activity glyph is a run that went
-/// badly, a red cell showing an "×" is a day nothing happened on, and since MAX-135 a red
+/// badly, a red cell showing an "×" is a day nothing happened on, since MAX-135 a red
 /// cell showing a half-filled disc is a day that did one of the two things it was asked
-/// for. That claim is only worth making if something checks it, and while the mapping sat
+/// for, and since MAX-159 a red cell showing a ringed "×" is a day that missed its ask and
+/// trained at something no verdict has reached. That claim is only worth making if
+/// something checks it, and while the mapping sat
 /// in `App/Dashboard/ScoreCalendarFormatting.swift` nothing could: `swift test` never
 /// compiles the app target. `WCAGContrastTests` now reads this table and asserts the
 /// property directly, which is the difference between a channel and an opinion.
@@ -58,6 +60,24 @@ public enum ScoreCalendarGlyph {
             // a *different* obligation's band in it would make MAX-084's one channel mean
             // two things on a fill that is not a band at all.
             return "circle.lefthalf.filled"
+        case .missedWithUnjudgedSession:
+            // **A miss, with something around it** (MAX-159). The fill is `.missed`'s own
+            // red — the settled outcome colours the day — so this is the fourth state on
+            // that one token and the mark carries the whole difference, as it does for the
+            // other three.
+            //
+            // `.missed`'s "×" inside an enclosure, rather than a new figure, because the
+            // enclosure is already this vocabulary's way of saying *the same thing, plus
+            // more*: `.long` takes `figure.run.circle` against an easy run's `figure.run`
+            // for exactly that reason. The day is a miss and it is not empty, which is one
+            // more thing than "×" alone can say.
+            //
+            // Chosen over the recorded activity's own figure, which was the other
+            // candidate: an activity glyph on this red is already `.scored(.ineffective,
+            // _)`'s cell — a run that went badly — and a recorded run can land in both
+            // states, so the two would collapse onto one drawing exactly where the
+            // difference matters most.
+            return "xmark.circle"
         case .missed:
             return "xmark"
         case .convertedRest:
@@ -127,8 +147,16 @@ public enum ScoreCalendarGlyph {
 /// than decoration on it, and load-bearing decisions live where CI can see them
 /// (`PlanCopy` moved down for the same reason in MAX-101).
 ///
-/// The vocabulary is `PlanCopy`'s, so a mixed day names its two asks with the same words
-/// the plan screen uses for them.
+/// MAX-159's settled-miss day is here for the same reason and it is the stronger case:
+/// that cell draws one red fill and one ringed "×", which cannot say *which* ask was
+/// missed, nor that anything was recorded at all, nor whether the thing recorded is still
+/// waiting on a score. All three live in the sentence, so all three live where CI can see
+/// them.
+///
+/// The vocabulary is `PlanCopy`'s, so these days name their asks with the same words the
+/// plan screen uses for them. It is one word away from `ScoreCalendarFormatting.kindLabel`
+/// — `.other` is "other" here and "session" there — which predates this type and belongs
+/// to MAX-104's copy pass over the lifting surfaces rather than to a calendar ticket.
 public enum ScoreCalendarCopy {
 
     /// The spoken outcome for `ScoreCalendarDayState.partiallyMet` — everything after the
@@ -151,6 +179,39 @@ public enum ScoreCalendarCopy {
         unmet: ScoreCalendarDayState.UnmetObligation
     ) -> String {
         "one of two sessions met. \(metClause(met)); \(unmetClause(unmet))."
+    }
+
+    /// The spoken outcome for `ScoreCalendarDayState.missedWithUnjudgedSession` —
+    /// everything after the cell's date, which the app layer prefixes.
+    ///
+    /// Reads, for a Tuesday whose run was skipped and whose lift was recorded and never
+    /// scoreable: *"missed easy run. Strength training recorded, not scored — the plan
+    /// scores runs."* The miss leads, because it is the settled half and the reason the
+    /// cell is red; the session follows, because a calendar read cell after cell must not
+    /// open by congratulating a day it is about to call a miss.
+    ///
+    /// **The tense of the second clause is `ActivityType.isRun`, decided here.** A
+    /// recorded run's score may still arrive, so it is *awaiting*; a lift, a ride, a hike
+    /// or a walk will never be judged, so saying "awaiting" would promise a verdict that
+    /// is not coming — MAX-126's whole argument, applied to the sentence rather than to
+    /// the fill. It is the same predicate `ScoreCalendar.dayState` splits `.awaitingScore`
+    /// from `.noVerdict` on, read here rather than stored twice.
+    ///
+    /// - Parameter describedAs: what the recorded session is called, capitalised — the
+    ///   one word this sentence does not own. `WorkoutDisplayFormatting.describe` is the
+    ///   app layer's vocabulary for activity names, and it says the same words on the
+    ///   workout list and the workout detail; a second name for a treadmill run composed
+    ///   down here would be exactly the drift `ScoreCalendarCopy` exists to prevent. The
+    ///   *shape* of the sentence — order, punctuation, tense, and how the missed ask is
+    ///   named — is entirely this function's.
+    public static func missedWithUnjudgedSessionOutcome(
+        scheduledKind: ScheduledSessionKind,
+        recorded: ActivityType,
+        describedAs activityText: String
+    ) -> String {
+        let missed = lowercasedFirst(PlanCopy.sessionKind(scheduledKind))
+        let verdict = recorded.isRun ? "awaiting score" : "not scored — the plan scores runs"
+        return "missed \(missed). \(activityText) recorded, \(verdict)."
     }
 
     private static func metClause(_ met: ScoreCalendarDayState.MetObligation) -> String {

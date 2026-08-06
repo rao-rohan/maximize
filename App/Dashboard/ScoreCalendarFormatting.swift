@@ -17,8 +17,9 @@ import MaximizeCore
 ///   `MaximizeCore.ScoreCalendarGlyph`, for the reason that type documents: a channel CI
 ///   cannot see is not a channel. `.scored`/`.awaitingScore`/`.noVerdict` show what
 ///   activity was done; `.missed` shows a dedicated "not done" mark; `.partiallyMet`
-///   shows a half-filled disc — three states on the *same* red fill, told apart by shape
-///   alone. `.scheduledRest` and `.convertedRest` use two distinct rest glyphs for the
+///   shows a half-filled disc; `.missedWithUnjudgedSession` (MAX-159) shows that mark
+///   ringed — four states on the *same* red fill, told apart by shape alone.
+///   `.scheduledRest` and `.convertedRest` use two distinct rest glyphs for the
 ///   same reason, even though both sit on the same neutral fill.
 /// - **VoiceOver label.** Every state gets a full sentence, not just a glyph name —
 ///   the strongest channel of all, since it does not depend on shape recognition
@@ -110,6 +111,17 @@ enum ScoreCalendarFormatting {
             // one short clause because a calendar is read cell after cell.
             return "\(dayText): \(WorkoutDisplayFormatting.describe(activityType)), "
                 + "recorded. Not scored — the plan scores runs."
+        case .missedWithUnjudgedSession(let scheduledKind, let recorded):
+            // Composed in the core for the reason the mixed day is (MAX-159): this cell
+            // draws one fill and one mark, so the sentence is the only channel that can
+            // say a session was recorded at all, which one, and whether a score is still
+            // coming for it. This layer supplies the activity's name — its own vocabulary,
+            // shared with the workout list and detail — and nothing else.
+            return "\(dayText): " + ScoreCalendarCopy.missedWithUnjudgedSessionOutcome(
+                scheduledKind: scheduledKind,
+                recorded: recorded,
+                describedAs: WorkoutDisplayFormatting.describe(recorded)
+            )
         case .missed(let scheduledKind):
             return "\(dayText): missed \(kindLabel(scheduledKind))."
         case .convertedRest(let scheduledKind):
@@ -160,8 +172,15 @@ enum ScoreCalendarFormatting {
                     return "Not on the plan."
                 }
                 return "Planned: \(kindLabel(prescription.scheduledSession.kind))."
-            case .scored, .partiallyMet, .missed, .convertedRest, .scheduledRest,
-                 .forthcoming, .unplanned:
+            // `.missedWithUnjudgedSession` is in this list rather than beside
+            // `.awaitingScore`/`.noVerdict` above, even though it too is a day with a
+            // recorded, unscored session: its outcome clause already names the plan's ask
+            // — the missed one — so "Planned: easy run." would say it a second time, and
+            // on a day whose *other* slot was the one recorded it would name the wrong ask
+            // entirely (`planClause` reads the run slot). The same reasoning that gives the
+            // mixed day no plan clause.
+            case .scored, .partiallyMet, .missed, .missedWithUnjudgedSession,
+                 .convertedRest, .scheduledRest, .forthcoming, .unplanned:
                 return nil
             }
         }
