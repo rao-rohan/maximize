@@ -27,6 +27,11 @@ final class PlanAuthoringTests: XCTestCase {
         XCTAssertEqual(session.draft.cadenceHighStepsPerMinute, StandardPlanSeed.cadenceHighStepsPerMinute)
         XCTAssertEqual(session.draft.effectiveThresholdPoints, StandardPlanSeed.effectiveThresholdPoints)
         XCTAssertEqual(session.draft.longRunArc.count, StandardPlanSeed.arcWeekCount)
+        // MAX-151: the seed now states a floor, closing tracker gap P3's authoring half.
+        XCTAssertEqual(
+            session.draft.minimumSessionDurationSeconds,
+            StandardPlanSeed.minimumSessionDurationSeconds
+        )
     }
 
     /// The suggested start is the Monday of the current training week, not today —
@@ -57,6 +62,16 @@ final class PlanAuthoringTests: XCTestCase {
         XCTAssertEqual(plan.cadenceTarget.highStepsPerMinute, 170)
         XCTAssertEqual(plan.rubric.effectiveThreshold, try ScoreValue(70))
         XCTAssertEqual(plan.version, try PlanVersion(1))
+    }
+
+    /// MAX-151's own acceptance criterion: a *saved* first plan actually carries the
+    /// seeded floor, not only the draft it was authored from.
+    func testASavedFirstPlanCarriesTheSeededDurationFloor() throws {
+        let session = try PlanAuthoring.session(revising: nil, today: try today)
+        let plan = try session.plan(from: session.draft, effectiveFrom: try day("2026-08-03"))
+
+        XCTAssertEqual(plan.minimumSessionDurationSeconds, StandardPlanSeed.minimumSessionDurationSeconds)
+        XCTAssertNotNil(plan.minimumSessionDurationSeconds)
     }
 
     /// The seeded rubric must have something to say about every scheduled kind, or a
@@ -149,6 +164,8 @@ final class PlanAuthoringTests: XCTestCase {
         XCTAssertEqual(rebuilt.cadenceTarget, stored.cadenceTarget)
         XCTAssertEqual(rebuilt.rubric, stored.rubric)
         XCTAssertEqual(rebuilt.goals, stored.goals)
+        // MAX-151: the floor is carried forward on a revision exactly like the cap is.
+        XCTAssertEqual(rebuilt.minimumSessionDurationSeconds, stored.minimumSessionDurationSeconds)
         // Everything but the two fields a new version exists to change.
         XCTAssertNotEqual(rebuilt.version, stored.version)
         XCTAssertNotEqual(rebuilt.effectiveFrom, stored.effectiveFrom)
@@ -273,6 +290,47 @@ final class PlanAuthoringTests: XCTestCase {
                 .scheduledDistanceNotPositive(weekday: .tuesday)
             )
         }
+    }
+
+    /// MAX-151: the floor is validated the same way every other plan-level number is,
+    /// but nil — "no opinion" — is itself a legal answer, unlike a zero or negative one.
+    func testTheDurationFloorMustBePositiveWhenStated() throws {
+        let session = try PlanAuthoring.session(revising: nil, today: try today)
+
+        var zero = session.draft
+        zero.minimumSessionDurationSeconds = 0
+        XCTAssertThrowsError(try session.plan(from: zero, effectiveFrom: try today)) { error in
+            XCTAssertEqual(error as? PlanAuthoringError, .minimumSessionDurationNotPositive)
+        }
+
+        var negative = session.draft
+        negative.minimumSessionDurationSeconds = -60
+        XCTAssertThrowsError(try session.plan(from: negative, effectiveFrom: try today)) { error in
+            XCTAssertEqual(error as? PlanAuthoringError, .minimumSessionDurationNotPositive)
+        }
+    }
+
+    /// The floor can be cleared back to "no opinion" — an athlete who decides the seed's
+    /// number was wrong for them is not stuck choosing a different positive one.
+    func testTheDurationFloorCanBeClearedToNoOpinion() throws {
+        let session = try PlanAuthoring.session(revising: nil, today: try today)
+        var draft = session.draft
+        XCTAssertNotNil(draft.minimumSessionDurationSeconds)
+
+        draft.minimumSessionDurationSeconds = nil
+        let plan = try session.plan(from: draft, effectiveFrom: try today)
+        XCTAssertNil(plan.minimumSessionDurationSeconds)
+    }
+
+    /// And it can be set to a different positive value, which reaches the saved plan —
+    /// the authoring screen's own acceptance criterion.
+    func testADifferentDurationFloorReachesTheSavedPlan() throws {
+        let session = try PlanAuthoring.session(revising: nil, today: try today)
+        var draft = session.draft
+        draft.minimumSessionDurationSeconds = 900
+
+        let plan = try session.plan(from: draft, effectiveFrom: try today)
+        XCTAssertEqual(plan.minimumSessionDurationSeconds, 900)
     }
 
     // MARK: - Editing the draft

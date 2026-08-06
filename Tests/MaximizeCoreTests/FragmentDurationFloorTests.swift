@@ -233,6 +233,54 @@ final class FragmentDurationFloorTests: XCTestCase {
         XCTAssertEqual(classification, .other)
     }
 
+    // MARK: - End to end, under the plan the app actually authors (MAX-151)
+
+    /// **The test proving the ticket did its job, not just moved a value.** The tests
+    /// above show the floor works once a plan states one; this shows a plan actually
+    /// states one. Before MAX-151, `StandardPlanSeed` set no floor and neither the
+    /// authoring screen nor a chat proposal could put one on a plan, so every plan on
+    /// disk carried `minimumSessionDurationSeconds == nil` and this exact workout
+    /// reached the scorer as a real session — tracker gap P3, "closed in vocabulary
+    /// only". Built through `PlanAuthoring.session(revising: nil, ...)`, the same path
+    /// a first-time athlete's app takes, not a hand-assembled `Plan`.
+    func testAMisStartedHROnlyWorkoutIsAFragmentUnderTheActualSeededPlan() throws {
+        let today = try CalendarDay(iso8601: "2026-08-03")
+        let session = try PlanAuthoring.session(revising: nil, today: today)
+        let plan = try session.plan(from: session.draft, effectiveFrom: today)
+        XCTAssertNotNil(plan.minimumSessionDurationSeconds, "the seeded plan states no floor")
+
+        // A watch session with heart-rate data and no distance sample, well under the
+        // seeded ten-minute floor — the mis-started treadmill run LIFTING-SPEC §9.2
+        // names.
+        let workout = try runWorkout(durationSeconds: 90, distanceMeters: nil)
+        let classification = try WorkoutClassifier.classify(
+            workout,
+            metrics: try metrics(zones: [(.one, 45), (.two, 45)]),
+            plan: plan,
+            timeZone: Self.utc
+        )
+        XCTAssertEqual(classification, .other)
+    }
+
+    /// The other side of the same proof: a real short run recorded with no distance —
+    /// an indoor track with no GPS lock — that clears the seeded floor still scores as
+    /// a run under the plan the app actually authors, not just under a hand-built
+    /// fixture.
+    func testARealShortRunWithNoDistanceAboveTheSeededFloorIsStillARunEndToEnd() throws {
+        let today = try CalendarDay(iso8601: "2026-08-03")
+        let session = try PlanAuthoring.session(revising: nil, today: today)
+        let plan = try session.plan(from: session.draft, effectiveFrom: today)
+
+        let workout = try runWorkout(durationSeconds: 900, distanceMeters: nil)
+        let classification = try WorkoutClassifier.classify(
+            workout,
+            metrics: try metrics(zones: [(.one, 300), (.two, 600)]),
+            plan: plan,
+            timeZone: Self.utc
+        )
+        XCTAssertEqual(classification, .easy)
+    }
+
     // MARK: - Fixtures local to this file
 
     private func runWorkout(
