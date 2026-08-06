@@ -21,9 +21,9 @@ final class FirstPlanDatingTests: XCTestCase {
         try CalendarDay(iso8601: text)
     }
 
-    /// A Thursday, so "the Monday of this week" (2026-08-03) is a distinct day. Same
-    /// anchor `PlanAuthoringTests` uses, deliberately: these two files describe the same
-    /// screen and should not disagree about what week it is.
+    /// A Thursday, so "the Monday of this week" (2026-08-03) is a distinct day. The same
+    /// training week `PlanAuthoringTests` anchors on, deliberately: these two files
+    /// describe one screen and should not disagree about what week it is.
     private var today: CalendarDay {
         get throws { try day("2026-08-06") }
     }
@@ -166,8 +166,11 @@ final class FirstPlanDatingTests: XCTestCase {
     }
 
     func testWorkoutsBecomeDaysInTheZoneTheCallerNames() throws {
-        // A run at 23:40 in London is the 5th there and the 6th in UTC+1. The conversion
-        // has one entry point and it demands the zone, so this cannot happen implicitly.
+        // A run at 23:20 UTC is the 5th in UTC and the 6th in Berlin, which is UTC+2 in
+        // August. Which day a workout falls on is a fact about a zone, the conversion has
+        // exactly one entry point, and it demands the zone — so this cannot drift
+        // implicitly between the pipeline and the screen.
+        //
         // 216 days after `Fixture.epoch` (2026-01-01T00:00:00Z), at 23:20.
         let lateEvening = Fixture.epoch.addingTimeInterval(216 * 86_400 + 23 * 3_600 + 20 * 60)
         let workout = try Workout(
