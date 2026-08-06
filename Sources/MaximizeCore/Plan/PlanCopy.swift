@@ -145,6 +145,34 @@ public enum PlanCopy {
         return formatter
     }()
 
+    // MARK: - What a first plan's date costs (MAX-165, A23)
+
+    /// What a candidate first effective date leaves permanently outside every plan
+    /// version, in figures — or nil when it leaves nothing.
+    ///
+    /// The sentence `PlanAuthoringFormatting.explain(.firstPlan)` already carries states
+    /// the permanence in prose. What it cannot state is the number, because the number
+    /// depends on what is stored on the device, and a count of one's own runs is the
+    /// difference between a caveat and a decision (CLAUDE.md: numerals do the hierarchy
+    /// work).
+    ///
+    /// **Nil at zero, rather than "0 workouts fall before this date".** Absence is a
+    /// designed state here in the strict sense: a date that costs nothing has nothing to
+    /// report, and rendering a zero would turn the ordinary, correct case into a warning
+    /// the athlete has to read and dismiss on every screen.
+    ///
+    /// "Workouts", not "runs": a lift is captured by the same pipeline, stranded by the
+    /// same boundary, and counted here for the same reason.
+    public static func excludedWorkoutsNotice(count: Int) -> String? {
+        guard count > 0 else { return nil }
+        let subject = count == 1
+            ? "1 workout already recorded falls"
+            : "\(count) workouts already recorded fall"
+        let object = count == 1 ? "It" : "They"
+        return "\(subject) before this date. \(object) can never be measured or scored: "
+            + "no later plan version is allowed to reach back past the first one's start date."
+    }
+
     // MARK: - A day's ask
 
     /// "Long run · 18.0 km · steady", the run slot's one-line rendering.
