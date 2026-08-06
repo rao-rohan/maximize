@@ -20,7 +20,7 @@ public struct ObligationID: Hashable, Sendable {
 /// What became of one obligation (A19, LIFTING-SPEC §6.2).
 ///
 /// Six cases rather than "met / not met", for the reason `ScoreCalendarDayState` has
-/// eight rather than three: the absences are not interchangeable. A day nothing was
+/// nine rather than three: the absences are not interchangeable. A day nothing was
 /// recorded on and a day whose workout has not been scored are both "not met", and
 /// treating them alike would either invent a miss the athlete did not commit or forgive
 /// one they did.
