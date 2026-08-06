@@ -171,8 +171,15 @@ final class FirstPlanDatingTests: XCTestCase {
         // exactly one entry point, and it demands the zone — so this cannot drift
         // implicitly between the pipeline and the screen.
         //
-        // 216 days after `Fixture.epoch` (2026-01-01T00:00:00Z), at 23:20.
-        let lateEvening = Fixture.epoch.addingTimeInterval(216 * 86_400 + 23 * 3_600 + 20 * 60)
+        // 2026-08-05T23:20:00Z — 216 whole days after `Fixture.epoch`
+        // (2026-01-01T00:00:00Z), plus 84 000 s (23 h 20 min).
+        //
+        // Two annotated constants rather than one arithmetic expression: five untyped
+        // literals and four overloaded operators inside a single argument is the shape
+        // the Swift type checker gives up on, and it did.
+        let wholeDays: TimeInterval = 216 * 86_400
+        let intoTheDay: TimeInterval = 84_000
+        let lateEvening = Fixture.epoch.addingTimeInterval(wholeDays + intoTheDay)
         let workout = try Workout(
             id: UUID(),
             activityType: .running,
