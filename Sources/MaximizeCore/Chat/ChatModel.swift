@@ -1088,9 +1088,15 @@ public final class ChatModel {
     /// §4.5 step 2, and the ticket's "failure is a state": every way this can fail gets
     /// one honest sentence in the transcript, as a notice — never written to the thread,
     /// exactly like a dropped stream's.
+    ///
+    /// Reads `PlanDraftingNotice`, not `PlanDraftingFailure.description` (MAX-155):
+    /// `description` is a developer diagnostic — it carries `PlanProposalModelError`'s
+    /// bare HTTP status number — and `PlanDraftingNotice` is the type that turns the
+    /// failure into words safe for this transcript, the same split `ChatFailureNotice`
+    /// keeps for a dropped stream.
     private func noteDraftingFailure(_ failure: PlanDraftingFailure) {
         planDrafting = .idle
-        messages.append(DisplayMessage(kind: .notice, text: failure.description))
+        messages.append(DisplayMessage(kind: .notice, text: PlanDraftingNotice.notice(for: failure).message))
     }
 
     /// Rejecting a proposal. Leaves the plan in force **completely** untouched, which

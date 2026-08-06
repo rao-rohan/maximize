@@ -10,6 +10,28 @@ import Foundation
 /// might work*; the rest mean *the plan data or the caller is wrong and asking again
 /// will fail identically*. `isWorthRetrying` is that distinction, made explicit so the
 /// client does not have to infer it from the case name.
+///
+/// ## `description` never carries the workout or the day (MAX-156)
+///
+/// `noPlanInEffect` and `contextAlreadyScored` carry a `CalendarDay` and a workout
+/// `UUID` as associated values — real identifying data about the athlete's training,
+/// not a status a server put on the wire. Before this ticket `description` interpolated
+/// both, on the same "diagnostic, read in a debugger" theory that lets
+/// `ScoringModelError.description` carry a status code: latent, because the one call
+/// site that logs a `ScoringError` (`IngestionComposition`) logs at `.private`, but a
+/// `description` is a plain `String` — nothing prevents a future caller from logging it
+/// `.public`, showing it on screen, or handing it to a crash reporter, and CLAUDE.md's
+/// "Health and privacy" rule does not carry a "the current caller happens to be careful"
+/// exception. So the payload is gone from every case's sentence, not audited caller by
+/// caller.
+///
+/// A caller that genuinely needs the day or the workout still has it: `switch`ing on
+/// `.noPlanInEffect(let day)` or `.contextAlreadyScored(let workoutID)` reaches the typed
+/// value directly. That is the "separate channel" the value lives on — pattern matching
+/// on a specific case rather than a blanket `String(describing:)` of any `Error` — and it
+/// is safe precisely because it takes a caller writing that case name on purpose, the
+/// same deliberateness `CLAUDE.md` asks for everywhere else health data is handled. No
+/// second property was added to duplicate what the enum's own payload already offers.
 public enum ScoringError: Error, Hashable, Sendable, CustomStringConvertible {
 
     // MARK: - The run cannot be scored at all
@@ -79,10 +101,13 @@ public enum ScoringError: Error, Hashable, Sendable, CustomStringConvertible {
 
     public var description: String {
         switch self {
-        case let .noPlanInEffect(day):
-            return "No plan version was in effect on \(day), so there is no rubric to score against"
-        case let .contextAlreadyScored(workoutID):
-            return "Workout \(workoutID) already has a score; scoring context must not carry one"
+        case .noPlanInEffect:
+            // No `day` here — see this type's note. The case name already says which
+            // fact is missing; the date it was missing on is not this string's to carry.
+            return "No plan version was in effect on this workout's day, so there is no rubric to score against"
+        case .contextAlreadyScored:
+            // No `workoutID` here, for the same reason.
+            return "This workout already has a score; scoring context must not carry one"
         case let .noBandMatched(scheduled, actual):
             return "No rubric band matched a \(actual.rawValue) workout on a \(scheduled.rawValue) day. "
                 + "The rubric needs a catch-all band for this combination"
