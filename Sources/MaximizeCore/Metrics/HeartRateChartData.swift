@@ -49,6 +49,49 @@ public struct HeartRateChartData: Hashable, Sendable {
     /// fallback constant.
     public let capBPM: Double?
 
+    /// The workout's discipline, kept only to tell `capBPM == nil` apart from itself —
+    /// see `capAbsenceReason`. Nothing else on this type branches on it.
+    private let discipline: Discipline
+
+    /// Why `capBPM` is nil, computed rather than passed in so the two can never
+    /// disagree: a cap present and a reason for its absence is not a state this type can
+    /// represent.
+    ///
+    /// **Two different facts, on purpose (MAX-139).** `Plan.heartRateCapBPM` is
+    /// documented as the easy-run ceiling — a lift was never asked to hold it, on any
+    /// day, governed or not — which is a fact about the *discipline*. A run with no
+    /// governing plan is a fact about the *day*. Before this type told the two apart,
+    /// `HRCurveView` said "no plan governs this day" for both, which is false on a
+    /// plan-governed day a lift happened to fall on.
+    public enum CapAbsenceReason: Hashable, Sendable {
+        /// A lift. `capBPM` is withheld regardless of whether a plan governs the day —
+        /// see `WorkoutDetailModel.heartRateChart(workoutRepository:planCalendar:day:discipline:metrics:)`.
+        case notApplicableToDiscipline
+        /// A run, but no plan governs this workout's day.
+        case noPlanForDay
+    }
+
+    public var capAbsenceReason: CapAbsenceReason? {
+        guard capBPM == nil else { return nil }
+        return discipline == .lift ? .notApplicableToDiscipline : .noPlanForDay
+    }
+
+    /// The sentence `HRCurveView` shows in place of a cap line — nil when a cap is
+    /// present, so the view never has to re-derive when to show it. Kept here rather
+    /// than a separate `*Copy` type for the reason MAX-150's `DriftOverlayView`
+    /// consolidation gives: one computed property per core type is enough ceremony for
+    /// two short sentences, and a second type would be a second place to look.
+    public var capAbsenceExplanation: String? {
+        switch capAbsenceReason {
+        case nil:
+            return nil
+        case .notApplicableToDiscipline:
+            return "This is a lift, not a run, so there's no heart-rate cap to compare against."
+        case .noPlanForDay:
+            return "No plan governs this day, so there's no cap to compare against."
+        }
+    }
+
     /// `DerivedMetrics.timeAboveCapSeconds`, unchanged. State this in the view; never
     /// derive a competing number from `aboveCapExcursions` — see the type documentation.
     public let timeAboveCapSeconds: Double?
@@ -68,14 +111,20 @@ public struct HeartRateChartData: Hashable, Sendable {
 
     /// - Parameters:
     ///   - series: the stored curve (`WorkoutRepository.heartRateSeries(forWorkout:)`).
+    ///   - discipline: the workout's `Discipline` — read only to resolve
+    ///     `capAbsenceReason` when `capBPM` is nil. No default: which discipline this is
+    ///     changes what the view is honest about, so every call site says so explicitly
+    ///     (`SummaryTileData.distanceUnit`'s own reasoning).
     ///   - capBPM: `Plan.heartRateCapBPM` for the plan governing this workout's day
-    ///     (`PlanCalendar.plan(on:)`), or nil if none does.
+    ///     (`PlanCalendar.plan(on:)`), or nil if none does, or if `discipline` is
+    ///     `.lift` (MAX-139 — a lift's curve is never handed the running cap).
     ///   - timeAboveCapSeconds: `DerivedMetrics.timeAboveCapSeconds`, passed straight
     ///     through. This initializer never computes it.
-    public init(series: HeartRateSeries, capBPM: Double?, timeAboveCapSeconds: Double?) {
+    public init(series: HeartRateSeries, discipline: Discipline, capBPM: Double?, timeAboveCapSeconds: Double?) {
         let curve = HeartRateCurve(series)
 
         self.points = series.samples.map { Point(offsetSeconds: $0.offsetSeconds, beatsPerMinute: $0.beatsPerMinute) }
+        self.discipline = discipline
         self.capBPM = capBPM
         self.timeAboveCapSeconds = timeAboveCapSeconds
         self.aboveCapExcursions = capBPM.map(curve.excursionsAbove) ?? []

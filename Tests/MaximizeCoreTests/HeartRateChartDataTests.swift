@@ -12,7 +12,7 @@ final class HeartRateChartDataTests: XCTestCase {
 
     func testPointsAreTheStoredSamplesUnchanged() throws {
         let series = try MetricsFixture.series([(0, 120), (300, 150), (600, 180)])
-        let data = HeartRateChartData(series: series, capBPM: 150, timeAboveCapSeconds: 300)
+        let data = HeartRateChartData(series: series, discipline: .run, capBPM: 150, timeAboveCapSeconds: 300)
 
         XCTAssertEqual(data.points.count, 3)
         XCTAssertEqual(data.points.map(\.offsetSeconds), [0, 300, 600])
@@ -30,14 +30,14 @@ final class HeartRateChartDataTests: XCTestCase {
         // The true crossing-implied duration for this ramp and this cap is 300 s
         // (reference ramp, see HeartRateCurveTests) — deliberately pass something else.
         let series = try MetricsFixture.series([(0, 120), (600, 180)])
-        let data = HeartRateChartData(series: series, capBPM: 150, timeAboveCapSeconds: 42)
+        let data = HeartRateChartData(series: series, discipline: .run, capBPM: 150, timeAboveCapSeconds: 42)
 
         XCTAssertEqual(data.timeAboveCapSeconds, 42)
     }
 
     func testTimeAboveCapSecondsPassesThroughNilUnchanged() throws {
         let series = try MetricsFixture.series([(0, 120), (600, 180)])
-        let data = HeartRateChartData(series: series, capBPM: 150, timeAboveCapSeconds: nil)
+        let data = HeartRateChartData(series: series, discipline: .run, capBPM: 150, timeAboveCapSeconds: nil)
         XCTAssertNil(data.timeAboveCapSeconds)
     }
 
@@ -46,7 +46,7 @@ final class HeartRateChartDataTests: XCTestCase {
     /// not a stored duration was supplied at all.
     func testShadingIsComputedFromTheCurveRegardlessOfWhatTimeAboveCapSecondsSays() throws {
         let series = try MetricsFixture.series([(0, 120), (600, 180)])
-        let data = HeartRateChartData(series: series, capBPM: 150, timeAboveCapSeconds: nil)
+        let data = HeartRateChartData(series: series, discipline: .run, capBPM: 150, timeAboveCapSeconds: nil)
 
         XCTAssertEqual(data.aboveCapExcursions.count, 1)
         let excursion = try XCTUnwrap(data.aboveCapExcursions.first)
@@ -60,17 +60,65 @@ final class HeartRateChartDataTests: XCTestCase {
 
     func testNoCapMeansNoShadingAndNoThresholdToDraw() throws {
         let series = try MetricsFixture.series([(0, 120), (600, 180)])
-        let data = HeartRateChartData(series: series, capBPM: nil, timeAboveCapSeconds: nil)
+        let data = HeartRateChartData(series: series, discipline: .run, capBPM: nil, timeAboveCapSeconds: nil)
 
         XCTAssertNil(data.capBPM)
         XCTAssertTrue(data.aboveCapExcursions.isEmpty)
+    }
+
+    // MARK: - MAX-139: two different reasons a cap can be absent
+
+    /// A run with no governing plan — the ordinary "no plan for this day" case.
+    func testCapAbsenceReasonIsNoPlanForDayOnARunWithNoCap() throws {
+        let series = try MetricsFixture.series([(0, 120), (600, 180)])
+        let data = HeartRateChartData(series: series, discipline: .run, capBPM: nil, timeAboveCapSeconds: nil)
+
+        XCTAssertEqual(data.capAbsenceReason, .noPlanForDay)
+        XCTAssertEqual(
+            data.capAbsenceExplanation,
+            "No plan governs this day, so there's no cap to compare against."
+        )
+    }
+
+    /// A lift, even on a day a plan governs — `Plan.heartRateCapBPM` is the easy-run
+    /// ceiling and was never asked of a lift, so this must not say "no plan governs this
+    /// day" (MAX-139's reported bug: a lift's absent cap and a run's absent cap read as
+    /// the same sentence, which is false for a lift on a plan-governed day).
+    func testCapAbsenceReasonIsNotApplicableToDisciplineOnALift() throws {
+        let series = try MetricsFixture.series([(0, 120), (600, 180)])
+        let data = HeartRateChartData(series: series, discipline: .lift, capBPM: nil, timeAboveCapSeconds: nil)
+
+        XCTAssertEqual(data.capAbsenceReason, .notApplicableToDiscipline)
+        XCTAssertEqual(
+            data.capAbsenceExplanation,
+            "This is a lift, not a run, so there's no heart-rate cap to compare against."
+        )
+    }
+
+    /// The two absence sentences must never coincide — otherwise MAX-139's bug is just
+    /// spelled differently.
+    func testTheTwoCapAbsenceExplanationsAreDifferentSentences() throws {
+        let series = try MetricsFixture.series([(0, 120), (600, 180)])
+        let runData = HeartRateChartData(series: series, discipline: .run, capBPM: nil, timeAboveCapSeconds: nil)
+        let liftData = HeartRateChartData(series: series, discipline: .lift, capBPM: nil, timeAboveCapSeconds: nil)
+
+        XCTAssertNotEqual(runData.capAbsenceExplanation, liftData.capAbsenceExplanation)
+    }
+
+    /// A cap present means no absence to explain — for either discipline.
+    func testCapAbsenceReasonIsNilWhenACapIsPresent() throws {
+        let series = try MetricsFixture.series([(0, 120), (600, 180)])
+        let data = HeartRateChartData(series: series, discipline: .run, capBPM: 150, timeAboveCapSeconds: nil)
+
+        XCTAssertNil(data.capAbsenceReason)
+        XCTAssertNil(data.capAbsenceExplanation)
     }
 
     // MARK: - A run entirely below the cap (state 3: perfectly executed, not absent)
 
     func testACurveThatNeverExceedsTheCapHasNoExcursionsButStillStatesZero() throws {
         let series = try MetricsFixture.series([(0, 120), (600, 140)])
-        let data = HeartRateChartData(series: series, capBPM: 150, timeAboveCapSeconds: 0)
+        let data = HeartRateChartData(series: series, discipline: .run, capBPM: 150, timeAboveCapSeconds: 0)
 
         XCTAssertTrue(data.aboveCapExcursions.isEmpty)
         // Zero is stated, not omitted — distinguishing "held the cap" from "unmeasured"
@@ -83,7 +131,7 @@ final class HeartRateChartDataTests: XCTestCase {
     func testBPMAxisDomainExpandsToIncludeACapAboveTheCurvesOwnPeak() throws {
         // min 120, max 140, cap 150: the axis must reach the cap, not just the curve.
         let series = try MetricsFixture.series([(0, 120), (600, 140)])
-        let data = HeartRateChartData(series: series, capBPM: 150, timeAboveCapSeconds: 0)
+        let data = HeartRateChartData(series: series, discipline: .run, capBPM: 150, timeAboveCapSeconds: 0)
 
         let domain = data.bpmAxisDomain
         XCTAssertLessThanOrEqual(domain.lowerBound, 120)
@@ -92,7 +140,7 @@ final class HeartRateChartDataTests: XCTestCase {
 
     func testBPMAxisDomainUsesOnlyTheCurveWhenThereIsNoCap() throws {
         let series = try MetricsFixture.series([(0, 120), (600, 180)])
-        let data = HeartRateChartData(series: series, capBPM: nil, timeAboveCapSeconds: nil)
+        let data = HeartRateChartData(series: series, discipline: .run, capBPM: nil, timeAboveCapSeconds: nil)
 
         let domain = data.bpmAxisDomain
         XCTAssertLessThanOrEqual(domain.lowerBound, 120)
@@ -103,14 +151,14 @@ final class HeartRateChartDataTests: XCTestCase {
 
     func testBPMAxisDomainIsWellFormedForAFlatSingleSampleCurve() throws {
         let series = try MetricsFixture.series([(30, 160)])
-        let data = HeartRateChartData(series: series, capBPM: nil, timeAboveCapSeconds: nil)
+        let data = HeartRateChartData(series: series, discipline: .run, capBPM: nil, timeAboveCapSeconds: nil)
 
         XCTAssertLessThan(data.bpmAxisDomain.lowerBound, data.bpmAxisDomain.upperBound)
     }
 
     func testOffsetSecondsDomainMatchesTheCurvesOwnSpan() throws {
         let series = try MetricsFixture.series([(30, 128), (900, 155)])
-        let data = HeartRateChartData(series: series, capBPM: nil, timeAboveCapSeconds: nil)
+        let data = HeartRateChartData(series: series, discipline: .run, capBPM: nil, timeAboveCapSeconds: nil)
 
         XCTAssertEqual(data.offsetSecondsDomain.lowerBound, 30, accuracy: 1e-9)
         XCTAssertEqual(data.offsetSecondsDomain.upperBound, 900, accuracy: 1e-9)
@@ -118,7 +166,7 @@ final class HeartRateChartDataTests: XCTestCase {
 
     func testOffsetSecondsDomainIsPaddedForASingleSampleCurve() throws {
         let series = try MetricsFixture.series([(30, 160)])
-        let data = HeartRateChartData(series: series, capBPM: nil, timeAboveCapSeconds: nil)
+        let data = HeartRateChartData(series: series, discipline: .run, capBPM: nil, timeAboveCapSeconds: nil)
 
         XCTAssertLessThan(data.offsetSecondsDomain.lowerBound, data.offsetSecondsDomain.upperBound)
     }
