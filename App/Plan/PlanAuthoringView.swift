@@ -348,16 +348,17 @@ struct PlanAuthoringView: View {
 
     /// A heading and the rules under it, or nothing at all when that category is empty.
     ///
-    /// Keyed by position rather than by the rationale itself: two bands are free to share
-    /// a rationale — `ScoringRubric` only requires identifiers to be unique — and a
-    /// `ForEach` with duplicate identities renders unpredictably.
+    /// Keyed by position rather than by the rationale itself: two bands are free to share a
+    /// rationale — `ScoringRubric` only requires *identifiers* to be unique — and a
+    /// `ForEach` with duplicate identities renders unpredictably. The list is rebuilt whole
+    /// or not at all, so a positional identity has nothing to get wrong here.
     @ViewBuilder
     private func ruleList(_ heading: String, _ rules: [String]) -> some View {
         if !rules.isEmpty {
             VStack(alignment: .leading, spacing: Spacing.tight) {
                 quietText(heading)
-                ForEach(Array(rules.enumerated()), id: \.offset) { rule in
-                    Text(rule.element)
+                ForEach(rules.indices, id: \.self) { index in
+                    Text(rules[index])
                 }
             }
             .padding(.vertical, Spacing.hairspace)
