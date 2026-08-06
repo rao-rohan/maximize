@@ -44,19 +44,28 @@ final class SettingsModel {
 
     private(set) var state: LoadState = .loading
 
-    private let settingsRepository: (any SettingsRepository)?
+    private let injectedSettingsRepository: (any SettingsRepository)?
+
+    /// The repository this model reads and writes: whatever was injected, or the app's one
+    /// store.
+    ///
+    /// **Resolved at each use, not captured at init (MAX-169).** `shared` is constructed by
+    /// the app root at launch, which is before the athlete has had any chance to press
+    /// **Try again** on a store that did not open — so a captured value here would be the
+    /// one place in the app that still held nil after a retry had succeeded, and the
+    /// settings screen would go on saying settings could not be loaded from a store that
+    /// was by then open. There is still deliberately no fallback other than
+    /// `PersistenceComposition.store`: MAX-049 was exactly a defaulted parameter reaching a
+    /// no-op stub in production, and this type must not give a future caller that footgun.
+    private var settingsRepository: (any SettingsRepository)? {
+        injectedSettingsRepository ?? PersistenceComposition.store
+    }
 
     /// - Parameter settingsRepository: defaults to `PersistenceComposition.store`.
     ///   Overridable so a preview or a test can inject a fake instead of reaching for
-    ///   the real on-device store. There is deliberately no other fallback: MAX-049
-    ///   was exactly a defaulted parameter reaching a no-op stub in production, and
-    ///   this type must not give a future caller the same footgun.
+    ///   the real on-device store.
     init(settingsRepository: (any SettingsRepository)? = nil) {
-        if let settingsRepository {
-            self.settingsRepository = settingsRepository
-        } else {
-            self.settingsRepository = PersistenceComposition.store
-        }
+        self.injectedSettingsRepository = settingsRepository
     }
 
     func load() async {

@@ -561,6 +561,7 @@ feature was governed by a plan that could not exist).
 | MAX-157 | **The fact sheet tells Claude "days" over a count of obligations** — `TrainingFactSheet`'s "Effective days" line is the same MAX-134 caption bug one layer into the prompt, not just on screen | MAX-140 | Sonnet ✅ |
 | MAX-161 | **First-run experience spec** — there is no first-run path in the app at all; a fresh install has no Health request, no plan, no key, and nothing pointing at any of them. Spec + A23/A24, decomposed into MAX-162…167 below | Owner | **Opus** ✅ |
 | MAX-162 … MAX-167 | The first-run build, decomposed from MAX-161 | MAX-161 | see below |
+| MAX-169 | **A store that will not open is a designed state, not a brick** — the whole-store failure is named once, at the root, instead of nine screens each reporting their own; a retry where one could work and none where it could not; the additive-schema migration question settled. **Closes the store half of R15** | MAX-154 | **Opus** ✅ — see the MAX-169 section below |
 
 **MAX-161.** [docs/FIRST-RUN-SPEC.md](./docs/FIRST-RUN-SPEC.md). Verified by search: no
 onboarding, welcome or first-run surface exists anywhere under `App/`. The spec argues
@@ -4841,6 +4842,119 @@ trained"* rather than as a close button at ~42pt; whether a red cell over a day 
 did train feels honest or punitive; and whether the sentence is the right length to hear
 cell after cell. **`swift build`/`swift test` were not run** — no Swift toolchain in this
 container (R1). See the PR's device list.
+## MAX-169 — a store that will not open is a designed state
+
+The highest-consequence path in the app that nothing has ever executed.
+`PersistenceComposition.modelContainer` opens the one SwiftData store; MAX-154 made its
+failure *logged* rather than silent, but the failure itself was still not a state the app
+had. `store` was nil, and each of the nine `LoadFailureSurface` cases independently said
+its own content could not be loaded — five screens' worth of local problems, none of them
+naming the single fact behind all five, and none of them mentioning the invisible half:
+that ingestion had nowhere to write either.
+
+### What it is now
+
+**One state, named in the core.** `StoreAvailability` — `.open`, `.couldNotOpen(failure)`,
+`.openedAfterTryingAgain` — with `FailureCopy.storeAvailability(_:)` supplying every word
+and `StoreAvailabilityTests` holding both. The app layer's whole remaining job is to call
+`MaximizeModelContainer.makeOnDisk()`, turn what came back into a `StoreOpenOutcome`, and
+render the result.
+
+**It replaces the app rather than sitting on top of it.** `MaximizeApp` switches between
+`StoreUnavailableView` and `RootTabView`. That is the "say it once, in one place" half of
+the ticket, and it also does the mechanical work that makes a retry honest: no screen's
+model is constructed while the store is shut, so none of them captures the nil, and a
+retry that succeeds is picked up by every screen built afterwards. `SettingsModel.shared`
+is the one exception by construction — the app root builds it at launch — so it now
+resolves `PersistenceComposition.store` at each use rather than in `init` (see R13).
+
+**A failure is not an absence, one level up.** "No workouts yet", "your workouts could not
+be loaded" and "Maximize could not open your history" are three different worlds, and
+before this the third rendered as several simultaneous instances of the second — and, on
+the workouts tab, as the *first*. `FailureCopyTests` now holds all three apart.
+
+### The route out, and its honest limits
+
+Investigated rather than assumed, since the ticket asked for the truth rather than a
+button:
+
+- **A retry is genuinely available for three of four classified reasons.** The strongest
+  case is real, not theoretical: the store is `.completeUntilFirstUserAuthentication`, so a
+  HealthKit background wake on a phone that rebooted overnight and has not been unlocked
+  since cannot read it — and if iOS then foregrounds that same process, the athlete is
+  looking at an app whose store failed an hour ago on a phone that is now unlocked. A
+  second attempt clears it. Out of space is the other actionable one: the athlete can free
+  space between the two presses.
+- **The reason a retry cannot clear gets no button and says why.** A store this build
+  cannot open is the same attempt against the same bytes. Offering a control there would
+  be a second thing that does not work.
+- **Nothing offers to delete, reset or rebuild the store** (A8 — it is the only copy), and
+  no sentence suggests doing it by hand. `StoreNoticeAction` has two cases and a test
+  asserts it, so a third has to be argued for rather than added.
+- **A retry that succeeds does not restore everything, and the copy says so.** The
+  ingestion pipeline is assembled once from `didFinishLaunchingWithOptions`, against
+  whatever store existed then — none. Reads work from the moment it opens; new workouts
+  are collected on the next launch, and none are lost while they wait, because with no
+  store the sink pins the HealthKit anchor rather than acknowledging the batch (R9/R12).
+  `.openedAfterTryingAgain` exists precisely so that is stated rather than discovered as a
+  run that never appeared.
+- **No diagnostic reaches the screen.** The domain, the code and now the classified reason
+  are `.public` in the log (a sysdiagnose is where they are read); the `Error` itself stays
+  `.private`, because a Core Data error's `userInfo` can carry stored row values. The
+  classification is derived in the core from two scalars — a domain string and an integer —
+  which cannot carry a workout.
+
+### The migration conclusion: no stage, and the argument for it
+
+`MiscategorisedScoreLabelRecord` (MAX-143) and `MuscleGroupEntryRecord` (A22) are the
+first shape change to land on a schema that may already have a store behind it, and
+`MaximizeMigrationPlan.stages` is empty. **It stays empty.** The full argument is written
+where the next person will look for it — `MaximizeMigrationPlan`'s doc comment — and in
+short:
+
+1. Both are *new entities*, which Core Data's lightweight migration infers; no row of any
+   existing model is read, rewritten or re-typed. The two harder cases (a new nullable
+   column, a new defaulted column) were already taken by `DerivedMetricsRecord` and
+   `ChatThreadRecord`, and neither took a stage either.
+2. A stage could not carry it: `MigrationStage` maps between two `VersionedSchema`s with
+   different identifiers, so writing one means a V2 holding a second copy of twelve model
+   classes, with a `.lightweight` stage asking SwiftData for the inference it already does.
+3. A `.custom` stage has no work to do — the new tables start empty and every property is
+   non-optional with a default, so there is no value to invent for an old row.
+4. Adding a record type is the one shape change that stays legal after a CloudKit schema
+   is promoted, so this does not expire when A8 is lifted.
+
+**This is an argument, not an observation.** No test and no device in this project has
+opened a pre-existing store with the new shape. If it is wrong, Core Data says so with
+`NSPersistentStoreIncompatibleVersionHashError` / `NSMigrationError` /
+`NSInferredMappingModelError`, which this ticket classifies as
+`.shapeThisBuildCannotOpen` — the state that offers no retry, says the history is still on
+the device, and offers nothing that would remove it. That is the designed landing place
+for the argument being wrong.
+
+**One cost recorded, not paid.** Several genuinely different on-disk shapes now all report
+themselves as schema version 1.0.0 (pre-MAX-046, pre-MAX-093, pre-MAX-143, and this one).
+That is free while every step is additive and inferable, but a future `.custom` stage keyed
+`1.0.0 → 2.0.0` cannot tell which of those it has been handed. The first change that is not
+inferable is therefore also the last moment at which versioning is cheap.
+
+### What CI can and cannot prove
+
+CI can prove: `MaximizeCore` compiles and the suite passes, including
+`StoreAvailabilityTests` (classification of nine documented Cocoa error codes, the retry
+being offered exactly where it could work, the two-case action enum, every transition of
+the state machine) and the `FailureCopy` whole-set rules extended over the new copy; and
+that the app target still compiles and links.
+
+CI cannot prove **the entire subject of this ticket**. It has never opened a store, never
+failed to open one, and never drawn a pixel. Specifically unverified: that a real store
+failure produces the error codes classified here; that the retry re-opens anything; that
+the app's screens actually come back after a successful retry; that the notice reads well
+at any Dynamic Type size; and that the additive schema change is in fact inferable on a
+store written by a previous build. See the PR's **Needs device verification** section — that
+check is the point of the ticket, not a footnote to it.
+
+**`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
 
 ---
 
@@ -4850,7 +4964,7 @@ container (R1). See the PR's device list.
 |---|---|---|---|
 | R1 | No Swift toolchain in the dev container; `download.swift.org` blocked | CI is the only gate | Accepted — mitigated by fat-core architecture + macOS CI |
 | R2 | No device/simulator in the loop | HealthKit flows, UI, on-device performance unverified until a human checks | Accepted per direction. PRs must list what needs device verification |
-| R13 | App-layer wiring is compiled but never executed | A defaulted parameter silently selected a no-op store — in **two** files, the second added the same hour the first was found; nothing in CI could see either | The stub is deleted, so there is nothing to default to. No production call site may default to a repository that can resolve to a no-op |
+| R13 | App-layer wiring is compiled but never executed | A defaulted parameter silently selected a no-op store — in **two** files, the second added the same hour the first was found; nothing in CI could see either | The stub is deleted, so there is nothing to default to. No production call site may default to a repository that can resolve to a no-op. **MAX-169 kept that rule while making one resolution lazy**: `SettingsModel` now reads `PersistenceComposition.store` at each use rather than capturing it in `init`, because `shared` is built at launch and would otherwise be the one holder still carrying nil after a retry succeeded. The fallback is still `PersistenceComposition.store` and nothing else. That ticket also added the largest single piece of app wiring nothing has ever run — the store-failure screen and its retry — so every decision inside it was pushed into `MaximizeCore` (`StoreAvailability`) where the suite does run |
 | R14 | CI is a hosted-minutes dependency | The whole merge gate vanished mid-session when the Actions allowance ran out — every job, including Ubuntu, failed in 2s with no runner | Repo is public, so standard runners are free and uncapped. Core suite moved to Linux (1x) so only `xcodebuild` needs macOS |
 | R3 | Anthropic key on-device | Weakens PRD §6 | Accepted for single-user (A5). **Tripwire: blocks any distribution** |
 | R5 | HealthKit background-delivery entitlement key | Wrong key means the wake silently never fires | **Resolved** at MAX-030 — `com.apple.developer.healthkit.background-delivery` confirmed against Apple docs; the PRD's guess was right. Base HealthKit entitlement and `NSHealthShareUsageDescription` also in place; all three fail the same silent way |
@@ -4860,7 +4974,7 @@ container (R1). See the PR's device list.
 | **R9** | **MAX-030 acknowledges every background wake, including failed ones — so iOS never retries.** This is only safe because a missed wake is recovered by the next anchored fetch | If MAX-031 lands a fetch that is not anchored or not idempotent, missed workouts are lost permanently and silently | **Constraint on MAX-031, not a risk to monitor.** The reasoning is documented in `WorkoutObservationCoordinator`; if the anchor guarantee changes, that decision must be revisited |
 | **R11** | **A permanently unacceptable workout wedges the whole pipeline.** If the sink throws deterministically for one workout, the anchor never advances past it, so it is refetched and rethrown on every pass forever — and every later workout queues behind it | Zero-touch capture stops entirely, and the symptom is silence | **MAX-033 must handle this.** Found by MAX-031, which deliberately did not build a poison-pill escape: "give up on this workout" is a data decision belonging to whoever owns the store. The obligation is documented on `WorkoutIngestionSink` |
 | R12 | The anchor write and the workout write are two separate stores, so the window between them exists by construction | A crash between them re-delivers the batch — absorbed by dedupe, so this is the safe side | **Accepted permanently. Do not "fix" this.** ~~MAX-020 can close it by moving the anchor into the same SwiftData transaction~~ — that earlier note was wrong and MAX-020 correctly refused it. See below |
-| **R15** | **No failure state in the app offers a retry, and a whole-store failure is never named as one.** Every `.failed` state is terminal until the view is rebuilt — including the ones a second attempt would plainly clear (a scoring call that timed out, a Keychain read during the moment the device was locked). And when the *store* is what failed, every screen independently says its own content could not be loaded, which reads as five separate problems rather than the one that it is; nothing tells the athlete that nothing at all is being saved | An athlete's only recovery from a transient failure is to guess that backing out and re-entering a screen will help, and their only signal for a permanent one is that the whole app looks broken in five different ways | **Open.** MAX-154 made every failure legible and put the store-open reason in the log (it previously went nowhere), but deliberately did not add controls or an app-level banner — that is a design decision about affordances, not an error-handling audit. Found by MAX-154 |
+| **R15** | **No failure state in the app offers a retry, and a whole-store failure is never named as one.** Every `.failed` state is terminal until the view is rebuilt — including the ones a second attempt would plainly clear (a scoring call that timed out, a Keychain read during the moment the device was locked). And when the *store* is what failed, every screen independently says its own content could not be loaded, which reads as five separate problems rather than the one that it is; nothing tells the athlete that nothing at all is being saved | An athlete's only recovery from a transient failure is to guess that backing out and re-entering a screen will help, and their only signal for a permanent one is that the whole app looks broken in five different ways | **The store half is closed by MAX-169; the per-screen half is still open.** MAX-154 made every failure legible and put the store-open reason in the log (it previously went nowhere), but deliberately did not add controls or an app-level banner. MAX-169 added both, for the store only: an unopenable store is now one named state (`StoreAvailability`) said once at the app root instead of nine surfaces each reporting their own read, it says plainly that nothing is being saved and that nothing has been deleted, and it offers a retry on the reasons a second attempt could clear and none on the reason it could not. **Still open:** every other `.failed` state is terminal until its view is rebuilt — a scoring call that timed out, a Keychain read taken while the device was locked, a plan version that would not save. Each has a retry that would plainly work and no control for it. Found by MAX-154 |
 | **R16** | **A first plan dated later than the history already on the device destroys that history, permanently and silently.** Three individually correct behaviours compose into it: the ingester backfills 90 days on its first pass, the authoring screen suggested this week's Monday as a first plan's effective date, and a workout on a day no plan governs is stored with no derived metrics and reported as `.workoutPredatesEveryPlan` — a reason that **never resolves**, because MAX-011 rightly forbids a later version from opening before an earlier one | An athlete accepting the suggested date on install day stranded roughly 89 days of their own training: stored, but never measurable, never scorable, never in a tally, and never mentioned on any screen. Silent, permanent, and invisible in CI because each part was correct in isolation | **Closed by MAX-165 (A23)** for the first plan, which is where it was reachable: the suggestion now covers the earliest captured workout, and the screen states in figures what any candidate date would exclude. **The class is not closed.** A workout that syncs *after* the first plan is saved but is dated before its effective date — a late Watch sync, a Health import from another app — is stranded the same way, still silently. Named in FIRST-RUN-SPEC §7.4; not yet a ticket |
 | **R17** | **A fix written into `StandardPlanSeed` does not reach anybody who already has a plan.** D1 makes the seed authoring *input*: it supplies the bands a first plan starts from and is then out of the loop forever. That is the property that keeps thresholds out of code — and it also means a corrected band, a new band, a reordering, or any future seeded plan field is delivered to precisely nobody until an athlete authors a new version. Every half is correct in isolation, which is why it took MAX-168 refusing to open a gate to notice | Two corrections sat undeliverable for four tickets: MAX-132's lift adherence bands and MAX-146's `rest.ranAnyway` condition, the second of which stamps every unprescribed lift *"Ran on a scheduled rest day."* A seed edit reads like a fix and lands like a no-op, and nothing in CI can tell the difference — the seed's own tests pass, because they test the seed | **Mitigated, not closed, by MAX-173.** There is now a route: authoring a revision adopts the current bands, stated on screen, as a new version. **The route still needs a human to walk it** — merging a seed fix changes no device until the owner opens Plan → revise → Save, so "shipped" and "in effect" remain different words. **The class recurs by construction:** the bands were the one plan field `PlanDraft` deliberately does not carry, which is exactly why they had no route — every other seeded value (the cap, the cadence band, the two thresholds, the arc, the week, the duration floor) is editable on the authoring screen, so an athlete can reach a new seed value by typing it. The next plan field added without either a draft field or an adoption path is stranded the same way, silently. Any ticket editing `StandardPlanSeed`, or adding a field to `Plan`, must say how its change reaches a plan that already exists — or say plainly that it does not |
 | R10 | The app cannot know whether Health *read* access was granted — `authorizationStatus(for:)` reports share status only, by Apple's design | No UI can honestly display "Health connected"; a permission problem is indistinguishable from "no workouts recorded yet" | Accepted, Apple-imposed. Found at MAX-030. Any future settings or onboarding UI must not claim read access it cannot verify. **MAX-161's spec §9 turns that into a rule with a structural defence and a test, and MAX-162 built it**: `FirstRunStep` models no per-step completion and the Health step has no completed state, so there is no value a view could draw a tick from; `FailureCopyTests.testNoHealthCopyClaimsAccessWasGrantedOrRefused` was extended over `FirstRunCopy` rather than duplicated. The rule now binds MAX-163's cover and MAX-164's card by construction rather than by review. (This row appeared twice after MAX-161; the duplicate is removed) |
