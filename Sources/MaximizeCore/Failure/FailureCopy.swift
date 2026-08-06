@@ -186,9 +186,142 @@ public enum FailureCopy {
         }
     }
 
+    // MARK: - The store itself, which is not a screen
+
+    /// What the app says when its one store did not open (MAX-169).
+    ///
+    /// `nil` for `.open`: there is nothing to say when the ordinary thing happened, and a
+    /// caller that renders a notice whenever one exists therefore needs no second question.
+    ///
+    /// ## Why this is one sentence about the app and not nine about screens
+    ///
+    /// `couldNotLoad(_:)` above answers "this surface's read did not work" — a local
+    /// problem, worded locally, and correct for a read that failed while the store is
+    /// perfectly healthy. When the *store* is what did not open, every one of those nine
+    /// surfaces says its own version of it at once, and an athlete reads five separate
+    /// bugs rather than the single fact that there is nowhere to read from and nowhere to
+    /// write to. This is that fact, said once, in the one place that knows it.
+    ///
+    /// ## The three things every failure body says
+    ///
+    /// - **Nothing has been deleted.** The most likely reaction to a screen like this is
+    ///   to reinstall the app, and with CloudKit deferred (A8) that would destroy the only
+    ///   copy of the athlete's history. So the body says what is true — the history is
+    ///   there and unread — before it says anything else.
+    /// - **Nothing is being saved either.** The screens being empty is the visible half;
+    ///   the invisible half is that ingestion has nowhere to write. Saying only the first
+    ///   would leave someone believing their runs are piling up safely somewhere.
+    /// - **The runs recorded meanwhile are not lost.** True by construction: with no store
+    ///   the ingestion sink pins the HealthKit anchor rather than acknowledging the batch
+    ///   (R9/R12), so a later launch refetches exactly what this one could not take.
+    ///
+    /// What varies between reasons is the second paragraph and whether a button is
+    /// offered — see `StoreOpenFailureReason`.
+    public static func storeAvailability(_ availability: StoreAvailability) -> StoreAvailabilityNotice? {
+        switch availability {
+        case .open:
+            return nil
+
+        case let .couldNotOpen(failure):
+            return StoreAvailabilityNotice(
+                heading: storeCouldNotOpenHeading,
+                body: storeCouldNotOpenBody,
+                detail: storeFailureDetail(failure),
+                // Present exactly when a second attempt could plausibly work. The state
+                // that cannot be helped gets no button and its detail says why, which is
+                // the honest version of a control that would have done nothing.
+                action: failure.permitsTryingAgain ? .tryAgain : nil
+            )
+
+        case .openedAfterTryingAgain:
+            return StoreAvailabilityNotice(
+                heading: "Your history opened",
+                // The caveat is the whole reason this state exists rather than dropping
+                // straight into the app — see `StoreAvailability.openedAfterTryingAgain`.
+                // "Starts" rather than "you open Maximize": returning to a backgrounded app
+                // is not a launch, and the pipeline is assembled at launch.
+                body: "Everything already recorded is there. One thing has not come back with "
+                    + "it: Maximize sets up its capture of new workouts once, as it starts, and "
+                    + "at that moment there was nowhere to put them. Workouts recorded since "
+                    + "then are collected the next time Maximize starts, and none of them are "
+                    + "lost while they wait.",
+                detail: nil,
+                action: .goToTheApp
+            )
+        }
+    }
+
+    /// The heading over every store-open failure. Names the app and the athlete's own
+    /// history, because "the store" is a developer's word for it.
+    private static let storeCouldNotOpenHeading = "Maximize could not open your history"
+
+    /// The paragraph that does not vary with the reason. See `storeAvailability(_:)` for
+    /// the three claims it makes and why each is load-bearing.
+    private static let storeCouldNotOpenBody =
+        "Everything Maximize has recorded — your workouts, your plan, your scores and your "
+            + "conversations — is kept in one place on this device, and it could not be opened "
+            + "this time. Nothing has been deleted: this is Maximize being unable to read your "
+            + "history, not a sign that it is gone. Until it opens, no screen has anything to "
+            + "show and nothing new is being kept. Runs recorded in the meantime are not lost — "
+            + "Maximize picks them up once it can open the store again."
+
+    /// The second paragraph: what is specific to this failure, and what the athlete can do
+    /// between attempts.
+    ///
+    /// Exhaustive over `StoreOpenFailureReason` with no `default`, so a reason added later
+    /// fails to compile here rather than inheriting a neighbour's explanation.
+    private static func storeFailureDetail(_ failure: StoreOpenFailure) -> String {
+        let reason: String
+        switch failure.reason {
+        case .deviceHadNotBeenUnlocked:
+            reason = "This happens when Maximize is woken in the background before the phone "
+                + "has been unlocked since it was last restarted — your history stays encrypted "
+                + "until then. Unlock the phone, then try again."
+        case .noRoomOnDevice:
+            reason = "The device reports that there is no room left on it to write to. Free up "
+                + "some space, then try again."
+        case .shapeThisBuildCannotOpen:
+            reason = "Your history is not in the shape this version of Maximize expects, and it "
+                + "could not be converted into it. A second attempt would do exactly the same "
+                + "thing, so Maximize is not offering one. Your history is still on the device "
+                + "and nothing here has changed it."
+        case .unknown:
+            reason = "Maximize has nothing more specific to say about why. Trying again costs "
+                + "nothing and sometimes works; if it does not, nothing on the device is any "
+                + "different for having tried."
+        }
+
+        // The acknowledgement goes first, so a person who has just pressed the button reads
+        // an answer to what they did before reading the explanation again. Two fixed
+        // literals joined — nothing here interpolates a value (see this type's note).
+        guard failure.hasAlreadyBeenTriedAgain else { return reason }
+        return "Trying again did not open it. " + reason
+    }
+
+    /// The title of the store notice's single button.
+    ///
+    /// Exhaustive with no `default`. Neither label promises an outcome: "Try again" says
+    /// what the button does, not that it will work, and the state where it would not work
+    /// does not offer it at all.
+    public static func actionLabel(for action: StoreNoticeAction) -> String {
+        switch action {
+        case .tryAgain:
+            return "Try again"
+        case .goToTheApp:
+            return "Continue"
+        }
+    }
+
     // MARK: - Absence, which is not failure
 
     /// Shown when the workout list loaded successfully and holds nothing.
+    ///
+    /// **Reachable only when the store is open** (MAX-169). Before that ticket this string
+    /// and a store that never opened were the same screen: an athlete whose store had
+    /// failed read "No workouts yet" and a suggestion to check their Health settings, for
+    /// a device where the workouts may well have been there all along. The store's own
+    /// failure is now stated at the root, in `storeAvailability(_:)`, and the workouts tab
+    /// is not reached while it holds.
     ///
     /// **The second sentence is R10.** iOS never tells an app whether Health *read*
     /// access was granted, so "no workouts yet" is not something this app can establish

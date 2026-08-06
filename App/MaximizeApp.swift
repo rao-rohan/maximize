@@ -22,11 +22,29 @@ struct MaximizeApp: App {
     /// without a relaunch.
     @State private var settingsModel = SettingsModel.shared
 
+    /// MAX-169. Whether there is a store at all — the one fact that decides between the
+    /// app and a single screen saying why there is not. Constructed here rather than
+    /// inside `RootTabView` because the answer has to be known *before* the tabs exist:
+    /// mounting them is what builds every screen's model, and a model built while the
+    /// store is shut holds that nil for the life of the process.
+    @State private var storeAvailability = StoreAvailabilityModel()
+
     var body: some Scene {
         WindowGroup {
-            RootTabView()
-                .task { await settingsModel.load() }
-                .preferredColorScheme(preferredColorScheme)
+            Group {
+                if let notice = storeAvailability.notice {
+                    StoreUnavailableView(notice: notice) { storeAvailability.perform($0) }
+                } else {
+                    RootTabView()
+                }
+            }
+            // `id:` rather than a bare `.task`, so a store that opened on a second attempt
+            // gets its settings read. The first run of this happened while there was no
+            // repository to read from, which left `state == .failed` — and a screen that
+            // still says settings could not be loaded, after the app has just told the
+            // athlete their history opened, would be the app disagreeing with itself.
+            .task(id: storeAvailability.availability.isUsable) { await settingsModel.load() }
+            .preferredColorScheme(preferredColorScheme)
         }
     }
 

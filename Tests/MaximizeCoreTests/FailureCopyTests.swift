@@ -95,6 +95,56 @@ final class FailureCopyTests: XCTestCase {
         return entries
     }
 
+    /// Every state the store notice can be in (MAX-169), with a label naming it.
+    ///
+    /// `StoreAvailability` carries an associated value, so it cannot be `CaseIterable` and
+    /// the inventory has to be built. Both values of `hasAlreadyBeenTriedAgain` are
+    /// enumerated because the second one changes what the athlete reads — that is the
+    /// whole reason the flag exists.
+    static var everyStoreAvailability: [(label: String, value: StoreAvailability)] {
+        var states: [(label: String, value: StoreAvailability)] = [
+            (label: "open", value: .open),
+            (label: "openedAfterTryingAgain", value: .openedAfterTryingAgain),
+        ]
+        for reason in StoreOpenFailureReason.allCases {
+            for hasTriedAgain in [false, true] {
+                states.append(
+                    (
+                        label: "couldNotOpen(\(reason), triedAgain: \(hasTriedAgain))",
+                        value: .couldNotOpen(
+                            StoreOpenFailure(reason: reason, hasAlreadyBeenTriedAgain: hasTriedAgain)
+                        )
+                    )
+                )
+            }
+        }
+        return states
+    }
+
+    /// Every string the store notice can produce (MAX-169).
+    ///
+    /// Its own inventory rather than part of `allCopy`, on `allFirstRunCopy`'s precedent
+    /// and for the same two reasons: a heading and a button title are correct copy that
+    /// would fail `testEverySentenceIsRealCopy`'s full stop, and the notice deliberately
+    /// repeats one body across four failure reasons, which `testNoTwoCasesShareASentence`
+    /// is written to forbid. The rules the two sets genuinely share — no diagnostic
+    /// vocabulary, no digits — are asserted over both rather than in a second test.
+    private var allStoreCopy: [Entry] {
+        var entries: [Entry] = []
+        for state in Self.everyStoreAvailability {
+            guard let notice = FailureCopy.storeAvailability(state.value) else { continue }
+            entries.append(Entry(label: "\(state.label).heading", text: notice.heading))
+            entries.append(Entry(label: "\(state.label).body", text: notice.body))
+            if let detail = notice.detail {
+                entries.append(Entry(label: "\(state.label).detail", text: detail))
+            }
+            if let actionLabel = notice.actionLabel {
+                entries.append(Entry(label: "\(state.label).action", text: actionLabel))
+            }
+        }
+        return entries
+    }
+
     /// The enums are the inventory. If a case is added and this count is not updated,
     /// the author has been made to look at whether the new case needs its own sentence —
     /// which is the whole point of enumerating them.
@@ -112,6 +162,20 @@ final class FailureCopyTests: XCTestCase {
         XCTAssertEqual(FirstRunCardState.allCases.count, 6)
         XCTAssertEqual(FirstRunStep.allCases.count, 3)
         XCTAssertEqual(allFirstRunCopy.count, 21)
+
+        // MAX-169's inventory. Four reasons, each in two states of having-been-retried,
+        // plus the reopened state — and two actions, which is the count that matters most
+        // in this file: `StoreNoticeAction` growing a third case is how a control that
+        // destroys the athlete's only copy of their history would arrive (A8), so it is
+        // counted here rather than trusted to review. See
+        // `StoreAvailabilityTests.testNoticeActionsAreOnlyTheTwoNonDestructiveOnes`.
+        XCTAssertEqual(StoreOpenFailureReason.allCases.count, 4)
+        XCTAssertEqual(StoreNoticeAction.allCases.count, 2)
+        XCTAssertEqual(Self.everyStoreAvailability.count, 10)
+        // Thirty-three: eight failure states with a heading, a body and a detail apiece
+        // (24), a button on the six of those whose reason is worth retrying (6), and the
+        // reopened state's heading, body and button (3). `.open` produces nothing.
+        XCTAssertEqual(allStoreCopy.count, 33)
     }
 
     // MARK: - No case falls through to a generic fallback
@@ -168,7 +232,12 @@ final class FailureCopyTests: XCTestCase {
             "keychain", "healthkit", "swiftdata", "coredata", "osstatus", "hkerror",
             "status code", "http", "json", "uuid", "optional", "unwrap",
         ]
-        for entry in allCopy {
+        // MAX-169's store notice is held to this rule too, and it is the surface under the
+        // most pressure from it: the app has just classified a Core Data error, and the
+        // temptation to pass a code or a framework name along to the person reading the
+        // screen is at its highest exactly where the app knows the most. The classification
+        // exists to decide whether a button is offered; the log carries the diagnostic.
+        for entry in allCopy + allStoreCopy {
             let lowered = entry.text.lowercased()
             for term in banned {
                 XCTAssertFalse(
@@ -187,7 +256,7 @@ final class FailureCopyTests: XCTestCase {
     /// a rendered sentence. A digit appearing here would mean one of those had grown a
     /// route, which is the finding CLAUDE.md's "health data is PII" rule is about.
     func testNoSentenceCarriesADigit() {
-        for entry in allCopy {
+        for entry in allCopy + allStoreCopy {
             XCTAssertFalse(
                 entry.text.contains(where: { $0.isNumber }),
                 "\(entry.label) carries a digit, so something is being interpolated: \"\(entry.text)\""
@@ -211,6 +280,37 @@ final class FailureCopyTests: XCTestCase {
         // The failure copy says explicitly that it is not the absence, because an empty
         // screen is the thing a person will otherwise read it as.
         XCTAssertTrue(failure.lowercased().contains("not a sign that none were recorded"))
+    }
+
+    /// MAX-169 extends the same rule one level up, to the third world these two could be
+    /// confused with: **the store never opened at all.**
+    ///
+    /// Three different facts, three different sentences. "No workouts yet" is an app that
+    /// works and has nothing in it; "your workouts could not be loaded" is one read that
+    /// did not work; "Maximize could not open your history" is an app with nowhere to read
+    /// from and nowhere to write to. Before this ticket the third was rendered as several
+    /// simultaneous instances of the second — and, on the workouts tab of a device whose
+    /// store had never opened, as the *first*.
+    func testTheStoreFailureIsNotWordedAsAnEmptyAppOrAsOneScreensRead() {
+        guard let notice = FailureCopy.storeAvailability(
+            .couldNotOpen(StoreOpenFailure(reason: .unknown, hasAlreadyBeenTriedAgain: false))
+        ) else {
+            return XCTFail("A store that did not open must produce a notice")
+        }
+
+        for surface in LoadFailureSurface.allCases {
+            XCTAssertNotEqual(notice.body, FailureCopy.couldNotLoad(surface))
+        }
+        XCTAssertNotEqual(notice.body, FailureCopy.noWorkoutsRecorded)
+        XCTAssertFalse(notice.body.contains(FailureCopy.noWorkoutsRecorded))
+
+        // It says the two things neither of the others can: that the history still exists,
+        // and that nothing new is being kept while this holds. Both are what stop an
+        // athlete reading this screen as "my history is gone" — the reading that leads to
+        // reinstalling the app, which with CloudKit deferred (A8) would make it true.
+        XCTAssertTrue(notice.body.contains("Nothing has been deleted"))
+        XCTAssertTrue(notice.body.lowercased().contains("nothing new is being kept"))
+        XCTAssertTrue(notice.body.lowercased().contains("not lost"))
     }
 
     // MARK: - R10: the app does not claim what it cannot know

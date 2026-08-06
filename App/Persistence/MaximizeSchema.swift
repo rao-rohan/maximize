@@ -673,6 +673,52 @@ enum MaximizeSchemaV1: VersionedSchema {
 /// schema to production, a migration may **add** record types and fields but may never
 /// rename, retype or remove them. A `.custom` stage that would be routine on a local-only
 /// store is not available once the data is mirrored.
+///
+/// ## MAX-169: why the two record types added at MAX-143 and A22 still need no stage
+///
+/// The question that ticket was asked to settle, because `MiscategorisedScoreLabelRecord`
+/// and `MuscleGroupEntryRecord` are the first shape change to land on a schema that may
+/// already have a store on a phone behind it. The conclusion is **no stage**, and the
+/// argument is four steps:
+///
+/// 1. **Both are new entities, not changes to existing ones.** Core Data's lightweight
+///    migration lists adding an entity among the changes it can infer, and the inference
+///    here has nothing to infer *between*: the two tables are created, and no row of any
+///    other model is read, rewritten or re-typed. The two harder cases — a new nullable
+///    column and a new defaulted column — were already taken by
+///    `DerivedMetricsRecord.distanceSplitsJSON` and `.distanceSplitsComputed`, and neither
+///    got a stage either.
+/// 2. **A stage could not carry this change anyway.** `MigrationStage` maps between two
+///    `VersionedSchema`s with *different* version identifiers, so writing one means a V2
+///    holding a second copy of all twelve model classes. The stage over it would be
+///    `.lightweight`, which asks SwiftData for exactly the inference it already performs.
+///    The duplicate schema would buy nothing and would have to be maintained in step.
+/// 3. **A `.custom` stage has no work to do.** Custom stages exist to invent a value an
+///    old row cannot supply. There is no such row here: the new tables start empty, and
+///    every property on both types is non-optional with a default, per this file's
+///    CloudKit rules.
+/// 4. **Adding a record type is the one shape change that stays legal after promotion**
+///    (Apple, quoted at the top of this file), so this reasoning does not expire when A8
+///    is lifted and MAX-021 promotes a schema.
+///
+/// **What that conclusion rests on, stated plainly: an argument, not an observation.** No
+/// test and no device in this project has ever opened a pre-existing store with the new
+/// shape — the core cannot import SwiftData, CI has no simulator (tracker R2), and
+/// `MaximizeModelContainer.makeOnDisk()` has never executed in this pipeline. If the
+/// inference does not go the way this comment expects, Core Data reports it as
+/// `NSPersistentStoreIncompatibleVersionHashError`, `NSMigrationError` or
+/// `NSInferredMappingModelError`; MAX-169 classifies exactly those codes as
+/// `StoreOpenFailureReason.shapeThisBuildCannotOpen`, which is the one failure state that
+/// offers no retry, says the history is still on the device, and offers nothing that would
+/// delete it. That is the designed landing place for this argument being wrong.
+///
+/// **One cost of holding the version identifier still, which nobody had written down.**
+/// Several genuinely different on-disk shapes now all report themselves as version 1.0.0:
+/// pre-MAX-046, pre-MAX-093, pre-MAX-143, and this one. That is free while every step
+/// between them is additive and inferable — but it means a future `.custom` stage keyed
+/// `1.0.0 → 2.0.0` cannot tell which of those shapes it has been handed. The first change
+/// that is *not* inferable is therefore also the last moment at which versioning is cheap,
+/// and whoever hits it should bump the identifier before writing anything else.
 enum MaximizeMigrationPlan: SchemaMigrationPlan {
     static var schemas: [any VersionedSchema.Type] { [MaximizeSchemaV1.self] }
     static var stages: [MigrationStage] { [] }
