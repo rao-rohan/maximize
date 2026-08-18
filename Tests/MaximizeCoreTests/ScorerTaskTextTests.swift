@@ -19,10 +19,12 @@ final class ScorerTaskTextTests: XCTestCase {
 
     /// Pinned as a literal rather than asserted against a substring, precisely so that
     /// an edit made in service of the lift branch cannot drift this one silently. The
-    /// two paragraphs this ticket does not own — `RationaleContract`'s rules and
-    /// `ScoreProposal`'s reply format — are read live rather than duplicated here: they
-    /// belong to a different ticket, and hardcoding their current wording a second time
-    /// would make this test fail on an edit that has nothing to do with MAX-147.
+    /// paragraphs this ticket does not own — `RationaleContract`'s rules,
+    /// `ScoreProposal`'s reply format, and MAX-175's absence rule — are read live rather
+    /// than duplicated here: they belong to a different ticket, and hardcoding their
+    /// current wording a second time would make this test fail on an edit that has
+    /// nothing to do with MAX-147. Each is pinned as a literal in its own owner's file
+    /// (`HonestRefusalAcrossPromptsTests` for the absence rule).
     func testTheRunTaskTextIsUnchanged() throws {
         let subject = try ScoringFixture.context()
 
@@ -48,6 +50,8 @@ final class ScorerTaskTextTests: XCTestCase {
 
         Do not argue with the matched rule and do not score outside the permitted range. \
         A score outside it will be rejected and you will be asked again.
+
+        \(WorkoutScorer.absenceRule)
 
         Rationale rules:
         \(RationaleContract.instructionText)
@@ -136,6 +140,9 @@ final class ScorerTaskTextTests: XCTestCase {
             XCTAssertTrue(task.contains(RationaleContract.instructionText))
             XCTAssertTrue(task.contains(ScoreProposal.responseFormatDescription))
             XCTAssertTrue(task.contains("Do not argue with the matched rule"))
+            // MAX-175: what to do with an absence is a property of the reply, not of the
+            // discipline, so neither branch may carry it alone.
+            XCTAssertTrue(task.contains(WorkoutScorer.absenceRule))
         }
     }
 

@@ -733,6 +733,51 @@ gated on a stored key, never on the critical path.
 
 ---
 
+## A25 — A felt-rating is collected before the score is revealed, or not at all.
+
+**Clarifies:** D8, and PRD §2's scorer-quality metric. Nothing is superseded.
+**Source:** MAX-175, from the owner's reading of a competitor's adaptive recovery score
+([docs/HELIX-COMPETITIVE-READ.md](./HELIX-COMPETITIVE-READ.md) §2.3).
+
+**The design examined, and rejected.** The athlete is shown a recovery score. They then
+rate how the day actually felt. The model re-weights its inputs against that rating, and
+the personalisation improves over time.
+
+**Why it cannot work in that order.** The rating is taken *after* the anchor. A low score
+primes a worse report of the same day, and the model then learns that the weighting which
+produced the low score was correct. The loop confirms itself: the label it trains on is
+downstream of the output it is grading, so no amount of data can contradict the model —
+there is no observation the design admits as evidence against it. That is not a
+personalisation that might be wrong; it is one that cannot be shown to be wrong, which is
+worse, because it accumulates confidence at exactly the rate it accumulates ratings.
+
+**Decision.** If Maximize ever collects a subjective felt-rating — of a session, a day, or
+a week — **the rating is captured before the athlete has seen the corresponding score, or
+it is not collected at all.** The ordering is the whole of the rule: the same field asked
+first is evidence, and asked second is an echo.
+
+**This changes nothing today.** No surface in the app collects a felt-rating, and none is
+planned. This is recorded so that whoever adds one inherits the constraint rather than
+rediscovering it — and so that "ask them how it went" cannot arrive as an obviously good
+idea attached to the wrong screen.
+
+**What it forbids concretely**, for that future ticket: the capture cannot sit under the
+verdict header on the workout detail screen, cannot be reached from a notification that
+names the score, and cannot be offered in a chat thread whose fact sheet already carries
+"## Score already assigned". Each of those reveals the score first by construction.
+
+**D8 already has the honest shape, which is why this is a clarification rather than a new
+principle.** The automatic score is written once and immutably; a correction is an
+additive annotation beside it; the divergence between the two is the measurement (PRD §2).
+That works precisely because the auto-score is fixed before the athlete's own judgement is
+recorded, and the two are stored apart rather than blended. A21 protects the same signal
+from a different contaminant — a score whose category was wrong is labelled out rather
+than silently averaged in. A felt-rating collected after its score would reintroduce the
+contamination that both of those exist to keep out, on the one axis neither of them
+guards.
+
+---
+
 ## Requirements unaffected
 
 Everything in §7 (features), §9 (metric definitions), §10 (scoring logic), §13 (risks)
