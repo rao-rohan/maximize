@@ -79,7 +79,7 @@ final class HonestRefusalAcrossPromptsTests: XCTestCase {
 
     // MARK: - The rule, over the set
 
-    func testEveryModelFacingPromptSaysWhatToDoWithAnAbsence() throws {
+    func testEveryModelFacingPromptSaysWhatToDoWithAnAbsence() async throws {
         for prompt in try Self.promptsAndTheirAbsenceClauses() {
             XCTAssertTrue(
                 prompt.task.contains(prompt.clause),
@@ -93,7 +93,7 @@ final class HonestRefusalAcrossPromptsTests: XCTestCase {
     /// a question outside the subject — and the training one refuses a second opinion on
     /// a score. Both are the same principle pointed at a different gap, and both were
     /// found by reading rather than assumed, so they are pinned here beside the rest.
-    func testTheChatPromptsAlsoDeclineWhatIsOutsideWhatTheyWereGiven() {
+    func testTheChatPromptsAlsoDeclineWhatIsOutsideWhatTheyWereGiven() async {
         XCTAssertTrue(ChatModel.workoutTask.contains("say that is outside what you can see here"))
         XCTAssertTrue(ChatModel.trainingTask.contains("never re-score a session"))
         XCTAssertTrue(ChatModel.trainingTask.contains("No medical advice"))
@@ -104,7 +104,7 @@ final class HonestRefusalAcrossPromptsTests: XCTestCase {
     /// Pinned as a literal here — the one file that owns MAX-175's words — so that
     /// `ScorerTaskTextTests` can read it live without either file being the only thing
     /// standing between a reword and CI.
-    func testTheScorersAbsenceRuleReadsExactlyAsPinned() {
+    func testTheScorersAbsenceRuleReadsExactlyAsPinned() async {
         XCTAssertEqual(WorkoutScorer.absenceRule, Self.pinnedAbsenceRule)
     }
 
@@ -123,7 +123,7 @@ final class HonestRefusalAcrossPromptsTests: XCTestCase {
     /// Digits are the check for the three prose prompts because a figure about a person is
     /// what one would carry — the same assertion `ChatModelTests` already makes for its
     /// two, extended over the set.
-    func testNoProsePromptCarriesAFigureAboutTheAthlete() {
+    func testNoProsePromptCarriesAFigureAboutTheAthlete() async {
         for task in [
             ChatModel.workoutTask,
             ChatModel.trainingTask,
@@ -137,7 +137,7 @@ final class HonestRefusalAcrossPromptsTests: XCTestCase {
     /// The scorer's whole task text cannot use the digit check — it numbers its two
     /// instructions and `RationaleContract` states a character limit — so the same claim
     /// is made the way it can be: the stable half does not move when the run does.
-    func testTheScorersStableHalfDoesNotVaryWithTheRunBeingScored() throws {
+    func testTheScorersStableHalfDoesNotVaryWithTheRunBeingScored() async throws {
         let cool = try ScoringFixture.context(
             metrics: try ScoringFixture.metrics(averageHeartRateBPM: 131)
         )
