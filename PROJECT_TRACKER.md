@@ -1963,6 +1963,7 @@ free. What landed in the file:
 | MAX-160 | ~~Should a labelled miscategorised score leave the athlete's own average?~~ **Owner decided: yes.** `TalliesCalculator.computeAverageScore` now skips a labelled score; the caption says when one was excluded and a fact-sheet line says why nothing is left when every scored workout was. See the MAX-160 note below | 143, 140 | Sonnet ✅ |
 | MAX-168 | **Open MAX-111's lift ingestion gate** — stop refusing to score a lift now that the vocabulary (131), the seed bands (132), the routing (133) and the copy (147) are all in place. **Was blocked on MAX-173** and found the gap that became it: it refused to open because no stored plan could reach MAX-132's or MAX-146's corrected bands, so opening the gate would have scored real lifts against a rubric that calls them runs. **Unblocked by MAX-173 — conditionally.** MAX-173 ships the *mechanism*; the gate is only safe once a plan version carrying the corrected bands is actually **in effect on the device**, which is an owner action (Plan → revise → Save). MAX-168 must check for that condition rather than assume it, and must say in its PR what happens to a lift ingested under a plan version that still carries the old bands | 111, 132, 133, 146, **173** | **Opus** |
 | MAX-173 | **A rubric fix can reach a stored plan** — authoring a revision adopts the bands this build ships, stated on screen and declinable, as a **new plan version**. Closes the D1 gap that made every seed-side rubric correction unreachable on a device with a plan. **Unblocks MAX-168.** Opens **R17** | 080, 132, 146 | **Opus** |
+| MAX-175 | **The app does not invent** — one principle, two expressions: the honest-refusal rule now holds over the *set* of model-facing prompts rather than in four literals that each remember it separately, and *no data, no judgement* is written down as a rule with tests. **The premise it was dispatched on was wrong** — the constraint was reported missing from chat and is not; see the MAX-175 section below | 174 | **Opus** |
 
 **Four collisions the overseer must respect.**
 
@@ -4958,6 +4959,151 @@ check is the point of the ticket, not a footnote to it.
 
 ---
 
+## MAX-175 — the app does not invent
+
+Two rules worth taking came out of the competitive read (MAX-174): *no night of data means
+no score*, and *if you have never logged strength work, it will say so rather than invent a
+per-muscle story*. This app mostly behaves like both already and had stated neither, which
+is the whole problem — nothing stops the next ticket from violating a rule nobody wrote
+down.
+
+### The premise this was dispatched on was wrong, and the correction is the interesting part
+
+The brief said: *"`ChatInstruction.swift` contains no honest-refusal constraint at all."*
+That sentence is true of the file and false about the app, and it came from grepping one
+file. **`ChatInstruction` holds no task text by design** — its `task` has no default, and
+its own doc comment says why: what to ask Claude to do in a chat turn is the chat feature's
+product decision, not the transport's. Looking for the rule there is looking in the one
+file deliberately built not to hold it.
+
+The rule was already in the three files that own prompt words, and it is good:
+
+- `ChatModel.workoutTask` — *"Never invent a number, split, or detail the fact sheet does
+  not state; when something was not measured, or the fact sheet says it does not apply, say
+  so rather than guessing."*
+- `ChatModel.trainingTask` — the same, plus name-the-window, never-re-score, no medical
+  advice.
+- `PlanProposalInstruction.taskDescription` — *"Do not invent facts about the athlete.
+  Where the conversation is silent…"*
+
+MAX-174 checked the claim and returned it corrected before this ticket built on it; the
+coordinator then rescoped mid-flight. **No second constraint was added to any chat prompt.**
+Adding one would have duplicated a rule in the place that already owns it — the opposite of
+what this ticket is for.
+
+### What was actually missing, and what changed
+
+**1. No test held the prompts to the rule as a set.** Four independent good sentences are
+not an invariant; they are four sentences, and a reword that dropped the clause from any
+one of them changed nothing CI could see. `HonestRefusalAcrossPromptsTests` now holds all
+four together, each pinned by the phrase *that* prompt uses — the words stay with their
+owners, because a fact sheet, a summary, a conversation and a record are four different
+things to be honest about, and collapsing them into one shared literal would have replaced
+four accurate sentences with one that is slightly wrong in three places.
+
+**2. The scorer's prompt genuinely lacked the rule** — checked directly rather than taken
+on faith, since the brief's other claim had not survived that treatment.
+`WorkoutScorer.absenceRule` is the one line of prompt text this ticket adds, shared by both
+discipline branches:
+
+> The record you are given states its own absences. Where it says a figure was not
+> recorded, does not apply, or was not computed, do not supply one and do not reason as
+> though you had it: score and justify from what is stated.
+
+It is a prohibition rather than a refusal, and that is deliberate: **this call has no
+refusal available to it.** The reply is a JSON object carrying a score inside a range the
+rubric already fixed, so "I do not have that" would be a failure, not a decline. The
+concrete hazard is the *rationale* — free prose that `RationaleContract` asks to cite the
+numbers that decided the score, stored immutably under D8 and shown in the verdict header.
+A run whose splits were never recorded getting a header that quotes a second-half split is
+the per-muscle story in one line, and unlike a chat turn, nobody can ask it to take that
+back. This also closes MAX-174's G3, which asked that the scorer's exemption be a recorded
+decision rather than an omission nobody had noticed; the answer turned out to be that it
+should not be exempt.
+
+**3. "No score" is now a rule with a test.** `NoJudgementWithoutDataTests` states it and
+pins it at six seams: the rubric refusing rather than defaulting when no plan governed the
+day or when the deciding metric was never measured; a model reply outside the permitted
+range rejected rather than clamped; an empty rationale refused rather than backfilled; an
+unscored window reporting no average rather than `0.0`; and the strictest form of it in
+the codebase — **an unscored run has no conversation to open at all**, because a thread
+would need a classification and the only classification that exists is the one the scorer
+recorded.
+
+### The invariant, stated
+
+> **Where the data required for a judgement is absent, the app produces no judgement
+> rather than a degraded one.** An absence is named — and where it matters, which *kind*
+> of absence it is — rather than filled, at every boundary: the stored record, the fact
+> sheet, the prompt, the tallies, the calendar and the screen.
+
+It is recorded in the decision log rather than as a PRD amendment, because it amends
+nothing: it is how PRD §10 already behaves, and A26–A28 are proposed by MAX-174 and in
+review, so taking a number here would collide with a document already being read. A25 —
+felt-ratings before scores — is the amendment this ticket does write, and it is the
+rejected design rather than the invariant.
+
+**No behaviour changed for it.** MAX-130 stopped fabricating a cadence for a lift; MAX-136
+omits the figures a lift was never measured by and says once why; MAX-168's ingestion gates
+fail closed; `.awaitingScore` and `.noVerdict` are designed states; `Tallies.averageScore`
+refuses to report `0.0` for "nothing has been scored". Six correct decisions taken six
+times were already there. What did not exist was the seventh author inheriting them, and
+that is what the statement and the tests buy.
+
+### A25 — a felt-rating is collected before the score is revealed, or not at all
+
+The rejected design, recorded: the athlete sees a score, then rates how the day felt, and
+the model re-weights against that rating. The rating is taken after the anchor, so a low
+score primes a worse report and the model learns that the weighting which produced it was
+correct. The label is downstream of the output it grades, so no observation can contradict
+it. D8 already has the honest ordering — auto-score fixed first, correction stored
+additively beside it, divergence as the measurement — which is why the amendment is a
+clarification rather than a new principle. Nothing in the app collects a felt-rating today;
+the rule exists so that whoever adds one inherits it.
+
+### Reported and deliberately not taken — and it is worse than filed
+
+MAX-174's **G2** (filed as **MAX-181**): `TrainingFactSheet`'s plan block renders
+`entry.session` and leaves `entry.liftSession` unrendered, so a training thread's model is
+shown the run prescription for each weekday and silently not the lift one. The renderer's
+own comment claims the lift slot "arrives for free the moment `WeeklyTemplate` grows one" —
+`WeeklyTemplate` grew one in MAX-109, and it did not.
+
+**The severity is higher than G2 records, and this ticket found the reason.**
+`PlanProposalInstruction.taskDescription` — the prompt that drafts a *new plan version* —
+instructs the model: *"restate each weekday's lift ask from the fact sheet exactly as it
+stands unless the conversation asks you to change it."* Plan drafting from a training
+thread is handed that same `TrainingFactSheet`. So the model is told to carry over lift
+asks it was never shown, and can only comply by inventing them or by proposing rest for
+every lift day. The second is the quiet one: an accepted proposal is a new plan version, so
+a drafting conversation could silently delete the athlete's entire lift schedule, and the
+authoring screen would show it as a change they did not ask for only if they read seven
+weekdays carefully.
+
+Not taken here for four reasons, and this is a judgement call the overseer can overrule:
+this ticket's own brief forbids changing what context is assembled; the fix needs a
+rendering decision about a two-slot template line that MAX-181's author should make with
+§10.2's economy rules in view; MAX-174 sequenced MAX-181 *after* MAX-175 precisely so it
+lands against the stated invariant; and a prompt-contents change with pinned byte-level
+tests is the worst thing to write in a container with no Swift toolchain. **Recommend
+MAX-181 be re-tiered and taken next**, with the plan-drafting consequence in its brief.
+
+### What CI can and cannot prove
+
+CI can prove: the package compiles; `HonestRefusalAcrossPromptsTests`,
+`NoJudgementWithoutDataTests` and the extended `ScorerTaskTextTests` pass; the scorer's task
+text is byte-identical to its pinned literal in both discipline branches; and that no prose
+prompt half carries a digit.
+
+CI cannot prove the thing that actually matters: **that Claude obeys the sentence.** No
+test in this repo can. What the tests buy is that the sentence is present in every prompt
+that should carry it, and that the app never asks for a judgement it has no data for — the
+half that is ours rather than the model's.
+
+**`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
+
+---
+
 ## Risks
 
 | # | Item | Impact | Status |
@@ -5043,4 +5189,5 @@ sat in a local worktree and the failure was silent.
 | 2026-08-05 | **MAX-109**: a day's prescription is indexed by discipline — one plan record, one version, two slots per weekday (A17) | Two plan records would make `Score.planVersion` ambiguous and split `PlanCalendar`, the context builder's coherence guard and MAX-011's no-back-dating rule in half, to buy the ability to revise lifting without restating running — a cost every other plan field already pays for free via `PlanAuthoringSession`. Two slots keep `WeeklyTemplate`'s totality (rest explicit on both sides), and because the plan is a JSON blob the lift slot decodes with `decodeIfPresent` to rest, so no stored prescription changes and no historical score becomes irreproducible |
 | 2026-08-05 | **MAX-109**: effective days count obligations, not days (A19) | Extending `contains(where: \.isEffective)` to two disciplines says "a day with two obligations is satisfied by meeting either one", which makes lifting decorative — the opposite of what "the plan should account for both" asks. Two *attempts at one* obligation still resolve best-of; the warm-up-jog reasoning is untouched. Landable because on a one-session day the two countings are identical, so no historical figure moves |
 | 2026-08-05 | **MAX-109**: lifting is scored on adherence, not volume; manual entry stays a non-goal (A20) | HealthKit carries no sets, reps or load, so the only alternative is the athlete typing them — PRD §3's "the thing being killed" and the direct negation of §2's north star. Adherence delivers what the ask actually needs (skipping the lift costs something) with zero taps; a volume rubric obliges the app to become a lifting logger, which §13 names as the top execution risk. The cost is stated rather than hidden: adherence cannot tell a hard session from a token one |
+| 2026-08-18 | **MAX-175**: where the data required for a judgement is absent, the app produces **no** judgement rather than a degraded one — and an absence is named, not filled, at every boundary (record, fact sheet, prompt, tallies, calendar, screen) | The behaviour was already right in six places and written down in none, so a seventh ticket inherited nothing. Recorded here rather than as a PRD amendment because it amends nothing — §10 already behaves this way — and because A26–A28 are proposed by MAX-174 and in review. Two consequences are not obvious and are the reason it is worth stating: an absence must say *which kind* it is ("never measured", "does not apply here", "not shown to this reader") because a model reasons confidently from an undifferentiated gap; and a refusal must not be softened into a degraded answer, so an unscored run gets no chat rather than a quieter one |
 | 2026-08-04 | **MAX-034**: `WorkoutIngestionPipeline.enrich` extracts and stores samples (HR series, route) before resolving the plan, not after | Fixed a permanent-data-loss bug: `enrich` previously returned before `WorkoutSampleExtractor.extract` ran whenever no plan governed the workout's day, so every run predating the athlete's first plan version kept no HR curve — and MAX-031's advancing anchor never revisited it. The curve is a fact about the run, not the plan; only derived metrics (§9, measured against the plan's cap) stay gated on plan coverage. `IngestionPipelineDiagnostic.storedWithoutPlan` now documents that samples are stored either way. Found in the same pass: `.workoutPredatesEveryPlan` can never be completed later — MAX-011's version/`effectiveFrom` ordering forbids a plan from ever back-dating earlier than one that already exists — unlike `.noPlanAuthored`, which the lazy path does complete once a first plan is authored |

@@ -177,6 +177,8 @@ public enum WorkoutScorer {
             Do not argue with the matched rule and do not score outside the permitted range. \
             A score outside it will be rejected and you will be asked again.
 
+            \(absenceRule)
+
             Rationale rules:
             \(RationaleContract.instructionText)
 
@@ -184,6 +186,46 @@ public enum WorkoutScorer {
             \(ScoreProposal.responseFormatDescription)
             """
     }
+
+    /// The one rule about absence this prompt was missing (MAX-175).
+    ///
+    /// ## Why the scorer needed its own wording, and why it is not a refusal
+    ///
+    /// The app's other model-facing prompts — `ChatModel.workoutTask`,
+    /// `ChatModel.trainingTask`, `PlanProposalInstruction.taskDescription` — each already
+    /// tell the model to *say* when something is not in front of it. This one could not
+    /// borrow that sentence, because this call has no refusal available to it: the reply
+    /// is a JSON object carrying a score inside a range the rubric already fixed, and a
+    /// scorer that answered "I do not have that" would have failed rather than declined.
+    ///
+    /// So the rule is stated as the thing the scorer *can* obey: do not supply a figure
+    /// the record withheld, and do not reason as though one had been supplied. That is
+    /// the same principle every fact-sheet absence line is written for — "not applicable
+    /// — this workout has no heart-rate data", "not recorded for this workout", and
+    /// MAX-136's "read nothing into their absence" — read from the other side of the
+    /// prompt. The fact sheet is careful to say *which kind* of nothing each gap is; this
+    /// is what stops that care being spent on a reader who was never told what to do with
+    /// it.
+    ///
+    /// **The concrete hazard is the rationale, and it is permanent.** The score itself is
+    /// bounded by the band, but the rationale is free prose that `RationaleContract` asks
+    /// to cite "the numbers that decided it", and it is stored immutably under D8 and
+    /// shown in the verdict header. A run whose splits were never recorded getting a
+    /// header that quotes a second-half split is exactly Helix's per-muscle story in one
+    /// line — and unlike a chat turn, nobody can ask it to take that back.
+    ///
+    /// Kept as a named constant rather than inlined so that
+    /// `HonestRefusalAcrossPromptsTests` can pin it and hold it beside the other three
+    /// prompts' clauses. Internal, not public: it is prompt text, not API.
+    ///
+    /// Shared by both discipline branches, and therefore written in neither's vocabulary
+    /// — no "pace", "cadence", "cap", "splits" or "distance", for the reason the lift
+    /// branch above states, and `ScorerTaskTextTests` checks that on every commit.
+    static let absenceRule = """
+        The record you are given states its own absences. Where it says a figure was not \
+        recorded, does not apply, or was not computed, do not supply one and do not reason \
+        as though you had it: score and justify from what is stated.
+        """
 
     // MARK: - Accepting
 
