@@ -123,7 +123,9 @@ struct VerdictHeaderView: View {
             ProgressView()
             scorelessCopy(
                 headline: "Not yet scored",
-                detail: "Scoring runs automatically once the run is captured."
+                // "workout", not "run": since MAX-168 a lift reaches this state too, once
+                // the athlete has said what it worked.
+                detail: "Scoring runs automatically once the workout is captured."
             )
             Spacer(minLength: 0)
         }
@@ -146,7 +148,10 @@ struct VerdictHeaderView: View {
         HStack(spacing: Spacing.compact) {
             scorelessCopy(
                 headline: "Recorded, not scored",
-                detail: "The plan scores runs, so there's no score for this workout."
+                // Reworded in MAX-168: the plan scores lifts too now, so the old sentence
+                // named the wrong reason. What reaches this state is a ride, a hike or a
+                // walk — activities no band describes.
+                detail: "The plan has no rule for this kind of workout, so there's no score."
             )
             Spacer(minLength: 0)
         }

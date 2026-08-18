@@ -296,9 +296,9 @@ final class DesignPaletteContrastTests: XCTestCase {
     }
 
     /// One representative cell per state the day grid can draw. The payloads are the
-    /// reachable ones: `.awaitingScore` only ever carries a run and `.noVerdict` only ever
-    /// carries something else (`ActivityType.isRun` splits them in the core), which is the
-    /// invariant that lets those two share a fill.
+    /// reachable ones: `.awaitingScore` only ever carries a run or a lift and `.noVerdict`
+    /// only ever carries something else (`ActivityType.isScoreable` splits them in the
+    /// core, MAX-168), which is the invariant that lets those two share a fill.
     private var dayGridCells: [DrawnCalendarCell] {
         let states: [ScoreCalendarDayState] = [
             .scored(band: .effective, activityType: .running),
@@ -319,7 +319,7 @@ final class DesignPaletteContrastTests: XCTestCase {
             // sentence (`ScoreCalendarSettledMissCopyTests`).
             .missedWithUnjudgedSession(scheduledKind: .easy, recorded: .traditionalStrengthTraining),
             .awaitingScore(activityType: .running),
-            .noVerdict(activityType: .traditionalStrengthTraining),
+            .noVerdict(activityType: .cycling),
             .convertedRest(scheduledKind: .easy),
             .scheduledRest,
             .forthcoming(scheduledKind: .easy),

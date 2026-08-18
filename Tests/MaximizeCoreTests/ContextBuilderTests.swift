@@ -288,8 +288,9 @@ final class ContextBuilderTests: XCTestCase {
 
     // MARK: - Absence is first-class (MAX-111, A18)
 
-    /// MAX-111 leaves every non-run unscored **by design**, permanently. A line for one
-    /// must read as a verdict that was never going to exist, not as a missing value.
+    /// A session can be unscored **by design** — permanently for a ride or a hike, and
+    /// until a plan version can judge it for a lift (MAX-111, MAX-168). A line for one
+    /// must read as a verdict that is not there, not as a missing value.
     func testAnUnscoredSessionReadsAsNoVerdict() throws {
         let unscoredRun = UUID()
         let lift = UUID()
@@ -311,10 +312,14 @@ final class ContextBuilderTests: XCTestCase {
 
         let sheet = try trainingContext(records: records, planCalendar: try calendar()).factSheet()
 
-        XCTAssertTrue(sheet.contains("Score: no verdict yet — this run has not been scored"), sheet)
-        XCTAssertTrue(
-            sheet.contains("Score: none — the plan's rubric scores runs, so this session is not scored"),
-            sheet
+        XCTAssertTrue(sheet.contains("Score: no verdict yet — this session has not been scored"), sheet)
+        // `.awaitingScore`, not `.noVerdict`: since MAX-168 a lift is scoreable, so telling
+        // the athlete no verdict is coming would be false the moment one arrives. Both the
+        // unscored run and the lift therefore read the same waiting line — which is why
+        // that line says "session" rather than "run".
+        XCTAssertFalse(
+            sheet.contains("the plan's rubric scores runs"),
+            "a lift is no longer unscoreable in principle: \(sheet)"
         )
         // Never a bare gap, and never a zero.
         XCTAssertFalse(sheet.contains("Score: 0/100"), sheet)

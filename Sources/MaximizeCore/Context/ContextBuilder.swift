@@ -78,8 +78,9 @@ public struct ContextInputs: Sendable {
         public let metrics: DerivedMetrics?
 
         /// The score and any corrections (D8). Nil for an unscored workout — an ordinary,
-        /// often indefinite state (no API key stored, no network) and, since MAX-111, the
-        /// *permanent* state of every non-run.
+        /// often indefinite state (no API key stored, no network), and the *permanent*
+        /// state of a ride, a hike or a walk (MAX-111, narrowed by MAX-168 — a lift is
+        /// scored once the athlete has described it and a plan version can judge it).
         public let ledger: ScoreLedger?
 
         /// The stored heart-rate curve. Read only by the workout subject, which turns it

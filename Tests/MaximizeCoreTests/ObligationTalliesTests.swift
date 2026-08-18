@@ -57,11 +57,10 @@ final class ObligationTalliesTests: XCTestCase {
         )
     }
 
-    /// A lift's ledger, which only exists once something scores lifts. Nothing does
-    /// today — `WorkoutIngestionPipeline` still gates on `activityType.isRun` — so these
-    /// tests supply one directly. That is the correct way round: A19's arithmetic has to
-    /// be right *before* the gate opens, or the first scored lift would land in a tally
-    /// that had never counted one.
+    /// A lift's ledger. Supplied directly rather than produced by the pipeline, which
+    /// keeps this suite about A19's arithmetic — MAX-168 has since opened the gate that
+    /// makes such a ledger reachable, and it reaches it under exactly these conditions: a
+    /// day prescribing a lift, judged by a band that names `.lift`.
     private func liftLedger(points: Int, workoutID: UUID) throws -> ScoreLedger {
         try ledger(
             points: points,

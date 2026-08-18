@@ -234,18 +234,19 @@ final class ScoreCalendarTests: XCTestCase {
 
     // MARK: - MAX-126: .noVerdict — recorded, and no score is coming
 
-    /// The defect this state exists to fix. Before MAX-126 a lift resolved to
-    /// `.awaitingScore`, which the calendar draws — and VoiceOver speaks — as a run the
-    /// app has not got round to yet. Since MAX-111 no score is ever attempted for it, so
-    /// that was a wait with nothing at the end of it.
+    /// **Reversed by MAX-168.** MAX-126 wrote this to assert that a recorded lift is not
+    /// awaiting a verdict, because at the time no score was ever attempted for one and the
+    /// wait had nothing at the end of it. The ingestion gate now offers a lift the scoring
+    /// path, so the wait resolves — on the athlete's answer (A22) and on a plan version
+    /// that prescribes and can judge a lift day — and the settled state would be the lie.
     ///
-    /// **Still `.noVerdict` after MAX-159, and the reason is now load-bearing**: the
-    /// default `.standard` budget of one day a week forgives this Tuesday's run (the
-    /// week's cheapest miss — an easy run adjacent to Monday's scheduled rest), so there is
-    /// no *settled* miss on the day for the new state to report. Turn the budget off and
+    /// **Unchanged after MAX-159 in the part that mattered there**: the default
+    /// `.standard` budget of one day a week forgives this Tuesday's run (the week's
+    /// cheapest miss — an easy run adjacent to Monday's scheduled rest), so there is no
+    /// *settled* miss on the day to report alongside the session. Turn the budget off and
     /// the same day is `.missedWithUnjudgedSession` — see `ScoreCalendarSettledMissTests`,
     /// which asserts exactly that pair.
-    func testARecordedNonRunHasNoVerdictRatherThanAwaitingOne() throws {
+    func testARecordedLiftAwaitsAScoreRatherThanSettling() throws {
         let days = try resolve(
             from: "2026-01-06", through: "2026-01-06",
             workouts: [
@@ -259,14 +260,14 @@ final class ScoreCalendarTests: XCTestCase {
         )
         XCTAssertEqual(
             try state(days, on: "2026-01-06"),
-            .noVerdict(activityType: .traditionalStrengthTraining)
+            .awaitingScore(activityType: .traditionalStrengthTraining)
         )
     }
 
-    /// Every non-run, not just the lift MAX-109 is about: the split is
-    /// `ActivityType.isRun`, so a ride, a hike and a walk are in exactly the same
-    /// position and must not read as runs the app owes a verdict to.
-    func testEveryNonRunActivityResolvesToNoVerdict() throws {
+    /// What is left in the settled state: the split is `ActivityType.isScoreable`, so a
+    /// ride, a hike and a walk stay here — no band describes one and none can be authored
+    /// — and they must not read as sessions the app owes a verdict to.
+    func testEveryActivityNoRubricDescribesResolvesToNoVerdict() throws {
         for activityType: ActivityType in [.cycling, .hiking, .walking, .other] {
             let days = try resolve(
                 from: "2026-01-06", through: "2026-01-06",
@@ -282,12 +283,35 @@ final class ScoreCalendarTests: XCTestCase {
         }
     }
 
-    func testMultipleUnscoredNonRunsPickTheEarliestDeterministically() throws {
+    /// The picker's middle step (MAX-168): a run first, then anything else the plan can
+    /// judge, then the earliest. No run here, so the lift speaks for the day even though
+    /// the ride started five hours earlier — its answer is the one still outstanding,
+    /// which is the same "a pending answer outranks a settled absence" rule the mixed-day
+    /// tests below turn on, applied within one day's unscored workouts rather than across
+    /// two obligations.
+    func testAnUnscoredLiftSpeaksForTheDayAheadOfAnEarlierRide() throws {
         let workouts = [
             try workout(
                 on: "2026-01-06", activityType: .traditionalStrengthTraining,
                 startOffsetSeconds: 3_600 * 6
             ),
+            try workout(on: "2026-01-06", activityType: .cycling, startOffsetSeconds: 3_600),
+        ]
+        let days = try resolve(
+            from: "2026-01-06", through: "2026-01-06",
+            workouts: workouts, scoreLedgers: [:], planCalendar: try calendar()
+        )
+        XCTAssertEqual(
+            try state(days, on: "2026-01-06"),
+            .awaitingScore(activityType: .traditionalStrengthTraining)
+        )
+    }
+
+    /// The tiebreak itself, on two workouts the picker cannot separate: earliest start
+    /// wins, deterministically.
+    func testMultipleUnscoredRidesPickTheEarliestDeterministically() throws {
+        let workouts = [
+            try workout(on: "2026-01-06", activityType: .hiking, startOffsetSeconds: 3_600 * 6),
             try workout(on: "2026-01-06", activityType: .cycling, startOffsetSeconds: 3_600),
         ]
         let days = try resolve(
@@ -313,10 +337,10 @@ final class ScoreCalendarTests: XCTestCase {
             planCalendar: try calendar()
         )
         let resolved = try cell(days, on: "2026-01-06")
-        XCTAssertEqual(resolved.state, .noVerdict(activityType: .traditionalStrengthTraining))
+        XCTAssertEqual(resolved.state, .awaitingScore(activityType: .traditionalStrengthTraining))
         XCTAssertEqual(resolved.prescription?.scheduledSession.kind, .easy)
-        // No stored classification exists for a lift, so there is nothing to compare
-        // against the ask (D2) — and unlike an awaiting run, there never will be.
+        // No stored classification exists for an unscored lift, so there is nothing to
+        // compare against the ask (D2).
         XCTAssertNil(resolved.agreement)
         XCTAssertNil(resolved.state.scoredBand)
     }
@@ -392,9 +416,9 @@ final class ScoreCalendarTests: XCTestCase {
     }
 
     /// The invariant the calendar's drawing is paid for by: the two scoreless states
-    /// partition on `ActivityType.isRun`, so the activity glyph a cell already carries
-    /// separates them without a new colour or a new mark. If this ever fails, a lifting
-    /// day and a run awaiting its score have become the same cell.
+    /// partition on `ActivityType.isScoreable`, so the activity glyph a cell already
+    /// carries separates them without a new colour or a new mark. If this ever fails, a
+    /// cycling day and a session awaiting its score have become the same cell.
     func testTheTwoScorelessStatesNeverCarryTheSameActivityType() throws {
         let workouts = [
             try workout(on: "2026-01-05", activityType: .running),
@@ -411,9 +435,9 @@ final class ScoreCalendarTests: XCTestCase {
         for resolved in days {
             switch resolved.state {
             case .awaitingScore(let activityType):
-                XCTAssertTrue(activityType.isRun, "\(resolved.date): \(activityType)")
+                XCTAssertTrue(activityType.isScoreable, "\(resolved.date): \(activityType)")
             case .noVerdict(let activityType):
-                XCTAssertFalse(activityType.isRun, "\(resolved.date): \(activityType)")
+                XCTAssertFalse(activityType.isScoreable, "\(resolved.date): \(activityType)")
             // `.missedWithUnjudgedSession` (MAX-159) carries a recorded activity too, but
             // it is outside this invariant on purpose: its mark is the state's ringed "×",
             // not the activity's figure, so a run and a lift in that payload draw the same

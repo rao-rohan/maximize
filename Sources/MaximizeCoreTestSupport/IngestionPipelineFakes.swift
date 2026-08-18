@@ -21,8 +21,13 @@ import MaximizeCore
 /// of stored workouts, scores, the plan **and** the rest-day budget, and a test asserting
 /// that a bubble and a dashboard tile agree should not have to wire four fakes together
 /// to say so.
+///
+/// `MuscleGroupEntryRepository` joined for MAX-168, for the same reason: whether a lift is
+/// scored is now a function of the *combination* of the plan, the workout and A22's log,
+/// and a test asserting that should not have to wire a second fake to say so.
 public final class InMemoryWorkoutStore: WorkoutRepository, ScoreRepository, PlanRepository,
-                                         SettingsRepository, @unchecked Sendable {
+                                         SettingsRepository, MuscleGroupEntryRepository,
+                                         @unchecked Sendable {
 
     /// A failure the store can be told to raise, distinct from `DomainError` so a test
     /// can drive both sides of the pipeline's permanent/transient split.
@@ -42,6 +47,8 @@ public final class InMemoryWorkoutStore: WorkoutRepository, ScoreRepository, Pla
     private var labelsByID: [UUID: [MiscategorisedScoreLabel]] = [:]
     private var calendar: PlanCalendar?
     private var appSettings: AppSettings = .standard
+    private var muscleGroupsByWorkout: [UUID: [MuscleGroupEntry]] = [:]
+    private var muscleGroupReadError: Error?
 
     private var workoutStoreError: Error?
     private var workoutStoreErrorsByID: [UUID: Error] = [:]
@@ -118,6 +125,12 @@ public final class InMemoryWorkoutStore: WorkoutRepository, ScoreRepository, Pla
         lock.locked { planReadError = error }
     }
 
+    /// MAX-168: a muscle-group read that fails must resolve the same way as an empty log
+    /// — a lift left unscored — because D8 makes the alternative permanent.
+    public func failMuscleGroupReads(with error: Error) {
+        lock.locked { muscleGroupReadError = error }
+    }
+
     public func failDeletes(with error: Error) {
         lock.locked { deleteError = error }
     }
@@ -130,6 +143,7 @@ public final class InMemoryWorkoutStore: WorkoutRepository, ScoreRepository, Pla
             metricsStoreError = nil
             scoreStoreError = nil
             planReadError = nil
+            muscleGroupReadError = nil
             deleteError = nil
         }
     }
@@ -302,6 +316,23 @@ public final class InMemoryWorkoutStore: WorkoutRepository, ScoreRepository, Pla
 
     public func store(_ settings: AppSettings) async throws {
         lock.locked { appSettings = settings }
+    }
+
+    // MARK: - MuscleGroupEntryRepository
+
+    /// Total, like the real store's: a lift nobody has answered for has an *empty* log,
+    /// which is a different thing from a read that failed (A22).
+    public func muscleGroupLog(forWorkout id: UUID) async throws -> MuscleGroupLog {
+        try lock.locked {
+            if let muscleGroupReadError { throw muscleGroupReadError }
+            return try MuscleGroupLog(workoutID: id, entries: muscleGroupsByWorkout[id] ?? [])
+        }
+    }
+
+    /// Additive, like the real store's — there is no update path, and MAX-168's gate
+    /// only ever asks whether the log is empty.
+    public func record(_ entry: MuscleGroupEntry) async throws {
+        lock.locked { muscleGroupsByWorkout[entry.workoutID, default: []].append(entry) }
     }
 }
 

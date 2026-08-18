@@ -184,18 +184,23 @@ public enum ScoreCalendarCopy {
     /// The spoken outcome for `ScoreCalendarDayState.missedWithUnjudgedSession` —
     /// everything after the cell's date, which the app layer prefixes.
     ///
-    /// Reads, for a Tuesday whose run was skipped and whose lift was recorded and never
-    /// scoreable: *"missed easy run. Strength training recorded, not scored — the plan
-    /// scores runs."* The miss leads, because it is the settled half and the reason the
+    /// Reads, for a Tuesday whose run was skipped and whose lift was recorded and not yet
+    /// judged: *"missed easy run. Strength training recorded, awaiting score."* The miss
+    /// leads, because it is the settled half and the reason the
     /// cell is red; the session follows, because a calendar read cell after cell must not
     /// open by congratulating a day it is about to call a miss.
     ///
-    /// **The tense of the second clause is `ActivityType.isRun`, decided here.** A
-    /// recorded run's score may still arrive, so it is *awaiting*; a lift, a ride, a hike
-    /// or a walk will never be judged, so saying "awaiting" would promise a verdict that
-    /// is not coming — MAX-126's whole argument, applied to the sentence rather than to
-    /// the fill. It is the same predicate `ScoreCalendar.dayState` splits `.awaitingScore`
-    /// from `.noVerdict` on, read here rather than stored twice.
+    /// **The tense of the second clause is `ActivityType.isScoreable`, decided here.** A
+    /// recorded run's or lift's score may still arrive, so it is *awaiting*; a ride, a
+    /// hike or a walk will never be judged, so saying "awaiting" would promise a verdict
+    /// that is not coming — MAX-126's whole argument, applied to the sentence rather than
+    /// to the fill. It is the same predicate `ScoreCalendar.dayState` splits
+    /// `.awaitingScore` from `.noVerdict` on, read here rather than stored twice.
+    ///
+    /// The clause itself stopped naming running in MAX-168, because the sentence stopped
+    /// being about running: what is left in the unjudged half is the set of activities the
+    /// plan has no rule for, and *"the plan has no rule for it"* is what that says without
+    /// implying a lift is in it.
     ///
     /// - Parameter describedAs: what the recorded session is called, capitalised — the
     ///   one word this sentence does not own. `WorkoutDisplayFormatting.describe` is the
@@ -210,7 +215,9 @@ public enum ScoreCalendarCopy {
         describedAs activityText: String
     ) -> String {
         let missed = lowercasedFirst(PlanCopy.sessionKind(scheduledKind))
-        let verdict = recorded.isRun ? "awaiting score" : "not scored — the plan scores runs"
+        let verdict = recorded.isScoreable
+            ? "awaiting score"
+            : "not scored — the plan has no rule for it"
         return "missed \(missed). \(activityText) recorded, \(verdict)."
     }
 

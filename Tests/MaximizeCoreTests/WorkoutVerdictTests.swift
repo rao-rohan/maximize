@@ -34,25 +34,28 @@ final class WorkoutVerdictTests: XCTestCase {
         XCTAssertEqual(verdict.scoring, .awaitingScore)
     }
 
-    // MARK: No verdict — a workout the plan has no rubric for (MAX-126)
+    // MARK: No verdict — a workout the plan has no rubric for (MAX-126, MAX-168)
 
-    /// The defect. Before MAX-126 this returned `.awaitingScore`, and the header
-    /// rendered that as a spinner over "Scoring runs automatically once the run is
-    /// captured" — a promise that, since MAX-111 stopped non-runs being scored, the app
-    /// was never going to keep.
-    func testAnUnscoredLiftHasNoVerdictRatherThanAwaitingOne() throws {
+    /// **Reversed by MAX-168, deliberately.** MAX-126 wrote this test to assert that an
+    /// unscored lift is *not* awaiting one, because at the time nothing could ever score
+    /// it and the header's spinner was a promise the app could not keep. The ingestion
+    /// gate now offers a lift the scoring path, so the promise is one the app does keep —
+    /// and the old assertion had become the lie. The state it moved *out of* is asserted
+    /// one test down, on the activities that really are permanent.
+    func testAnUnscoredLiftIsAwaitingAScoreRatherThanSettled() throws {
         let workout = try Fixture.workout(activityType: .traditionalStrengthTraining)
 
         let verdict = WorkoutVerdict(workout: workout, planDay: nil, ledger: nil)
 
         XCTAssertEqual(verdict.actual, .unclassified(.traditionalStrengthTraining))
-        XCTAssertEqual(verdict.scoring, .noVerdict)
+        XCTAssertEqual(verdict.scoring, .awaitingScore)
     }
 
-    /// The split is `ActivityType.isRun`, the same predicate the ingestion pipeline
-    /// declines to score on — so every non-run is in this state, not only the lift
-    /// MAX-109 is about.
-    func testEveryUnscoredNonRunHasNoVerdict() throws {
+    /// The split is `ActivityType.isScoreable`, the same predicate the ingestion pipeline
+    /// gates on — so what is left in this state is exactly what no rubric can describe: a
+    /// ride, a hike, a walk, an unmapped type. `Discipline` is closed at two cases and
+    /// there is no band editor, so no plan version can ever reach one of these.
+    func testEveryUnscoredWorkoutNoRubricDescribesHasNoVerdict() throws {
         for activityType: ActivityType in [.cycling, .hiking, .walking, .other] {
             let verdict = WorkoutVerdict(
                 workout: try Fixture.workout(activityType: activityType),
@@ -83,7 +86,10 @@ final class WorkoutVerdictTests: XCTestCase {
 
         XCTAssertEqual(verdict.scheduledSession, .rest, "Not planDay.scheduledSession, which is the run ask")
         XCTAssertNotEqual(verdict.scheduledSession, planDay.scheduledSession)
-        XCTAssertEqual(verdict.scoring, .noVerdict)
+        // MAX-168: the day asked for no lift, so no score is coming under *this* plan
+        // version — but one is under a version that prescribes a lift day, and this state
+        // is the one that leaves that open.
+        XCTAssertEqual(verdict.scoring, .awaitingScore)
     }
 
     /// The mirror case: a day that prescribes both a run and a lift. A lift workout must
@@ -191,9 +197,11 @@ final class WorkoutVerdictTests: XCTestCase {
         XCTAssertEqual(verdict.actual, .unclassified(.traditionalStrengthTraining))
     }
 
-    /// Once the athlete has answered, the prompt stops. Nothing scores a lift yet — the
-    /// rubric is MAX-131/132 — so the honest state is the one that says no verdict is
-    /// coming, not a spinner.
+    /// Once the athlete has answered, the prompt stops — and as of MAX-168 what follows
+    /// it is a wait rather than a settled absence, because answering is precisely what
+    /// unblocks the ingestion gate (`UnscoredReason.liftAwaitingMuscleGroups`). Before
+    /// MAX-168 this asserted `.noVerdict`, which was true only while nothing could score
+    /// a lift under any condition.
     func testALiftTheAthleteHasDescribedNoLongerPrompts() throws {
         let workout = try Fixture.workout(activityType: .traditionalStrengthTraining)
 
@@ -204,7 +212,7 @@ final class WorkoutVerdictTests: XCTestCase {
             muscleGroups: try log([.chest, .shoulders])
         )
 
-        XCTAssertEqual(verdict.scoring, .noVerdict)
+        XCTAssertEqual(verdict.scoring, .awaitingScore)
         XCTAssertEqual(verdict.muscleGroupEntry?.groups, [.chest, .shoulders])
     }
 
@@ -237,15 +245,20 @@ final class WorkoutVerdictTests: XCTestCase {
     }
 
     /// Nil is "this caller did not look", not "the athlete has not said". A call site
-    /// with no muscle-group log to hand — `ContextBuilder`, today — must resolve exactly
-    /// as it did before A22 rather than assert a state it never read.
-    func testACallerThatSuppliesNoLogResolvesExactlyAsBeforeA22() throws {
+    /// with no muscle-group log to hand — `ContextBuilder`, today — must not assert a
+    /// state it never read, so it lands on the generic wait and never on A22's question.
+    ///
+    /// The distinction is what the test is about, and MAX-168 kept it while changing
+    /// which state the nil side resolves to: nil is `.awaitingScore`, an empty log is
+    /// `.awaitingMuscleGroups`, and only the second is a question anybody is being asked.
+    func testACallerThatSuppliesNoLogNeverAssertsTheWaitingQuestion() throws {
         let verdict = WorkoutVerdict(
             workout: try Fixture.workout(activityType: .traditionalStrengthTraining),
             planDay: nil,
             ledger: nil
         )
-        XCTAssertEqual(verdict.scoring, .noVerdict)
+        XCTAssertEqual(verdict.scoring, .awaitingScore)
+        XCTAssertNotEqual(verdict.scoring, .awaitingMuscleGroups)
         XCTAssertNil(verdict.muscleGroupEntry)
     }
 

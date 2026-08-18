@@ -109,6 +109,7 @@ public actor WorkoutIngestionPipeline: WorkoutIngestionSink {
     private let workouts: WorkoutRepository
     private let scores: ScoreRepository
     private let plans: PlanRepository
+    private let muscleGroups: (any MuscleGroupEntryRepository)?
     private let samples: WorkoutSampleFetching
     private let model: ScoringModelInvoking
     private let policy: IngestionPipelinePolicy
@@ -117,6 +118,12 @@ public actor WorkoutIngestionPipeline: WorkoutIngestionSink {
     private let report: @Sendable (IngestionPipelineDiagnostic) -> Void
 
     /// - Parameters:
+    ///   - muscleGroups: A22's log, read to decide whether a lift may be scored yet
+    ///     (MAX-168). **Nil means "this caller cannot look", and a lift is then never
+    ///     scored** — the same reading `WorkoutVerdict` gives its own nil log, resolved in
+    ///     the safe direction: D8 makes an auto-score permanent, so a pipeline that cannot
+    ///     tell whether the athlete has answered must not answer for them. Defaulted so
+    ///     every existing construction keeps its exact behaviour for runs.
     ///   - timeZone: the zone a workout's calendar day is resolved in.
     ///     `Workout.calendarDay(in:)` demands one and will not guess. `Workout` carries
     ///     none of its own, so the honest best available answer is the device's current
@@ -134,6 +141,7 @@ public actor WorkoutIngestionPipeline: WorkoutIngestionSink {
         workouts: WorkoutRepository,
         scores: ScoreRepository,
         plans: PlanRepository,
+        muscleGroups: (any MuscleGroupEntryRepository)? = nil,
         samples: WorkoutSampleFetching,
         model: ScoringModelInvoking,
         policy: IngestionPipelinePolicy = .standard,
@@ -144,6 +152,7 @@ public actor WorkoutIngestionPipeline: WorkoutIngestionSink {
         self.workouts = workouts
         self.scores = scores
         self.plans = plans
+        self.muscleGroups = muscleGroups
         self.samples = samples
         self.model = model
         self.policy = policy
@@ -498,46 +507,39 @@ public actor WorkoutIngestionPipeline: WorkoutIngestionSink {
         let existingLedger = try? await scores.ledger(forWorkout: workout.id)
         if existingLedger != nil { return }
 
-        // MAX-111: the plan scores runs, so a workout that is not a run gets no verdict.
+        // MAX-111's gate, opened for a lift and left shut for everything else (MAX-168).
         //
-        // **The reason has changed, and the gate has not** (MAX-133). A lift no longer
-        // inherits the run day's bands: `RubricEvaluator` resolves the ask for the
-        // workout's own discipline, so `StandardPlanSeed`'s `easy.wellOverCap` can no
-        // longer fire on a strength session and the A21 defect is structurally closed.
-        // MAX-132 has given the seed three bands a lift day can match.
+        // The plan can now judge two disciplines. `RubricEvaluator` resolves the ask for
+        // the workout's own slot (MAX-133), the rubric has the words to describe a lift
+        // (MAX-131) and `StandardPlanSeed` writes three adherence bands with them
+        // (MAX-132) — so refusing every non-run has stopped being the honest reading of
+        // "the plan only knows how to score runs". What is left outside is the set the
+        // rubric genuinely has no vocabulary for: a ride, a hike, a walk. See
+        // `ActivityType.isScoreable`, which is where that line is drawn and why.
         //
-        // What is still true is the case those bands do not cover: they apply to a day
-        // whose **lift slot is prescribed**, and no seeded weekday prescribes one — nor
-        // does any plan already on disk, all of whose lift slots decode to rest. A lift
-        // let through today therefore resolves to `.rest`, correctly. **It no longer
-        // matches `rest.ranAnyway`** — MAX-146 gave that band
-        // `.actualDiscipline(oneOf: [.run])`, the same fix MAX-132 gave
-        // `easy.wellOverCap`, so a lift now falls to the seed's own unconditional
-        // `fallback.recorded` instead of being labelled with running language for a
-        // session that was not a run.
-        //
-        // **The gate stays shut anyway.** Closing the seed's shadow is not the same
-        // decision as opening MAX-111's gate: a lift that scores acquires a calendar
-        // colour and enters the tallies, which is MAX-134's and MAX-135's arithmetic,
-        // now landed — but *deciding* to open the gate is still its own call, not a
-        // line in this ticket.
-        //
-        // Returning — rather than throwing — is what keeps this inside R11's guarantee:
-        // the workout is already durable, its samples are stored, `enrich` completes
-        // normally, and the anchor moves on. The workout is captured; it simply carries no
-        // score.
-        //
-        // `activityType.isRun` is the same predicate `WorkoutClassifier` short-circuits
-        // on, on purpose: one notion of "is this a run" in the core, not two that can
-        // drift apart.
-        guard workout.activityType.isRun else {
-            report(.leftUnscored(reason: .workoutIsNotARun))
+        // Returning — rather than throwing — is what keeps every branch below inside
+        // R11's guarantee: the workout is already durable, its samples are stored,
+        // `enrich` completes normally, and the anchor moves on. The workout is captured;
+        // it simply carries no score.
+        let discipline = workout.activityType.discipline
+        guard workout.activityType.isScoreable else {
+            report(.leftUnscored(reason: .workoutIsNeitherARunNorALift))
             return
+        }
+
+        // A22: a lift waits for the athlete, not for a model. Asked here, before the
+        // context is built, so a lift nobody has described still assembles nothing into a
+        // prompt — the property MAX-111's gate had, kept for the state that replaces it.
+        if discipline == .lift {
+            let theAthleteHasAnswered = await athleteHasSaidWhatTheLiftWorked(workout.id)
+            guard theAthleteHasAnswered else {
+                report(.leftUnscored(reason: .liftAwaitingMuscleGroups))
+                return
+            }
         }
 
         let context: WorkoutContext
         let evaluation: RubricEvaluation
-        let instruction: ScoringInstruction
         do {
             context = try WorkoutContextBuilder.build(
                 workout: workout,
@@ -551,11 +553,43 @@ public actor WorkoutIngestionPipeline: WorkoutIngestionSink {
                 existingScore: nil
             )
             evaluation = try RubricEvaluator.evaluate(context)
-            instruction = try WorkoutScorer.instruction(for: context, evaluation: evaluation)
         } catch {
             // Deterministic in the plan data and the context — most often a rubric with
             // no band for what happened, which `ScoringError.noBandMatched` documents as
             // wanting a new plan version rather than a retry.
+            report(.leftUnscored(reason: .rubricCouldNotBeApplied))
+            return
+        }
+
+        // **The rubric matched, and the question is what it matched with** (MAX-168).
+        //
+        // D1 makes the rubric versioned *data*, so what the seed says today is not what a
+        // stored plan says: a plan saved before MAX-132/MAX-146 carries an unconditional
+        // `rest.ranAnyway`, and an unprescribed lift lands on it and is stamped "Ran on a
+        // scheduled rest day." — permanently, under D8. Merging that fix reached no
+        // device; adopting it is a revision the athlete authors (MAX-173). So the gate
+        // cannot assume the corrected bands are in force, and asking the *evaluation*
+        // whether the band names this discipline is how it checks rather than assumes.
+        //
+        // The same guard covers the case where the rubric is current and the day simply
+        // asked for no lift: the match is then the unconditional catch-all, which is the
+        // plan's "no rule for this session", not an opinion about unscheduled lifting —
+        // and MAX-146 declined to write that opinion precisely because choosing its score
+        // range is a product decision. Both are answered by a new plan version, and both
+        // leave the workout exactly as captured in the meantime.
+        //
+        // A run is not asked (see `RubricEvaluation.bandNamesItsDiscipline`), so nothing
+        // on the run path changes: the same context, the same evaluation, the same
+        // instruction, in the same order.
+        if discipline == .lift, !evaluation.bandNamesItsDiscipline {
+            report(.leftUnscored(reason: .noLiftBandMatched))
+            return
+        }
+
+        let instruction: ScoringInstruction
+        do {
+            instruction = try WorkoutScorer.instruction(for: context, evaluation: evaluation)
+        } catch {
             report(.leftUnscored(reason: .rubricCouldNotBeApplied))
             return
         }
@@ -608,6 +642,23 @@ public actor WorkoutIngestionPipeline: WorkoutIngestionSink {
             }
             return
         }
+    }
+
+    /// Whether A22's answer is on file for this lift (MAX-168).
+    ///
+    /// Three ways to answer "no", and all three mean the same thing to the caller: no
+    /// repository was supplied, the read failed, or the log is empty. The last is the
+    /// ordinary state of a lift nobody has opened yet; the first two are the app being
+    /// unable to tell — and under D8 "cannot tell" has to resolve the same way as "not
+    /// yet", because the alternative writes a permanent score on a guess. A failed read is
+    /// also not durable: the next pass, or the next time the screen is opened, asks again.
+    private func athleteHasSaidWhatTheLiftWorked(_ workoutID: UUID) async -> Bool {
+        guard let muscleGroups,
+              let log = try? await muscleGroups.muscleGroupLog(forWorkout: workoutID)
+        else {
+            return false
+        }
+        return !log.isAwaitingEntry
     }
 
     /// One model call, optionally bounded by the wake budget (R8).

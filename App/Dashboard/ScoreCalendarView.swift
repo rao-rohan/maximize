@@ -86,10 +86,12 @@ enum ScoreCalendarDoorRoute: Hashable {
 /// never read as the same fact even though neither is a judgment.
 ///
 /// **`.noVerdict` is the newest of those (MAX-126) and it deliberately costs nothing.**
-/// A lifting day is a neutral cell carrying the strength glyph — no new colour, no new
-/// mark, no new ring state. It can never be confused with `.awaitingScore` even though
-/// they share a fill, because the two states can never carry the same activity type
-/// (`ActivityType.isRun` splits them in the core), so the glyph the cell already draws
+/// A cycling day is a neutral cell carrying the cycling glyph — no new colour, no new
+/// mark, no new ring state. (A *lifting* day was the original example and stopped being
+/// one in MAX-168, which moved a lift onto the waiting side of this split.) It can never
+/// be confused with `.awaitingScore` even though they share a fill, because the two
+/// states can never carry the same activity type (`ActivityType.isScoreable` splits them
+/// in the core), so the glyph the cell already draws
 /// is the channel, and it survives greyscale and every kind of colour vision because it
 /// is a shape. The VoiceOver sentence carries the reason, which no cell this size could.
 ///
