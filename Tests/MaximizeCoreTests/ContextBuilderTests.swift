@@ -312,15 +312,14 @@ final class ContextBuilderTests: XCTestCase {
 
         let sheet = try trainingContext(records: records, planCalendar: try calendar()).factSheet()
 
-        XCTAssertTrue(sheet.contains("Score: no verdict yet — this run has not been scored"), sheet)
-        // Still `.noVerdict`, not `.awaitingMuscleGroups`, even after MAX-168 opened the
-        // ingestion gate: `ContextBuilder` passes no muscle-group log, so `WorkoutVerdict`
-        // will not assert a state no caller has read (A22, MAX-145). See the unreachability
-        // note on `TrainingFactSheet.verdict`. The day a builder supplies one, this
-        // assertion is what should fail.
-        XCTAssertTrue(
-            sheet.contains("Score: none — the plan's rubric scores runs, so this session is not scored"),
-            sheet
+        XCTAssertTrue(sheet.contains("Score: no verdict yet — this session has not been scored"), sheet)
+        // `.awaitingScore`, not `.noVerdict`: since MAX-168 a lift is scoreable, so telling
+        // the athlete no verdict is coming would be false the moment one arrives. Both the
+        // unscored run and the lift therefore read the same waiting line — which is why
+        // that line says "session" rather than "run".
+        XCTAssertFalse(
+            sheet.contains("the plan's rubric scores runs"),
+            "a lift is no longer unscoreable in principle: \(sheet)"
         )
         // Never a bare gap, and never a zero.
         XCTAssertFalse(sheet.contains("Score: 0/100"), sheet)

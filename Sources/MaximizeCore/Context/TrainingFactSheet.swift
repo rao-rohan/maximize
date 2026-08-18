@@ -311,7 +311,11 @@ extension TrainingContext {
     private static func verdict(_ session: TrainingContext.Session) -> String {
         switch session.verdict.scoring {
         case .awaitingScore:
-            return "Score: no verdict yet — this run has not been scored"
+            // "session", not "run": since MAX-168 a lift is scoreable, so it reaches
+            // `.awaitingScore` too, and the old wording described a strength workout in
+            // running vocabulary — the defect MAX-136 removed from the rest of this file
+            // and which making lifts scoreable quietly reintroduced here.
+            return "Score: no verdict yet — this session has not been scored"
         // Unreachable from here today, and required by the compiler: `ContextBuilder`
         // passes no muscle-group log, and `WorkoutVerdict` will not assert a state a
         // caller has not read (A22, MAX-145). The wording is here so the state has an
