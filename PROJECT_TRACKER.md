@@ -1964,6 +1964,7 @@ free. What landed in the file:
 | MAX-168 | ~~**Open MAX-111's lift ingestion gate**~~ **Opened, on three conditions.** The blanket "not a run → no score" is gone; a lift is scored when (1) it is a lift — a ride and a hike stay out, permanently, (2) the athlete has said what it worked (A22, which the pipeline now honours rather than only the header stating it) and (3) the plan version in effect matched it to a band that **names** `.lift`. Condition 3 is the answer to "what about a plan whose rubric MAX-173 has not reached": it is read off the stored rubric, so a stale `rest.ranAnyway` can no longer stamp a lift *"Ran on a scheduled rest day."*, and an unprescribed lift is not scored against the catch-all either. **Nothing on the device is scored by merging this** — see the MAX-168 note below | 111, 132, 133, 146, **173**, **145/A22** | **Opus** ✅ |
 | MAX-173 | **A rubric fix can reach a stored plan** — authoring a revision adopts the bands this build ships, stated on screen and declinable, as a **new plan version**. Closes the D1 gap that made every seed-side rubric correction unreachable on a device with a plan. **Unblocks MAX-168.** Opens **R17** | 080, 132, 146 | **Opus** |
 | MAX-175 | **The app does not invent** — one principle, two expressions: the honest-refusal rule now holds over the *set* of model-facing prompts rather than in four literals that each remember it separately, and *no data, no judgement* is written down as a rule with tests. **The premise it was dispatched on was wrong** — the constraint was reported missing from chat and is not; see the MAX-175 section below | 174 | **Opus** |
+| MAX-176 | **Per-workout strain, computed at ingestion** — the app now measures what a session *cost*, beside everything else it measures, which is whether the athlete did what was asked. A zone-weighted integral of the stored HR curve (Edwards' summated-zone score over the plan's cap-anchored zones), in **zone-weighted minutes**, unbounded, computed once and stored in a new nullable `strainPoints` column. **No curve, no strain** — nil, never zero. A lift gets one and it is heart-rate only (A20). **Nothing already stored is rescored or moved**; existing workouts read back with no strain until something re-runs their metrics. Consumed by MAX-177 and MAX-178 — see the MAX-176 section below | 174, 175 | **Opus** |
 
 **Four collisions the overseer must respect.**
 
@@ -5206,6 +5207,110 @@ CI cannot prove the thing that actually matters: **that Claude obeys the sentenc
 test in this repo can. What the tests buy is that the sentence is present in every prompt
 that should carry it, and that the app never asks for a judgement it has no data for — the
 half that is ours rather than the model's.
+
+**`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
+
+---
+
+## MAX-176 — per-workout strain, and what its number means
+
+Everything the app measured before this ticket answers one question: *did you execute the
+ask*. Time above the cap, drift, cadence against the band, and the score that reads them
+are all comparisons against a prescription. None of them answers *what did it take out of
+you*, and the two come apart constantly — a disciplined easy hour and a disciplined easy
+three hours score identically and cost wildly different amounts. Strain is the second
+question, stored as its own figure, and it is deliberately not a verdict: no rubric band
+references it, nothing compares it to a prescription, and a big strain is neither good nor
+bad on its own.
+
+**The weighting: Edwards' summated heart-rate zone score.** Each zone counts for its own
+ordinal — zone 1 once, zone 5 five times — multiplied by the time spent there. Three
+reasons it is that and not something invented here. It reads the distribution the record
+*already carries*: `zoneSplits` is cut at every boundary the piecewise-linear curve
+crosses, so `Σ weight(z)·seconds(z)` **is** `∫ weight(HR(t)) dt` exactly, not an
+approximation, and the tile and the zone chart therefore cannot disagree about the same run
+(D2). It introduces no second set of thresholds — the one modelling choice is where the
+zones sit, and that is already made once, in `HeartRateZoneModel`, anchored to the plan's
+cap (D1), with the plan version stored beside the figure. And linear weights are less blunt
+than they look, because the bands are not equally wide: cap-anchored they are ≤0.90×,
+≤1.00×, ≤1.08×, ≤1.16× of the cap and then open, so the response to *heart rate* is already
+convex above the cap.
+
+**The unit, which is now permanent in stored data: points, where one point is one minute in
+zone 1** — zone-weighted minutes — **unbounded above.** There is no ceiling to be near. Two
+anchors: an hour held just under the cap is exactly **120 points**; an hour climbing 120 →
+180 bpm under a 150 bpm cap is exactly **159**. A bigger number means longer, or harder, or
+both, and it deliberately cannot tell those apart — a hard half-hour and an easy hour both
+come to 120. `zoneSplits` is what says which it was, and any surface showing strain should
+be able to reach it.
+
+**What was rejected, and why.** A bounded 0–21 scale (Whoop's, and Helix's copy of it)
+needs a personal ceiling to anchor the top — a rolling maximum, or heart-rate reserve from
+resting and maximum HR. This app ingests no daily health data (§8.1's decline, proposed
+A27) and holds neither the athlete's age nor their resting HR, so the ceiling would be an
+arbitrary constant made permanently invisible inside every stored number. Banister's TRIMP
+falls to the same missing inputs plus a sex-specific constant. A continuous weighting of
+`HR / cap` was rejected as a curve this repository would be inventing, and as a *second*
+reading of the same curve that could drift from the zone splits stored beside it.
+
+**A lift's strain is heart-rate only, and the type says so.** HealthKit carries no load for
+a strength workout — no sets, no reps, no weight (A20) — so a lifting session's strain is
+the cardiovascular cost of the hour and nothing else. Two sessions with the same curve have
+the same strain whatever was on the bar, and the zone boundaries it is cut against are
+anchored to the plan's *run* cap (tracker gap **P2**, already true of `zoneSplits` and made
+no worse by totalling it). `WorkoutStrain`'s own doc comment states this so MAX-179 and
+anything after it cannot read the figure as more than it is.
+
+**Absence is first-class.** A workout with no heart-rate curve has **no strain** — nil,
+never zero, because a zero reads as "this session cost nothing" and would be summed into
+MAX-178's rolling load as a real day of training (A18, MAX-175's invariant). The case is
+added to `NoJudgementWithoutDataTests` rather than to a parallel file, and `DerivedMetrics`
+refuses to be constructed with a strain and no heart rate at all. A curve that exists but
+covers no span — a single sample — gets `0`, which is the same reading
+`timeAboveCapSeconds` already takes of that case: there is a measurement, and it truthfully
+contains nothing.
+
+**What a person will see for their history.** Nothing changes and nothing is rescored (D8).
+`strainPoints` is a nullable column added to `DerivedMetricsRecord`; SwiftData's lightweight
+migration gives every existing row NULL, which reads back as no strain and says so. A past
+workout gains a strain only if something puts it back through the existing metrics path —
+this ticket adds no backfill and no sweep. So on the device today, strain appears on
+workouts ingested after this build and on nothing before it, until a backfill ticket decides
+otherwise. **`MaximizeSchemaV1` is not promoted**, per MAX-169's conclusion: an added
+nullable attribute is Core Data's canonical lightweight-migration case and needs no version
+bump while no schema has been promoted to CloudKit production.
+
+**What MAX-177 and MAX-178 should read.** Both read `DerivedMetrics.strain`, a
+`WorkoutStrain?`, whose one figure is `.points` in zone-weighted minutes. **MAX-177**: the
+tile and the fact-sheet line render `strain?.points`; nil is the absence state and must say
+which absence it is — the workout has no heart-rate curve — rather than showing a dash or a
+zero, and the fact-sheet half should state the unit, because a bare number with no unit is
+exactly what A18 warns a model will reason confidently from. **MAX-178**: sum
+`strain?.points` over the window, skipping nil rather than treating it as zero, and say in
+the caption how many sessions in the window carried no strain — a 7-day sum missing two
+strapless runs is not the same fact as a 7-day sum of everything that happened. The column
+`StoredDerivedMetrics.strainPoints` is a real nullable `Double` column, not a JSON blob,
+precisely so that summing a month of it does not oblige a decode per workout.
+
+### What CI can and cannot prove
+
+CI can prove: the package compiles; the strain over four hand-computed curves is the value
+claimed, by arithmetic written out in the test rather than captured from the
+implementation; a workout with no curve has no strain and one with a zero-span curve has
+zero; ordering by duration and by intensity; that a pre-change `DerivedMetrics` payload and
+a pre-change stored row both decode unchanged with no strain, and that a record with no
+strain re-encodes without the key.
+
+CI cannot prove anything about how the number reads to a person — no tile exists yet
+(MAX-177), and no unit is drawn on screen by this ticket. It also cannot prove the
+migration: CI never runs SwiftData (tracker **R2**), so "an existing row gains a NULL
+column" is verified only as the pure mapping in `StoredDerivedMetrics`, and the SwiftData
+half is a two-line field copy in `MaximizeSchema` with no branches in it.
+
+**Needs device verification:** install over an existing build with workouts already stored,
+confirm the store still opens (the migration is inferred, and an inferred migration that
+fails presents as an unopenable store — MAX-169's screen), and confirm an older workout's
+detail screen is unchanged.
 
 **`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
 

@@ -153,6 +153,7 @@ public enum DerivedMetricsCalculator {
         var timeAboveCapSeconds: Double?
         var heartRateDriftFraction: Double?
         var zoneSplits = ZoneSplits.empty
+        var strain: WorkoutStrain?
 
         if let series = input.heartRateSeries {
             let curve = HeartRateCurve(series)
@@ -172,6 +173,21 @@ public enum DerivedMetricsCalculator {
             }
             if applies(.zoneSplits) {
                 zoneSplits = try curve.zoneSplits(model: zones)
+            }
+
+            // MAX-176. Read off the distribution just computed rather than walking the
+            // curve a second time: two readings of one curve are two numbers that can
+            // disagree, and `Σ weight(zone) · seconds(zone)` is the zone-weighted
+            // integral exactly — `zoneSplits` is cut at every boundary crossing, so
+            // nothing is approximated by totalling it. See `WorkoutStrain`.
+            //
+            // Gated on `.zoneSplits` as well as on itself, which is redundant today and
+            // deliberately so: the two answer the applicability question identically now,
+            // and if a later ticket ever withholds the distribution from a discipline,
+            // the figure derived from it must go absent too rather than quietly total an
+            // empty value to zero. That would be exactly A18's fabricated number.
+            if applies(.strain), applies(.zoneSplits) {
+                strain = try WorkoutStrain(zoneSplits: zoneSplits)
             }
 
             // §9: drift is "most meaningful on easy and long runs; near-meaningless on
@@ -226,6 +242,7 @@ public enum DerivedMetricsCalculator {
             averageCadenceStepsPerMinute: averageCadenceStepsPerMinute,
             gradeAdjustedPaceSecondsPerKilometer: gradeAdjustedPaceSecondsPerKilometer,
             zoneSplits: zoneSplits,
+            strain: strain,
             distanceSplits: distanceSplits,
             planVersion: plan.version
         )

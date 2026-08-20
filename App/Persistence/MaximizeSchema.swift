@@ -214,6 +214,28 @@ enum MaximizeSchemaV1: VersionedSchema {
         var gradeAdjustedPaceSecondsPerKilometer: Double?
         var zoneSplitsJSON: Data = Data()
 
+        /// MAX-176's per-workout strain, in zone-weighted minutes.
+        ///
+        /// Optional and default-less, exactly like `distanceSplitsJSON` below and for the
+        /// same two agreeing reasons. The domain reason: a workout with no heart-rate
+        /// curve has **no** strain (A18), so nil is a fact the record must be able to
+        /// state — a defaulted `0` would say the session cost nothing, which is a
+        /// fabricated measurement rather than a missing one. The schema reason: a nullable
+        /// attribute is the one shape a store already holding rows can gain without a
+        /// value to backfill, and CloudKit's rule is that a *non*-optional attribute must
+        /// have a default.
+        ///
+        /// **What this does to a store that already has rows.** Every `DerivedMetricsRecord`
+        /// written before this build gains the column as NULL and reads back as
+        /// `DerivedMetrics.strain == nil` — no strain, said as such. Nothing is rewritten
+        /// and no score is touched (D8): a past workout gains a strain only if something
+        /// puts it back through the ingestion path that computes metrics. **The schema
+        /// version is unchanged**, for the reason `distanceSplitsJSON` states below and
+        /// MAX-169 concluded: `MaximizeSchemaV1` has never been promoted to a CloudKit
+        /// production schema, so the additive-only immutability rule has not started
+        /// applying, and SwiftData infers a nullable added attribute on its own.
+        var strainPoints: Double?
+
         /// MAX-046's pace breakdown. Optional and default-less on purpose — see
         /// `StoredDerivedMetrics.distanceSplitsJSON` for the domain half of that choice.
         ///
@@ -256,6 +278,7 @@ enum MaximizeSchemaV1: VersionedSchema {
             averageCadenceStepsPerMinute = stored.averageCadenceStepsPerMinute
             gradeAdjustedPaceSecondsPerKilometer = stored.gradeAdjustedPaceSecondsPerKilometer
             zoneSplitsJSON = stored.zoneSplitsJSON
+            strainPoints = stored.strainPoints
             distanceSplitsJSON = stored.distanceSplitsJSON
             distanceSplitsComputed = stored.distanceSplitsComputed
             planVersionNumber = stored.planVersionNumber
@@ -272,6 +295,7 @@ enum MaximizeSchemaV1: VersionedSchema {
                     averageCadenceStepsPerMinute: averageCadenceStepsPerMinute,
                     gradeAdjustedPaceSecondsPerKilometer: gradeAdjustedPaceSecondsPerKilometer,
                     zoneSplitsJSON: zoneSplitsJSON,
+                    strainPoints: strainPoints,
                     distanceSplitsJSON: distanceSplitsJSON,
                     distanceSplitsComputed: distanceSplitsComputed,
                     planVersionNumber: planVersionNumber
@@ -286,6 +310,7 @@ enum MaximizeSchemaV1: VersionedSchema {
                 averageCadenceStepsPerMinute = newValue.averageCadenceStepsPerMinute
                 gradeAdjustedPaceSecondsPerKilometer = newValue.gradeAdjustedPaceSecondsPerKilometer
                 zoneSplitsJSON = newValue.zoneSplitsJSON
+                strainPoints = newValue.strainPoints
                 distanceSplitsJSON = newValue.distanceSplitsJSON
                 distanceSplitsComputed = newValue.distanceSplitsComputed
                 planVersionNumber = newValue.planVersionNumber
