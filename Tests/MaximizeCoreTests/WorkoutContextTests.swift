@@ -271,10 +271,10 @@ final class WorkoutContextTests: XCTestCase {
     func testALiftsStrainLineDisclaimsLoad() throws {
         let strain = try WorkoutStrain(points: 88)
         let sheet = try build(
+            metrics: metrics(strain: strain),
             workout: Fixture.workout(
                 activityType: .traditionalStrengthTraining, distanceMeters: nil, hasRoute: false
-            ),
-            metrics: metrics(strain: strain)
+            )
         ).factSheet()
 
         XCTAssertTrue(sheet.contains("Heart rate only — it says nothing about sets, reps, or load"), sheet)
