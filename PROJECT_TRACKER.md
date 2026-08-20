@@ -1964,6 +1964,7 @@ free. What landed in the file:
 | MAX-168 | ~~**Open MAX-111's lift ingestion gate**~~ **Opened, on three conditions.** The blanket "not a run → no score" is gone; a lift is scored when (1) it is a lift — a ride and a hike stay out, permanently, (2) the athlete has said what it worked (A22, which the pipeline now honours rather than only the header stating it) and (3) the plan version in effect matched it to a band that **names** `.lift`. Condition 3 is the answer to "what about a plan whose rubric MAX-173 has not reached": it is read off the stored rubric, so a stale `rest.ranAnyway` can no longer stamp a lift *"Ran on a scheduled rest day."*, and an unprescribed lift is not scored against the catch-all either. **Nothing on the device is scored by merging this** — see the MAX-168 note below | 111, 132, 133, 146, **173**, **145/A22** | **Opus** ✅ |
 | MAX-173 | **A rubric fix can reach a stored plan** — authoring a revision adopts the bands this build ships, stated on screen and declinable, as a **new plan version**. Closes the D1 gap that made every seed-side rubric correction unreachable on a device with a plan. **Unblocks MAX-168.** Opens **R17** | 080, 132, 146 | **Opus** |
 | MAX-175 | **The app does not invent** — one principle, two expressions: the honest-refusal rule now holds over the *set* of model-facing prompts rather than in four literals that each remember it separately, and *no data, no judgement* is written down as a rule with tests. **The premise it was dispatched on was wrong** — the constraint was reported missing from chat and is not; see the MAX-175 section below | 174 | **Opus** |
+| MAX-179 | **Per-muscle fatigue from the entries A22 already collects** — the last session naming each of the six groups, weighted by its duration, decayed on a 48-hour half-life. States in its own doc comment what it cannot know (no sets, no reps, no load) and that **A20's tripwire governs the "just add a weight field" follow-up, not A22's permission**. A group never logged has *no* figure; a group logged a fortnight ago is *fresh* — a different fact. See the MAX-179 section below | 174, 175, A20/A22 | **Opus** |
 
 **Four collisions the overseer must respect.**
 
@@ -5206,6 +5207,119 @@ CI cannot prove the thing that actually matters: **that Claude obeys the sentenc
 test in this repo can. What the tests buy is that the sentence is present in every prompt
 that should carry it, and that the app never asks for a judgement it has no data for — the
 half that is ours rather than the model's.
+
+**`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
+
+---
+
+## MAX-179 — per-muscle fatigue, and the argument it is written against
+
+A decay model over the `MuscleGroupEntry` records A22 already collects — the cheapest of
+MAX-174's four features precisely because its input was already paid for. New files only:
+`Domain/MuscleFatigue.swift` and `Metrics/MuscleFatigueCalculator.swift`, plus tests.
+
+### The shape
+
+For each of the six groups, the **most recent** session the athlete said worked it:
+
+```text
+weight   = min(durationSeconds / 2700, 1)      // 45 minutes counts as a full session
+decay    = pow(0.5, elapsedSeconds / 172800)   // 48-hour half-life, measured from the end
+fraction = weight * decay                      // reported as fatigue above 0.01
+```
+
+**The 48-hour half-life is chosen against the interval a split repeats a group at, not
+against a physiological measurement** — a group trained Monday reads half-fatigued on
+Wednesday, the day a plan would next ask for it, and about a twelfth as fatigued the
+following Monday. 72 hours is equally defensible and is not more correct; the model is
+coarse enough that the gap between the two is smaller than the gap between a hard session
+and a token one, which neither can see at all. The 1% floor puts the "fresh" boundary at
+about 13 days and 7 hours for a full session.
+
+**The constants are code, not plan data, and that is a decision rather than an oversight.**
+D1 protects the reproducibility of *stored scores*, and this model produces none — nothing
+scores, gates or judges from it. The type states the line in advance: if a fatigue figure
+ever reaches the scorer, its constants become plan data in the same change.
+
+### What it cannot know, and why that is the ticket
+
+MAX-174 predicted this is the feature most likely to attract a *"just add a weight field"*
+follow-up, so the type meets that argument rather than leaving it to be re-derived. There
+are no sets, reps, load or exercises here because **the record does not contain them** —
+A20's wall — and the doc comment carries A20's own cost sentence rather than paraphrasing
+it: forty-five minutes of moving light weights reads exactly like forty-five real minutes.
+The governing amendment is stated explicitly: A22 spent the manual-entry non-goal narrowly
+and once (*which* muscles a session worked, on one screen, on one kind of workout, and "a
+later ticket does not inherit this amendment's permission"); **A20 governs *how much*, and
+requires an amendment superseding PRD §3 — never a field arriving inside a lifting
+ticket.** The figure is also documented as coarse, in the type, because a number with
+three decimal places invites being read as though it had three decimal places.
+
+### Two absences, not one
+
+MAX-175's invariant, applied at a new seam. A group **no session ever named** has no figure
+at all: a `0.0` would say *fully recovered*, which is a claim the record cannot support —
+the athlete may have trained legs daily and told the app nothing (A22: "I have not told you
+yet" is not "I trained nothing"). A group **worked a fortnight ago** is `.fresh` and still
+carries its figure, because there recovery is something the app was told enough to judge.
+Three reading cases, three sentences in `MuscleFatigueCopy`, and both new cases live in
+`NoJudgementWithoutDataTests` rather than a parallel file.
+
+### What was rejected
+
+- **Accumulating sessions.** Three leg days in four read as the last of them. A sum's scale
+  is anchored to nothing measured, which turns a coarse signal into an arbitrary one.
+- **A linear ramp.** It needs an arbitrary zero crossing and then asserts a hard edge at it
+  — *fatigued Thursday, recovered Friday* — a sharper claim than "halves every couple of
+  days" and no better supported.
+- **Scaling duration without a ceiling**, and **normalising to the athlete's longest
+  session**. The first reads a three-hour session as 4× a 45-minute one on a scale nothing
+  justifies; the second lets one outlier rescale every figure in the app.
+- **Clamping the tail to zero at the floor.** The floor is a presentation boundary; the
+  figure underneath it still orders, so a fortnight ago and a year ago do not collapse.
+- **Admitting a zero-duration session as a zero weight.** Refused at
+  `MuscleFatigueSession.init` for the same reason a never-logged group has no figure. The
+  builder over stored workouts *skips* such a record rather than throwing, so one malformed
+  workout cannot deny the athlete the other five groups.
+
+### The seam MAX-176 swaps
+
+Weighting goes through `MuscleFatigueModel.Weighting`, one case today (`.duration`). When
+per-workout strain lands: add a `.strain` case, give `MuscleFatigueSession` an optional
+stored strain beside its duration, add one branch to
+`MuscleFatigueCalculator.weight(for:model:)`. Nothing else in either file moves. **`.duration`
+does not become dead code** — a lift whose strap dropped has no strain, and MAX-175 forbids
+judging it on a fabricated one, so duration stays as the honest fallback and the choice
+stays the caller's. No file MAX-176 owns was touched.
+
+### What MAX-180 should read
+
+- `MuscleFatigueMap.ordered` — all six groups in canonical order, **total by construction**:
+  a group with no session is present as `.neverLogged`, never missing, so a region cannot be
+  silently dropped by a lookup that returned nil.
+- `MuscleFatigueMap.hasNoLoggedSessions` — the map's own absence state. One sentence, not
+  six regions drawn at zero.
+- `MuscleFatigueCopy.modelCaption` — the honest caption, written and pinned by a test.
+  `MuscleFatigueCopy.detail(for:)` gives the per-group sentence, and the never-logged and
+  fresh wordings are deliberately different.
+- `MuscleFatigue.fraction` for the band; `sessionWeight`, `elapsedSeconds`, `elapsedDays`
+  and `lastWorkedAt` for the detail a dense screen wants.
+- **The three reading cases must stay three on screen**, and fatigue bands need a non-hue
+  channel that extends the existing score-band accessibility test rather than a parallel
+  one.
+
+### What CI can and cannot prove
+
+CI can prove the package compiles and that the curve is the one documented: every expected
+figure in `MuscleFatigueTests` is hand-computed from the half-life, so each elapsed time is
+a whole or half number of half-lives and each expectation is a written-out power of two —
+including the floor asserted from both sides (13 days is fatigue at 2^-6.5, 14 days is fresh
+at 2^-7). A test that asserted whatever `compute` returned would pass against the wrong
+curve.
+
+CI cannot prove the half-life is the right one. That is a product judgement no test reaches,
+and its first honest check is an athlete reading a map after a real training week — which
+needs MAX-180, since nothing draws this yet.
 
 **`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
 
