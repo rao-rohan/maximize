@@ -1965,6 +1965,7 @@ free. What landed in the file:
 | MAX-173 | **A rubric fix can reach a stored plan** — authoring a revision adopts the bands this build ships, stated on screen and declinable, as a **new plan version**. Closes the D1 gap that made every seed-side rubric correction unreachable on a device with a plan. **Unblocks MAX-168.** Opens **R17** | 080, 132, 146 | **Opus** |
 | MAX-175 | **The app does not invent** — one principle, two expressions: the honest-refusal rule now holds over the *set* of model-facing prompts rather than in four literals that each remember it separately, and *no data, no judgement* is written down as a rule with tests. **The premise it was dispatched on was wrong** — the constraint was reported missing from chat and is not; see the MAX-175 section below | 174 | **Opus** |
 | MAX-179 | **Per-muscle fatigue from the entries A22 already collects** — the last session naming each of the six groups, weighted by its duration, decayed on a 48-hour half-life. States in its own doc comment what it cannot know (no sets, no reps, no load) and that **A20's tripwire governs the "just add a weight field" follow-up, not A22's permission**. A group never logged has *no* figure; a group logged a fortnight ago is *fresh* — a different fact. See the MAX-179 section below | 174, 175, A20/A22 | **Opus** |
+| MAX-180 | **The muscle map, drawn** — `MuscleFatigueMark` bands MAX-179's reading into five states (`.notLogged`/`.fresh`/`.light`/`.moderate`/`.high`) and marks each with a non-hue geometric channel (fill fraction + dashed outline + glyph), extending `WCAGContrastTests`'s hue-alone test with a third representation rather than a parallel suite. `MuscleMapView` draws it on a flat content surface with `@ScaledMetric` throughout, and `WorkoutDetailView` composes it unconditionally (it is the athlete's state, not the workout's). A group never logged draws dashed-and-glyphed, never a coloured "at rest" fill. See the MAX-180 section below | 179 | Sonnet — **PR open, not yet merged.** Package compiles and core unit tests pass by inspection only; no toolchain here to run them (R1). Needs device verification, per the PR |
 
 **Four collisions the overseer must respect.**
 
@@ -5319,9 +5320,99 @@ curve.
 
 CI cannot prove the half-life is the right one. That is a product judgement no test reaches,
 and its first honest check is an athlete reading a map after a real training week — which
-needs MAX-180, since nothing draws this yet.
+needed MAX-180, drawn below. That first real-week check itself still has not happened;
+MAX-180 only made it possible.
 
 **`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
+
+---
+
+## MAX-180 — the muscle map, drawn
+
+`Sources/MaximizeCore/Accessibility/MuscleFatigueMark.swift` (new),
+`App/Workouts/MuscleMapView.swift` (new), `App/Workouts/WorkoutDetailModel.swift`,
+`App/Workouts/WorkoutDetailView.swift`, `App/DesignSystem/Layout.swift`, plus tests in
+`Tests/MaximizeCoreTests/MuscleFatigueTests.swift` and
+`Tests/MaximizeCoreTests/WCAGContrastTests.swift`.
+
+### Five bands, from MAX-179's three reading cases
+
+`MuscleFatigueReading` stays three cases; `MuscleFatigueBand.of(_:)` bands it into five for
+drawing: `.notLogged` (`.neverLogged`, unchanged), `.fresh` (unchanged), and `.fatigued`'s
+continuous fraction split into equal thirds — `.light`/`.moderate`/`.high`. Equal thirds
+rather than a named physiological threshold, because `MuscleFatigueModel`'s own doc comment
+already says this figure "has roughly one bit of real information"; three even tiers claim
+no more precision than that. `MuscleFatigueMark.mark(for:)` is the one place a reading
+becomes a band, a label, and a non-hue mark — the view never compares a fraction to a
+threshold of its own.
+
+### The non-hue channel: fill fraction, on one neutral ink
+
+Every band draws in the same two tokens regardless of level —
+`Color.chartSeriesPrimary` filled bottom-up over `Color.surfaceInset`, `Color.surfaceBorder`
+for the outline. **No new saturated hue was added.** FR-4.3 reserves the three score-band
+colours for the calendar and verdict header, and the accent's own documented meaning
+("on-plan / effective") is not what a fatigued muscle group is — so rather than picking a
+fourth saturated colour and re-litigating what it means, the level is carried entirely by
+how much of a region's own shape is filled, plus whether its outline is solid or dashed
+(`.notLogged` only) plus a glyph (`.notLogged` only, so an empty *known* group cannot be
+misread as an empty *unknown* one). `WCAGContrastTests` holds `.light`/`.moderate`/`.high`
+at the literal same ink — 1.0:1, no contrast at all — and still requires every band to read
+apart on the geometric channel alone. Fill fraction and dash style are geometry, not opacity
+or lightness, so Reduce Transparency and Increase Contrast have nothing to weaken here
+(MAX-070): there is no translucency in the view to degrade in the first place.
+
+### Extended, not duplicated
+
+`WCAGContrastTests.testNoTwoCalendarCellsAreDistinguishedByHueAlone` gained a third
+representation (`muscleMapCells()`) alongside the day grid (MAX-084) and the year heatmap
+(MAX-087), the same way MAX-087 added the second one to the same test rather than writing
+`ScoreBandHeatmapMarkTests` as its own suite. A sibling `testEveryFatigueBandCarriesItsOwnMark`
+sits next to `testEveryScoreBandCarriesItsOwnMark`, in the same class. No new test file
+duplicates this invariant. Ordinary unit coverage of the pure banding/label/fraction mapping
+(`MuscleFatigueMarkTests`) was appended to the existing `MuscleFatigueTests.swift`, matching
+how `ScoreBandMarkTests`/`ScoreBandHeatmapMarkTests` already sit inside `ScoreBandTests.swift`
+rather than in files of their own.
+
+### The absence MAX-179 was explicit about
+
+A group `.neverLogged` draws dashed, unfilled, and glyphed — never the fill colour at zero,
+which would silently read as "fully recovered." `MuscleMapView.hasNoLoggedSessions` is the
+map's *own* absence, drawn as MAX-179's `MuscleFatigueCopy.noSessionsHeadline`/`.noSessionsDetail`
+sentence rather than six regions all saying the same "not logged" thing.
+
+### Where it hangs
+
+`WorkoutDetailView` composes `MuscleMapView` unconditionally, directly under
+`MuscleGroupEntryView`, on every discipline's screen — unlike the run-only sections (MAX-139),
+it is not gated by `SummaryTileData.showsRunOnlySections`, because the map is the athlete's
+whole-body state as of *now*, not a fact about the workout being viewed.
+`WorkoutDetailModel.muscleFatigueMap(...)` fetches the trailing 21 days of workouts and their
+muscle-group logs (no batch API exists on `MuscleGroupEntryRepository`, so this is one read
+per candidate workout, the same cost the rest of that method already pays for HR series and
+routes) and hands them to `MuscleFatigueCalculator.compute`.
+
+### What CI can and cannot prove
+
+CI can prove the package compiles, that `MuscleFatigueBand.of(_:)` bands the thirds where its
+own doc comment says it does (including both boundaries, from both sides), and that no two of
+the five marks — asserted against `MuscleFatigueMark`'s actual output, not against a
+restatement of its thresholds — share a non-hue signature in either `MuscleFatigueMarkTests`
+or the widened `WCAGContrastTests`.
+
+CI **cannot** prove any of the following, all of which needs a device (§9: "the whole thing"):
+that the schematic body layout reads as a figure rather than as six unrelated tiles; that the
+fill-fraction channel is legible at the map's actual on-screen size; that the middle row's
+switch to a vertical stack at accessibility Dynamic Type sizes actually prevents the overflow
+it is written to prevent, rather than merely compiling; that Reduce Transparency and Increase
+Contrast leave the map visually unchanged (expected, since nothing here is translucent, but
+unverified); and that the caption reads as honest rather than as hedging. The App target was
+not built — no Xcode toolchain in this container, and `App/` is outside the SwiftPM package
+`swift test` covers (R1); the CI job that does build it (`ios-app`, an unsigned Simulator
+build via `xcodegen`) runs only in GitHub Actions, not here.
+
+**`swift build`/`swift test` were not run for `MaximizeCore` either** — no Swift toolchain in
+this container (R1, same as MAX-179 and every ticket before it).
 
 ---
 

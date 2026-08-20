@@ -48,6 +48,13 @@ struct WorkoutDetailData: Equatable {
     /// `SummaryTileData`'s own formatting, and `VerdictHeaderView` needs it separately
     /// for the scheduled session's distance, which lives outside `SummaryTileData`.
     let distanceUnit: DistanceUnit
+
+    /// MAX-180. Every muscle group's fatigue reading as of this load — the whole
+    /// athlete's state, not this one workout's, which is why `MuscleMapView` draws
+    /// unconditionally rather than being gated by `SummaryTileData.showsRunOnlySections`
+    /// the way the run-only sections are: "where does my recovery stand right now" is a
+    /// question worth answering from any workout's screen, run or lift.
+    let muscleFatigue: MuscleFatigueMap
 }
 
 /// Loads one workout and assembles `WorkoutDetailData` for the detail screen. Everything
@@ -204,6 +211,10 @@ final class WorkoutDetailModel {
                 unit: distanceUnit
             )
             let summaryTiles = SummaryTileData(workout: workout, metrics: metrics, distanceUnit: distanceUnit)
+            let muscleFatigue = try await muscleFatigueMap(
+                workoutRepository: workoutRepository,
+                muscleGroupRepository: muscleGroupRepository
+            )
 
             state = .loaded(WorkoutDetailData(
                 verdict: verdict,
@@ -213,7 +224,8 @@ final class WorkoutDetailModel {
                 splits: splits,
                 summaryTiles: summaryTiles,
                 muscleGroups: muscleGroups,
-                distanceUnit: distanceUnit
+                distanceUnit: distanceUnit,
+                muscleFatigue: muscleFatigue
             ))
         } catch {
             state = .failed
@@ -254,6 +266,38 @@ final class WorkoutDetailModel {
             capBPM: capBPM,
             timeAboveCapSeconds: metrics?.timeAboveCapSeconds
         )
+    }
+
+    /// MAX-180: assembles `MuscleFatigueInput` from stored records and hands it to
+    /// `MuscleFatigueCalculator` — the whole of this screen's part in producing the
+    /// map, since every decision about what a reading *means* is `MaximizeCore`'s.
+    ///
+    /// **The fetch window is 21 days, not the workout's own date range.** The map is
+    /// the athlete's whole current state, not a fact about the workout being viewed
+    /// (see `WorkoutDetailData.muscleFatigue`), so it is read from *now*
+    /// (`self.now()`, the same injected clock `setMuscleGroups` uses) rather than from
+    /// anything tied to `workoutID`. Three weeks comfortably covers
+    /// `MuscleFatigueModel.standard`'s own fresh boundary — about 13 days, 7 hours —
+    /// with margin, per `MuscleFatigueInput`'s own guidance to fetch at least a
+    /// fortnight's worth of curve.
+    ///
+    /// One `muscleGroupLog(forWorkout:)` read per candidate workout: there is no
+    /// batch API on `MuscleGroupEntryRepository`, and at a phone's scale of strength
+    /// sessions in three weeks this is the same cost the rest of this method already
+    /// pays reading `heartRateSeries`/`route` per workout above.
+    private func muscleFatigueMap(
+        workoutRepository: any WorkoutRepository,
+        muscleGroupRepository: any MuscleGroupEntryRepository
+    ) async throws -> MuscleFatigueMap {
+        let instant = now()
+        let lookback = DateInterval(start: instant.addingTimeInterval(-21 * 24 * 3_600), end: instant)
+        let candidates = try await workoutRepository.workouts(startingIn: lookback)
+        var logs: [UUID: MuscleGroupLog] = [:]
+        for candidate in candidates {
+            logs[candidate.id] = try await muscleGroupRepository.muscleGroupLog(forWorkout: candidate.id)
+        }
+        let input = try MuscleFatigueInput(now: instant, workouts: candidates, muscleGroupLogs: logs)
+        return try MuscleFatigueCalculator.compute(input)
     }
 
     /// R8's lazy path (MAX-033): scores a run the background wake could not score.

@@ -231,13 +231,22 @@ final class DesignPaletteContrastTests: XCTestCase {
     /// collapses two cells onto one mark, or that adds a state or a band without one,
     /// fails here rather than waiting for a reviewer with a colour-blindness filter.
     ///
-    /// **Two representations, not one**, since MAX-087: `ScoreBandMark` (MAX-084) is
-    /// what `ScoreCalendarDayCell` actually draws in the day grid (week and month
-    /// spans); `ScoreBandHeatmapMark` (MAX-087) is what `ScoreCalendarHeatmapCell`
-    /// actually draws at year density, where there is no room for a corner pip. Testing
-    /// only the day grid's mark — as this suite did before MAX-087 — would let the
-    /// heatmap's channel silently disappear (or silently collapse two bands onto the
-    /// same size) with nothing to catch it, exactly the gap that shipped in MAX-083.
+    /// **Three representations, not one**, since MAX-087 and MAX-180: `ScoreBandMark`
+    /// (MAX-084) is what `ScoreCalendarDayCell` actually draws in the day grid (week
+    /// and month spans); `ScoreBandHeatmapMark` (MAX-087) is what
+    /// `ScoreCalendarHeatmapCell` actually draws at year density, where there is no
+    /// room for a corner pip. Testing only the day grid's mark — as this suite did
+    /// before MAX-087 — would let the heatmap's channel silently disappear (or
+    /// silently collapse two bands onto the same size) with nothing to catch it,
+    /// exactly the gap that shipped in MAX-083.
+    ///
+    /// **The third is not a calendar at all.** `MuscleFatigueMark` (MAX-180) is what
+    /// `MuscleMapView` draws for a muscle group's fatigue band, and the rule this test
+    /// asserts — no two marks left apart by hue alone — is exactly the rule that
+    /// screen needs too. Widening this test to cover it, rather than writing a second
+    /// "no hue alone" suite next to it, is what CLAUDE.md asks for directly: the
+    /// codebase has one hue-only defect on record (MAX-084's 1.02:1) and one place
+    /// that checks for a second.
     ///
     /// **Cells, not bands, since MAX-135**, and that is a widening of the same rule
     /// rather than a second one. Three of the day grid's states draw on the *identical*
@@ -370,10 +379,65 @@ final class DesignPaletteContrastTests: XCTestCase {
         }
     }
 
-    func testNoTwoCalendarCellsAreDistinguishedByHueAlone() {
+    /// The fill each fatigue band draws behind its mark, mirroring `MuscleMapView`:
+    /// `.notLogged` and `.fresh` both draw at `fillFraction == 0`, so what a reader
+    /// actually sees is the region's own track (`surfaceInset`); `.light`/`.moderate`/
+    /// `.high` show some real area of the fill ink (`chartSeriesPrimary`) and so are
+    /// represented by it here. Restated rather than read for `dayGridFill`'s reason:
+    /// this target cannot import SwiftUI, so `MuscleMapView`'s actual `Color` tokens
+    /// are not reachable from here — this is the same two tokens, named directly from
+    /// `DesignPalette`.
+    private func muscleMapFill(for band: MuscleFatigueBand) -> DesignPalette.Ink {
+        switch band {
+        case .notLogged, .fresh:
+            return DesignPalette.surfaceInset
+        case .light, .moderate, .high:
+            return DesignPalette.chartSeriesPrimary
+        }
+    }
+
+    /// One representative reading per fatigue band, the same five `MuscleFatigueMark`
+    /// itself is tested against in `MuscleFatigueMarkTests` — restated here rather than
+    /// imported, since a test asserting against its own construction proves nothing:
+    /// this is a second, independent statement of what each band draws.
+    private func muscleMapCells() throws -> [DrawnCalendarCell] {
+        let bands: [(name: String, mark: MuscleFatigueMark)] = [
+            ("notLogged", .mark(for: .neverLogged)),
+            ("fresh", .mark(for: .fresh(try fixture(fraction: 0.002)))),
+            ("light", .mark(for: .fatigued(try fixture(fraction: 0.1)))),
+            ("moderate", .mark(for: .fatigued(try fixture(fraction: 0.5)))),
+            ("high", .mark(for: .fatigued(try fixture(fraction: 0.9)))),
+        ]
+        return bands.map { entry in
+            DrawnCalendarCell(
+                name: "muscleFatigue:\(entry.name)",
+                fill: muscleMapFill(for: entry.mark.band),
+                nonHueChannels: [
+                    "outline:\(entry.mark.outlineIsDashed ? "dashed" : "solid")",
+                    "fill:\(entry.mark.fillFraction)",
+                    "glyph:\(entry.mark.hasGlyph)",
+                ]
+            )
+        }
+    }
+
+    /// A `MuscleFatigue` with an arbitrary but valid payload — every fixture here only
+    /// varies `fraction`, which is all `MuscleFatigueBand.of(_:)` reads.
+    private func fixture(fraction: Double) throws -> MuscleFatigue {
+        try MuscleFatigue(
+            group: .chest,
+            fraction: fraction,
+            lastWorkedAt: Date(timeIntervalSince1970: 0),
+            elapsedSeconds: 3_600,
+            sessionWeight: 1.0
+        )
+    }
+
+    func testNoTwoCalendarCellsAreDistinguishedByHueAlone() throws {
         let representations: [(name: String, cells: [DrawnCalendarCell])] = [
             ("day grid — glyph, corner pip (MAX-084), fill/no-fill", dayGridCells),
             ("year heatmap — hollow, inset size (MAX-087)", heatmapCells),
+            ("muscle map — outline, fill fraction, glyph (MAX-180)", try muscleMapCells()),
         ]
         for representation in representations {
             for (indexA, cellA) in representation.cells.enumerated() {
@@ -457,6 +521,20 @@ final class DesignPaletteContrastTests: XCTestCase {
             Set(heatmapMarks).count,
             ScoreBand.allCases.count,
             "Two bands share a heatmap mark: \(heatmapMarks.map(\.rawValue))"
+        )
+    }
+
+    /// MAX-180's analogue, stated the same way: a mark is only a channel if every band
+    /// it can take is actually different from every other. `MuscleFatigueMarkTests`
+    /// covers this from the type's own side (`testEveryFatigueBandCarriesItsOwnDistinct-
+    /// Mark`); this is the second, independent statement `muscleMapCells()` above
+    /// already relies on `nonHueChannels` being pairwise distinct for.
+    func testEveryFatigueBandCarriesItsOwnMark() throws {
+        let signatures = try muscleMapCells().map { $0.nonHueChannels }
+        XCTAssertEqual(
+            Set(signatures.map { $0.joined(separator: ",") }).count,
+            signatures.count,
+            "Two fatigue bands share a mark: \(signatures)"
         )
     }
 

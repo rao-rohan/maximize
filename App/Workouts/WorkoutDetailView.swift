@@ -31,6 +31,16 @@ import MaximizeCore
 /// only its cap line is discipline-gated, and that happens in `WorkoutDetailModel`,
 /// where the cap value is assembled from the plan.
 ///
+/// ## MAX-180: the muscle map is the athlete's state, not this workout's
+///
+/// `MuscleMapView` draws `WorkoutDetailData.muscleFatigue` — MAX-179's per-group decay
+/// model as of the moment this screen loaded, not a fact derived from `workoutID`.
+/// Unlike the run-only sections above, it is not gated by
+/// `SummaryTileData.showsRunOnlySections`: "where does my recovery stand right now" is
+/// a question worth answering from a lift's screen exactly as much as a run's, so it
+/// composes unconditionally, directly under the section that lets the athlete answer
+/// it for *this* session (`MuscleGroupEntryView`).
+///
 /// ## MAX-098: this screen tells the Ask button what it is looking at
 ///
 /// The persistent chat control is subject-aware (§2.1): on this screen it reads "Ask
@@ -96,6 +106,11 @@ struct WorkoutDetailView: View {
                 MuscleGroupEntryView(data: data.muscleGroups) { groups in
                     Task { await model.setMuscleGroups(groups) }
                 }
+                // MAX-180. The athlete's whole-body recovery state, not a fact about
+                // this one workout — drawn on every discipline's screen, unlike the
+                // run-only sections below, for the reason `WorkoutDetailData
+                // .muscleFatigue` gives.
+                MuscleMapView(map: data.muscleFatigue)
                 // A heart rate measured during a lift is still a heart rate — this stays
                 // for every discipline. Only its cap line is gated, in
                 // `WorkoutDetailModel`, against the plan's *run* cap.

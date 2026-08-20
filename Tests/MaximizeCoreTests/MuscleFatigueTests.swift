@@ -456,3 +456,155 @@ final class MuscleFatigueTests: XCTestCase {
         XCTAssertTrue(MuscleFatigueCopy.modelCaption.contains("not how hard a session was"))
     }
 }
+
+/// MAX-180 — the banding a reading is drawn under, and the mark that band produces.
+/// `WCAGContrastTests` is where the hue-alone invariant itself lives (extended, not
+/// duplicated, per CLAUDE.md); this class is the ordinary unit coverage for the pure
+/// mapping `MuscleFatigueMark.swift` defines, in the shape `ScoreBandMarkTests` and
+/// `ScoreBandHeatmapMarkTests` already use for their own mark types.
+final class MuscleFatigueMarkTests: XCTestCase {
+
+    /// A `.fatigued` reading with an arbitrary but valid `MuscleFatigue` payload — every
+    /// case below only cares about `fraction`, so the rest of the fields are fixed
+    /// filler rather than being re-derived from the calculator MAX-179 already tests.
+    private func fatigued(_ fraction: Double) throws -> MuscleFatigueReading {
+        .fatigued(try MuscleFatigue(
+            group: .chest,
+            fraction: fraction,
+            lastWorkedAt: Date(timeIntervalSince1970: 0),
+            elapsedSeconds: 3_600,
+            sessionWeight: 1.0
+        ))
+    }
+
+    // MARK: - Banding
+
+    func testNeverLoggedBandsAsNotLogged() {
+        XCTAssertEqual(MuscleFatigueBand.of(.neverLogged), .notLogged)
+    }
+
+    func testFreshBandsAsFresh() throws {
+        let fresh = MuscleFatigueReading.fresh(try MuscleFatigue(
+            group: .back,
+            fraction: 0.005,
+            lastWorkedAt: Date(timeIntervalSince1970: 0),
+            elapsedSeconds: 1_000_000,
+            sessionWeight: 1.0
+        ))
+        XCTAssertEqual(MuscleFatigueBand.of(fresh), .fresh)
+    }
+
+    /// Literal fractions chosen well clear of the two thirds boundaries — 0.1, 0.5, 0.9
+    /// — so this is a test of the banding, not a restatement of where the boundary
+    /// itself sits (that is `testTheThirdsBoundariesLandInTheBandTheyDocumentThemselves-
+    /// AsBelongingTo` below).
+    func testFatiguedFractionsBandIntoThirds() throws {
+        XCTAssertEqual(MuscleFatigueBand.of(try fatigued(0.1)), .light)
+        XCTAssertEqual(MuscleFatigueBand.of(try fatigued(0.5)), .moderate)
+        XCTAssertEqual(MuscleFatigueBand.of(try fatigued(0.9)), .high)
+    }
+
+    /// The boundary itself: a third exactly is documented as belonging to `.moderate`
+    /// (the light band is `..<`, half-open), and two thirds exactly likewise belongs to
+    /// `.high`. Pinned so a future edit cannot silently flip which side either boundary
+    /// falls on.
+    func testTheThirdsBoundariesLandInTheBandTheyDocumentThemselvesAsBelongingTo() throws {
+        XCTAssertEqual(MuscleFatigueBand.of(try fatigued(1.0 / 3.0)), .moderate)
+        XCTAssertEqual(MuscleFatigueBand.of(try fatigued((1.0 / 3.0) - 0.0001)), .light)
+        XCTAssertEqual(MuscleFatigueBand.of(try fatigued(2.0 / 3.0)), .high)
+        XCTAssertEqual(MuscleFatigueBand.of(try fatigued((2.0 / 3.0) - 0.0001)), .moderate)
+    }
+
+    func testEveryFatigueBandIsReachable() throws {
+        XCTAssertEqual(
+            Set(MuscleFatigueBand.allCases),
+            [.notLogged, .fresh, .light, .moderate, .high]
+        )
+    }
+
+    // MARK: - The mark
+
+    /// The reading in, the whole presentation out — asserted against literal expected
+    /// values, not against the private thresholds `MuscleFatigueMark.swift` itself
+    /// uses, so this fails if the mapping drifts rather than passing however it reads.
+    func testNeverLoggedDrawsADashedEmptyOutlineWithAGlyph() {
+        let mark = MuscleFatigueMark.mark(for: .neverLogged)
+        XCTAssertEqual(mark.band, .notLogged)
+        XCTAssertEqual(mark.label, "Not logged")
+        XCTAssertTrue(mark.outlineIsDashed)
+        XCTAssertEqual(mark.fillFraction, 0, accuracy: 0.0001)
+        XCTAssertTrue(mark.hasGlyph)
+    }
+
+    func testFreshDrawsASolidEmptyOutlineWithNoGlyph() throws {
+        let fresh = MuscleFatigueReading.fresh(try MuscleFatigue(
+            group: .legs,
+            fraction: 0.002,
+            lastWorkedAt: Date(timeIntervalSince1970: 0),
+            elapsedSeconds: 2_000_000,
+            sessionWeight: 1.0
+        ))
+        let mark = MuscleFatigueMark.mark(for: fresh)
+        XCTAssertEqual(mark.band, .fresh)
+        XCTAssertEqual(mark.label, "Fresh")
+        XCTAssertFalse(mark.outlineIsDashed)
+        XCTAssertEqual(mark.fillFraction, 0, accuracy: 0.0001)
+        XCTAssertFalse(mark.hasGlyph)
+    }
+
+    func testFatiguedBandsFillProportionallyMoreAsTheLevelRises() throws {
+        let light = MuscleFatigueMark.mark(for: try fatigued(0.1))
+        let moderate = MuscleFatigueMark.mark(for: try fatigued(0.5))
+        let high = MuscleFatigueMark.mark(for: try fatigued(0.9))
+
+        XCTAssertEqual(light.label, "Light")
+        XCTAssertEqual(moderate.label, "Moderate")
+        XCTAssertEqual(high.label, "High")
+
+        XCTAssertEqual(light.fillFraction, 1.0 / 3.0, accuracy: 0.0001)
+        XCTAssertEqual(moderate.fillFraction, 2.0 / 3.0, accuracy: 0.0001)
+        XCTAssertEqual(high.fillFraction, 1.0, accuracy: 0.0001)
+
+        for mark in [light, moderate, high] {
+            XCTAssertFalse(mark.outlineIsDashed)
+            XCTAssertFalse(mark.hasGlyph)
+        }
+
+        // The channel this ticket exists to guarantee: strictly increasing fill, with
+        // nothing here reading a colour to know it.
+        XCTAssertLessThan(light.fillFraction, moderate.fillFraction)
+        XCTAssertLessThan(moderate.fillFraction, high.fillFraction)
+    }
+
+    /// No two bands may render the same mark — the direct analogue of
+    /// `testEveryScoreBandCarriesItsOwnMark` for this type. Built from the actual
+    /// output of `MuscleFatigueMark.mark(for:)` for one representative reading per
+    /// band, not from the band list alone, so a bug that made two *different* bands
+    /// compute the same tuple would be caught here rather than only in the banding
+    /// tests above.
+    func testEveryFatigueBandCarriesItsOwnDistinctMark() throws {
+        let readings: [MuscleFatigueReading] = [
+            .neverLogged,
+            .fresh(try MuscleFatigue(
+                group: .core, fraction: 0.001, lastWorkedAt: Date(timeIntervalSince1970: 0),
+                elapsedSeconds: 3_000_000, sessionWeight: 1.0
+            )),
+            try fatigued(0.1),
+            try fatigued(0.5),
+            try fatigued(0.9),
+        ]
+        let signatures = readings.map { reading -> [String] in
+            let mark = MuscleFatigueMark.mark(for: reading)
+            return [
+                "dashed:\(mark.outlineIsDashed)",
+                "fill:\(mark.fillFraction)",
+                "glyph:\(mark.hasGlyph)",
+            ]
+        }
+        XCTAssertEqual(
+            Set(signatures.map { $0.joined(separator: ",") }).count,
+            readings.count,
+            "two fatigue bands drew the same mark: \(signatures)"
+        )
+    }
+}
