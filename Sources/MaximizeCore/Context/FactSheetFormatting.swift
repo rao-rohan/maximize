@@ -108,4 +108,36 @@ enum FactSheetFormatting {
         }
         return parts.joined(separator: ", ")
     }
+
+    /// The **lift** slot's ask — "lift, 45m 0s, muscle groups: chest, shoulders".
+    ///
+    /// Moved here from `WorkoutFactSheet` (MAX-181) the moment `TrainingFactSheet`'s plan
+    /// block became its second caller — exactly what that private function's own doc
+    /// comment said would happen. Not `scheduledSession(_:)` above: that function renders
+    /// a prescribed *distance*, which no lift carries, and is silent about the two fields
+    /// a lift's ask is actually written in, `durationSeconds` and `muscleGroups`.
+    ///
+    /// **Absences are omitted, not stated** — the opposite of `scheduledSession(_:)`'s own
+    /// convention, and deliberately so: "lift on Tuesday, length unstated" and "lift on
+    /// Tuesday, groups unstated" are ordinary asks a plan really makes (`ScheduledSession`
+    /// documents both as distinct from rest), not gaps in a record, so there is nothing for
+    /// a disclaimer to tell either reader that the short line does not already say.
+    static func liftPrescription(_ session: ScheduledSession) -> String {
+        var parts = [session.kind.rawValue]
+        if let durationSeconds = session.durationSeconds {
+            parts.append(duration(durationSeconds))
+        }
+        if !session.muscleGroups.isEmpty {
+            // `ordered`, never the set's own iteration order: a prompt that shuffled its
+            // muscle groups between two builds of the same context would be D3's
+            // determinism failing on a word rather than on a number.
+            parts.append("muscle groups: "
+                + session.muscleGroups.ordered.map(\.rawValue).joined(separator: ", "))
+        }
+        let prescription = parts.joined(separator: ", ")
+        // The note trails the list rather than joining it: it is a gloss on the whole
+        // ask, not another item in it, and ", (upper body)" reads as a fourth field.
+        guard let note = session.note, !note.isEmpty else { return prescription }
+        return "\(prescription) (\(note))"
+    }
 }

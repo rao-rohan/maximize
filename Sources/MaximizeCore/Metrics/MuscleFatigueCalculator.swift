@@ -71,11 +71,10 @@ public struct MuscleFatigueInput: Sendable {
     /// the six change nothing — `MuscleGroup` is closed.
     ///
     /// **How far back to fetch is the caller's decision, and it is nearly free to get
-    /// right**: only the most recent session per group is read, so a window that is too
-    /// short can only make a group read as *never logged* when it was logged before the
-    /// window. Fetch at least `MuscleFatigueModel.negligibleFraction`'s worth of curve —
-    /// a fortnight covers the standard model — or simply fetch the lifts you already
-    /// have.
+    /// right**: one session per group sets the figure, so a window that is too short can
+    /// only under-report, never invent. Fetch at least the curve's own length —
+    /// `MuscleFatigueModel.negligibleDecay` puts that at a fortnight for the standard
+    /// model — or simply fetch the lifts you already have.
     public let sessions: [MuscleFatigueSession]
 
     public let model: MuscleFatigueModel
@@ -143,7 +142,7 @@ public struct MuscleFatigueInput: Sendable {
 ///
 /// ## The curve
 ///
-/// For each group, the **most recent** session that named it:
+/// For each session naming a group:
 ///
 /// ```text
 /// weight   = min(durationSeconds / fullSessionSeconds, 1)
@@ -154,14 +153,33 @@ public struct MuscleFatigueInput: Sendable {
 /// Exponential rather than linear because a linear ramp needs an arbitrary zero
 /// crossing and then asserts a hard edge at it — *fatigued on Thursday, recovered on
 /// Friday* — which is a sharper claim than "roughly halves every couple of days" and no
-/// better supported. The floor at `negligibleFraction` is where the exponential's tail
+/// better supported. The floor at `negligibleDecay` is where the exponential's tail
 /// stops being reported as fatigue; the figure underneath it is still carried, so
 /// ordering survives.
 ///
-/// **Only the last session counts.** Three leg days in four read as the last of them.
-/// Accumulating them was declined for MAX-179: the sum's scale is anchored to nothing
-/// measured, and the model's own weight is already a proxy standing in for work nobody
-/// recorded. See `MuscleFatigue` for the full list of what this cannot know.
+/// ## Exactly one session governs, and it is the one that comes out highest
+///
+/// **Not simply the latest**, and the difference is the reason this is written down.
+/// MAX-179 was briefed as "the last session that worked it", and taken literally that
+/// makes the app punish honesty: a ninety-minute leg day on Monday evening reads about
+/// 0.82 on Tuesday morning, and logging a ten-minute mobility session that also touched
+/// legs on Tuesday morning drops the same athlete to about 0.22 — *more* logged data,
+/// *less* reported fatigue, from a session that added work rather than removing it.
+///
+/// Taking the highest candidate reading fixes that without accumulating anything: still
+/// exactly one session, still no sum, and now monotone — logging a session can never
+/// lower a group's figure. It reduces to "the last session" whenever the sessions are
+/// of comparable length, which is the ordinary case the brief was describing.
+///
+/// `MuscleFatigue` carries both instants, because they answer different questions:
+/// `sessionEndedAt` is where the figure came from, and `mostRecentlyWorkedAt` is when
+/// the athlete last worked the group at all — which is what a screen means by "last
+/// worked", and would be a false sentence if it named the governing session instead.
+///
+/// Three leg days in four still read as one of them, never as their sum: that was
+/// declined for MAX-179 because the sum's scale is anchored to nothing measured, and
+/// the model's own weight is already a proxy standing in for work nobody recorded. See
+/// `MuscleFatigue` for the full list of what this cannot know.
 ///
 /// A pure function over stored records, in the shape `TalliesCalculator` already has —
 /// no clock, no storage, no framework.
@@ -174,10 +192,16 @@ public enum MuscleFatigueCalculator {
     ///   It is a `throws` rather than a comment claiming so.
     public static func compute(_ input: MuscleFatigueInput) throws -> MuscleFatigueMap {
         var readings: [MuscleGroup: MuscleFatigueReading] = [:]
-        for (group, session) in lastSessionByGroup(input.sessions) {
+        for group in MuscleGroup.allCases {
+            let named = input.sessions.filter { $0.groups.contains(group) }
+            guard
+                let governing = governingSession(among: named, now: input.now, model: input.model),
+                let lastWorked = named.map({ $0.endedAt }).max()
+            else { continue }
             readings[group] = try reading(
                 for: group,
-                session: session,
+                session: governing,
+                mostRecentlyWorkedAt: lastWorked,
                 now: input.now,
                 model: input.model
             )
@@ -189,28 +213,33 @@ public enum MuscleFatigueCalculator {
         )
     }
 
-    /// The session each group is measured from: the latest one naming it.
+    /// The one session a group's figure is measured from: whichever reads highest. See
+    /// the type note for why this is not simply the latest.
     ///
-    /// Ties are broken deterministically — longer session first, then by identifier —
-    /// because two sessions can share an end instant (a re-recorded workout, a fixture)
-    /// and a map that redrew itself differently on each launch would be a bug nobody
-    /// could reproduce.
-    private static func lastSessionByGroup(
-        _ sessions: [MuscleFatigueSession]
-    ) -> [MuscleGroup: MuscleFatigueSession] {
-        var latest: [MuscleGroup: MuscleFatigueSession] = [:]
+    /// Ties are broken deterministically — later session first, then longer, then by
+    /// identifier — because equal figures are ordinary here (two identical sessions, two
+    /// sessions sharing an end instant, a fixture) and a map that redrew itself
+    /// differently on each launch would be a bug nobody could reproduce.
+    private static func governingSession(
+        among sessions: [MuscleFatigueSession],
+        now: Date,
+        model: MuscleFatigueModel
+    ) -> MuscleFatigueSession? {
+        var governing: MuscleFatigueSession?
+        var governingFigure = -Double.infinity
         for session in sessions {
-            for group in session.groups {
-                guard let held = latest[group] else {
-                    latest[group] = session
-                    continue
-                }
-                if isLater(session, than: held) {
-                    latest[group] = session
-                }
+            let figure = fraction(of: session, now: now, model: model)
+            guard let held = governing else {
+                governing = session
+                governingFigure = figure
+                continue
+            }
+            if figure > governingFigure || (figure == governingFigure && isLater(session, than: held)) {
+                governing = session
+                governingFigure = figure
             }
         }
-        return latest
+        return governing
     }
 
     private static func isLater(
@@ -224,26 +253,53 @@ public enum MuscleFatigueCalculator {
         return lhs.workoutID.uuidString > rhs.workoutID.uuidString
     }
 
+    /// Seconds since a session ended, clamped.
+    ///
+    /// Clamped rather than signed: a session whose end stamp is in the future is a clock
+    /// or time-zone artefact, not evidence of work not yet done, and letting the exponent
+    /// go negative would push the figure above the model's ceiling. The stamp itself is
+    /// carried through to `MuscleFatigue.sessionEndedAt` uncorrected — this clamps the
+    /// arithmetic, not the record.
+    private static func elapsedSeconds(since session: MuscleFatigueSession, now: Date) -> Double {
+        max(0, now.timeIntervalSince(session.endedAt))
+    }
+
+    private static func decay(
+        since session: MuscleFatigueSession,
+        now: Date,
+        model: MuscleFatigueModel
+    ) -> Double {
+        pow(0.5, elapsedSeconds(since: session, now: now) / model.halfLifeSeconds)
+    }
+
+    private static func fraction(
+        of session: MuscleFatigueSession,
+        now: Date,
+        model: MuscleFatigueModel
+    ) -> Double {
+        weight(for: session, model: model) * decay(since: session, now: now, model: model)
+    }
+
     private static func reading(
         for group: MuscleGroup,
         session: MuscleFatigueSession,
+        mostRecentlyWorkedAt: Date,
         now: Date,
         model: MuscleFatigueModel
     ) throws -> MuscleFatigueReading {
-        // Clamped rather than signed: a session whose end stamp is in the future is a
-        // clock or time-zone artefact, not evidence of work not yet done, and letting
-        // the exponent go negative would push the figure above the model's ceiling.
-        let elapsedSeconds = max(0, now.timeIntervalSince(session.endedAt))
-        let sessionWeight = weight(for: session, model: model)
-        let decay = pow(0.5, elapsedSeconds / model.halfLifeSeconds)
         let fatigue = try MuscleFatigue(
             group: group,
-            fraction: sessionWeight * decay,
-            lastWorkedAt: session.endedAt,
-            elapsedSeconds: elapsedSeconds,
-            sessionWeight: sessionWeight
+            fraction: fraction(of: session, now: now, model: model),
+            sessionEndedAt: session.endedAt,
+            mostRecentlyWorkedAt: mostRecentlyWorkedAt,
+            elapsedSeconds: elapsedSeconds(since: session, now: now),
+            sessionWeight: weight(for: session, model: model)
         )
-        return fatigue.fraction < model.negligibleFraction
+        // Tested against the decay factor, not the finished figure: a twenty-second
+        // session read a minute later is small, not old, and calling it `.fresh` would
+        // say "enough time has passed" about something that just happened. See
+        // `MuscleFatigueModel.negligibleDecay`.
+        return decay(since: session, now: now, model: model) < model.negligibleDecay
             ? .fresh(fatigue)
             : .fatigued(fatigue)
     }
