@@ -63,7 +63,18 @@ final class TrainingFactSheetPlanBlockTests: XCTestCase {
         XCTAssertTrue(sheet.contains("Friday: rest\n"), sheet)
         XCTAssertTrue(sheet.contains("Saturday: easy, 6.0 km\n"), sheet)
         XCTAssertTrue(sheet.contains("Sunday: long, 18.0 km\n"), sheet)
-        XCTAssertFalse(sheet.contains("Lift:"), sheet)
+        // Scoped to the weekday lines, not the whole sheet: the convention sentence names
+        // the tag in prose, so "Lift:" legitimately appears above them. The invariant is
+        // that no *day* claims a lift ask, which is the only place a stray clause would
+        // mislead the model.
+        let weekdays = [
+            "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
+        ]
+        let weekdayLines = sheet.split(separator: "\n").filter { line in
+            weekdays.contains { line.hasPrefix("\($0): ") }
+        }
+        XCTAssertEqual(weekdayLines.count, 7, sheet)
+        XCTAssertFalse(weekdayLines.contains { $0.contains("Lift:") }, sheet)
     }
 
     // MARK: - A week with lifts on some days
