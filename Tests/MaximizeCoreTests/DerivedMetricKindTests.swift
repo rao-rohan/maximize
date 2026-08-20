@@ -100,10 +100,15 @@ final class DerivedMetricKindTests: XCTestCase {
     /// §3.3, the decision about what a lift's metrics *are* rather than only what they
     /// are not: the heart-rate readings are real and stay, and everything anchored to a
     /// run field of the plan or modelling running gait goes.
+    ///
+    /// `.strain` joined the list in MAX-176 because it is a total of `.zoneSplits`, which
+    /// was already here — see `WorkoutStrain` for what a lift's strain therefore is (the
+    /// cardiovascular cost of the session) and what it is not (anything about load, which
+    /// HealthKit does not carry — A20).
     func testALiftGetsTheHeartRateReadingsAndNothingAnchoredToARunField() {
         XCTAssertEqual(
             DerivedMetricKind.applicable(to: .traditionalStrengthTraining),
-            [.averageHeartRateBPM, .maximumHeartRateBPM, .zoneSplits]
+            [.averageHeartRateBPM, .maximumHeartRateBPM, .zoneSplits, .strain]
         )
     }
 

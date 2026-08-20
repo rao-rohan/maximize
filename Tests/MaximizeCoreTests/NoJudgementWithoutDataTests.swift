@@ -107,6 +107,48 @@ final class NoJudgementWithoutDataTests: XCTestCase {
         }
     }
 
+    // MARK: - A figure with nothing underneath it is not produced
+
+    /// MAX-176's addition to the rule, and the reason it belongs here rather than only in
+    /// its own file: strain is an integral of the heart-rate curve, so a workout with no
+    /// curve has **no** strain. A zero would be the degraded judgement this file exists to
+    /// forbid — it reads as "this session cost nothing", which is a measurement, and it
+    /// would be summed into a rolling load figure as a real day of training rather than
+    /// left out of it.
+    ///
+    /// Both directions are checked, because the distinction A18 draws is between two
+    /// absences and not between absence and zero alone: a curve that exists but covers no
+    /// span *does* get a zero, since there is a measurement and it truthfully contains
+    /// nothing.
+    func testAWorkoutWithNoHeartRateCurveHasNoStrainRatherThanAZero() throws {
+        func metrics(_ samples: [(Double, Double)]?) throws -> DerivedMetrics {
+            try DerivedMetricsCalculator.compute(
+                DerivedMetricsInput(
+                    workout: try Fixture.workout(hasRoute: false),
+                    heartRateSeries: try samples.map { try MetricsFixture.series($0) }
+                ),
+                plan: try Fixture.plan()
+            )
+        }
+
+        let unmeasured = try metrics(nil)
+        XCTAssertNil(unmeasured.strain, "no curve to integrate — not a fabricated 0")
+        XCTAssertFalse(unmeasured.isRecorded(.strain))
+
+        let measured = try metrics([(0, 145)])
+        XCTAssertEqual(try XCTUnwrap(measured.strain).points, 0, "measured, and truthfully empty")
+
+        // And the record cannot be assembled the dishonest way round, whatever writes it.
+        assertThrows(
+            .inconsistent,
+            try DerivedMetrics(
+                workoutID: Fixture.workoutID,
+                strain: WorkoutStrain(points: 120),
+                planVersion: PlanVersion(1)
+            )
+        )
+    }
+
     // MARK: - Aggregates do not invent a figure out of an empty set
 
     /// A recorded workout nobody has scored is a workout day and nothing else. The average
@@ -154,5 +196,58 @@ final class NoJudgementWithoutDataTests: XCTestCase {
         )
 
         XCTAssertThrowsError(try ContextBuilder.build(for: .workout(Fixture.workoutID), from: inputs))
+    }
+
+    // MARK: - A muscle group nobody logged is not a recovered one
+
+    /// MAX-179's seam. A fatigue figure of `0.0` for a group no session ever named
+    /// would read as **fully recovered**, which is a claim about the athlete's body
+    /// from a record that says nothing about it — they may have trained legs every day
+    /// and told the app nothing (A22: "I have not told you yet" is not "I trained
+    /// nothing").
+    ///
+    /// So the reading is `.neverLogged` and its `fraction` is nil. The group beside it
+    /// is the contrast that makes the point: worked a fortnight ago, decayed below the
+    /// model's floor, and **still carrying a figure** — because there, recovery is
+    /// something the app was actually told enough to judge.
+    func testAMuscleGroupNoSessionEverNamedHasNoFatigueFigureRatherThanAZero() throws {
+        let map = try MuscleFatigueCalculator.compute(
+            MuscleFatigueInput(
+                now: Fixture.epoch,
+                sessions: [
+                    try MuscleFatigueSession(
+                        workoutID: Fixture.workoutID,
+                        groups: [.chest],
+                        endedAt: Fixture.epoch.addingTimeInterval(-14 * 24 * 3_600),
+                        durationSeconds: 2_700
+                    )
+                ]
+            )
+        )
+
+        XCTAssertEqual(map[.legs], .neverLogged)
+        XCTAssertNil(map[.legs].fraction, "no session named legs — not a fabricated 0.0")
+        XCTAssertNotNil(
+            map[.chest].fraction,
+            "a group worked a fortnight ago is judged recovered, which is a different fact"
+        )
+        XCTAssertNotEqual(map[.chest], .neverLogged)
+    }
+
+    /// The same rule one level up: an athlete who has logged nothing gets the map's own
+    /// absence state, not six regions drawn at zero. `hasNoLoggedSessions` is the
+    /// question a screen asks instead of inferring it from six figures that would all
+    /// have had to be invented.
+    func testAnAthleteWhoHasLoggedNoStrengthSessionGetsNoMapRatherThanAnEmptyOne() throws {
+        let map = try MuscleFatigueCalculator.compute(
+            MuscleFatigueInput(now: Fixture.epoch, sessions: [])
+        )
+
+        XCTAssertTrue(map.hasNoLoggedSessions)
+        XCTAssertEqual(map.neverLogged, Set(MuscleGroup.allCases))
+        XCTAssertTrue(
+            map.ordered.allSatisfy { $0.reading.fraction == nil },
+            "every region is an absence, and none of them is a zero"
+        )
     }
 }

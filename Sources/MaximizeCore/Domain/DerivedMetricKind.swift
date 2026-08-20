@@ -36,6 +36,7 @@ public enum DerivedMetricKind: String, Hashable, Sendable, CaseIterable {
     case averageCadenceStepsPerMinute
     case gradeAdjustedPaceSecondsPerKilometer
     case zoneSplits
+    case strain
     case distanceSplits
 
     /// What a workout must be before this figure describes anything about it.
@@ -85,6 +86,21 @@ public enum DerivedMetricKind: String, Hashable, Sendable, CaseIterable {
         // never doing so.
         case .timeAboveCapSeconds, .heartRateDriftFraction:
             return .runDiscipline
+
+        // MAX-176. Strain is a reading of `zoneSplits` — the same distribution, weighted
+        // by zone and summed — so it can only ever be as applicable as the figure it is
+        // read from, and `zoneSplits` is `.anyDiscipline` by §3.3 above. Giving it a
+        // narrower requirement would leave the record carrying a distribution nobody is
+        // allowed to total, and a wider one does not exist.
+        //
+        // A lift therefore has a strain, and `WorkoutStrain` states in its own
+        // documentation exactly what that figure is and is not: the cardiovascular cost
+        // of the session and nothing else, because HealthKit carries no load for a
+        // strength workout (A20). It inherits the zone boundaries' anchoring to the run
+        // cap along with everything else read off `zoneSplits` — tracker gap P2, made no
+        // worse by summing what is already there.
+        case .strain:
+            return .anyDiscipline
 
         // MAX-111's three, restated. Cadence is steps per minute against a running
         // band, and a lift's steps are the walk to the water fountain. Grade-adjusted
