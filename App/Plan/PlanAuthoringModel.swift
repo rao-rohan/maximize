@@ -75,6 +75,12 @@ final class PlanAuthoringModel {
         /// first keystroke would leave them wondering what they were looking at.
         var prefill: PlanPrefillNotice?
 
+        /// MAX-166: whether the "describe it in a conversation" door can be offered right
+        /// now, and what the screen says either way. Resolved once at `load()`, from the
+        /// same three-state key read Settings and first run already use — see
+        /// `PlanAuthoringConversationalRoute`'s own doc for why `.unknown` still offers it.
+        var conversationalRoute: PlanAuthoringConversationalRoute
+
         var canSave: Bool { problem == nil }
 
         /// What the date currently chosen costs, in figures — "43 workouts already
@@ -113,6 +119,11 @@ final class PlanAuthoringModel {
     /// captured, `CapturedWorkoutHistory` turns that into days, and the core says what a
     /// date costs.
     private let workoutRepository: (any WorkoutRepository)?
+    /// Read only to gate MAX-166's conversational-route door. Never written here, and
+    /// never asked for the key itself — `resolveKeyPresence()` is the same three-state
+    /// read `SettingsView.refreshStoredKeyStatus()` and `FirstRunModel
+    /// .resolveKeyPresence()` already do.
+    private let keyStore: AnthropicAPIKeyStoring
     private let timeZone: TimeZone
     private let todayOverride: CalendarDay?
 
@@ -133,6 +144,11 @@ final class PlanAuthoringModel {
     ///   - settingsRepository: same, for the display unit.
     ///   - workoutRepository: same, for the captured history a first plan's date is
     ///     measured against (MAX-165).
+    ///   - keyStore: where the Anthropic API key lives, for MAX-166's gate. Defaults to
+    ///     the real Keychain store, matching `SettingsView` and `FirstRunModel`; a test
+    ///     or preview passes a fake. `KeychainAnthropicAPIKeyStore()` is not `@MainActor`,
+    ///     so — unlike `StoreAvailabilityModel`'s `availability` — this can default
+    ///     directly in the parameter list rather than being resolved in the body.
     ///   - today: the athlete's civil day. Defaults to now in `timeZone`; pinned by
     ///     tests and previews so the screen does not depend on the wall clock.
     ///   - timeZone: the zone an instant becomes a day in. `.current` is the honest
@@ -146,6 +162,7 @@ final class PlanAuthoringModel {
         planRepository: (any PlanRepository)? = nil,
         settingsRepository: (any SettingsRepository)? = nil,
         workoutRepository: (any WorkoutRepository)? = nil,
+        keyStore: AnthropicAPIKeyStoring = KeychainAnthropicAPIKeyStore(),
         today: CalendarDay? = nil,
         timeZone: TimeZone = .current,
         proposal: PlanProposal? = nil
@@ -168,6 +185,7 @@ final class PlanAuthoringModel {
         } else {
             self.workoutRepository = PersistenceComposition.store
         }
+        self.keyStore = keyStore
         self.timeZone = timeZone
         self.todayOverride = today
         self.proposal = proposal
@@ -200,7 +218,10 @@ final class PlanAuthoringModel {
                         governedDays: [],
                         problem: nil,
                         confirmation: nil,
-                        prefill: applied?.notice
+                        prefill: applied?.notice,
+                        conversationalRoute: PlanAuthoringConversationalRoute(
+                            apiKeyPresence: resolveKeyPresence()
+                        )
                     )
                 )
             )
@@ -273,6 +294,20 @@ final class PlanAuthoringModel {
             return AppSettings.standard.distanceUnit
         }
         return settings.distanceUnit
+    }
+
+    /// `SettingsView.refreshStoredKeyStatus()`'s and `FirstRunModel.resolveKeyPresence()`'s
+    /// own three-state read, duplicated for the same reason `FirstRunModel` gives for its
+    /// own copy of `performHealthAccessRequest`: this is a thin adapter with no decision
+    /// in it, not logic worth sharing across files this ticket did not touch. The decision
+    /// — what a failed read should mean — is `StoredAPIKeyPresence.unknown` and
+    /// `PlanAuthoringConversationalRoute`, both in `MaximizeCore` and under test.
+    private func resolveKeyPresence() -> StoredAPIKeyPresence {
+        do {
+            return try keyStore.retrieve() == nil ? .notStored : .stored
+        } catch {
+            return .unknown
+        }
     }
 
     // MARK: - Editing

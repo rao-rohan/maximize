@@ -560,7 +560,7 @@ feature was governed by a plan that could not exist).
 | MAX-153 | **The chat shell** — composer, thread list, sheet chrome. The design pass the chat's *shell* never had | Owner | **Opus** ✅ |
 | MAX-157 | **The fact sheet tells Claude "days" over a count of obligations** — `TrainingFactSheet`'s "Effective days" line is the same MAX-134 caption bug one layer into the prompt, not just on screen | MAX-140 | Sonnet ✅ |
 | MAX-161 | **First-run experience spec** — there is no first-run path in the app at all; a fresh install has no Health request, no plan, no key, and nothing pointing at any of them. Spec + A23/A24, decomposed into MAX-162…167 below | Owner | **Opus** ✅ |
-| MAX-162 … MAX-167 | The first-run build, decomposed from MAX-161 | MAX-161 | see below |
+| MAX-162 … MAX-167 | The first-run build, decomposed from MAX-161 | MAX-161 | see below ✅ |
 | MAX-169 | **A store that will not open is a designed state, not a brick** — the whole-store failure is named once, at the root, instead of nine screens each reporting their own; a retry where one could work and none where it could not; the additive-schema migration question settled. **Closes the store half of R15** | MAX-154 | **Opus** ✅ — see the MAX-169 section below |
 
 **MAX-161.** [docs/FIRST-RUN-SPEC.md](./docs/FIRST-RUN-SPEC.md). Verified by search: no
@@ -591,7 +591,7 @@ but is dated before its effective date is permanently unscorable, and nothing te
 | MAX-163 | The first-launch cover — one action, presents the Health sheet, claims no result | MAX-161 | Sonnet ✅ — see the MAX-163 section below for the gate and the recording |
 | MAX-164 | The setup card on the Workouts tab, including the "set up, nothing recorded yet" window | MAX-161 | Sonnet ✅ — see the MAX-164 section below, including how it now reads MAX-163's device-lifetime recording |
 | MAX-165 | **The first plan's effective date** — default covers what is captured; the excluded-workout count on screen. Revisions unchanged | MAX-161 | **Opus** ✅ **built ahead of the rest of this set** — see the MAX-165 section below |
-| MAX-166 | The conversational route to a first plan, offered from the authoring screen. Droppable | MAX-161 | Sonnet |
+| MAX-166 | The conversational route to a first plan, offered from the authoring screen. Droppable | MAX-161 | Sonnet ✅ — see the MAX-166 section below |
 | MAX-167 | The API key section's purpose footer — what the key is for, what it costs, where it lives | MAX-161 | Sonnet 🔒 ✅ |
 | MAX-172 | **The consolidated device-verification checklist** — every *Needs device verification* item from #101–#157, reordered into the sequence a person would actually run them in and ranked by risk, instead of thirty scattered PR sections | Owner | Sonnet ✅ |
 
@@ -1965,6 +1965,7 @@ free. What landed in the file:
 | MAX-173 | **A rubric fix can reach a stored plan** — authoring a revision adopts the bands this build ships, stated on screen and declinable, as a **new plan version**. Closes the D1 gap that made every seed-side rubric correction unreachable on a device with a plan. **Unblocks MAX-168.** Opens **R17** | 080, 132, 146 | **Opus** |
 | MAX-175 | **The app does not invent** — one principle, two expressions: the honest-refusal rule now holds over the *set* of model-facing prompts rather than in four literals that each remember it separately, and *no data, no judgement* is written down as a rule with tests. **The premise it was dispatched on was wrong** — the constraint was reported missing from chat and is not; see the MAX-175 section below | 174 | **Opus** |
 | MAX-176 | **Per-workout strain, computed at ingestion** — the app now measures what a session *cost*, beside everything else it measures, which is whether the athlete did what was asked. A zone-weighted integral of the stored HR curve (Edwards' summated-zone score over the plan's cap-anchored zones), in **zone-weighted minutes**, unbounded, computed once and stored in a new nullable `strainPoints` column. **No curve, no strain** — nil, never zero. A lift gets one and it is heart-rate only (A20). **Nothing already stored is rescored or moved**; existing workouts read back with no strain until something re-runs their metrics. Consumed by MAX-177 and MAX-178 — see the MAX-176 section below | 174, 175 | **Opus** |
+| MAX-179 | **Per-muscle fatigue from the entries A22 already collects** — the last session naming each of the six groups, weighted by its duration, decayed on a 48-hour half-life. States in its own doc comment what it cannot know (no sets, no reps, no load) and that **A20's tripwire governs the "just add a weight field" follow-up, not A22's permission**. A group never logged has *no* figure; a group logged a fortnight ago is *fresh* — a different fact. See the MAX-179 section below | 174, 175, A20/A22 | **Opus** |
 
 **Four collisions the overseer must respect.**
 
@@ -4530,6 +4531,79 @@ changed; `swift test` was not re-run to confirm the unmodified suite still passe
 
 ---
 
+## MAX-166 — the conversational route, offered from the authoring screen
+
+FIRST-RUN-SPEC §10 argues at length against a conversational *first run* and settles on
+the one place a conversational route belongs: "the authoring screen is where the
+conversational route should be offered, since that is where a person who dislikes the
+form is standing." §13 decision 5: "Offer it, from the authoring screen only, gated on a
+stored key." This ticket builds the door, not a new drafting mechanism —
+`ChatConversationView`'s "Draft a plan from this conversation" has shipped since MAX-101
+and is unchanged.
+
+**Premise checked against stored data first, per this ticket's own instruction.** The
+affordance did not already exist, `PlanAuthoringView` had no reference to chat, and
+`ChatConversationView`'s drafting entry point is reachable exactly as the spec assumes —
+so the ticket proceeded as briefed.
+
+### The gate, in the core
+
+`PlanAuthoringConversationalRoute` (`Sources/MaximizeCore/Plan/`) reads
+`StoredAPIKeyPresence` — the same three-state read Settings' key section and
+`FirstRunModel` already use — and answers two things: whether the action is enabled, and
+what the screen says either way. `.stored` and `.unknown` both enable it, matching
+`StoredAPIKeyPresence.permitsClearing`'s own reasoning (Settings offers **Clear** on both
+for the same "a failed read is not evidence of absence" argument, and `FirstRunChecklist`
+makes the identical call for its own "add a key" step). Only `.notStored` disables it.
+
+**Never a hidden button.** CLAUDE.md's "absence is a designed state" — the button always
+renders; `PlanAuthoringConversationalRoute.explanation` supplies the sentence under it in
+either state, worded to match `ChatFailureNotice.noAPIKeyStored(for:)`'s own register for
+the missing-key case rather than writing a second sentence about the same fact. Tested in
+`PlanAuthoringConversationalRouteTests` — every case of `StoredAPIKeyPresence`, both
+explanations non-empty and distinct, the unavailable one naming Settings and not claiming
+a key is stored.
+
+### App layer, deliberately thin
+
+`PlanAuthoringModel` gained one `keyStore: AnthropicAPIKeyStoring` parameter (defaults to
+`KeychainAnthropicAPIKeyStore()`, matching `SettingsView`/`FirstRunModel`) and one
+`resolveKeyPresence()` — the same three-state read duplicated a third time rather than
+shared, matching `FirstRunModel`'s own reasoning for its duplicated
+`performHealthAccessRequest`. `PlanAuthoringView` adds one `Section` (placed right after
+"Current plan", ahead of the eleven-field form) with the action button and the core's
+explanation text underneath, and a `.sheet(item:)` presenting `ChatSheet(subject:
+.training(scope))` — a fresh training thread frozen to "this week", the same fallback
+`ChatSheet.defaultInterval()` already resolves to. No change to `ChatSheet` or
+`ChatConversationView`: both already supported this call shape.
+
+**A14 held explicitly.** The button presents a sheet and calls nothing; `ChatModel` fires
+only when the athlete sends a message inside the conversation it opens. **CHAT-FIRST
+§2.5 held too**: the sheet opened is the same one MAX-101 already proved ends at
+`PlanAuthoringView`, reviewed and saved by hand — this ticket adds a second door to it,
+not a second way to write.
+
+### Tests
+
+`PlanAuthoringConversationalRouteTests` — nine tests, all in `MaximizeCore`, all
+synchronous (the type carries no `@MainActor` state). No test touches `App/`, which is
+never run by CI (R2/R13); the gate itself is what is verified there.
+
+### What CI can and cannot prove
+
+CI can prove: the package compiles, `PlanAuthoringConversationalRouteTests` holds the
+gate to every `StoredAPIKeyPresence` case, and the app target still links.
+
+CI cannot prove: that the button renders where intended, at any Dynamic Type size or
+under Increase Contrast/Reduce Transparency; that a tap actually presents `ChatSheet`;
+that the disabled state reads as disabled rather than merely dim; or that the "this week"
+scope resolves sensibly on a real device's clock. See the PR's "Needs device
+verification" section.
+
+**`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
+
+---
+
 ## MAX-170 — the stall detector stops depending on the ping cadence
 
 **MAX-152's threshold rested on a claim about the API that nobody had checked, and the
@@ -5336,6 +5410,119 @@ half is a two-line field copy in `MaximizeSchema` with no branches in it.
 confirm the store still opens (the migration is inferred, and an inferred migration that
 fails presents as an unopenable store — MAX-169's screen), and confirm an older workout's
 detail screen is unchanged.
+
+**`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
+
+---
+
+## MAX-179 — per-muscle fatigue, and the argument it is written against
+
+A decay model over the `MuscleGroupEntry` records A22 already collects — the cheapest of
+MAX-174's four features precisely because its input was already paid for. New files only:
+`Domain/MuscleFatigue.swift` and `Metrics/MuscleFatigueCalculator.swift`, plus tests.
+
+### The shape
+
+For each of the six groups, the **most recent** session the athlete said worked it:
+
+```text
+weight   = min(durationSeconds / 2700, 1)      // 45 minutes counts as a full session
+decay    = pow(0.5, elapsedSeconds / 172800)   // 48-hour half-life, measured from the end
+fraction = weight * decay                      // reported as fatigue above 0.01
+```
+
+**The 48-hour half-life is chosen against the interval a split repeats a group at, not
+against a physiological measurement** — a group trained Monday reads half-fatigued on
+Wednesday, the day a plan would next ask for it, and about a twelfth as fatigued the
+following Monday. 72 hours is equally defensible and is not more correct; the model is
+coarse enough that the gap between the two is smaller than the gap between a hard session
+and a token one, which neither can see at all. The 1% floor puts the "fresh" boundary at
+about 13 days and 7 hours for a full session.
+
+**The constants are code, not plan data, and that is a decision rather than an oversight.**
+D1 protects the reproducibility of *stored scores*, and this model produces none — nothing
+scores, gates or judges from it. The type states the line in advance: if a fatigue figure
+ever reaches the scorer, its constants become plan data in the same change.
+
+### What it cannot know, and why that is the ticket
+
+MAX-174 predicted this is the feature most likely to attract a *"just add a weight field"*
+follow-up, so the type meets that argument rather than leaving it to be re-derived. There
+are no sets, reps, load or exercises here because **the record does not contain them** —
+A20's wall — and the doc comment carries A20's own cost sentence rather than paraphrasing
+it: forty-five minutes of moving light weights reads exactly like forty-five real minutes.
+The governing amendment is stated explicitly: A22 spent the manual-entry non-goal narrowly
+and once (*which* muscles a session worked, on one screen, on one kind of workout, and "a
+later ticket does not inherit this amendment's permission"); **A20 governs *how much*, and
+requires an amendment superseding PRD §3 — never a field arriving inside a lifting
+ticket.** The figure is also documented as coarse, in the type, because a number with
+three decimal places invites being read as though it had three decimal places.
+
+### Two absences, not one
+
+MAX-175's invariant, applied at a new seam. A group **no session ever named** has no figure
+at all: a `0.0` would say *fully recovered*, which is a claim the record cannot support —
+the athlete may have trained legs daily and told the app nothing (A22: "I have not told you
+yet" is not "I trained nothing"). A group **worked a fortnight ago** is `.fresh` and still
+carries its figure, because there recovery is something the app was told enough to judge.
+Three reading cases, three sentences in `MuscleFatigueCopy`, and both new cases live in
+`NoJudgementWithoutDataTests` rather than a parallel file.
+
+### What was rejected
+
+- **Accumulating sessions.** Three leg days in four read as the last of them. A sum's scale
+  is anchored to nothing measured, which turns a coarse signal into an arbitrary one.
+- **A linear ramp.** It needs an arbitrary zero crossing and then asserts a hard edge at it
+  — *fatigued Thursday, recovered Friday* — a sharper claim than "halves every couple of
+  days" and no better supported.
+- **Scaling duration without a ceiling**, and **normalising to the athlete's longest
+  session**. The first reads a three-hour session as 4× a 45-minute one on a scale nothing
+  justifies; the second lets one outlier rescale every figure in the app.
+- **Clamping the tail to zero at the floor.** The floor is a presentation boundary; the
+  figure underneath it still orders, so a fortnight ago and a year ago do not collapse.
+- **Admitting a zero-duration session as a zero weight.** Refused at
+  `MuscleFatigueSession.init` for the same reason a never-logged group has no figure. The
+  builder over stored workouts *skips* such a record rather than throwing, so one malformed
+  workout cannot deny the athlete the other five groups.
+
+### The seam MAX-176 swaps
+
+Weighting goes through `MuscleFatigueModel.Weighting`, one case today (`.duration`). When
+per-workout strain lands: add a `.strain` case, give `MuscleFatigueSession` an optional
+stored strain beside its duration, add one branch to
+`MuscleFatigueCalculator.weight(for:model:)`. Nothing else in either file moves. **`.duration`
+does not become dead code** — a lift whose strap dropped has no strain, and MAX-175 forbids
+judging it on a fabricated one, so duration stays as the honest fallback and the choice
+stays the caller's. No file MAX-176 owns was touched.
+
+### What MAX-180 should read
+
+- `MuscleFatigueMap.ordered` — all six groups in canonical order, **total by construction**:
+  a group with no session is present as `.neverLogged`, never missing, so a region cannot be
+  silently dropped by a lookup that returned nil.
+- `MuscleFatigueMap.hasNoLoggedSessions` — the map's own absence state. One sentence, not
+  six regions drawn at zero.
+- `MuscleFatigueCopy.modelCaption` — the honest caption, written and pinned by a test.
+  `MuscleFatigueCopy.detail(for:)` gives the per-group sentence, and the never-logged and
+  fresh wordings are deliberately different.
+- `MuscleFatigue.fraction` for the band; `sessionWeight`, `elapsedSeconds`, `elapsedDays`
+  and `lastWorkedAt` for the detail a dense screen wants.
+- **The three reading cases must stay three on screen**, and fatigue bands need a non-hue
+  channel that extends the existing score-band accessibility test rather than a parallel
+  one.
+
+### What CI can and cannot prove
+
+CI can prove the package compiles and that the curve is the one documented: every expected
+figure in `MuscleFatigueTests` is hand-computed from the half-life, so each elapsed time is
+a whole or half number of half-lives and each expectation is a written-out power of two —
+including the floor asserted from both sides (13 days is fatigue at 2^-6.5, 14 days is fresh
+at 2^-7). A test that asserted whatever `compute` returned would pass against the wrong
+curve.
+
+CI cannot prove the half-life is the right one. That is a product judgement no test reaches,
+and its first honest check is an athlete reading a map after a real training week — which
+needs MAX-180, since nothing draws this yet.
 
 **`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
 
