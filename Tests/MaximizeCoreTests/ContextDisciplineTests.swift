@@ -364,6 +364,7 @@ final class ContextDisciplineTests: XCTestCase {
         Average cadence: 167 spm (within the target band)
         Grade-adjusted pace: 5:08 per km
         Time in zones: zone 2 50m 0s, zone 3 15m 0s
+        Strain: not yet computed for this workout, so there is no figure to read
         """)
     }
 

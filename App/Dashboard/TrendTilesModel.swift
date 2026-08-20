@@ -114,6 +114,10 @@ final class TrendTilesModel {
                 restDayBudget: restDayBudget
             )
             let tallies = try TalliesCalculator.compute(talliesInput)
+            let loadBalance = try await self.loadBalance(
+                anchor: today,
+                workoutRepository: workoutRepository
+            )
 
             // `workouts` is the widened C1 set; `TrendTileData` filters it back down to
             // `tallies.from...tallies.through` itself (see its own documentation), so
@@ -127,11 +131,81 @@ final class TrendTilesModel {
                 workouts: workouts,
                 timeZone: timeZone,
                 planCalendar: planCalendar,
-                distanceUnit: settings.distanceUnit
+                distanceUnit: settings.distanceUnit,
+                loadBalance: loadBalance
             )
             state = .loaded(tileData)
         } catch {
             state = .failed
         }
+    }
+
+    /// The earliest calendar day a workout `WorkoutRepository` predates — used only to
+    /// tell `LoadBalanceCalculator` whether the chronic window is fully inside the app's
+    /// own horizon (`LoadBalanceInput.historyStart`, MAX-178). Not the athlete's actual
+    /// training history: this app can only vouch for what it has stored.
+    ///
+    /// Bounded well before any HealthKit workout could plausibly exist rather than
+    /// `Date.distantPast` — both are correct, but a concrete calendar day keeps the
+    /// repository query inside `DateInterval.covering(from:through:in:)`'s ordinary
+    /// contract instead of leaning on an extreme sentinel `Date`.
+    private static let historyProbeFloor = (try? CalendarDay(year: 2010, month: 1, day: 1))
+
+    /// Resolves `LoadBalanceCalculator.compute`'s input and calls it (MAX-178). Two
+    /// repository reads: the chronic window itself, which the sums need regardless, and
+    /// one bounded probe for "does anything exist before it" — cheaper than fetching
+    /// every workout ever stored just to find the earliest one, and correct for the same
+    /// reason `historyProbeFloor`'s doc comment gives: only *whether* history reaches
+    /// back that far matters once it does, never the exact day it started.
+    private func loadBalance(
+        anchor: CalendarDay,
+        workoutRepository: any WorkoutRepository
+    ) async throws -> LoadBalanceReading {
+        let chronicWindowStart = try anchor.adding(days: -(LoadBalanceCalculator.chronicWindowDays - 1))
+
+        let chronicInterval = try DateInterval.covering(
+            from: chronicWindowStart, through: anchor, in: timeZone
+        )
+        let chronicWorkouts = try await workoutRepository.workouts(startingIn: chronicInterval)
+
+        var historyStart = anchor
+        if let earliestChronicDay = try chronicWorkouts.map({ try $0.calendarDay(in: timeZone) }).min() {
+            historyStart = earliestChronicDay
+        }
+
+        // Only worth probing further back when the chronic window's own earliest
+        // workout has not already proven sufficiency on its own (a workout on the
+        // window's first day already puts `historyStart` at or before it).
+        if historyStart > chronicWindowStart, let floor = Self.historyProbeFloor, floor < chronicWindowStart {
+            let priorInterval = try DateInterval.covering(
+                from: floor,
+                through: chronicWindowStart.adding(days: -1),
+                in: timeZone
+            )
+            let priorWorkouts = try await workoutRepository.workouts(startingIn: priorInterval)
+            if !priorWorkouts.isEmpty {
+                // Sufficient either way — the exact day does not change the reading once
+                // it is at or before `chronicWindowStart` (`LoadBalanceCalculator`'s
+                // guard only compares against `chronicWindowDays`), so the window's own
+                // start stands in for it rather than resolving a real minimum.
+                historyStart = chronicWindowStart
+            }
+        }
+
+        var derivedMetricsByWorkoutID: [UUID: DerivedMetrics] = [:]
+        for workout in chronicWorkouts {
+            if let metrics = try await workoutRepository.derivedMetrics(forWorkout: workout.id) {
+                derivedMetricsByWorkoutID[workout.id] = metrics
+            }
+        }
+
+        let input = try LoadBalanceInput(
+            anchor: anchor,
+            timeZone: timeZone,
+            historyStart: historyStart,
+            workouts: chronicWorkouts,
+            derivedMetricsByWorkoutID: derivedMetricsByWorkoutID
+        )
+        return try LoadBalanceCalculator.compute(input)
     }
 }

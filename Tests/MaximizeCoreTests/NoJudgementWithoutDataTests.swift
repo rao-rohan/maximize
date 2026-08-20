@@ -250,4 +250,69 @@ final class NoJudgementWithoutDataTests: XCTestCase {
             "every region is an absence, and none of them is a zero"
         )
     }
+
+    // MARK: - A load-balance window skips absent strain rather than zeroing it (MAX-178)
+
+    /// The seam MAX-176 named directly for this ticket: a strapless workout's missing
+    /// strain must not be summed into a rolling load window as a real, free day of
+    /// training. Two same-length workouts fall in the acute window; only one carries a
+    /// strain figure, and the sum reads exactly that one figure — not that figure halved
+    /// across both, and not that figure plus a fabricated zero for the other.
+    func testALoadBalanceWindowSkipsAWorkoutWithNoStrainRatherThanTreatingItAsZero() throws {
+        let anchor = try CalendarDay(iso8601: "2026-01-28")
+        // Exactly 28 days of history — the boundary the chronic window needs to be full.
+        let historyStart = try CalendarDay(iso8601: "2026-01-01")
+
+        func workout(on dayText: String, id: UUID) throws -> Workout {
+            let start = try CalendarDay(iso8601: dayText).civilAnchor()
+            return try Workout(
+                id: id,
+                activityType: .running,
+                start: start,
+                end: start.addingTimeInterval(1_800),
+                durationSeconds: 1_800,
+                distanceMeters: 5_000,
+                activeEnergyKilocalories: 300,
+                hasRoute: false,
+                source: .appleWatch,
+                ingestedAt: start.addingTimeInterval(1_860)
+            )
+        }
+
+        let strapped = UUID()
+        let strapless = UUID()
+        let metrics = try DerivedMetrics(
+            workoutID: strapped,
+            averageHeartRateBPM: 140,
+            strain: try WorkoutStrain(points: 80),
+            planVersion: PlanVersion(1)
+        )
+
+        let reading = try LoadBalanceCalculator.compute(
+            LoadBalanceInput(
+                anchor: anchor,
+                timeZone: .gmt,
+                historyStart: historyStart,
+                workouts: [
+                    try workout(on: "2026-01-27", id: strapped),
+                    try workout(on: "2026-01-27", id: strapless),
+                ],
+                // `strapless` carries no entry at all — the same reading this input
+                // gives a workout whose metrics were computed but found no curve.
+                derivedMetricsByWorkoutID: [strapped: metrics]
+            )
+        )
+
+        guard case let .available(balance) = reading else {
+            return XCTFail("28 days of history should already be enough for a reading")
+        }
+        XCTAssertEqual(
+            balance.acuteStrainPoints, 80, accuracy: 1e-9,
+            "the strapless run contributes nothing to the sum — not a fabricated 0"
+        )
+        XCTAssertEqual(
+            balance.acuteWorkoutsWithoutStrain, 1,
+            "the gap is counted, not silently absorbed into the sum"
+        )
+    }
 }

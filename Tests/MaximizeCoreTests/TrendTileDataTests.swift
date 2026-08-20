@@ -329,7 +329,10 @@ final class TrendTileDataTests: XCTestCase {
             distanceUnit: .kilometers
         )
 
-        XCTAssertEqual(data.tiles.map(\.caption), ["km vs. arc", "effective sessions", "day streak", "avg score"])
+        XCTAssertEqual(
+            data.tiles.map(\.caption),
+            ["km vs. arc", "effective sessions", "day streak", "building load history", "avg score"]
+        )
     }
 
     /// With mileage and effective days both absent, `tiles` drops straight to the two
@@ -342,7 +345,7 @@ final class TrendTileDataTests: XCTestCase {
             workouts: [], timeZone: .gmt, planCalendar: nil, distanceUnit: .kilometers
         )
 
-        XCTAssertEqual(data.tiles.map(\.caption), ["day streak", "avg score"])
+        XCTAssertEqual(data.tiles.map(\.caption), ["day streak", "building load history", "avg score"])
     }
 
     // MARK: - The tile set follows the span (MAX-083)
@@ -383,7 +386,10 @@ final class TrendTileDataTests: XCTestCase {
         XCTAssertEqual(data.workoutDays?.caption, "days trained")
         XCTAssertEqual(
             data.tiles.map(\.caption),
-            ["km vs. arc", "effective sessions", "days trained", "day streak", "avg score"]
+            [
+                "km vs. arc", "effective sessions", "days trained",
+                "day streak", "building load history", "avg score",
+            ]
         )
     }
 
@@ -434,7 +440,10 @@ final class TrendTileDataTests: XCTestCase {
         XCTAssertEqual(data.workoutDays?.value, "212")
         XCTAssertEqual(
             data.tiles.map(\.caption),
-            ["km total", "effective, of 310 eligible sessions", "days trained", "day streak", "avg score"]
+            [
+                "km total", "effective, of 310 eligible sessions", "days trained",
+                "day streak", "building load history", "avg score",
+            ]
         )
     }
 
@@ -704,5 +713,165 @@ final class TrendTileDataTests: XCTestCase {
         // (80 + 60) / 2 = 70.0 — both scored efforts counted, neither collapsed to a
         // single best-of-the-day figure the way `effectiveDays` would.
         XCTAssertEqual(data.averageScore?.value, "70.0")
+    }
+
+    // MARK: - MAX-178: load balance is a formatted, already-computed reading
+
+    /// `.buildingHistory` renders as a real tile — the designed absence state, not a
+    /// blank and not the tile simply missing from `tiles`.
+    func testLoadBalanceRendersTheBuildingHistoryStateAsARealTile() throws {
+        let data = try TrendTileData(
+            kind: .week,
+            tallies: try tallies(from: "2026-01-05", through: "2026-01-11"),
+            workouts: [], timeZone: .gmt, planCalendar: nil, distanceUnit: .kilometers,
+            loadBalance: .buildingHistory(daysRecorded: 6, daysNeeded: 28)
+        )
+
+        XCTAssertEqual(data.loadBalance.value, "6/28 days")
+        XCTAssertEqual(data.loadBalance.caption, "building load history")
+        XCTAssertTrue(data.tiles.map(\.caption).contains("building load history"))
+    }
+
+    /// The ordinary case: a ratio, formatted to two decimal places, with a plain caption
+    /// that names no verdict.
+    func testLoadBalanceRendersTheRatioToTwoDecimalPlaces() throws {
+        let balance = try LoadBalance(
+            anchor: try day("2026-01-28"),
+            acuteStrainPoints: 120,
+            chronicStrainPoints: 160,
+            chronicWeeklyAveragePoints: 40,
+            ratio: 3.0,
+            acuteWorkoutsWithoutStrain: 0,
+            chronicWorkoutsWithoutStrain: 0
+        )
+
+        let data = try TrendTileData(
+            kind: .week,
+            tallies: try tallies(from: "2026-01-05", through: "2026-01-11"),
+            workouts: [], timeZone: .gmt, planCalendar: nil, distanceUnit: .kilometers,
+            loadBalance: .available(balance)
+        )
+
+        XCTAssertEqual(data.loadBalance.value, "3.00")
+        XCTAssertEqual(data.loadBalance.caption, "acute:chronic load")
+    }
+
+    /// MAX-176's own instruction for this tile: the caption names how many of the acute
+    /// window's sessions carried no strain, so a sum quietly missing coverage does not
+    /// read the same as a sum of everything that happened.
+    func testLoadBalanceCaptionNamesStrainlessSessionsInTheAcuteWindow() throws {
+        let balance = try LoadBalance(
+            anchor: try day("2026-01-28"),
+            acuteStrainPoints: 80,
+            chronicStrainPoints: 300,
+            chronicWeeklyAveragePoints: 75,
+            ratio: 80.0 / 75.0,
+            acuteWorkoutsWithoutStrain: 2,
+            chronicWorkoutsWithoutStrain: 2
+        )
+
+        let data = try TrendTileData(
+            kind: .week,
+            tallies: try tallies(from: "2026-01-05", through: "2026-01-11"),
+            workouts: [], timeZone: .gmt, planCalendar: nil, distanceUnit: .kilometers,
+            loadBalance: .available(balance)
+        )
+
+        XCTAssertEqual(data.loadBalance.caption, "acute:chronic load (2 sessions this week without strain)")
+    }
+
+    /// The singular, so "1 session" never reads as "1 sessions."
+    func testLoadBalanceCaptionSingularisesOneStrainlessSession() throws {
+        let balance = try LoadBalance(
+            anchor: try day("2026-01-28"),
+            acuteStrainPoints: 80,
+            chronicStrainPoints: 300,
+            chronicWeeklyAveragePoints: 75,
+            ratio: 80.0 / 75.0,
+            acuteWorkoutsWithoutStrain: 1,
+            chronicWorkoutsWithoutStrain: 1
+        )
+
+        let data = try TrendTileData(
+            kind: .week,
+            tallies: try tallies(from: "2026-01-05", through: "2026-01-11"),
+            workouts: [], timeZone: .gmt, planCalendar: nil, distanceUnit: .kilometers,
+            loadBalance: .available(balance)
+        )
+
+        XCTAssertEqual(data.loadBalance.caption, "acute:chronic load (1 session this week without strain)")
+    }
+
+    /// No chronic baseline: the ratio is withheld, but the acute figure — genuinely
+    /// known — is still shown rather than the tile going blank.
+    func testLoadBalanceShowsTheAcuteFigureAloneWhenThereIsNoChronicBaseline() throws {
+        // No strain anywhere in the window (`LoadBalance.init` ties `ratio == nil` to
+        // `chronicWeeklyAveragePoints == 0`): the acute figure, genuinely 0 here, is
+        // still shown — the same "measured, and containing nothing" reading
+        // `WorkoutStrain` gives a zero-span curve.
+        let balance = try LoadBalance(
+            anchor: try day("2026-01-28"),
+            acuteStrainPoints: 0,
+            chronicStrainPoints: 0,
+            chronicWeeklyAveragePoints: 0,
+            ratio: nil,
+            acuteWorkoutsWithoutStrain: 0,
+            chronicWorkoutsWithoutStrain: 3
+        )
+
+        let data = try TrendTileData(
+            kind: .week,
+            tallies: try tallies(from: "2026-01-05", through: "2026-01-11"),
+            workouts: [], timeZone: .gmt, planCalendar: nil, distanceUnit: .kilometers,
+            loadBalance: .available(balance)
+        )
+
+        XCTAssertEqual(data.loadBalance.value, "0 pts")
+        XCTAssertEqual(data.loadBalance.caption, "7-day strain — no 4-week baseline yet")
+    }
+
+    /// The tile carries no colour, verdict word or threshold language — only a number
+    /// and a plain description of what it is. Every state this type can render one
+    /// through actual `TrendTileData` output, not a hand-typed copy of the strings
+    /// above, so a caption drifting toward "high"/"low"/"risk" wording later would
+    /// actually fail this test rather than only failing to be re-pinned by it.
+    func testLoadBalanceTilesNeverEditorialise() throws {
+        func renderedTile(_ reading: LoadBalanceReading) throws -> TrendTileData.Tile {
+            try TrendTileData(
+                kind: .week,
+                tallies: try tallies(from: "2026-01-05", through: "2026-01-11"),
+                workouts: [], timeZone: .gmt, planCalendar: nil, distanceUnit: .kilometers,
+                loadBalance: reading
+            ).loadBalance
+        }
+
+        let available = try LoadBalance(
+            anchor: try day("2026-01-28"),
+            acuteStrainPoints: 120, chronicStrainPoints: 160, chronicWeeklyAveragePoints: 40,
+            ratio: 3.0, acuteWorkoutsWithoutStrain: 1, chronicWorkoutsWithoutStrain: 1
+        )
+        let noBaseline = try LoadBalance(
+            anchor: try day("2026-01-28"),
+            acuteStrainPoints: 0, chronicStrainPoints: 0, chronicWeeklyAveragePoints: 0,
+            ratio: nil, acuteWorkoutsWithoutStrain: 0, chronicWorkoutsWithoutStrain: 3
+        )
+
+        let renderedTiles = [
+            try renderedTile(.buildingHistory(daysRecorded: 6, daysNeeded: 28)),
+            try renderedTile(.available(available)),
+            try renderedTile(.available(noBaseline)),
+        ]
+
+        let bannedWords = ["risk", "overtrain", "danger", "high", "low", "warning", "caution", "alert"]
+        for renderedTile in renderedTiles {
+            let combined = (renderedTile.value + " " + renderedTile.caption).lowercased()
+            for word in bannedWords {
+                XCTAssertFalse(
+                    combined.contains(word),
+                    "\"\(renderedTile.value)\" / \"\(renderedTile.caption)\" must not carry coaching "
+                        + "language — MAX-178 forbids editorialising the ratio"
+                )
+            }
+        }
     }
 }
