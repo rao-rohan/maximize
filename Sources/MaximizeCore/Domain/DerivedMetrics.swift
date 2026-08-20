@@ -125,6 +125,15 @@ public struct DerivedMetrics: Hashable, Sendable, Codable, Identifiable {
 
     public let zoneSplits: ZoneSplits
 
+    /// What the session cost: the zone-weighted integral of the heart-rate curve, in
+    /// zone-weighted minutes (MAX-176). Nil means there was no curve to integrate — a
+    /// workout with no heart rate has no strain, never a zero.
+    ///
+    /// `WorkoutStrain` carries the weighting, the unit and the limits of the figure,
+    /// including the one a lift's strain has: it is heart-rate only, and knows nothing
+    /// about load (A20). Read it before consuming this.
+    public let strain: WorkoutStrain?
+
     /// FR-1.5's per-kilometre/mile pace breakdown — cut at ingestion, at every display
     /// unit, and stored (D2). Not to be confused with `zoneSplits` above, which is time
     /// per *heart-rate zone*: a different measurement that happens to share the word.
@@ -173,6 +182,7 @@ public struct DerivedMetrics: Hashable, Sendable, Codable, Identifiable {
         averageCadenceStepsPerMinute: Double? = nil,
         gradeAdjustedPaceSecondsPerKilometer: Double? = nil,
         zoneSplits: ZoneSplits = .empty,
+        strain: WorkoutStrain? = nil,
         distanceSplits: DistanceSplits? = nil,
         distanceSplitsComputed: Bool = true,
         planVersion: PlanVersion
@@ -198,6 +208,16 @@ public struct DerivedMetrics: Hashable, Sendable, Codable, Identifiable {
                 reason: "DerivedMetrics.timeAboveCapSeconds requires a heart-rate series"
             )
         }
+        // A18, as a type-level check rather than a convention: strain is an integral of
+        // the heart-rate curve, so a record stating one while stating no heart rate at
+        // all is a figure with nothing underneath it. Tested against
+        // `averageHeartRateBPM` because that is the figure every discipline records
+        // whenever a series exists — see `DerivedMetrics.hasHeartRateData`.
+        if averageHeartRateBPM == nil, strain != nil {
+            throw DomainError.inconsistent(
+                reason: "DerivedMetrics.strain requires a heart-rate series"
+            )
+        }
 
         self.workoutID = workoutID
         self.averageHeartRateBPM = averageHeartRateBPM
@@ -207,6 +227,7 @@ public struct DerivedMetrics: Hashable, Sendable, Codable, Identifiable {
         self.averageCadenceStepsPerMinute = averageCadenceStepsPerMinute
         self.gradeAdjustedPaceSecondsPerKilometer = gradeAdjustedPaceSecondsPerKilometer
         self.zoneSplits = zoneSplits
+        self.strain = strain
         self.distanceSplits = distanceSplits
         self.distanceSplitsComputed = distanceSplitsComputed
         self.planVersion = planVersion
@@ -235,6 +256,7 @@ public struct DerivedMetrics: Hashable, Sendable, Codable, Identifiable {
         case .averageCadenceStepsPerMinute: return averageCadenceStepsPerMinute != nil
         case .gradeAdjustedPaceSecondsPerKilometer: return gradeAdjustedPaceSecondsPerKilometer != nil
         case .zoneSplits: return !zoneSplits.splits.isEmpty
+        case .strain: return strain != nil
         case .distanceSplits: return distanceSplits != nil
         }
     }
@@ -258,7 +280,7 @@ public struct DerivedMetrics: Hashable, Sendable, Codable, Identifiable {
     private enum CodingKeys: String, CodingKey {
         case workoutID, averageHeartRateBPM, maximumHeartRateBPM, timeAboveCapSeconds
         case heartRateDriftFraction, averageCadenceStepsPerMinute
-        case gradeAdjustedPaceSecondsPerKilometer, zoneSplits, distanceSplits
+        case gradeAdjustedPaceSecondsPerKilometer, zoneSplits, strain, distanceSplits
         case distanceSplitsComputed, planVersion
     }
 
@@ -277,6 +299,12 @@ public struct DerivedMetrics: Hashable, Sendable, Codable, Identifiable {
                 Double.self, forKey: .gradeAdjustedPaceSecondsPerKilometer
             ),
             zoneSplits: container.decode(ZoneSplits.self, forKey: .zoneSplits),
+            // `decodeIfPresent` for MAX-176's reason, the same one `distanceSplits`
+            // states below: a record encoded before this ticket carries no key here, and
+            // the honest reading of that is "no strain was ever computed for this
+            // workout" — which is exactly what it means — not a decode failure that
+            // would lose every other metric on the run.
+            strain: container.decodeIfPresent(WorkoutStrain.self, forKey: .strain),
             // `decodeIfPresent`: a record encoded before MAX-046 carries no key here, and
             // the honest reading of that is "no breakdown recorded", not a decode failure
             // that would lose every other metric on the run.

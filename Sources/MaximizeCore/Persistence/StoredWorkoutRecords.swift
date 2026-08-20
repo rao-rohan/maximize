@@ -231,6 +231,24 @@ public struct StoredDerivedMetrics: Hashable, Sendable {
     /// A JSON-encoded `ZoneSplits`.
     public var zoneSplitsJSON: Data
 
+    /// The zone-weighted integral of the heart-rate curve, in zone-weighted minutes
+    /// (MAX-176), or **nil when this workout has no heart-rate curve** — and nil is also
+    /// what every row written before this column existed reads back as, which is the
+    /// honest answer for a record whose strain was never computed.
+    ///
+    /// A column rather than a field inside a blob, unlike the two split payloads either
+    /// side of it, because
+    /// this one *is* queried: MAX-178's rolling 7-day and 28-day load balance sums it
+    /// across a window, and a figure a dashboard totals should not oblige the store to
+    /// decode a JSON payload per workout to reach it.
+    ///
+    /// A bare `Double?` rather than an encoded `WorkoutStrain`: the domain type exists to
+    /// carry the meaning and the validation, and it reconstructs from its one number on
+    /// the way back out. Storing the wrapper would put a JSON object where a nullable
+    /// numeric column belongs, and CloudKit accepts the optional column as-is (its rule
+    /// is that a *non*-optional attribute must have a default).
+    public var strainPoints: Double?
+
     /// A JSON-encoded `DistanceSplits` (MAX-046), or **nil when this run has no pace
     /// breakdown** — an indoor run, a route that could not be cut up, or a workout whose
     /// metrics were computed before this column existed.
@@ -267,6 +285,7 @@ public struct StoredDerivedMetrics: Hashable, Sendable {
         averageCadenceStepsPerMinute: Double?,
         gradeAdjustedPaceSecondsPerKilometer: Double?,
         zoneSplitsJSON: Data,
+        strainPoints: Double?,
         distanceSplitsJSON: Data?,
         distanceSplitsComputed: Bool,
         planVersionNumber: Int
@@ -279,6 +298,7 @@ public struct StoredDerivedMetrics: Hashable, Sendable {
         self.averageCadenceStepsPerMinute = averageCadenceStepsPerMinute
         self.gradeAdjustedPaceSecondsPerKilometer = gradeAdjustedPaceSecondsPerKilometer
         self.zoneSplitsJSON = zoneSplitsJSON
+        self.strainPoints = strainPoints
         self.distanceSplitsJSON = distanceSplitsJSON
         self.distanceSplitsComputed = distanceSplitsComputed
         self.planVersionNumber = planVersionNumber
@@ -301,6 +321,7 @@ public struct StoredDerivedMetrics: Hashable, Sendable {
             averageCadenceStepsPerMinute: metrics.averageCadenceStepsPerMinute,
             gradeAdjustedPaceSecondsPerKilometer: metrics.gradeAdjustedPaceSecondsPerKilometer,
             zoneSplitsJSON: zoneSplitsJSON,
+            strainPoints: metrics.strain?.points,
             distanceSplitsJSON: distanceSplitsJSON,
             distanceSplitsComputed: metrics.distanceSplitsComputed,
             planVersionNumber: metrics.planVersion.number
@@ -321,6 +342,7 @@ public struct StoredDerivedMetrics: Hashable, Sendable {
                 from: zoneSplitsJSON,
                 field: "StoredDerivedMetrics.zoneSplitsJSON"
             ),
+            strain: try strainPoints.map { try WorkoutStrain(points: $0) },
             distanceSplits: try distanceSplitsJSON.map {
                 try PersistencePayload.decode(
                     DistanceSplits.self,

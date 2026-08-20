@@ -427,7 +427,7 @@ final class DesignPaletteContrastTests: XCTestCase {
         try MuscleFatigue(
             group: .chest,
             fraction: fraction,
-            lastWorkedAt: Date(timeIntervalSince1970: 0),
+            sessionEndedAt: Date(timeIntervalSince1970: 0),
             elapsedSeconds: 3_600,
             sessionWeight: 1.0
         )

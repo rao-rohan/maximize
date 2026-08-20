@@ -39,8 +39,26 @@ import MaximizeCore
 /// set, rep or load behind any of these six numbers, and A22 means the map only knows
 /// what the athlete typed. The caption says both, plainly, rather than letting a
 /// confident-looking diagram imply a precision the record does not have.
+///
+/// ## "Last worked", calendar-correct
+///
+/// Each logged region also draws when it was last worked (`MuscleFatigueLastWorked-
+/// Caption`, MAX-180 adapting to #173's removal of `MuscleFatigue.elapsedDays`): a
+/// whole-day count built from `CalendarDay.days(until:)` in the athlete's zone, the
+/// same pattern `ChatThreadListPresentation.compactTimestamp` already uses for a chat
+/// thread's timestamp — never a fixed 86,400-second block, which misreports a session
+/// that ended late one night as "today" the next morning. This view supplies the two
+/// inputs the core function needs (`map.computedAt` for "now", `timeZone` for which
+/// calendar the days are counted in) and draws what it returns; it does no date
+/// arithmetic of its own.
 struct MuscleMapView: View {
     let map: MuscleFatigueMap
+
+    /// The athlete's zone, for the "last worked" caption's day count
+    /// (`MuscleFatigueLastWorkedCaption`). `.current` is the honest default for a
+    /// single-device app (A1) — the same default `WorkoutDetailModel.timeZone` already
+    /// uses for every other calendar-day computation on this screen.
+    var timeZone: TimeZone = .current
 
     @ScaledMetric(relativeTo: .body) private var regionSize: CGFloat = LayoutMetrics.muscleMapRegionSize
 
@@ -124,6 +142,7 @@ struct MuscleMapView: View {
     private func region(_ group: MuscleGroup) -> some View {
         let reading = map[group]
         let mark = MuscleFatigueMark.mark(for: reading)
+        let lastWorked = lastWorkedCaption(for: reading)
         return VStack(spacing: Spacing.tight) {
             MuscleFatigueRegionMarkView(mark: mark, diameter: regionSize)
             Text(group.displayName)
@@ -137,29 +156,40 @@ struct MuscleMapView: View {
             // The numeral CLAUDE.md's UI standard asks for, on the two bands that
             // have one — `reading.fatigue` is nil only for `.neverLogged`, and
             // `mark.label` already carries the whole story for that one on its own.
-            if let elapsedDays = reading.fatigue?.elapsedDays {
-                Text(elapsedDaysCaption(elapsedDays))
+            if let lastWorked {
+                Text(lastWorked.compact)
                     .font(.microLabel)
                     .foregroundStyle(Color.textTertiary)
             }
         }
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(accessibilityLabel(group: group, reading: reading, mark: mark))
+        .accessibilityLabel(accessibilityLabel(group: group, reading: reading, mark: mark, lastWorked: lastWorked))
     }
 
-    private func elapsedDaysCaption(_ days: Int) -> String {
-        days == 0 ? "today" : "\(days)d ago"
+    /// `MuscleFatigueLastWorkedCaption` reads `mostRecentlyWorkedAt`, never
+    /// `sessionEndedAt` — see that type's doc comment on why naming the governing
+    /// session instead would be a false sentence on a session #173 outweighed but did
+    /// not erase. `map.computedAt` stands in for "now" so this caption's notion of
+    /// today can never disagree with the fatigue figure drawn beside it.
+    private func lastWorkedCaption(for reading: MuscleFatigueReading) -> MuscleFatigueLastWorkedCaption.Caption? {
+        guard let fatigue = reading.fatigue else { return nil }
+        return MuscleFatigueLastWorkedCaption.text(
+            mostRecentlyWorkedAt: fatigue.mostRecentlyWorkedAt,
+            now: map.computedAt,
+            timeZone: timeZone
+        )
     }
 
     private func accessibilityLabel(
         group: MuscleGroup,
         reading: MuscleFatigueReading,
-        mark: MuscleFatigueMark
+        mark: MuscleFatigueMark,
+        lastWorked: MuscleFatigueLastWorkedCaption.Caption?
     ) -> String {
         var label = "\(group.displayName): \(mark.label). \(MuscleFatigueCopy.detail(for: reading))"
-        if let elapsedDays = reading.fatigue?.elapsedDays {
-            label += " Last worked \(elapsedDaysCaption(elapsedDays))."
+        if let lastWorked {
+            label += " \(lastWorked.sentence)"
         }
         return label
     }

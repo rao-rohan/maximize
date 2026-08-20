@@ -59,13 +59,13 @@ final class MuscleFatigueTests: XCTestCase {
         let validated = try MuscleFatigueModel(
             halfLifeSeconds: MuscleFatigueModel.standard.halfLifeSeconds,
             fullSessionSeconds: MuscleFatigueModel.standard.fullSessionSeconds,
-            negligibleFraction: MuscleFatigueModel.standard.negligibleFraction,
+            negligibleDecay: MuscleFatigueModel.standard.negligibleDecay,
             weighting: MuscleFatigueModel.standard.weighting
         )
         XCTAssertEqual(validated, .standard)
         XCTAssertEqual(MuscleFatigueModel.standard.halfLifeSeconds, Self.halfLife)
         XCTAssertEqual(MuscleFatigueModel.standard.fullSessionSeconds, Self.fullSession)
-        XCTAssertEqual(MuscleFatigueModel.standard.negligibleFraction, 0.01)
+        XCTAssertEqual(MuscleFatigueModel.standard.negligibleDecay, 0.01)
     }
 
     func testAModelWithoutAPositiveHalfLifeIsRejected() {
@@ -74,7 +74,7 @@ final class MuscleFatigueTests: XCTestCase {
             try MuscleFatigueModel(
                 halfLifeSeconds: 0,
                 fullSessionSeconds: Self.fullSession,
-                negligibleFraction: 0.01,
+                negligibleDecay: 0.01,
                 weighting: .duration
             )
         )
@@ -83,7 +83,7 @@ final class MuscleFatigueTests: XCTestCase {
             try MuscleFatigueModel(
                 halfLifeSeconds: Self.halfLife,
                 fullSessionSeconds: Self.fullSession,
-                negligibleFraction: 1.5,
+                negligibleDecay: 1.5,
                 weighting: .duration
             )
         )
@@ -159,6 +159,13 @@ final class MuscleFatigueTests: XCTestCase {
         let readings = try map([try session([.shoulders], hoursAgo: -6)])
         XCTAssertEqual(try fraction(readings, .shoulders), 1.0, accuracy: 1e-12)
         XCTAssertEqual(readings[.shoulders].fatigue?.elapsedSeconds, 0)
+        // The arithmetic is clamped; the record is not. `sessionEndedAt` still says what
+        // the stored workout says, so nothing downstream has to guess whether it was
+        // corrected — `elapsedSeconds` is the figure to compute with, and it says so.
+        XCTAssertEqual(
+            readings[.shoulders].fatigue?.sessionEndedAt,
+            Self.now.addingTimeInterval(6 * 3_600)
+        )
     }
 
     // MARK: - Ordering
@@ -184,10 +191,10 @@ final class MuscleFatigueTests: XCTestCase {
         XCTAssertEqual(readings.neverLogged, [.back, .shoulders, .legs, .core])
     }
 
-    /// Only the most recent session naming a group is read. Two 45-minute chest days,
-    /// two and four days ago, read as the later one — 0.5, not 0.5 + 0.25. The model
-    /// does not accumulate, and this is the test that says so out loud.
-    func testOnlyTheLastSessionNamingAGroupIsRead() throws {
+    /// Exactly one session sets a group's figure. Two 45-minute chest days, two and four
+    /// days ago, read 0.5 — the later one — not 0.5 + 0.25. The model does not
+    /// accumulate, and this is the test that says so out loud.
+    func testOnlyOneSessionSetsAGroupsFigureAndTheyAreNeverSummed() throws {
         let readings = try map([
             try session([.chest], hoursAgo: 96),
             try session([.chest], hoursAgo: 48)
@@ -195,9 +202,72 @@ final class MuscleFatigueTests: XCTestCase {
         XCTAssertEqual(try fraction(readings, .chest), 0.5, accuracy: 1e-12)
     }
 
+    /// **Logging a session must never make the athlete read as more recovered.** A
+    /// 90-minute leg day two days ago reads 0.5; a 10-minute session that also touched
+    /// legs, finishing just now, reads 2/9 on its own. Taking "the last session"
+    /// literally would report the smaller figure — more logged data, less reported
+    /// fatigue, from work that was added rather than removed. The governing session is
+    /// whichever reads highest, so the figure holds at 0.5.
+    func testALighterLaterSessionCannotLowerAGroupsFigure() throws {
+        let heavyThenLight = try map([
+            try session([.legs], hoursAgo: 48, minutes: 90),
+            try session([.legs], hoursAgo: 0, minutes: 10)
+        ])
+        let heavyAlone = try map([try session([.legs], hoursAgo: 48, minutes: 90)])
+
+        XCTAssertEqual(try fraction(heavyThenLight, .legs), 0.5, accuracy: 1e-12)
+        XCTAssertEqual(
+            try fraction(heavyThenLight, .legs),
+            try fraction(heavyAlone, .legs),
+            accuracy: 1e-12,
+            "logging the mobility session must not reduce the figure"
+        )
+        XCTAssertGreaterThan(try fraction(heavyThenLight, .legs), 0.2222222222222222)
+    }
+
+    /// The two instants answer different questions, and the light-session case is where
+    /// they come apart: the figure is measured from Monday's leg day, and the athlete
+    /// nonetheless worked legs this morning. A screen saying "last worked two days ago"
+    /// would be false.
+    func testTheGoverningSessionAndTheLastSessionAreBothReported() throws {
+        let readings = try map([
+            try session([.legs], hoursAgo: 48, minutes: 90),
+            try session([.legs], hoursAgo: 0, minutes: 10)
+        ])
+        let fatigue = try XCTUnwrap(readings[.legs].fatigue)
+        XCTAssertEqual(fatigue.sessionEndedAt, Self.now.addingTimeInterval(-48 * 3_600))
+        XCTAssertEqual(fatigue.mostRecentlyWorkedAt, Self.now)
+        XCTAssertEqual(fatigue.elapsedSeconds, 48 * 3_600)
+    }
+
+    /// The ordinary case: one session, and the two instants are the same.
+    func testTheTwoInstantsAgreeWhenOneSessionIsBothTheLatestAndTheHeaviest() throws {
+        let readings = try map([try session([.core], hoursAgo: 24)])
+        let fatigue = try XCTUnwrap(readings[.core].fatigue)
+        XCTAssertEqual(fatigue.sessionEndedAt, fatigue.mostRecentlyWorkedAt)
+        XCTAssertEqual(fatigue.sessionEndedAt, Self.now.addingTimeInterval(-24 * 3_600))
+    }
+
+    /// A figure cannot claim to have been measured from a session later than the last
+    /// one the group was worked — the type refuses the pair rather than trusting a
+    /// caller to keep them consistent.
+    func testAFigureMeasuredFromAfterTheLastSessionIsRefused() {
+        assertThrows(
+            .inconsistent,
+            try MuscleFatigue(
+                group: .chest,
+                fraction: 0.5,
+                sessionEndedAt: Self.now,
+                mostRecentlyWorkedAt: Self.now.addingTimeInterval(-3_600),
+                elapsedSeconds: 0,
+                sessionWeight: 0.5
+            )
+        )
+    }
+
     /// Input order must not decide the answer, and neither must a shared end instant.
     /// Same-instant sessions are ranked by duration, deterministically.
-    func testTheLatestSessionWinsRegardlessOfInputOrderAndTiesAreDeterministic() throws {
+    func testTheGoverningSessionIsTheSameRegardlessOfInputOrderAndTiesAreDeterministic() throws {
         let older = try session([.legs], hoursAgo: 96)
         let newer = try session([.legs], hoursAgo: 48)
         XCTAssertEqual(try fraction(try map([older, newer]), .legs), 0.5, accuracy: 1e-12)
@@ -225,6 +295,37 @@ final class MuscleFatigueTests: XCTestCase {
         XCTAssertEqual(try fraction(fourteen, .back), 0.0078125, accuracy: 1e-12)
         guard case .fresh = fourteen[.back] else {
             return XCTFail("14 days is below the 1% floor and reads as fresh")
+        }
+    }
+
+    /// **The boundary is temporal, and only temporal.** It is tested against the decay
+    /// factor rather than the finished figure, so a 20-minute session crosses it on the
+    /// same day a 45-minute one does — at 13 days it is still fatigue even though its
+    /// figure (0.0049) is already under 1%, and at 14 days it is fresh.
+    func testTheFreshBoundaryDoesNotMoveWithSessionLength() throws {
+        let thirteen = try map([try session([.arms], hoursAgo: 13 * 24, minutes: 20)])
+        XCTAssertEqual(try fraction(thirteen, .arms), 0.004910463758239913, accuracy: 1e-12)
+        guard case .fatigued = thirteen[.arms] else {
+            return XCTFail("a small figure is not the same fact as an old one")
+        }
+
+        let fourteen = try map([try session([.arms], hoursAgo: 14 * 24, minutes: 20)])
+        XCTAssertEqual(try fraction(fourteen, .arms), 0.003472222222222222, accuracy: 1e-12)
+        guard case .fresh = fourteen[.arms] else {
+            return XCTFail("14 days is past the floor for any session length")
+        }
+    }
+
+    /// The reason the boundary is gated on decay: a mis-started Watch workout of fifteen
+    /// seconds, tagged and read a minute later, has a figure under 1% because it was
+    /// *tiny*, not because time has passed. Calling it `.fresh` would put "enough time
+    /// has passed" on screen about something that just happened.
+    func testATinySessionThatJustFinishedIsNotCalledFresh() throws {
+        let readings = try map([try session([.shoulders], hoursAgo: 0, minutes: 0.25)])
+        XCTAssertEqual(try fraction(readings, .shoulders), 0.005555555555555556, accuracy: 1e-12)
+        XCTAssertLessThan(try fraction(readings, .shoulders), MuscleFatigueModel.standard.negligibleDecay)
+        guard case .fatigued = readings[.shoulders] else {
+            return XCTFail("a session a minute old has not had time to recover, however small")
         }
     }
 
@@ -471,7 +572,7 @@ final class MuscleFatigueMarkTests: XCTestCase {
         .fatigued(try MuscleFatigue(
             group: .chest,
             fraction: fraction,
-            lastWorkedAt: Date(timeIntervalSince1970: 0),
+            sessionEndedAt: Date(timeIntervalSince1970: 0),
             elapsedSeconds: 3_600,
             sessionWeight: 1.0
         ))
@@ -487,7 +588,7 @@ final class MuscleFatigueMarkTests: XCTestCase {
         let fresh = MuscleFatigueReading.fresh(try MuscleFatigue(
             group: .back,
             fraction: 0.005,
-            lastWorkedAt: Date(timeIntervalSince1970: 0),
+            sessionEndedAt: Date(timeIntervalSince1970: 0),
             elapsedSeconds: 1_000_000,
             sessionWeight: 1.0
         ))
@@ -540,7 +641,7 @@ final class MuscleFatigueMarkTests: XCTestCase {
         let fresh = MuscleFatigueReading.fresh(try MuscleFatigue(
             group: .legs,
             fraction: 0.002,
-            lastWorkedAt: Date(timeIntervalSince1970: 0),
+            sessionEndedAt: Date(timeIntervalSince1970: 0),
             elapsedSeconds: 2_000_000,
             sessionWeight: 1.0
         ))
@@ -586,7 +687,7 @@ final class MuscleFatigueMarkTests: XCTestCase {
         let readings: [MuscleFatigueReading] = [
             .neverLogged,
             .fresh(try MuscleFatigue(
-                group: .core, fraction: 0.001, lastWorkedAt: Date(timeIntervalSince1970: 0),
+                group: .core, fraction: 0.001, sessionEndedAt: Date(timeIntervalSince1970: 0),
                 elapsedSeconds: 3_000_000, sessionWeight: 1.0
             )),
             try fatigued(0.1),
@@ -606,5 +707,105 @@ final class MuscleFatigueMarkTests: XCTestCase {
             readings.count,
             "two fatigue bands drew the same mark: \(signatures)"
         )
+    }
+
+    // MARK: - "Last worked" (MAX-180, adapting to #173's removal of `elapsedDays`)
+
+    /// **The case that motivated this file.** A session ending Sunday 22:00 UTC, read
+    /// ten hours later at Monday 08:00 UTC, is only 10 of 86,400 seconds into a day —
+    /// the old `elapsedDays = Int(elapsedSeconds / 86_400)` said "0 days ago", i.e.
+    /// "today". A calendar, in the same GMT zone, says Sunday and Monday are different
+    /// days, so the honest answer is "yesterday". This is the regression
+    /// `MuscleFatigueLastWorkedCaption` exists to fix, stated with the exact clock
+    /// times the bug was reported with rather than with round numbers of days.
+    func testASessionEndingSundayNightReadsAsYesterdayByMondayMorningEvenThoughUnderADayElapsed() {
+        let sundayTenPM = Date(timeIntervalSince1970: 1_786_917_600) // 2026-08-16T22:00:00Z
+        let mondayEightAM = Date(timeIntervalSince1970: 1_786_953_600) // 2026-08-17T08:00:00Z
+        XCTAssertEqual(mondayEightAM.timeIntervalSince(sundayTenPM), 10 * 3_600, "fixture sanity: 10 hours apart")
+
+        let text = MuscleFatigueLastWorkedCaption.text(
+            mostRecentlyWorkedAt: sundayTenPM,
+            now: mondayEightAM,
+            timeZone: .gmt
+        )
+        XCTAssertEqual(text?.compact, "yesterday")
+        XCTAssertEqual(text?.sentence, "Last worked yesterday.")
+    }
+
+    /// **The same two instants, a different zone, a different calendar-correct
+    /// answer** — proof this is genuinely timezone-aware rather than merely closer to
+    /// correct. In Honolulu (UTC−10, no DST) both instants fall in the *same* local
+    /// calendar day: 2026-08-16 12:00 and 2026-08-16 22:00. Zero calendar days have
+    /// passed there, even though GMT — ten time zones east — has already turned the
+    /// page once.
+    func testTheSameTwoInstantsReadDifferentlyInATenHourEarlierZone() throws {
+        let sundayTenPM = Date(timeIntervalSince1970: 1_786_917_600) // 2026-08-16T22:00:00Z
+        let mondayEightAM = Date(timeIntervalSince1970: 1_786_953_600) // 2026-08-17T08:00:00Z
+        let honolulu = try XCTUnwrap(TimeZone(identifier: "Pacific/Honolulu"))
+
+        let text = MuscleFatigueLastWorkedCaption.text(
+            mostRecentlyWorkedAt: sundayTenPM,
+            now: mondayEightAM,
+            timeZone: honolulu
+        )
+        XCTAssertEqual(text?.compact, "today")
+        XCTAssertEqual(text?.sentence, "Last worked today.")
+    }
+
+    func testTheSameInstantReadsAsTodayWhenNothingHasElapsed() {
+        let now = Date(timeIntervalSince1970: 1_786_953_600)
+        let text = MuscleFatigueLastWorkedCaption.text(mostRecentlyWorkedAt: now, now: now, timeZone: .gmt)
+        XCTAssertEqual(text?.compact, "today")
+    }
+
+    /// Three calendar days apart, well clear of any boundary ambiguity — the ordinary
+    /// case the "yesterday" boundary test above is contrasted against.
+    func testSeveralWholeDaysReadsAsAnNDayCaption() {
+        let sundayTenPM = Date(timeIntervalSince1970: 1_786_917_600) // 2026-08-16T22:00:00Z
+        let wednesday = sundayTenPM.addingTimeInterval(3 * 24 * 3_600 + 3_600) // Wed, ~23:00 UTC
+        let text = MuscleFatigueLastWorkedCaption.text(
+            mostRecentlyWorkedAt: sundayTenPM,
+            now: wednesday,
+            timeZone: .gmt
+        )
+        XCTAssertEqual(text?.compact, "3d ago")
+        XCTAssertEqual(text?.sentence, "Last worked 3 days ago.")
+    }
+
+    /// A future-dated stamp — clock or zone skew — reads as "today" rather than a
+    /// negative day count, the same clamp-the-arithmetic-not-the-record discipline
+    /// `MuscleFatigueCalculator` already applies to `elapsedSeconds`.
+    func testAFutureDatedStampClampsToTodayRatherThanGoingNegative() {
+        let now = Date(timeIntervalSince1970: 1_786_953_600)
+        let future = now.addingTimeInterval(3_600)
+        let text = MuscleFatigueLastWorkedCaption.text(mostRecentlyWorkedAt: future, now: now, timeZone: .gmt)
+        XCTAssertEqual(text?.compact, "today")
+    }
+
+    /// The accessibility label `MuscleMapView` builds reads `mostRecentlyWorkedAt`,
+    /// never `sessionEndedAt` — the exact mistake #173 warned this ticket against, since
+    /// naming the governing session in a "last worked" sentence is a false one whenever
+    /// the two instants differ (`MuscleFatigueCalculator`'s "whichever reads highest"
+    /// rule). Stated here as a caption-level assertion so a future edit that reaches for
+    /// the wrong field fails a test instead of only a code review.
+    func testTheCaptionIsBuiltFromMostRecentlyWorkedAtNotSessionEndedAt() throws {
+        let fatigue = try MuscleFatigue(
+            group: .legs,
+            fraction: 0.5,
+            sessionEndedAt: Date(timeIntervalSince1970: 1_786_917_600), // governing session: Sun 22:00
+            mostRecentlyWorkedAt: Date(timeIntervalSince1970: 1_786_953_600), // last worked: Mon 08:00
+            elapsedSeconds: 10 * 3_600,
+            sessionWeight: 0.5
+        )
+        let now = Date(timeIntervalSince1970: 1_786_953_600) // same instant as mostRecentlyWorkedAt
+        let text = MuscleFatigueLastWorkedCaption.text(
+            mostRecentlyWorkedAt: fatigue.mostRecentlyWorkedAt,
+            now: now,
+            timeZone: .gmt
+        )
+        // Built from `mostRecentlyWorkedAt` (== now): "today". Built from
+        // `sessionEndedAt` (ten hours and one calendar day earlier) it would have read
+        // "yesterday" — the false sentence this test guards against.
+        XCTAssertEqual(text?.compact, "today")
     }
 }

@@ -197,6 +197,7 @@ final class StoredRecordRoundTripTests: XCTestCase {
                 ZoneSplits.Split(zone: .two, seconds: 1_200),
                 ZoneSplits.Split(zone: .three, seconds: 900.5),
             ]),
+            strain: WorkoutStrain(points: 74.5),
             distanceSplits: DistanceSplits(series: [
                 DistanceSplitSeries(
                     unit: .kilometers,
@@ -265,6 +266,9 @@ final class StoredRecordRoundTripTests: XCTestCase {
         XCTAssertNil(restored.heartRateDriftFraction)
         XCTAssertNil(restored.gradeAdjustedPaceSecondsPerKilometer)
         XCTAssertNil(restored.distanceSplits)
+        // MAX-176: absent for the same reason as the rest — there was no curve to
+        // integrate, and a zero would read as a session that cost nothing.
+        XCTAssertNil(restored.strain)
         XCTAssertFalse(restored.hasHeartRateData)
     }
 
