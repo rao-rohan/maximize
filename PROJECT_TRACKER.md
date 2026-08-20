@@ -1967,6 +1967,7 @@ free. What landed in the file:
 | MAX-176 | **Per-workout strain, computed at ingestion** — the app now measures what a session *cost*, beside everything else it measures, which is whether the athlete did what was asked. A zone-weighted integral of the stored HR curve (Edwards' summated-zone score over the plan's cap-anchored zones), in **zone-weighted minutes**, unbounded, computed once and stored in a new nullable `strainPoints` column. **No curve, no strain** — nil, never zero. A lift gets one and it is heart-rate only (A20). **Nothing already stored is rescored or moved**; existing workouts read back with no strain until something re-runs their metrics. Consumed by MAX-177 and MAX-178 — see the MAX-176 section below | 174, 175 | **Opus** |
 | MAX-178 | **Acute vs. chronic load balance** — rolling 7-day and 28-day sums of `DerivedMetrics.strain.points`, and their ratio, in `LoadBalanceCalculator` (`TalliesCalculator`'s own shape). The ratio's denominator is the chronic sum *scaled to a week* (÷4), not the raw 28-day total — the two are not interchangeable, see the MAX-178 section below for why. A workout with no strain figure is skipped from both sums, never zeroed, and the gap is counted so a caption can say how many sessions a window is missing (MAX-176's own instruction). **The first 28 days of an athlete's recorded history are `.buildingHistory`**, a designed absence tile, never a ratio computed from a handful of days. No verdict, no colour, no "high"/"low" wording anywhere in the figure — reporting only | 176 | Sonnet ✅ |
 | MAX-179 | **Per-muscle fatigue from the entries A22 already collects** — one session per group, weighted by its duration, decayed on a 48-hour half-life. States in its own doc comment what it cannot know (no sets, no reps, no load) and that **A20's tripwire governs the "just add a weight field" follow-up, not A22's permission**. A group never logged has *no* figure; a group logged a fortnight ago is *fresh* — a different fact. **Departs from the brief's "the last session" in one deliberate place**, which the MAX-179 section below sets out | 174, 175, A20/A22 | **Opus** |
+| MAX-180 | **The muscle map, drawn** — `MuscleFatigueMark` bands MAX-179's reading into five states (`.notLogged`/`.fresh`/`.light`/`.moderate`/`.high`) and marks each with a non-hue geometric channel (fill fraction + dashed outline + glyph), extending `WCAGContrastTests`'s hue-alone test with a third representation rather than a parallel suite. `MuscleMapView` draws it on a flat content surface with `@ScaledMetric` throughout, and `WorkoutDetailView` composes it unconditionally (it is the athlete's state, not the workout's). A group never logged draws dashed-and-glyphed, never a coloured "at rest" fill. **Adapted after #173 landed on top of it**: the "last worked" caption reads `mostRecentlyWorkedAt`, not the removed `elapsedDays`, and the day count is now calendar-correct via `CalendarDay.days(until:)` rather than fixed 86,400-second blocks. See the MAX-180 section below | 179 | Sonnet — **PR open, not yet merged.** Package compiles and core unit tests pass by inspection only; no toolchain here to run them (R1). Needs device verification, per the PR |
 | MAX-181 | **The fact sheet renders the lift slot** — `TrainingFactSheet`'s plan block now names each weekday's lift ask beside its run ask, tagged `Lift:`, omitted rather than stated when the plan asks nothing of the slot. Closes MAX-174 §5.3's G2, and MAX-136's open item. **Also closes the more severe consequence MAX-175 found and declined to fix**: `PlanProposalInstruction` tells a drafting model to restate each weekday's lift ask from this same fact sheet unchanged — it could not, so an accepted revision could silently zero out an athlete's whole lift schedule. See the MAX-181 section below | 174, 175 | Sonnet ✅ |
 
 **Four collisions the overseer must respect.**
@@ -5563,7 +5564,102 @@ session must leave the figure exactly where the leg day put it.
 
 CI cannot prove the half-life is the right one. That is a product judgement no test reaches,
 and its first honest check is an athlete reading a map after a real training week — which
-needs MAX-180, since nothing draws this yet.
+needed MAX-180, drawn below. That first real-week check itself still has not happened;
+MAX-180 only made it possible.
+
+**`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
+
+---
+
+## MAX-180 — the muscle map, drawn
+
+`Sources/MaximizeCore/Accessibility/MuscleFatigueMark.swift` (new),
+`App/Workouts/MuscleMapView.swift` (new), `App/Workouts/WorkoutDetailModel.swift`,
+`App/Workouts/WorkoutDetailView.swift`, `App/DesignSystem/Layout.swift`, plus tests in
+`Tests/MaximizeCoreTests/MuscleFatigueTests.swift` and
+`Tests/MaximizeCoreTests/WCAGContrastTests.swift`.
+
+### Five bands, from MAX-179's three reading cases
+
+`MuscleFatigueReading` stays three cases; `MuscleFatigueBand.of(_:)` bands it into five for
+drawing: `.notLogged` (`.neverLogged`, unchanged), `.fresh` (unchanged), and `.fatigued`'s
+continuous fraction split into equal thirds — `.light`/`.moderate`/`.high`. Equal thirds
+rather than a named physiological threshold, because `MuscleFatigueModel`'s own doc comment
+already says this figure "has roughly one bit of real information"; three even tiers claim
+no more precision than that. `MuscleFatigueMark.mark(for:)` is the one place a reading
+becomes a band, a label, and a non-hue mark — the view never compares a fraction to a
+threshold of its own.
+
+### The non-hue channel: fill fraction, on one neutral ink
+
+Every band draws in the same two tokens regardless of level —
+`Color.chartSeriesPrimary` filled bottom-up over `Color.surfaceInset`, `Color.surfaceBorder`
+for the outline. **No new saturated hue was added.** FR-4.3 reserves the three score-band
+colours for the calendar and verdict header, and the accent's own documented meaning
+("on-plan / effective") is not what a fatigued muscle group is — so rather than picking a
+fourth saturated colour and re-litigating what it means, the level is carried entirely by
+how much of a region's own shape is filled, plus whether its outline is solid or dashed
+(`.notLogged` only) plus a glyph (`.notLogged` only, so an empty *known* group cannot be
+misread as an empty *unknown* one). `WCAGContrastTests` holds `.light`/`.moderate`/`.high`
+at the literal same ink — 1.0:1, no contrast at all — and still requires every band to read
+apart on the geometric channel alone. Fill fraction and dash style are geometry, not opacity
+or lightness, so Reduce Transparency and Increase Contrast have nothing to weaken here
+(MAX-070): there is no translucency in the view to degrade in the first place.
+
+### Extended, not duplicated
+
+`WCAGContrastTests.testNoTwoCalendarCellsAreDistinguishedByHueAlone` gained a third
+representation (`muscleMapCells()`) alongside the day grid (MAX-084) and the year heatmap
+(MAX-087), the same way MAX-087 added the second one to the same test rather than writing
+`ScoreBandHeatmapMarkTests` as its own suite. A sibling `testEveryFatigueBandCarriesItsOwnMark`
+sits next to `testEveryScoreBandCarriesItsOwnMark`, in the same class. No new test file
+duplicates this invariant. Ordinary unit coverage of the pure banding/label/fraction mapping
+(`MuscleFatigueMarkTests`) was appended to the existing `MuscleFatigueTests.swift`, matching
+how `ScoreBandMarkTests`/`ScoreBandHeatmapMarkTests` already sit inside `ScoreBandTests.swift`
+rather than in files of their own.
+
+### The absence MAX-179 was explicit about
+
+A group `.neverLogged` draws dashed, unfilled, and glyphed — never the fill colour at zero,
+which would silently read as "fully recovered." `MuscleMapView.hasNoLoggedSessions` is the
+map's *own* absence, drawn as MAX-179's `MuscleFatigueCopy.noSessionsHeadline`/`.noSessionsDetail`
+sentence rather than six regions all saying the same "not logged" thing.
+
+### Where it hangs
+
+`WorkoutDetailView` composes `MuscleMapView` unconditionally, directly under
+`MuscleGroupEntryView`, on every discipline's screen — unlike the run-only sections (MAX-139),
+it is not gated by `SummaryTileData.showsRunOnlySections`, because the map is the athlete's
+whole-body state as of *now*, not a fact about the workout being viewed.
+`WorkoutDetailModel.muscleFatigueMap(...)` fetches the trailing 21 days of workouts and their
+muscle-group logs (no batch API exists on `MuscleGroupEntryRepository`, so this is one read
+per candidate workout, the same cost the rest of that method already pays for HR series and
+routes) and hands them to `MuscleFatigueCalculator.compute`.
+
+### What CI can and cannot prove
+
+CI can prove the package compiles, that `MuscleFatigueBand.of(_:)` bands the thirds where its
+own doc comment says it does (including both boundaries, from both sides), and that no two of
+the five marks — asserted against `MuscleFatigueMark`'s actual output, not against a
+restatement of its thresholds — share a non-hue signature in either `MuscleFatigueMarkTests`
+or the widened `WCAGContrastTests`.
+
+CI **cannot** prove any of the following, all of which needs a device (§9: "the whole thing"):
+that the schematic body layout reads as a figure rather than as six unrelated tiles; that the
+fill-fraction channel is legible at the map's actual on-screen size; that the middle row's
+switch to a vertical stack at accessibility Dynamic Type sizes actually prevents the overflow
+it is written to prevent, rather than merely compiling; that Reduce Transparency and Increase
+Contrast leave the map visually unchanged (expected, since nothing here is translucent, but
+unverified); and that the caption reads as honest rather than as hedging. The App target was
+not built — no Xcode toolchain in this container, and `App/` is outside the SwiftPM package
+`swift test` covers (R1); the CI job that does build it (`ios-app`, an unsigned Simulator
+build via `xcodegen`) runs only in GitHub Actions, not here.
+
+**`swift build`/`swift test` were not run for `MaximizeCore` either** — no Swift toolchain in
+this container (R1, same as MAX-179 and every ticket before it).
+
+---
+
 ## MAX-181 — the fact sheet renders the lift slot
 
 MAX-174 §5.3's G2: `TrainingFactSheet`'s plan block iterated `plan.weeklyTemplate.entries`

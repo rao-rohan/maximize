@@ -195,4 +195,22 @@ enum LayoutMetrics {
     /// `.frame(minWidth:minHeight:)` combined with `.contentShape(Rectangle())`
     /// enlarges only the tappable region, never the visible fill or ring.
     static let minimumTapTarget: CGFloat = 44
+
+    /// The base size of one region in the muscle map (MAX-180), before
+    /// `@ScaledMetric` grows it with Dynamic Type. Square, so `MuscleFatigueMark`'s
+    /// fill-fraction channel — a bottom-up fill of the region's own shape — reads as a
+    /// simple gauge rather than a bar whose proportions change per region.
+    static let muscleMapRegionSize: CGFloat = 56
+
+    /// Outline stroke width for a muscle map region, in both its solid (logged) and
+    /// dashed (`.notLogged`) forms. Heavier than `LayoutMetrics.hairline`, which would
+    /// vanish at a dash this short — matching `ScoreBandMarkView`'s hollow pip
+    /// reasoning at a larger size.
+    static let muscleMapOutlineWidth: CGFloat = 1.5
+
+    /// Dash and gap length for `MuscleFatigueMark.outlineIsDashed`'s outline, as
+    /// multiples of `muscleMapOutlineWidth` so the pattern scales with the stroke
+    /// itself rather than needing its own `@ScaledMetric`.
+    static let muscleMapDashLengthMultiplier: CGFloat = 3
+    static let muscleMapDashGapMultiplier: CGFloat = 2
 }
