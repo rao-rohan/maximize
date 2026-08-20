@@ -20,8 +20,22 @@ import MaximizeCore
 /// `TrendTileData.tiles` already excludes every figure that does not apply to this
 /// interval — no plan governing it, nothing yet scored (see that type's own
 /// documentation for the full list). This view never fills a gap with "0" or "--"; a
-/// missing tile is a tile that is not drawn. `streak` is the one figure that is never
-/// absent, so the grid is never completely empty once loading finishes successfully.
+/// missing tile is a tile that is not drawn. `streak` and `loadBalance` are the two
+/// figures that are never absent, so the grid is never completely empty once loading
+/// finishes successfully.
+///
+/// ## The load balance tile (MAX-178) draws exactly like every other one
+///
+/// `TrendTileData.loadBalance` is a plain `Tile` — a value and a caption, formatted by
+/// `MaximizeCore` before this view ever sees it, same as the other five. It carries no
+/// colour, no threshold marker and no "high"/"low" wording of its own: `TrendTileData`'s
+/// own documentation explains why this figure in particular must never read as a
+/// verdict, and this view keeps that true by treating it exactly like the tiles beside
+/// it rather than singling it out with an accent this file would have to invent. During
+/// an athlete's first four weeks the same tile carries `LoadBalanceReading
+/// .buildingHistory`'s value/caption instead of a ratio — still one flat tile, not a
+/// banner or a different shape, because the absence state is a designed answer, not an
+/// error condition.
 struct TrendTilesView: View {
     let interval: TrendInterval
 

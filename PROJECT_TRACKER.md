@@ -1964,7 +1964,8 @@ free. What landed in the file:
 | MAX-168 | ~~**Open MAX-111's lift ingestion gate**~~ **Opened, on three conditions.** The blanket "not a run → no score" is gone; a lift is scored when (1) it is a lift — a ride and a hike stay out, permanently, (2) the athlete has said what it worked (A22, which the pipeline now honours rather than only the header stating it) and (3) the plan version in effect matched it to a band that **names** `.lift`. Condition 3 is the answer to "what about a plan whose rubric MAX-173 has not reached": it is read off the stored rubric, so a stale `rest.ranAnyway` can no longer stamp a lift *"Ran on a scheduled rest day."*, and an unprescribed lift is not scored against the catch-all either. **Nothing on the device is scored by merging this** — see the MAX-168 note below | 111, 132, 133, 146, **173**, **145/A22** | **Opus** ✅ |
 | MAX-173 | **A rubric fix can reach a stored plan** — authoring a revision adopts the bands this build ships, stated on screen and declinable, as a **new plan version**. Closes the D1 gap that made every seed-side rubric correction unreachable on a device with a plan. **Unblocks MAX-168.** Opens **R17** | 080, 132, 146 | **Opus** |
 | MAX-175 | **The app does not invent** — one principle, two expressions: the honest-refusal rule now holds over the *set* of model-facing prompts rather than in four literals that each remember it separately, and *no data, no judgement* is written down as a rule with tests. **The premise it was dispatched on was wrong** — the constraint was reported missing from chat and is not; see the MAX-175 section below | 174 | **Opus** |
-| MAX-176 | **Per-workout strain, computed at ingestion** — the app now measures what a session *cost*, beside everything else it measures, which is whether the athlete did what was asked. A zone-weighted integral of the stored HR curve (Edwards' summated-zone score over the plan's cap-anchored zones), in **zone-weighted minutes**, unbounded, computed once and stored in a new nullable `strainPoints` column. **No curve, no strain** — nil, never zero. A lift gets one and it is heart-rate only (A20). **Nothing already stored is rescored or moved**; existing workouts read back with no strain until something re-runs their metrics. Consumed by MAX-177 and MAX-178 — see the MAX-176 section below | 174, 175 | **Opus** |
+| MAX-176 | **Per-workout strain, computed at ingestion** — the app now measures what a session *cost*, beside everything else it measures, which is whether the athlete did what was asked. A zone-weighted integral of the stored HR curve (Edwards' summated-zone score over the plan's cap-anchored zones), in **zone-weighted minutes**, unbounded, computed once and stored in a new nullable `strainPoints` column. **No curve, no strain** — nil, never zero. A lift gets one and it is heart-rate only (A20). **Nothing already stored is rescored or moved**; existing workouts read back with no strain until something re-runs their metrics. Consumed by MAX-177 and MAX-178 (✅, see below) — see the MAX-176 section below | 174, 175 | **Opus** |
+| MAX-178 | **Acute vs. chronic load balance** — rolling 7-day and 28-day sums of `DerivedMetrics.strain.points`, and their ratio, in `LoadBalanceCalculator` (`TalliesCalculator`'s own shape). The ratio's denominator is the chronic sum *scaled to a week* (÷4), not the raw 28-day total — the two are not interchangeable, see the MAX-178 section below for why. A workout with no strain figure is skipped from both sums, never zeroed, and the gap is counted so a caption can say how many sessions a window is missing (MAX-176's own instruction). **The first 28 days of an athlete's recorded history are `.buildingHistory`**, a designed absence tile, never a ratio computed from a handful of days. No verdict, no colour, no "high"/"low" wording anywhere in the figure — reporting only | 176 | Sonnet ✅ |
 | MAX-179 | **Per-muscle fatigue from the entries A22 already collects** — the last session naming each of the six groups, weighted by its duration, decayed on a 48-hour half-life. States in its own doc comment what it cannot know (no sets, no reps, no load) and that **A20's tripwire governs the "just add a weight field" follow-up, not A22's permission**. A group never logged has *no* figure; a group logged a fortnight ago is *fresh* — a different fact. See the MAX-179 section below | 174, 175, A20/A22 | **Opus** |
 
 **Four collisions the overseer must respect.**
@@ -5528,6 +5529,90 @@ needs MAX-180, since nothing draws this yet.
 
 ---
 
+## MAX-178 — acute vs. chronic load balance
+
+Rolling 7-day and 28-day sums of `DerivedMetrics.strain.points` (MAX-176), and their ratio,
+in `LoadBalanceCalculator` — matched to `TalliesCalculator`'s own shape: an `*Input` struct
+carrying an explicit `anchor` (never `Date()`), a `*Calculator` enum, one `compute` entry
+point. New files only: `Sources/MaximizeCore/Tallies/LoadBalanceCalculator.swift` (the
+calculator, `LoadBalanceInput`, `LoadBalance` and `LoadBalanceReading` together — one file,
+matching the ticket's own file list rather than splitting the output type into `Domain/` the
+way `Tallies` and `MuscleFatigue` are split, since nothing else reads `LoadBalance` on its
+own). `TrendTileData.swift` and `TrendTilesView.swift` gained the tile; `TrendTilesModel.swift`
+was also touched, to resolve `LoadBalanceInput` from the stores and call the calculator — not
+in the ticket's own file list, but load-bearing: nothing renders without it, and it touches no
+file MAX-177 owns.
+
+### The two decisions the ticket asked for, and why
+
+**Nil strain is skipped, never zeroed, and the coverage gap is counted.** A workout with no
+strain figure — no heart-rate curve, or metrics simply not yet computed — contributes nothing
+to either sum (A18/MAX-175's invariant, restated at this seam: a zero here would read as "this
+session cost nothing" and would be summed into the rolling load as a real day of training).
+What it does do is increment `acuteWorkoutsWithoutStrain` / `chronicWorkoutsWithoutStrain`, so
+`TrendTileData`'s caption can say "N sessions this week without strain" rather than presenting
+a 7-day sum silently missing coverage as though it were a sum of everything that happened —
+MAX-176's own instruction for this ticket, quoted in `LoadBalanceCalculator`'s doc comment.
+
+**The ratio's denominator is the chronic sum scaled to a week, not the raw 28-day total.**
+`acuteStrainPoints / (chronicStrainPoints / 4)`, not `acuteStrainPoints / chronicStrainPoints`.
+Dividing two raw sums of unequal windows makes steady, unchanging training read as roughly
+0.25 forever — 7 days of a total against 28 days of the same total is always about a quarter,
+independent of whether the athlete is undertrained, holding steady, or overreaching. Scaling
+the chronic sum to the acute window's length turns it into "a typical week over the last
+month", so the ratio reads as how this week compares to the athlete's own recent normal —
+steady training sits near 1.0. This is the standard acute:chronic workload ratio construction
+from the sports-science literature the feature is modelled on, the same way Edwards' zone
+weighting was borrowed rather than invented for MAX-176.
+
+**Partial history is `.buildingHistory`, not a truncated sum.** Fewer than 28 days between
+`LoadBalanceInput.historyStart` (the earliest day the app can vouch for — the earliest
+recorded workout, resolved by `TrendTilesModel`, never assumed) and the anchor, inclusive,
+and `compute` returns the designed absence state instead of a `LoadBalance`, however few or
+many workouts happened to fall in that short span. Nine days of hard training on a six-day-old
+account reads "6/28 days — building load history", not a ratio a reader would take at face
+value. `historyStart` is resolved from the same `WorkoutRepository` the sums already read —
+no new repository method, no `Date.distantPast` query: `TrendTilesModel.loadBalance` probes a
+bounded range (2010-01-01 onward) only when the chronic window's own earliest workout has not
+already proven sufficiency, so most calls make exactly one repository read beyond the window
+itself.
+
+### A third decision, found in review rather than specified
+
+The ratio and `chronicWeeklyAveragePoints == 0` are the same fact stated two ways —
+`LoadBalance.init` now rejects a `ratio` that disagrees with a zero baseline, the same
+cross-field discipline `DerivedMetrics` already applies to strain-without-heart-rate. Nothing
+outside this ticket's own files depends on it; recorded because MAX-176's write-up flagged
+that this project's review culture expects illegal states to be unrepresentable where the
+type system allows it, not merely undocumented.
+
+### What is deliberately not here
+
+No verdict, no colour, no "high"/"low"/"risk" wording anywhere in `LoadBalanceCalculator`,
+`TrendTileData` or `TrendTilesView` — the figure is reported, not interpreted. The doc comment
+argues this at length so a future change that adds a threshold does not read the file as
+having left room for one. `TrendTileDataTests.testLoadBalanceTilesNeverEditorialise` pins it
+by scanning every state's rendered value/caption for a short list of coaching words.
+
+### What CI can and cannot prove
+
+CI can prove: the package compiles; every sum in `LoadBalanceCalculatorTests` matches
+arithmetic worked out by hand in the test's own comment, never captured from `compute`'s
+output; the anchor day is included in both windows; a workout outside the chronic window is
+excluded even when handed to the calculator; the `.buildingHistory` boundary is exact at 27
+vs. 28 days; a zero chronic baseline withholds the ratio without dividing by zero;
+`TrendTileData` renders all three `LoadBalanceReading` shapes without ever leaving `tiles`
+without a load-balance entry.
+
+CI cannot prove anything about how the tile reads on a real screen — no device has shown it
+yet, and no verification exists that a genuine six-day-old install or a genuine four-week
+history renders legibly at every Dynamic Type size and in both colour schemes. See the PR's
+own "Needs device verification" section.
+
+**`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
+
+---
+
 ## Risks
 
 | # | Item | Impact | Status |
@@ -5615,3 +5700,5 @@ sat in a local worktree and the failure was silent.
 | 2026-08-05 | **MAX-109**: lifting is scored on adherence, not volume; manual entry stays a non-goal (A20) | HealthKit carries no sets, reps or load, so the only alternative is the athlete typing them — PRD §3's "the thing being killed" and the direct negation of §2's north star. Adherence delivers what the ask actually needs (skipping the lift costs something) with zero taps; a volume rubric obliges the app to become a lifting logger, which §13 names as the top execution risk. The cost is stated rather than hidden: adherence cannot tell a hard session from a token one |
 | 2026-08-18 | **MAX-175**: where the data required for a judgement is absent, the app produces **no** judgement rather than a degraded one — and an absence is named, not filled, at every boundary (record, fact sheet, prompt, tallies, calendar, screen) | The behaviour was already right in six places and written down in none, so a seventh ticket inherited nothing. Recorded here rather than as a PRD amendment because it amends nothing — §10 already behaves this way — and because A26–A28 are proposed by MAX-174 and in review. Two consequences are not obvious and are the reason it is worth stating: an absence must say *which kind* it is ("never measured", "does not apply here", "not shown to this reader") because a model reasons confidently from an undifferentiated gap; and a refusal must not be softened into a degraded answer, so an unscored run gets no chat rather than a quieter one |
 | 2026-08-04 | **MAX-034**: `WorkoutIngestionPipeline.enrich` extracts and stores samples (HR series, route) before resolving the plan, not after | Fixed a permanent-data-loss bug: `enrich` previously returned before `WorkoutSampleExtractor.extract` ran whenever no plan governed the workout's day, so every run predating the athlete's first plan version kept no HR curve — and MAX-031's advancing anchor never revisited it. The curve is a fact about the run, not the plan; only derived metrics (§9, measured against the plan's cap) stay gated on plan coverage. `IngestionPipelineDiagnostic.storedWithoutPlan` now documents that samples are stored either way. Found in the same pass: `.workoutPredatesEveryPlan` can never be completed later — MAX-011's version/`effectiveFrom` ordering forbids a plan from ever back-dating earlier than one that already exists — unlike `.noPlanAuthored`, which the lazy path does complete once a first plan is authored |
+| 2026-08-20 | **MAX-178**: the acute:chronic ratio's denominator is the chronic sum scaled to a week (÷4), not the raw 28-day sum | The two are not interchangeable — dividing raw sums of unequal windows makes steady training read as a constant ~0.25 regardless of load, carrying no information. Scaling the chronic sum to the acute window's length is the standard sports-science acute:chronic workload ratio construction, and reads as "this week vs. the athlete's recent normal" with steady training near 1.0 |
+| 2026-08-20 | **MAX-178**: the first 28 days of an athlete's recorded history is `.buildingHistory`, a designed absence tile, not a ratio computed from a short window | A ratio computed from four days of data is a confident-looking number over almost nothing. `LoadBalanceInput.historyStart` — the earliest day the app can vouch for — is what tells a real, zero-load rest period apart from a window the app simply has not observed yet; a day before it is never read as a free zero |

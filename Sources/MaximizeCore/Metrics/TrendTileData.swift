@@ -16,6 +16,7 @@ import Foundation
 /// | days trained | — | `18` | `212` |
 /// | streak | ✓ | ✓ | ✓ |
 /// | avg score | ✓ | ✓ | ✓ |
+/// | load balance | ✓ | ✓ | ✓ |
 ///
 /// `TrendTileSet`'s own documentation carries the argument for each change; the short
 /// version is that a year's arc "target" is a sum over ~52 different weekly asks that the
@@ -35,6 +36,17 @@ import Foundation
 /// of N eligible sessions" (annual), which is also the exact word LIFTING-SPEC §6.2 uses
 /// when it names this as the cost of the decision. Nothing else about the tile changed —
 /// same value, same position, same nil rule.
+///
+/// ## MAX-178 — load balance is anchored to *now*, not to the selected span
+///
+/// Unlike the other five figures, `loadBalance` does not describe `tallies.from...
+/// tallies.through` — it is `LoadBalanceCalculator`'s rolling 7-day/28-day read, anchored
+/// to the athlete's current day regardless of which week, month or year the dashboard
+/// happens to be showing. It is present at every span for that reason: it is not a
+/// property of the interval on screen, so there is no span it would stop applying to,
+/// the same reasoning that keeps `streak` present everywhere. **Always shown, never
+/// omitted** — see the field's own documentation for why this is the one figure in this
+/// type that is not read as `nil` when there is nothing to show yet.
 ///
 /// ## What this reads versus what it computes
 ///
@@ -70,6 +82,13 @@ import Foundation
 ///   denominator that *is* measured stays where it belongs, on `effectiveDays`.
 /// - `streak` is never nil. Zero is a real, measured streak — the day after a miss —
 ///   and omitting the tile would hide exactly the number a streak screen exists to show.
+/// - `loadBalance` is never nil either, and for a related but distinct reason: the first
+///   `LoadBalanceCalculator.chronicWindowDays` days of an athlete's history are a
+///   **designed absence state**, not a gap this type quietly drops. Omitting the tile
+///   entirely for a new athlete would look identical to the tile never having been
+///   built; showing it with a fabricated ratio computed from four days of data would be
+///   worse. `LoadBalanceReading.buildingHistory` is rendered as its own real tile
+///   instead — see the field's own documentation.
 /// - `averageScore` is nil when `Tallies.averageScore` is nil. That covers two honest
 ///   "no data" states, not one: nothing in the interval has been scored yet, **or**
 ///   (MAX-160) everything that was scored carried a `MiscategorisedScoreLabel` and got
@@ -132,6 +151,19 @@ public struct TrendTileData: Hashable, Sendable {
     /// that day carried. No MAX-140 change belongs here.
     public let streak: Tile
 
+    /// `LoadBalanceCalculator`'s rolling acute:chronic strain ratio (MAX-178), read
+    /// verbatim from an already-computed `LoadBalanceReading` — this initializer never
+    /// calls `LoadBalanceCalculator` itself, matching how `tallies` arrives already
+    /// computed. Always present: see this type's own "Absent is not zero" section for
+    /// why `.buildingHistory` renders as a real tile rather than being treated as `nil`.
+    ///
+    /// **No verdict lives in this tile.** The value and caption below state the figure
+    /// and, when there is one, the ratio — never a "high"/"low" reading, a colour cue
+    /// keyed to the number, or any language implying overtraining. `LoadBalanceCalculator`
+    /// documents why at length; this initializer does not reopen that argument, only
+    /// honours it.
+    public let loadBalance: Tile
+
     /// `Tallies.averageScore`, to one decimal place. Nil when nothing eligible has been
     /// scored — see the type's own "Absent is not zero" section for the two states that
     /// covers since MAX-160.
@@ -191,13 +223,27 @@ public struct TrendTileData: Hashable, Sendable {
     ///     is the one place that converts for the tile. No default, matching
     ///     `SummaryTileData`'s initializer: every call site must say explicitly which
     ///     unit it means.
+    ///   - loadBalance: `LoadBalanceCalculator.compute`'s already-computed reading
+    ///     (MAX-178) — anchored to the athlete's current day, not to `tallies.from...
+    ///     tallies.through`, which is why it is a plain parameter rather than something
+    ///     derived from `tallies` or `workouts` the way `mileage` is. See this type's
+    ///     "MAX-178" section for why the anchor differs from the rest of this tile set.
+    ///     Defaults to `.buildingHistory` with nothing recorded, purely so call sites
+    ///     this figure is not about — most of this file's own tests — do not have to
+    ///     state it explicitly; `TrendTilesModel` (production) always passes a real
+    ///     reading. Unlike `distanceUnit`, a default here cannot silently misreport
+    ///     anything: every value the default can produce is itself a designed,
+    ///     truthful absence state, never a number.
     public init(
         kind: TrendIntervalKind,
         tallies: Tallies,
         workouts: [Workout],
         timeZone: TimeZone,
         planCalendar: PlanCalendar?,
-        distanceUnit: DistanceUnit
+        distanceUnit: DistanceUnit,
+        loadBalance: LoadBalanceReading = .buildingHistory(
+            daysRecorded: 0, daysNeeded: LoadBalanceCalculator.chronicWindowDays
+        )
     ) throws {
         let tileSet = kind.trendTileSet
         self.tileSet = tileSet
@@ -272,6 +318,8 @@ public struct TrendTileData: Hashable, Sendable {
 
         streak = Tile(value: "\(tallies.currentStreak)", caption: "day streak")
 
+        self.loadBalance = Self.loadBalanceTile(loadBalance)
+
         averageScore = tallies.averageScore.map {
             Tile(
                 value: Self.formattedAverageScore($0),
@@ -283,10 +331,16 @@ public struct TrendTileData: Hashable, Sendable {
     }
 
     /// Every present tile, in FR-3.4's own order — the distance figure, then
-    /// effectiveness, then consistency, then streak, then average score — with the tiles
-    /// this span does not carry simply absent.
+    /// effectiveness, then consistency, then streak, then load balance, then average
+    /// score — with the tiles this span does not carry simply absent. `loadBalance` is
+    /// never one of the absent ones (see its own documentation), so it is listed
+    /// directly rather than through `compactMap`, immediately after `streak` — the other
+    /// figure that is never absent — and before `averageScore`, mirroring where MAX-178
+    /// slotted it into the table at the top of this file.
     public var tiles: [Tile] {
-        [mileage, totalDistance, effectiveDays, workoutDays, streak, averageScore].compactMap { $0 }
+        [mileage, totalDistance, effectiveDays, workoutDays].compactMap { $0 }
+            + [streak, loadBalance]
+            + [averageScore].compactMap { $0 }
     }
 
     // MARK: - Formatting
@@ -310,6 +364,56 @@ public struct TrendTileData: Hashable, Sendable {
     /// measured.
     private static func formattedRate(_ rate: Double) -> String {
         "\(Int((rate * 100).rounded()))%"
+    }
+
+    /// MAX-178. Three states, none of them a bare `nil`:
+    ///
+    /// - `.buildingHistory` — the designed absence state. The value names how much of
+    ///   the chronic window is on record so far, exactly as measured, never rounded up
+    ///   to look closer to done than it is.
+    /// - `.available` with a ratio — the ordinary case. Two decimal places: enough to
+    ///   distinguish "1.0" from "1.08" (a difference a week of easy running produces),
+    ///   not so many that the figure looks like a measurement more precise than an
+    ///   Edwards-weighted integral over a heart-rate curve actually is.
+    /// - `.available` with no ratio (`LoadBalance.ratio == nil`) — a full chronic window
+    ///   exists but carried no strain to divide by (every workout in it lacked a curve,
+    ///   or none happened). The acute figure is still real and still shown; only the
+    ///   ratio, which would be a division by zero, is withheld — see `LoadBalance.ratio`'s
+    ///   own documentation.
+    ///
+    /// **No case here reads the ratio's size and says anything about it.** A value and a
+    /// caption, formatted, nothing graded.
+    private static func loadBalanceTile(_ reading: LoadBalanceReading) -> Tile {
+        switch reading {
+        case let .buildingHistory(daysRecorded, daysNeeded):
+            return Tile(
+                value: "\(daysRecorded)/\(daysNeeded) days",
+                caption: "building load history"
+            )
+        case let .available(balance):
+            guard let ratio = balance.ratio else {
+                return Tile(
+                    value: "\(Int(balance.acuteStrainPoints.rounded())) pts",
+                    caption: "7-day strain — no 4-week baseline yet"
+                )
+            }
+            return Tile(
+                value: String(format: "%.2f", locale: nil, ratio),
+                caption: Self.loadBalanceCaption(balance)
+            )
+        }
+    }
+
+    /// "acute:chronic load", plus how many of the acute window's workouts had no strain
+    /// figure to contribute — MAX-176's own instruction for this tile: "a 7-day sum
+    /// missing two strapless runs is not the same fact as a 7-day sum of everything that
+    /// happened." Silent when the count is zero, matching `averageScoreCaption`'s own
+    /// "say nothing was excluded by saying nothing" rule.
+    private static func loadBalanceCaption(_ balance: LoadBalance) -> String {
+        let missing = balance.acuteWorkoutsWithoutStrain
+        guard missing > 0 else { return "acute:chronic load" }
+        let session = missing == 1 ? "session" : "sessions"
+        return "acute:chronic load (\(missing) \(session) this week without strain)"
     }
 
     /// One decimal place.
