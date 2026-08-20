@@ -107,6 +107,48 @@ final class NoJudgementWithoutDataTests: XCTestCase {
         }
     }
 
+    // MARK: - A figure with nothing underneath it is not produced
+
+    /// MAX-176's addition to the rule, and the reason it belongs here rather than only in
+    /// its own file: strain is an integral of the heart-rate curve, so a workout with no
+    /// curve has **no** strain. A zero would be the degraded judgement this file exists to
+    /// forbid — it reads as "this session cost nothing", which is a measurement, and it
+    /// would be summed into a rolling load figure as a real day of training rather than
+    /// left out of it.
+    ///
+    /// Both directions are checked, because the distinction A18 draws is between two
+    /// absences and not between absence and zero alone: a curve that exists but covers no
+    /// span *does* get a zero, since there is a measurement and it truthfully contains
+    /// nothing.
+    func testAWorkoutWithNoHeartRateCurveHasNoStrainRatherThanAZero() throws {
+        func metrics(_ samples: [(Double, Double)]?) throws -> DerivedMetrics {
+            try DerivedMetricsCalculator.compute(
+                DerivedMetricsInput(
+                    workout: try Fixture.workout(hasRoute: false),
+                    heartRateSeries: try samples.map { try MetricsFixture.series($0) }
+                ),
+                plan: try Fixture.plan()
+            )
+        }
+
+        let unmeasured = try metrics(nil)
+        XCTAssertNil(unmeasured.strain, "no curve to integrate — not a fabricated 0")
+        XCTAssertFalse(unmeasured.isRecorded(.strain))
+
+        let measured = try metrics([(0, 145)])
+        XCTAssertEqual(try XCTUnwrap(measured.strain).points, 0, "measured, and truthfully empty")
+
+        // And the record cannot be assembled the dishonest way round, whatever writes it.
+        assertThrows(
+            .inconsistent,
+            try DerivedMetrics(
+                workoutID: Fixture.workoutID,
+                strain: WorkoutStrain(points: 120),
+                planVersion: PlanVersion(1)
+            )
+        )
+    }
+
     // MARK: - Aggregates do not invent a figure out of an empty set
 
     /// A recorded workout nobody has scored is a workout day and nothing else. The average
