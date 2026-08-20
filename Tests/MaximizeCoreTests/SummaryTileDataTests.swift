@@ -14,6 +14,7 @@ final class SummaryTileDataTests: XCTestCase {
         maximumHeartRateBPM: Double? = 180,
         heartRateDriftFraction: Double? = 0.05,
         gradeAdjustedPaceSecondsPerKilometer: Double? = 312,
+        strain: WorkoutStrain? = nil,
         workoutID: UUID = Fixture.workoutID
     ) throws -> DerivedMetrics {
         try DerivedMetrics(
@@ -23,6 +24,7 @@ final class SummaryTileDataTests: XCTestCase {
             timeAboveCapSeconds: averageHeartRateBPM == nil ? nil : 120,
             heartRateDriftFraction: heartRateDriftFraction,
             gradeAdjustedPaceSecondsPerKilometer: gradeAdjustedPaceSecondsPerKilometer,
+            strain: strain,
             planVersion: PlanVersion(1)
         )
     }
@@ -371,5 +373,73 @@ final class SummaryTileDataTests: XCTestCase {
         let data = SummaryTileData(workout: workout, metrics: nil, distanceUnit: .kilometers)
 
         XCTAssertNil(data.disciplineNote)
+    }
+
+    // MARK: - MAX-177: strain
+
+    func testStrainIsReadFromMetricsVerbatim() throws {
+        let workout = try Fixture.workout()
+        let strain = try WorkoutStrain(points: 142)
+        let data = SummaryTileData(workout: workout, metrics: try metrics(strain: strain), distanceUnit: .kilometers)
+
+        XCTAssertEqual(data.strain?.value, "142")
+        // The unit lives in the caption on purpose — see the type's doc comment on why
+        // a bare "strain" caption would misread as a bounded 0–21-style rating.
+        XCTAssertEqual(data.strain?.caption, "strain pts")
+    }
+
+    func testNoStrainStaysAbsentRatherThanBecomingZero() throws {
+        let workout = try Fixture.workout()
+        let data = SummaryTileData(workout: workout, metrics: try metrics(strain: nil), distanceUnit: .kilometers)
+
+        XCTAssertNil(data.strain)
+    }
+
+    func testNilMetricsLeavesStrainAbsentToo() throws {
+        let workout = try Fixture.workout()
+        let data = SummaryTileData(workout: workout, metrics: nil, distanceUnit: .kilometers)
+
+        XCTAssertNil(data.strain)
+    }
+
+    /// A zero-span curve (`WorkoutStrain(points: 0)`, MAX-176's single-sample case) is a
+    /// real recorded measurement, not an absence — the tile must show "0", never omit
+    /// the tile the way it does for a genuinely missing strain.
+    func testAZeroStrainRendersAsARealMeasurementNotAnAbsence() throws {
+        let workout = try Fixture.workout()
+        let strain = try WorkoutStrain(points: 0)
+        let data = SummaryTileData(workout: workout, metrics: try metrics(strain: strain), distanceUnit: .kilometers)
+
+        XCTAssertEqual(data.strain?.value, "0")
+    }
+
+    /// MAX-176: a lift's strain is heart-rate only, but it is still shown — unlike
+    /// distance, drift and grade-adjusted pace, it is not gated to nil by discipline,
+    /// because `DerivedMetricKind.strain` is `.anyDiscipline` (a heart rate measured
+    /// during a lift is still a heart rate).
+    func testALiftsStrainIsNotGatedAwayLikeTheRunOnlyFigures() throws {
+        let workout = try Fixture.workout(
+            activityType: .traditionalStrengthTraining, distanceMeters: 500, hasRoute: false
+        )
+        let strain = try WorkoutStrain(points: 96)
+        let data = SummaryTileData(workout: workout, metrics: try metrics(strain: strain), distanceUnit: .kilometers)
+
+        XCTAssertEqual(data.strain?.value, "96")
+    }
+
+    /// FR-1.5's own six tiles keep their stated order; strain is a MAX-176 figure that
+    /// postdates the spec, so it is appended rather than interleaved.
+    func testStrainAppearsLastInTilesRatherThanReorderingFR15sList() throws {
+        let workout = try Fixture.workout(durationSeconds: 462, distanceMeters: 8_420)
+        let strain = try WorkoutStrain(points: 118)
+        let data = SummaryTileData(workout: workout, metrics: try metrics(strain: strain), distanceUnit: .kilometers)
+
+        XCTAssertEqual(data.tiles.count, 8)
+        XCTAssertEqual(data.tiles[7].caption, "strain pts")
+        XCTAssertEqual(data.tiles[7].value, "118")
+    }
+
+    func testFormattedStrainRoundsToTheNearestWholePoint() {
+        XCTAssertEqual(SummaryTileData.formattedStrain(141.6), "142")
     }
 }

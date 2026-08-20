@@ -7,10 +7,13 @@ import MaximizeCore
 /// ## What this view does and does not decide
 ///
 /// Every string here is precomputed by `MaximizeCore.SummaryTileData` (MAX-045): which
-/// figures are present, their order (FR-1.5's own: distance, duration, avg/max HR,
-/// energy, drift %, grade-adjusted pace), and every formatted value and caption. This
-/// view only lays `SummaryTileData.tiles` out in a grid on design-system tokens — no
-/// rounding, no unit conversion, no threshold comparison happens here.
+/// figures are present, their order (FR-1.5's own six — distance, duration, avg/max HR,
+/// energy, drift %, grade-adjusted pace — with MAX-177's strain tile appended after
+/// them), and every formatted value and caption. This view only lays
+/// `SummaryTileData.tiles` out in a grid on design-system tokens — no rounding, no unit
+/// conversion, no threshold comparison happens here, and no new tile shape either: the
+/// strain tile reuses `tileView(_:)` exactly like every other one, because a second
+/// tile convention is exactly what this file's own doc comment warns against.
 ///
 /// Thin on purpose, per FR-1.5's own description of itself: one tile shape
 /// (`.contentSurface(.tile)`, `.metricPrimary` value over `.metricLabel` caption),

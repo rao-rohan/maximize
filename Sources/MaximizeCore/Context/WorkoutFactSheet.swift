@@ -134,6 +134,11 @@ extension WorkoutContext {
         // session's heart rate was distributed, they cost nothing extra, and they are the
         // only thing in the record that could tell a lifting session apart from a walk.
         lines.append("Time in zones: \(zoneLine)")
+        // MAX-176/MAX-177. Both disciplines, like the two heart-rate lines above it:
+        // `DerivedMetricKind.strain` is `.anyDiscipline`, because it is a read of
+        // `zoneSplits`, which is too. Its own line explains the unit and the two things
+        // a bare number would invite Claude to assume — see `strainLine`.
+        lines.append("Strain: \(strainLine)")
 
         if let heartRateShape {
             lines.append("")
@@ -253,6 +258,42 @@ extension WorkoutContext {
             return "zone \(zone.rawValue) \(FactSheetFormatting.duration(seconds))"
         }
         return present.isEmpty ? "not applicable — no heart-rate data" : present.joined(separator: ", ")
+    }
+
+    /// States its own absence — MAX-175's rule that the record says what it does not
+    /// know rather than leaving Claude to supply a figure — and, when present, the two
+    /// things a bare number invites a model to assume: that it is a bounded rating, and
+    /// (A20) that it says anything about what was on the bar.
+    ///
+    /// **Two absences, worded apart, the same distinction `driftLine` already makes.**
+    /// `strain == nil` while `hasHeartRateData` is true is a real, common state rather
+    /// than a contradiction: MAX-176 rescored nothing already stored (D8), so a workout
+    /// ingested before it shipped has heart-rate data and no strain until something puts
+    /// it back through the metrics pipeline. Reading `metrics.strain` — never a fallback
+    /// off `averageHeartRateBPM` — is what tells that state apart from a workout with no
+    /// heart-rate series at all.
+    ///
+    /// Guarded on `metrics.strain` directly, never on `zoneSplits` being non-empty,
+    /// which matters for a second, narrower case: `WorkoutStrain`'s doc comment names a
+    /// curve that covers no span (a single sample) as a *recorded* strain of `0` and
+    /// *empty* zone splits — one fact ("measured, and containing nothing") rather than
+    /// two in tension — and reading `strain` itself keeps this line from misreading that
+    /// workout as the same absence the line directly above states for it.
+    private var strainLine: String {
+        guard let strain = metrics.strain else {
+            return metrics.hasHeartRateData
+                ? "not yet computed for this workout, so there is no figure to read"
+                : "not applicable — this workout has no heart-rate data"
+        }
+        guard strain.points > 0 else {
+            return "0 zone-weighted minutes — its heart-rate curve covers no time span (a "
+                + "single sample), which is a different fact from the line above having no "
+                + "heart-rate data at all"
+        }
+        return "\(FactSheetFormatting.number(strain.points)) zone-weighted minutes. Unbounded, "
+            + "not a 0–100 score: a bigger number can mean a longer session, a harder one, or "
+            + "both, and it does not distinguish them. Heart rate only — it says nothing "
+            + "about sets, reps, or load, on a lift or otherwise."
     }
 
     // MARK: - Pace breakdown (MAX-068)

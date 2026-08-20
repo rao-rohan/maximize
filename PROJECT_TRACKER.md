@@ -1965,6 +1965,7 @@ free. What landed in the file:
 | MAX-173 | **A rubric fix can reach a stored plan** — authoring a revision adopts the bands this build ships, stated on screen and declinable, as a **new plan version**. Closes the D1 gap that made every seed-side rubric correction unreachable on a device with a plan. **Unblocks MAX-168.** Opens **R17** | 080, 132, 146 | **Opus** |
 | MAX-175 | **The app does not invent** — one principle, two expressions: the honest-refusal rule now holds over the *set* of model-facing prompts rather than in four literals that each remember it separately, and *no data, no judgement* is written down as a rule with tests. **The premise it was dispatched on was wrong** — the constraint was reported missing from chat and is not; see the MAX-175 section below | 174 | **Opus** |
 | MAX-176 | **Per-workout strain, computed at ingestion** — the app now measures what a session *cost*, beside everything else it measures, which is whether the athlete did what was asked. A zone-weighted integral of the stored HR curve (Edwards' summated-zone score over the plan's cap-anchored zones), in **zone-weighted minutes**, unbounded, computed once and stored in a new nullable `strainPoints` column. **No curve, no strain** — nil, never zero. A lift gets one and it is heart-rate only (A20). **Nothing already stored is rescored or moved**; existing workouts read back with no strain until something re-runs their metrics. Consumed by MAX-177 and MAX-178 — see the MAX-176 section below | 174, 175 | **Opus** |
+| MAX-177 | **Strain reaches the detail view and the prompt** — one tile (`SummaryTileData.strain`, appended after FR-1.5's own six rather than interleaved), one fact-sheet line, both disciplines (`DerivedMetricKind.strain` is `.anyDiscipline`). Nil states its own absence and distinguishes "no heart-rate data" from "heart-rate data but strain not yet computed" (MAX-176 rescored nothing already stored). The fact-sheet line states the unit and disclaims a bounded rating and a verdict on load — on every workout, not only a lift's. See the MAX-177 section below | 176 | Sonnet 🔒 ✅ |
 | MAX-178 | **Acute vs. chronic load balance** — rolling 7-day and 28-day sums of `DerivedMetrics.strain.points`, and their ratio, in `LoadBalanceCalculator` (`TalliesCalculator`'s own shape). The ratio's denominator is the chronic sum *scaled to a week* (÷4), not the raw 28-day total — the two are not interchangeable, see the MAX-178 section below for why. A workout with no strain figure is skipped from both sums, never zeroed, and the gap is counted so a caption can say how many sessions a window is missing (MAX-176's own instruction). **The first 28 days of an athlete's recorded history are `.buildingHistory`**, a designed absence tile, never a ratio computed from a handful of days. No verdict, no colour, no "high"/"low" wording anywhere in the figure — reporting only | 176 | Sonnet ✅ |
 | MAX-179 | **Per-muscle fatigue from the entries A22 already collects** — one session per group, weighted by its duration, decayed on a 48-hour half-life. States in its own doc comment what it cannot know (no sets, no reps, no load) and that **A20's tripwire governs the "just add a weight field" follow-up, not A22's permission**. A group never logged has *no* figure; a group logged a fortnight ago is *fresh* — a different fact. **Departs from the brief's "the last session" in one deliberate place**, which the MAX-179 section below sets out | 174, 175, A20/A22 | **Opus** |
 | MAX-180 | **The muscle map, drawn** — `MuscleFatigueMark` bands MAX-179's reading into five states (`.notLogged`/`.fresh`/`.light`/`.moderate`/`.high`) and marks each with a non-hue geometric channel (fill fraction + dashed outline + glyph), extending `WCAGContrastTests`'s hue-alone test with a third representation rather than a parallel suite. `MuscleMapView` draws it on a flat content surface with `@ScaledMetric` throughout, and `WorkoutDetailView` composes it unconditionally (it is the athlete's state, not the workout's). A group never logged draws dashed-and-glyphed, never a coloured "at rest" fill. **Adapted after #173 landed on top of it**: the "last worked" caption reads `mostRecentlyWorkedAt`, not the removed `elapsedDays`, and the day count is now calendar-correct via `CalendarDay.days(until:)` rather than fixed 86,400-second blocks. See the MAX-180 section below | 179 | Sonnet — **PR open, not yet merged.** Package compiles and core unit tests pass by inspection only; no toolchain here to run them (R1). Needs device verification, per the PR |
@@ -5363,11 +5364,12 @@ nullable attribute is Core Data's canonical lightweight-migration case and needs
 bump while no schema has been promoted to CloudKit production.
 
 **What MAX-177 and MAX-178 should read.** Both read `DerivedMetrics.strain`, a
-`WorkoutStrain?`, whose one figure is `.points` in zone-weighted minutes. **MAX-177**: the
-tile and the fact-sheet line render `strain?.points`; nil is the absence state and must say
-which absence it is — the workout has no heart-rate curve — rather than showing a dash or a
-zero, and the fact-sheet half should state the unit, because a bare number with no unit is
-exactly what A18 warns a model will reason confidently from. **MAX-178**: sum
+`WorkoutStrain?`, whose one figure is `.points` in zone-weighted minutes. **MAX-177**
+(built — see the MAX-177 section below): the tile and the fact-sheet line render
+`strain?.points`; nil is the absence state and must say which absence it is — the workout
+has no heart-rate curve — rather than showing a dash or a zero, and the fact-sheet half
+should state the unit, because a bare number with no unit is exactly what A18 warns a
+model will reason confidently from. **MAX-178**: sum
 `strain?.points` over the window, skipping nil rather than treating it as zero, and say in
 the caption how many sessions in the window carried no strain — a 7-day sum missing two
 strapless runs is not the same fact as a 7-day sum of everything that happened. The column
@@ -5392,12 +5394,14 @@ properties of reading a heart-rate curve, and the fix for each is worse than the
   single-sample series gives strain `0` and empty splits, so `isRecorded(.strain)` is true
   while `isRecorded(.zoneSplits)` is false. One fact, not two in tension — "measured, and
   containing nothing" — pinned by a test and stated in `WorkoutStrain` so **MAX-177 does
-  not draw them as a contradiction**.
+  not draw them as a contradiction**. **Confirmed: it does not** — see that ticket's own
+  section for the test and the wording.
 
-Also raised and deliberately not taken: nothing at `WorkoutFactSheet`'s call site records
-that `strain` is intentionally absent from the prompt. That file is MAX-177's, it is
-running in parallel, and a comment there would be a merge conflict bought for a note that
-MAX-177 deletes when it adds the line. Recorded here instead.
+Also raised and deliberately not taken (at the time): nothing at `WorkoutFactSheet`'s call
+site recorded that `strain` was intentionally absent from the prompt. That file was
+MAX-177's, running in parallel, and a comment there would have been a merge conflict
+bought for a note MAX-177 would delete the moment it added the line — which is exactly
+what happened; no such placeholder comment existed for it to remove.
 
 ### What CI can and cannot prove
 
@@ -5408,16 +5412,92 @@ zero; ordering by duration and by intensity; that a pre-change `DerivedMetrics` 
 a pre-change stored row both decode unchanged with no strain, and that a record with no
 strain re-encodes without the key.
 
-CI cannot prove anything about how the number reads to a person — no tile exists yet
-(MAX-177), and no unit is drawn on screen by this ticket. It also cannot prove the
-migration: CI never runs SwiftData (tracker **R2**), so "an existing row gains a NULL
-column" is verified only as the pure mapping in `StoredDerivedMetrics`, and the SwiftData
-half is a two-line field copy in `MaximizeSchema` with no branches in it.
+CI cannot prove anything about how the number reads to a person — no tile existed at the
+time this ticket landed (MAX-177 added it after), and no unit was drawn on screen by this
+ticket. It also cannot prove the migration: CI never runs SwiftData (tracker **R2**), so
+"an existing row gains a NULL column" is verified only as the pure mapping in
+`StoredDerivedMetrics`, and the SwiftData half is a two-line field copy in `MaximizeSchema`
+with no branches in it.
 
 **Needs device verification:** install over an existing build with workouts already stored,
 confirm the store still opens (the migration is inferred, and an inferred migration that
 fails presents as an unopenable store — MAX-169's screen), and confirm an older workout's
 detail screen is unchanged.
+
+**`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
+
+---
+
+## MAX-177 — strain on the detail view and in the prompt
+
+Two surfaces, both reading `DerivedMetrics.strain` directly (D2) and never recomputing it.
+
+**The tile.** `SummaryTileData.strain` is `Tile?`, built the same way `averageHeartRate`
+and `maximumHeartRate` already are: read straight off `metrics?.strain`, unguarded by
+discipline, because `DerivedMetricKind.strain` is `.anyDiscipline` — a lift's strain is not
+gated to nil the way `distance`, `heartRateDrift` and `gradeAdjustedPace` are. It is
+appended to `tiles` *after* FR-1.5's own six rather than interleaved into their stated
+order, since strain is a MAX-176 figure that postdates the spec and the six are a closed
+list this type does not reorder. The caption is `"strain pts"` rather than a bare
+`"strain"` — deliberately, so the tile cannot be misread as a bounded 0–21-style rating the
+way Whoop's figure is; `WorkoutStrain`'s own doc comment names that as the exact
+misreading this app rejected the shape of. `SummaryTilesView` needed no code change at
+all: it lays out `data.tiles` generically and the new tile reuses `tileView(_:)` exactly,
+so there is no second tile convention to review. Only its doc comment was updated to name
+the new tile and its position.
+
+**The fact-sheet line.** One new line in `WorkoutFactSheet.factSheet()`'s `## Measured`
+section, both disciplines, right after `Time in zones`. It states the unit
+("zone-weighted minutes"), that the figure is unbounded and not a 0–100 score, that a
+bigger number can mean longer, harder, or both without saying which, and that it is
+heart-rate only — "on a lift or otherwise", so the caveat is not read as implying a run's
+strain *does* carry load information by omission.
+
+**Two absences, worded apart — the same distinction `driftLine` already makes, and a case
+this ticket found rather than assumed.** `metrics.strain == nil` is not one fact:
+
+- **No heart-rate data at all** (`hasHeartRateData == false`) — the same "not
+  applicable" wording `timeAboveCapLine`/`driftLine`/`zoneLine` already use.
+- **Heart-rate data present, strain not yet computed.** MAX-176 rescored nothing already
+  stored (D8): a workout ingested before it shipped has average/max heart rate on the
+  sheet two lines above and no strain, which is a real, common, non-contradictory state —
+  not the same fact as "no heart-rate series exists." The line reads "not yet computed for
+  this workout" rather than reusing the no-data wording, or the fact sheet would tell
+  Claude a workout has no heart-rate series when it plainly does.
+
+**The zero-span case is handled without contradicting the zone-splits line above it.**
+`WorkoutStrain`'s doc comment names a curve that exists but covers no time span (a single
+sample) as a *recorded* strain of `0` alongside *empty* zone splits — one fact ("measured,
+and containing nothing"), not two in tension. The strain line is guarded on
+`metrics.strain` directly, never on `zoneSplits` being non-empty, which is what keeps a
+zero-span workout from reading as "0 zone-weighted minutes" beside "not applicable — no
+heart-rate data" on the line above as if the two disagreed; the zero branch spells out
+which of the two facts it is rather than leaving that inference to the reader.
+
+**Not touched: `TrainingFactSheet`.** The roll-up is a different renderer (§3.3 already
+excludes several per-workout figures from it) and was not named in this ticket's file
+list; whether the training roll-up should carry a strain figure of its own — a sum, an
+average, something else — is a separate product question this ticket did not decide.
+
+### What CI can and cannot prove
+
+CI can prove: the package compiles; `SummaryTileData.strain` reads `metrics.strain`
+verbatim and is never gated by discipline, unlike the three run-only tiles beside it; a
+lift's stale pre-MAX-130 metrics do not resurrect a discipline-gated tile the way they do
+for the guarded three (strain was never one of them); the fact-sheet line is pinned as a
+literal for both the present and the two-absence cases; the zero-span case renders `0`
+rather than either absence wording, and does not print `"Strain: not applicable"` beside
+it; and a lift's line carries the same load disclaimer a run's does, asserted directly
+against a lift-discipline context rather than inferred from the wording being unconditional
+in the source.
+
+CI cannot prove how the tile reads at largest Dynamic Type, in either colour scheme, or
+with the strain absence state actually on screen next to the other six tiles — no device
+or simulator runs HealthKit or SwiftUI here (tracker **R1**/**R2**).
+
+**Needs device verification:** the tile — largest Dynamic Type, light and dark, with a
+strain figure present and with the tile correctly absent (a workout whose curve predates
+MAX-176, or has none at all).
 
 **`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
 
