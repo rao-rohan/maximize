@@ -30,6 +30,19 @@ import MaximizeCore
 struct PlanAuthoringView: View {
     @State private var model: PlanAuthoringModel
 
+    /// MAX-166: non-nil exactly while the conversational-route sheet is up. Carries the
+    /// subject resolved **at the moment of the tap**, matching `RootTabView.chatOpening`'s
+    /// own reasoning — what opens is what the button said it would open, not whatever
+    /// "this week" happens to resolve to by the time the sheet's closure runs.
+    @State private var conversationalRouteOpening: ConversationalRouteOpening?
+
+    /// `ChatSubject` is `Hashable`, which is all `sheet(item:)` needs of an identifier —
+    /// mirrors `RootTabView.ChatOpening` exactly, one file only needing it for one door.
+    private struct ConversationalRouteOpening: Identifiable {
+        let subject: ChatSubject
+        var id: ChatSubject { subject }
+    }
+
     /// - Parameters:
     ///   - planRepository/settingsRepository/workoutRepository: forwarded to
     ///     `PlanAuthoringModel`, which defaults them to `PersistenceComposition.store` —
@@ -71,15 +84,23 @@ struct PlanAuthoringView: View {
         }
         .navigationTitle("Training plan")
         .task { await model.load() }
+        // MAX-166: the conversational route's own presentation, entirely separate from
+        // this screen's `Form` state — tapping it neither saves nor discards the draft
+        // underneath, matching `SettingsView`'s `isAuthoringPlan` sheet for the same
+        // reason: presentation and the plan being edited are two different facts.
+        .sheet(item: $conversationalRouteOpening) { opening in
+            ChatSheet(subject: opening.subject, currentInterval: conversationalRouteInterval())
+        }
     }
 
     /// Split into two groups only because `ViewBuilder` takes at most ten children and
-    /// this screen has exactly ten sections; nothing else distinguishes the halves.
+    /// this screen has more sections than that; nothing else distinguishes the halves.
     @ViewBuilder
     private func editingSections(_ editing: PlanAuthoringModel.Editing) -> some View {
         Group {
             prefillSection(editing)
             statusSection(editing)
+            conversationalRouteSection(editing)
             effectiveFromSection(editing)
             capSection(editing)
             durationFloorSection(editing)
@@ -125,6 +146,63 @@ struct PlanAuthoringView: View {
             Text(PlanAuthoringFormatting.describe(editing.session.mode))
             quietText(PlanAuthoringFormatting.explain(editing.session.mode))
         }
+    }
+
+    // MARK: - The conversational route (MAX-166)
+
+    /// FIRST-RUN-SPEC §10/§12: the door to `ChatConversationView`'s existing "Draft a plan
+    /// from this conversation" (MAX-101), offered here because this is where a person who
+    /// dislikes the form below is already standing — placed right after "Current plan" so
+    /// that reading it is the decision, not something found after scrolling past every
+    /// stepper on this screen.
+    ///
+    /// **Never hidden.** `editing.conversationalRoute` (`PlanAuthoringConversationalRoute`,
+    /// `MaximizeCore`) decides whether the button is enabled and always supplies the
+    /// sentence under it — a missing key reads as a designed absence, not a control that
+    /// silently stopped appearing. This view renders exactly what that value says and
+    /// decides nothing itself.
+    @ViewBuilder
+    private func conversationalRouteSection(_ editing: PlanAuthoringModel.Editing) -> some View {
+        Section {
+            Button(PlanAuthoringConversationalRoute.actionLabel) {
+                conversationalRouteTapped()
+            }
+            .disabled(!editing.conversationalRoute.isAvailable)
+            .accessibilityHint(
+                "Opens a conversation you describe the plan in. Nothing is saved until you "
+                    + "review it on this screen."
+            )
+
+            quietText(editing.conversationalRoute.explanation)
+        }
+    }
+
+    /// A14: presents the sheet and nothing else. No call fires until the athlete sends a
+    /// message inside the conversation this opens.
+    private func conversationalRouteTapped() {
+        guard let subject = conversationalRouteSubject() else { return }
+        conversationalRouteOpening = ConversationalRouteOpening(subject: subject)
+    }
+
+    /// "This week", the same fallback `ChatSheet.defaultInterval()` resolves to when
+    /// nothing live is handed in. This screen has no dashboard interval to read — only
+    /// `RootTabView` owns the one live selection (§3.4) — so it resolves its own the same
+    /// way that fallback does, deliberately duplicated rather than reaching across files
+    /// this ticket did not touch. Nil only where `CalendarDay`'s 1...9999 AD domain
+    /// cannot express today, matching every other caller of this pattern.
+    private func conversationalRouteInterval() -> TrendInterval? {
+        guard let today = try? CalendarDay(Date(), in: .current) else { return nil }
+        return try? TrendInterval.thisWeek(today: today)
+    }
+
+    /// A fresh training thread, frozen to `conversationalRouteInterval()` — matching how
+    /// `ChatSheet.startNewTrainingChat()` freezes the dashboard's own selection into a
+    /// `TrainingScope`. Nil in the same close-to-unreachable case the interval above is.
+    private func conversationalRouteSubject() -> ChatSubject? {
+        guard let interval = conversationalRouteInterval(),
+              let scope = try? TrainingScope(resolving: interval)
+        else { return nil }
+        return .training(scope)
     }
 
     // MARK: - When it takes effect
