@@ -23,6 +23,7 @@ final class WorkoutContextTests: XCTestCase {
         heartRateDriftFraction: Double? = 0.032,
         averageCadenceStepsPerMinute: Double? = 167,
         gradeAdjustedPaceSecondsPerKilometer: Double? = 308,
+        strain: WorkoutStrain? = nil,
         distanceSplits: DistanceSplits? = nil
     ) throws -> DerivedMetrics {
         try DerivedMetrics(
@@ -37,6 +38,7 @@ final class WorkoutContextTests: XCTestCase {
                 ZoneSplits.Split(zone: .two, seconds: 3_000),
                 ZoneSplits.Split(zone: .three, seconds: 900),
             ]),
+            strain: strain,
             distanceSplits: distanceSplits,
             planVersion: PlanVersion(planVersion)
         )
@@ -192,10 +194,90 @@ final class WorkoutContextTests: XCTestCase {
         for label in [
             "Average heart rate:", "Maximum heart rate:", "Time above cap:",
             "Heart-rate drift:", "Average cadence:", "Grade-adjusted pace:", "Time in zones:",
+            "Strain:",
         ] {
             let occurrences = sheet.components(separatedBy: label).count - 1
             XCTAssertEqual(occurrences, 1, "\(label) should appear exactly once")
         }
+    }
+
+    // MARK: - MAX-177: strain
+
+    func testAbsentStrainStatesTheAbsence() throws {
+        let sheet = try build(
+            metrics: metrics(
+                averageHeartRateBPM: nil, maximumHeartRateBPM: nil, timeAboveCapSeconds: nil,
+                heartRateDriftFraction: nil, strain: nil
+            )
+        ).factSheet()
+        XCTAssertTrue(sheet.contains("Strain: not applicable — this workout has no heart-rate data"), sheet)
+    }
+
+    /// The common case on real data today: MAX-176 rescored nothing already stored
+    /// (D8), so a workout with heart-rate data and no strain is not a contradiction —
+    /// it predates the ticket, and this must read differently from "no heart-rate data
+    /// at all" or Claude would be told the workout carries no heart-rate series when it
+    /// plainly does (average/max HR appear two lines above).
+    func testStrainNotYetComputedIsDistinguishedFromNoHeartRateData() throws {
+        let sheet = try build(metrics: metrics(strain: nil)).factSheet()
+
+        XCTAssertTrue(sheet.contains("Average heart rate: 142 bpm"), sheet)
+        XCTAssertTrue(sheet.contains("Strain: not yet computed for this workout"), sheet)
+        XCTAssertFalse(sheet.contains("Strain: not applicable"), "there is heart-rate data; this is a different fact")
+    }
+
+    /// Pinned as a literal, per the ticket's own requirement, so the wording — the
+    /// unit, and the two things a bare number would invite Claude to assume — cannot
+    /// silently drift.
+    func testPresentStrainStatesTheUnitAndItsLimits() throws {
+        let strain = try WorkoutStrain(points: 142)
+        let sheet = try build(metrics: metrics(strain: strain)).factSheet()
+
+        XCTAssertTrue(sheet.contains(
+            "Strain: 142 zone-weighted minutes. Unbounded, not a 0–100 score: a bigger "
+                + "number can mean a longer session, a harder one, or both, and it does not "
+                + "distinguish them. Heart rate only — it says nothing about sets, reps, or "
+                + "load, on a lift or otherwise."
+        ), sheet)
+    }
+
+    /// `WorkoutStrain`'s zero-span case, built exactly as `DerivedMetricsCalculator`
+    /// would: a curve that exists but covers no time (a single sample) reads as a
+    /// *recorded* strain of 0 and *empty* zone splits — one fact, not two in tension —
+    /// so the zone-splits line above reads "not applicable" while the strain line must
+    /// not read as the same absence.
+    func testAZeroSpanStrainIsDistinguishedFromNoHeartRateData() throws {
+        let zeroSpanMetrics = try DerivedMetrics(
+            workoutID: Fixture.workoutID,
+            averageHeartRateBPM: 140,
+            maximumHeartRateBPM: 140,
+            zoneSplits: .empty,
+            strain: WorkoutStrain(points: 0),
+            planVersion: PlanVersion(1)
+        )
+        let sheet = try build(metrics: zeroSpanMetrics).factSheet()
+
+        XCTAssertTrue(sheet.contains("Time in zones: not applicable — no heart-rate data"), sheet)
+        XCTAssertTrue(sheet.contains("Strain: 0 zone-weighted minutes"), sheet)
+        XCTAssertFalse(
+            sheet.contains("Strain: not applicable"),
+            "a recorded zero must not read as the same absence as no heart-rate data at all"
+        )
+    }
+
+    /// LIFTING-SPEC/A20: strain is heart-rate only, and a lift's line must not be
+    /// readable as a verdict on the weight the athlete moved — the caveat is on every
+    /// strain line, run or lift, rather than only appearing for one discipline.
+    func testALiftsStrainLineDisclaimsLoad() throws {
+        let strain = try WorkoutStrain(points: 88)
+        let sheet = try build(
+            workout: Fixture.workout(
+                activityType: .traditionalStrengthTraining, distanceMeters: nil, hasRoute: false
+            ),
+            metrics: metrics(strain: strain)
+        ).factSheet()
+
+        XCTAssertTrue(sheet.contains("Heart rate only — it says nothing about sets, reps, or load"), sheet)
     }
 
     // MARK: - What is deliberately withheld

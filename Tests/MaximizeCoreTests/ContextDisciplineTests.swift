@@ -148,6 +148,38 @@ final class ContextDisciplineTests: XCTestCase {
         XCTAssertTrue(sheet.contains("## Heart-rate shape"), sheet)
     }
 
+    /// MAX-177/A20: `DerivedMetricKind.strain` is `.anyDiscipline`, so a lift's strain
+    /// reaches the prompt exactly like a run's — but the line must not be readable as a
+    /// verdict on the weight the athlete moved, since HealthKit gives a lift no load at
+    /// all (A20).
+    func testALiftsStrainReachesThePromptWithoutReadingAsLoad() throws {
+        let series = try HeartRateSeries(
+            workoutID: Fixture.workoutID,
+            samples: (0..<40).map { index in
+                try HeartRateSample(offsetSeconds: Double(index) * 60, beatsPerMinute: 110 + Double(index))
+            }
+        )
+        let metricsWithStrain = try DerivedMetrics(
+            workoutID: Fixture.workoutID,
+            averageHeartRateBPM: 118,
+            maximumHeartRateBPM: 152,
+            zoneSplits: ZoneSplits(splits: [
+                ZoneSplits.Split(zone: .one, seconds: 1_500),
+                ZoneSplits.Split(zone: .two, seconds: 1_200),
+            ]),
+            strain: WorkoutStrain(points: 65),
+            planVersion: PlanVersion(1)
+        )
+        let sheet = try build(
+            workout: liftWorkout(),
+            metrics: metricsWithStrain,
+            heartRateSeries: series
+        ).factSheet()
+
+        XCTAssertTrue(sheet.contains("Strain: 65 zone-weighted minutes"), sheet)
+        XCTAssertTrue(sheet.contains("Heart rate only — it says nothing about sets, reps, or load"), sheet)
+    }
+
     /// The absence rule inverted rather than dropped. Nine disclaiming headings would be
     /// prompt tokens spent on nothing; saying nothing at all would leave Claude to reason
     /// from a gap, which is the hazard the rule exists for.

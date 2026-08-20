@@ -1,9 +1,9 @@
 import Foundation
 
 /// Chart-ready — tile-ready — presentation of one workout's summary figures (FR-1.5):
-/// distance, duration, avg/max HR, energy, drift %, grade-adjusted pace. Precomputed
-/// here, mirroring `HeartRateChartData` (MAX-042) and `CadenceChartData` (MAX-043), so
-/// CI verifies the formatting instead of a device.
+/// distance, duration, avg/max HR, energy, drift %, grade-adjusted pace, and (MAX-177)
+/// strain. Precomputed here, mirroring `HeartRateChartData` (MAX-042) and
+/// `CadenceChartData` (MAX-043), so CI verifies the formatting instead of a device.
 ///
 /// ## Thin by design
 ///
@@ -115,6 +115,20 @@ public struct SummaryTileData: Hashable, Sendable {
     /// not yet computed.
     public let gradeAdjustedPace: Tile?
 
+    /// `DerivedMetrics.strain`, unchanged (MAX-176/MAX-177). Nil when this workout has
+    /// no heart-rate curve at all — the same absence rule as `averageHeartRate` above,
+    /// not a discipline gate: `DerivedMetricKind.strain` is `.anyDiscipline` (a lift's
+    /// heart rate is still a heart rate), so this tile is never nilled out for a lift
+    /// the way `distance`, `heartRateDrift` and `gradeAdjustedPace` are.
+    ///
+    /// **The caption carries the unit on purpose.** `WorkoutStrain` is unbounded
+    /// zone-weighted minutes, not a 0–100 rating, and a caption reading merely "strain"
+    /// would let this tile be misread as one — the same scale Whoop's bounded figure
+    /// occupies and this app deliberately rejected (see that type's doc comment). A
+    /// bare number cannot say whether it is a long session or a hard one; nothing here
+    /// tries to, because a tile has no room to.
+    public let strain: Tile?
+
     /// Which of the plan's two prescriptions this workout belongs to (A17), read from
     /// `Workout.activityType.discipline` — the one place that mapping lives, the same
     /// source `WorkoutVerdict.discipline` reads, so the tiles and the header above them
@@ -155,7 +169,7 @@ public struct SummaryTileData: Hashable, Sendable {
     ///     others.
     ///   - metrics: `DerivedMetrics` for this workout (D2 — read, never recomputed),
     ///     or nil if metrics have not been computed yet. Supplies `averageHeartRate`,
-    ///     `maximumHeartRate`, `heartRateDrift`, `gradeAdjustedPace`.
+    ///     `maximumHeartRate`, `heartRateDrift`, `gradeAdjustedPace`, `strain`.
     ///   - distanceUnit: MAX-047 — a display decision only. `Workout` and
     ///     `DerivedMetrics` stay in metres/seconds-per-kilometre regardless; this
     ///     initializer is the one place that converts for the tile. No default: every
@@ -199,6 +213,10 @@ public struct SummaryTileData: Hashable, Sendable {
                 caption: "grade-adj. pace /\(distanceUnit.abbreviation)"
             )
         }
+        // Both disciplines, unguarded, for the same reason as `averageHeartRate` above.
+        self.strain = metrics?.strain.map {
+            Tile(value: Self.formattedStrain($0.points), caption: "strain pts")
+        }
     }
 
     /// Worded apart from `WorkoutFactSheet.disciplineFraming` and from `RouteMapView`'s
@@ -209,12 +227,15 @@ public struct SummaryTileData: Hashable, Sendable {
         "This is a lift, not a run, so the figures a run is measured by — cadence, route, "
         + "pace splits, and the heart-rate cap — are left off rather than shown empty."
 
-    /// Every present tile, in FR-1.5's own order: distance, duration, avg/max HR,
-    /// energy, drift %, grade-adjusted pace. `SummaryTilesView` reads only this — it
-    /// never has to know which figures can be absent or reorder them itself.
+    /// Every present tile, in FR-1.5's own order — distance, duration, avg/max HR,
+    /// energy, drift %, grade-adjusted pace — with `strain` appended after it rather
+    /// than interleaved: FR-1.5's list is a closed spec this type does not reorder, and
+    /// strain is a MAX-176 figure that postdates it. `SummaryTilesView` reads only this
+    /// — it never has to know which figures can be absent or reorder them itself.
     public var tiles: [Tile] {
         let all: [Tile?] = [
             distance, duration, averageHeartRate, maximumHeartRate, activeEnergy, heartRateDrift, gradeAdjustedPace,
+            strain,
         ]
         return all.compactMap { $0 }
     }
@@ -267,6 +288,13 @@ public struct SummaryTileData: Hashable, Sendable {
 
     static func formattedKilocalories(_ kilocalories: Double) -> String {
         String(format: "%.0f", locale: nil, kilocalories)
+    }
+
+    /// Whole zone-weighted minutes — the same precision `FactSheetFormatting.number`
+    /// gives Claude for the identical figure, so a tile and a prompt reading the same
+    /// stored `WorkoutStrain` cannot round it two different ways.
+    static func formattedStrain(_ points: Double) -> String {
+        String(format: "%.0f", locale: nil, points)
     }
 
     /// "+3.1" or "-2.4" — the sign always shown, since an unsigned drift percentage
