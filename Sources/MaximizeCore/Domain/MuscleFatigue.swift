@@ -3,9 +3,9 @@ import Foundation
 /// How recently, and how long, each muscle group was last worked — a decay curve over
 /// the entries A22 already collects (MAX-179).
 ///
-/// One figure per `MuscleGroup`: take the most recent session the athlete said worked
-/// that group, weight it by how long that session lasted, and decay it by how long ago
-/// it ended. Nothing else is read, because nothing else is recorded.
+/// One figure per `MuscleGroup`: take a session the athlete said worked that group,
+/// weight it by how long that session lasted, and decay it by how long ago it ended.
+/// Nothing else is read, because nothing else is recorded.
 ///
 /// ## What this model cannot know, and why no ticket should "fix" it
 ///
@@ -47,10 +47,12 @@ import Foundation
 /// - **It is a recency signal, not a physiological one.** The half-life is a training
 ///   week's timescale, not a measurement of protein synthesis or of this athlete's
 ///   recovery. Nothing here has been calibrated against a person.
-/// - **It does not accumulate.** Only the *last* session naming a group is read, so
-///   three hard leg days in four days read exactly like the last of them. Summing
-///   sessions was considered and declined for MAX-179 — it turns a coarse signal into
-///   an arbitrary one, because the sum's scale would be unanchored to anything measured.
+/// - **It does not accumulate.** Exactly one session sets a group's figure, so three
+///   hard leg days in four read like the heaviest of them rather than like their sum.
+///   Summing was considered and declined for MAX-179 — it turns a coarse signal into an
+///   arbitrary one, because the sum's scale would be unanchored to anything measured.
+///   (Which single session governs is `MuscleFatigueCalculator`'s "the reading that
+///   comes out highest", not simply the latest; the reasoning is there.)
 /// - **It scores nothing and gates nothing.** No verdict, no rubric band, no adherence
 ///   consequence reads this figure, which is also why its constants live here rather
 ///   than in a versioned plan record: D1 protects the reproducibility of *stored
@@ -81,12 +83,33 @@ public struct MuscleFatigue: Hashable, Sendable {
     /// anything outside this app.
     public let fraction: Double
 
-    /// When the most recent session naming this group **ended**. The end is what
+    /// When the session this figure was measured from **ended**. The end is what
     /// recovery runs from; a ninety-minute session that started three hours ago
     /// finished ninety minutes ago.
-    public let lastWorkedAt: Date
+    ///
+    /// Usually the same instant as `mostRecentlyWorkedAt`, and not always — see
+    /// `MuscleFatigueCalculator` on why the *governing* session is the one that reads
+    /// highest rather than simply the latest.
+    ///
+    /// **Carried exactly as recorded, including a stamp in the future.** A workout
+    /// dated ahead of `MuscleFatigueMap.computedAt` is a clock or time-zone artefact,
+    /// and this field states what the record says rather than a corrected version of
+    /// it; `elapsedSeconds` is the clamped figure, and it is the one to compute with.
+    /// So `computedAt.timeIntervalSince(sessionEndedAt)` is **not** always
+    /// `elapsedSeconds` — the identity is `elapsedSeconds == max(0, that)`.
+    public let sessionEndedAt: Date
 
-    /// Seconds between `lastWorkedAt` and the instant the map was computed. Never
+    /// When this group was last worked at all, governing session or not — the fact a
+    /// screen means by "last worked".
+    ///
+    /// Never earlier than `sessionEndedAt`, and equal to it in the ordinary case. The
+    /// two come apart only when a later, much lighter session is outweighed by an
+    /// earlier heavier one: the athlete *did* work the group yesterday, and saying
+    /// otherwise because a different session sets the figure would be a false sentence
+    /// on screen.
+    public let mostRecentlyWorkedAt: Date
+
+    /// Seconds between `sessionEndedAt` and the instant the map was computed. Never
     /// negative — see `MuscleFatigueCalculator` for the clamp and why it exists.
     public let elapsedSeconds: Double
 
@@ -98,28 +121,41 @@ public struct MuscleFatigue: Hashable, Sendable {
     /// distinguish.
     public let sessionWeight: Double
 
+    /// - Parameter mostRecentlyWorkedAt: defaults to `sessionEndedAt`, which is the
+    ///   ordinary case. Passing an earlier instant is rejected: a group cannot have
+    ///   been last worked before the session the figure was measured from.
     public init(
         group: MuscleGroup,
         fraction: Double,
-        lastWorkedAt: Date,
+        sessionEndedAt: Date,
+        mostRecentlyWorkedAt: Date? = nil,
         elapsedSeconds: Double,
         sessionWeight: Double
     ) throws {
         try Validate.within(fraction, 0...1, "MuscleFatigue.fraction")
         try Validate.within(sessionWeight, 0...1, "MuscleFatigue.sessionWeight")
         try Validate.nonNegative(elapsedSeconds, "MuscleFatigue.elapsedSeconds")
+        let lastWorked = mostRecentlyWorkedAt ?? sessionEndedAt
+        guard lastWorked >= sessionEndedAt else {
+            throw DomainError.inconsistent(
+                reason: "MuscleFatigue.mostRecentlyWorkedAt precedes the session it was measured from"
+            )
+        }
         self.group = group
         self.fraction = fraction
-        self.lastWorkedAt = lastWorkedAt
+        self.sessionEndedAt = sessionEndedAt
+        self.mostRecentlyWorkedAt = lastWorked
         self.elapsedSeconds = elapsedSeconds
         self.sessionWeight = sessionWeight
     }
 
-    /// Whole days since the session ended, rounded down. A convenience for the surfaces
-    /// that say "3 days ago"; the figure itself is computed from seconds.
-    public var elapsedDays: Int {
-        Int(elapsedSeconds / 86_400)
-    }
+    // There is deliberately no `elapsedDays` here. Whole days are a *calendar*
+    // question — a session ending Sunday 22:00 was yesterday at Monday 08:00 and ten
+    // hours ago, and only one of those two answers is what a person means — and a
+    // calendar answer needs the athlete's time zone, which this type does not carry.
+    // `CalendarDayArithmetic` says the same thing about interval arithmetic in general.
+    // The surface that says "3 days ago" resolves both instants through `CalendarDay`
+    // and calls `days(until:)`, as `ChatThreadListPresentation` already does.
 }
 
 /// One group's state: the three facts a muscle map has to be able to tell apart.
@@ -136,7 +172,7 @@ public enum MuscleFatigueReading: Hashable, Sendable {
     case neverLogged
 
     /// Logged, but long enough ago that the curve has decayed below
-    /// `MuscleFatigueModel.negligibleFraction`. A figure exists and is carried — the
+    /// `MuscleFatigueModel.negligibleDecay`. A figure exists and is carried — the
     /// reading is a *judgement of recovery*, which the record supports, rather than an
     /// absence, which it does not.
     case fresh(MuscleFatigue)
@@ -208,29 +244,40 @@ public struct MuscleFatigueModel: Hashable, Sendable {
     /// count for more — see `Weighting.duration`.
     public let fullSessionSeconds: Double
 
-    /// Below this, a figure is reported as `.fresh` rather than `.fatigued`.
+    /// The point at which **elapsed time** has run the curve out: once the decay factor
+    /// `pow(0.5, elapsed / halfLife)` falls below this, the reading is `.fresh` rather
+    /// than `.fatigued`.
     ///
     /// The floor exists because an exponential never reaches zero, and a curve that
     /// draws a group as faintly-fatigued four months after its last session is stating
     /// a precision the model does not have. It is a **presentation boundary, not a
     /// clamp**: the figure below it is still carried and still ordered, so a group
     /// worked last week and one worked last year do not read as identical.
-    public let negligibleFraction: Double
+    ///
+    /// **It is tested against the decay factor and not against the finished figure**,
+    /// which is a distinction with a visible consequence. A mis-started Watch workout
+    /// of twenty seconds, tagged and then read a minute later, has a figure under 1%
+    /// because it was *tiny* — not because time has passed. Calling that `.fresh` would
+    /// put `MuscleFatigueCopy.freshDetail` — "enough time has passed" — on screen about
+    /// a session that ended a minute ago, which is simply false. Gating on decay makes
+    /// this boundary purely temporal: about 13 days and 7 hours under `.standard`,
+    /// whatever the session's length.
+    public let negligibleDecay: Double
 
     public let weighting: Weighting
 
     public init(
         halfLifeSeconds: Double,
         fullSessionSeconds: Double,
-        negligibleFraction: Double,
+        negligibleDecay: Double,
         weighting: Weighting
     ) throws {
         try Validate.positive(halfLifeSeconds, "MuscleFatigueModel.halfLifeSeconds")
         try Validate.positive(fullSessionSeconds, "MuscleFatigueModel.fullSessionSeconds")
-        try Validate.within(negligibleFraction, 0...1, "MuscleFatigueModel.negligibleFraction")
+        try Validate.within(negligibleDecay, 0...1, "MuscleFatigueModel.negligibleDecay")
         self.halfLifeSeconds = halfLifeSeconds
         self.fullSessionSeconds = fullSessionSeconds
-        self.negligibleFraction = negligibleFraction
+        self.negligibleDecay = negligibleDecay
         self.weighting = weighting
     }
 
@@ -248,8 +295,10 @@ public struct MuscleFatigueModel: Hashable, Sendable {
     /// athlete's plan; the seed's authored duration floor is 600 seconds, which is a
     /// different question (what counts as having *shown up*).
     ///
-    /// The 1% floor puts the `.fresh` boundary at about 13 days and 7 hours for a full
-    /// session — inside a fortnight, outside a fortnight's plan.
+    /// The 1% floor puts the `.fresh` boundary at about 13 days and 7 hours — inside a
+    /// fortnight, outside a fortnight's plan. Because it is tested against decay rather
+    /// than against the finished figure, that boundary is the same for a twenty-minute
+    /// session as for a two-hour one.
     ///
     /// Built through the unchecked initializer for `RestDayBudget.standard`'s reason —
     /// a `static let` cannot throw and these literals are known-good. A test asserts
@@ -264,12 +313,12 @@ public struct MuscleFatigueModel: Hashable, Sendable {
     private init(
         unchecked halfLifeSeconds: Double,
         _ fullSessionSeconds: Double,
-        _ negligibleFraction: Double,
+        _ negligibleDecay: Double,
         _ weighting: Weighting
     ) {
         self.halfLifeSeconds = halfLifeSeconds
         self.fullSessionSeconds = fullSessionSeconds
-        self.negligibleFraction = negligibleFraction
+        self.negligibleDecay = negligibleDecay
         self.weighting = weighting
     }
 }

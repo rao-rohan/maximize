@@ -1964,7 +1964,7 @@ free. What landed in the file:
 | MAX-168 | ~~**Open MAX-111's lift ingestion gate**~~ **Opened, on three conditions.** The blanket "not a run → no score" is gone; a lift is scored when (1) it is a lift — a ride and a hike stay out, permanently, (2) the athlete has said what it worked (A22, which the pipeline now honours rather than only the header stating it) and (3) the plan version in effect matched it to a band that **names** `.lift`. Condition 3 is the answer to "what about a plan whose rubric MAX-173 has not reached": it is read off the stored rubric, so a stale `rest.ranAnyway` can no longer stamp a lift *"Ran on a scheduled rest day."*, and an unprescribed lift is not scored against the catch-all either. **Nothing on the device is scored by merging this** — see the MAX-168 note below | 111, 132, 133, 146, **173**, **145/A22** | **Opus** ✅ |
 | MAX-173 | **A rubric fix can reach a stored plan** — authoring a revision adopts the bands this build ships, stated on screen and declinable, as a **new plan version**. Closes the D1 gap that made every seed-side rubric correction unreachable on a device with a plan. **Unblocks MAX-168.** Opens **R17** | 080, 132, 146 | **Opus** |
 | MAX-175 | **The app does not invent** — one principle, two expressions: the honest-refusal rule now holds over the *set* of model-facing prompts rather than in four literals that each remember it separately, and *no data, no judgement* is written down as a rule with tests. **The premise it was dispatched on was wrong** — the constraint was reported missing from chat and is not; see the MAX-175 section below | 174 | **Opus** |
-| MAX-179 | **Per-muscle fatigue from the entries A22 already collects** — the last session naming each of the six groups, weighted by its duration, decayed on a 48-hour half-life. States in its own doc comment what it cannot know (no sets, no reps, no load) and that **A20's tripwire governs the "just add a weight field" follow-up, not A22's permission**. A group never logged has *no* figure; a group logged a fortnight ago is *fresh* — a different fact. See the MAX-179 section below | 174, 175, A20/A22 | **Opus** |
+| MAX-179 | **Per-muscle fatigue from the entries A22 already collects** — one session per group, weighted by its duration, decayed on a 48-hour half-life. States in its own doc comment what it cannot know (no sets, no reps, no load) and that **A20's tripwire governs the "just add a weight field" follow-up, not A22's permission**. A group never logged has *no* figure; a group logged a fortnight ago is *fresh* — a different fact. **Departs from the brief's "the last session" in one deliberate place**, which the MAX-179 section below sets out | 174, 175, A20/A22 | **Opus** |
 
 **Four collisions the overseer must respect.**
 
@@ -5220,21 +5220,39 @@ MAX-174's four features precisely because its input was already paid for. New fi
 
 ### The shape
 
-For each of the six groups, the **most recent** session the athlete said worked it:
+For each session the athlete said worked a group:
 
 ```text
 weight   = min(durationSeconds / 2700, 1)      // 45 minutes counts as a full session
 decay    = pow(0.5, elapsedSeconds / 172800)   // 48-hour half-life, measured from the end
-fraction = weight * decay                      // reported as fatigue above 0.01
+fraction = weight * decay                      // fresh once decay itself falls below 0.01
 ```
+
+Exactly one session sets a group's figure — nothing is summed — and **it is the session
+that reads highest, not simply the latest.** This is the one place the implementation
+departs from the brief's wording ("the last session that worked it"), and it is
+deliberate: taken literally, that rule makes the app punish honesty. A 90-minute leg day
+on Monday evening reads about 0.82 on Tuesday morning; logging a 10-minute mobility
+session that also touched legs on Tuesday morning drops the same athlete to about 0.22 —
+*more* logged data, *less* reported fatigue, from work that was added rather than
+removed. Taking the highest candidate still uses exactly one session, still sums nothing,
+and is monotone: logging can never lower a figure. It reduces to "the last session"
+whenever sessions are of comparable length, which is the case the brief describes.
+`MuscleFatigue` therefore carries two instants — `sessionEndedAt` (where the figure came
+from) and `mostRecentlyWorkedAt` (what a screen means by "last worked").
 
 **The 48-hour half-life is chosen against the interval a split repeats a group at, not
 against a physiological measurement** — a group trained Monday reads half-fatigued on
 Wednesday, the day a plan would next ask for it, and about a twelfth as fatigued the
 following Monday. 72 hours is equally defensible and is not more correct; the model is
 coarse enough that the gap between the two is smaller than the gap between a hard session
-and a token one, which neither can see at all. The 1% floor puts the "fresh" boundary at
-about 13 days and 7 hours for a full session.
+and a token one, which neither can see at all.
+
+The 1% floor is applied to **the decay factor, not the finished figure**, which puts the
+`.fresh` boundary at about 13 days and 7 hours *whatever the session's length*. Applying
+it to the figure would call a mis-started fifteen-second workout `.fresh` a minute after
+it ended — putting "enough time has passed" on screen about something that just happened,
+because the figure was small rather than old.
 
 **The constants are code, not plan data, and that is a decision rather than an oversight.**
 D1 protects the reproducibility of *stored scores*, and this model produces none — nothing
@@ -5267,8 +5285,10 @@ Three reading cases, three sentences in `MuscleFatigueCopy`, and both new cases 
 
 ### What was rejected
 
-- **Accumulating sessions.** Three leg days in four read as the last of them. A sum's scale
-  is anchored to nothing measured, which turns a coarse signal into an arbitrary one.
+- **Accumulating sessions.** Three leg days in four read as one of them. A sum's scale is
+  anchored to nothing measured, which turns a coarse signal into an arbitrary one.
+- **Reading the brief's "last session" literally** — see above. Kept the one-session rule,
+  dropped the non-monotonicity.
 - **A linear ramp.** It needs an arbitrary zero crossing and then asserts a hard edge at it
   — *fatigued Thursday, recovered Friday* — a sharper claim than "halves every couple of
   days" and no better supported.
@@ -5302,8 +5322,11 @@ stays the caller's. No file MAX-176 owns was touched.
 - `MuscleFatigueCopy.modelCaption` — the honest caption, written and pinned by a test.
   `MuscleFatigueCopy.detail(for:)` gives the per-group sentence, and the never-logged and
   fresh wordings are deliberately different.
-- `MuscleFatigue.fraction` for the band; `sessionWeight`, `elapsedSeconds`, `elapsedDays`
-  and `lastWorkedAt` for the detail a dense screen wants.
+- `MuscleFatigue.fraction` for the band; `sessionWeight`, `elapsedSeconds`,
+  `sessionEndedAt` and `mostRecentlyWorkedAt` for the detail a dense screen wants. There
+  is deliberately **no `elapsedDays`**: "3 days ago" is a calendar question needing the
+  athlete's time zone, so the label resolves both instants through `CalendarDay` and calls
+  `days(until:)`, as `ChatThreadListPresentation` already does.
 - **The three reading cases must stay three on screen**, and fatigue bands need a non-hue
   channel that extends the existing score-band accessibility test rather than a parallel
   one.
@@ -5314,8 +5337,9 @@ CI can prove the package compiles and that the curve is the one documented: ever
 figure in `MuscleFatigueTests` is hand-computed from the half-life, so each elapsed time is
 a whole or half number of half-lives and each expectation is a written-out power of two —
 including the floor asserted from both sides (13 days is fatigue at 2^-6.5, 14 days is fresh
-at 2^-7). A test that asserted whatever `compute` returned would pass against the wrong
-curve.
+at 2^-7) and from both session lengths. A test that asserted whatever `compute` returned
+would pass against the wrong curve. Monotonicity has its own case: logging the mobility
+session must leave the figure exactly where the leg day put it.
 
 CI cannot prove the half-life is the right one. That is a product judgement no test reaches,
 and its first honest check is an athlete reading a map after a real training week — which
