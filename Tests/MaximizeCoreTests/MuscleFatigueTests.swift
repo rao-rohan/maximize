@@ -59,13 +59,13 @@ final class MuscleFatigueTests: XCTestCase {
         let validated = try MuscleFatigueModel(
             halfLifeSeconds: MuscleFatigueModel.standard.halfLifeSeconds,
             fullSessionSeconds: MuscleFatigueModel.standard.fullSessionSeconds,
-            negligibleFraction: MuscleFatigueModel.standard.negligibleFraction,
+            negligibleDecay: MuscleFatigueModel.standard.negligibleDecay,
             weighting: MuscleFatigueModel.standard.weighting
         )
         XCTAssertEqual(validated, .standard)
         XCTAssertEqual(MuscleFatigueModel.standard.halfLifeSeconds, Self.halfLife)
         XCTAssertEqual(MuscleFatigueModel.standard.fullSessionSeconds, Self.fullSession)
-        XCTAssertEqual(MuscleFatigueModel.standard.negligibleFraction, 0.01)
+        XCTAssertEqual(MuscleFatigueModel.standard.negligibleDecay, 0.01)
     }
 
     func testAModelWithoutAPositiveHalfLifeIsRejected() {
@@ -74,7 +74,7 @@ final class MuscleFatigueTests: XCTestCase {
             try MuscleFatigueModel(
                 halfLifeSeconds: 0,
                 fullSessionSeconds: Self.fullSession,
-                negligibleFraction: 0.01,
+                negligibleDecay: 0.01,
                 weighting: .duration
             )
         )
@@ -83,7 +83,7 @@ final class MuscleFatigueTests: XCTestCase {
             try MuscleFatigueModel(
                 halfLifeSeconds: Self.halfLife,
                 fullSessionSeconds: Self.fullSession,
-                negligibleFraction: 1.5,
+                negligibleDecay: 1.5,
                 weighting: .duration
             )
         )
@@ -159,6 +159,13 @@ final class MuscleFatigueTests: XCTestCase {
         let readings = try map([try session([.shoulders], hoursAgo: -6)])
         XCTAssertEqual(try fraction(readings, .shoulders), 1.0, accuracy: 1e-12)
         XCTAssertEqual(readings[.shoulders].fatigue?.elapsedSeconds, 0)
+        // The arithmetic is clamped; the record is not. `sessionEndedAt` still says what
+        // the stored workout says, so nothing downstream has to guess whether it was
+        // corrected — `elapsedSeconds` is the figure to compute with, and it says so.
+        XCTAssertEqual(
+            readings[.shoulders].fatigue?.sessionEndedAt,
+            Self.now.addingTimeInterval(6 * 3_600)
+        )
     }
 
     // MARK: - Ordering
@@ -184,10 +191,10 @@ final class MuscleFatigueTests: XCTestCase {
         XCTAssertEqual(readings.neverLogged, [.back, .shoulders, .legs, .core])
     }
 
-    /// Only the most recent session naming a group is read. Two 45-minute chest days,
-    /// two and four days ago, read as the later one — 0.5, not 0.5 + 0.25. The model
-    /// does not accumulate, and this is the test that says so out loud.
-    func testOnlyTheLastSessionNamingAGroupIsRead() throws {
+    /// Exactly one session sets a group's figure. Two 45-minute chest days, two and four
+    /// days ago, read 0.5 — the later one — not 0.5 + 0.25. The model does not
+    /// accumulate, and this is the test that says so out loud.
+    func testOnlyOneSessionSetsAGroupsFigureAndTheyAreNeverSummed() throws {
         let readings = try map([
             try session([.chest], hoursAgo: 96),
             try session([.chest], hoursAgo: 48)
@@ -195,9 +202,72 @@ final class MuscleFatigueTests: XCTestCase {
         XCTAssertEqual(try fraction(readings, .chest), 0.5, accuracy: 1e-12)
     }
 
+    /// **Logging a session must never make the athlete read as more recovered.** A
+    /// 90-minute leg day two days ago reads 0.5; a 10-minute session that also touched
+    /// legs, finishing just now, reads 2/9 on its own. Taking "the last session"
+    /// literally would report the smaller figure — more logged data, less reported
+    /// fatigue, from work that was added rather than removed. The governing session is
+    /// whichever reads highest, so the figure holds at 0.5.
+    func testALighterLaterSessionCannotLowerAGroupsFigure() throws {
+        let heavyThenLight = try map([
+            try session([.legs], hoursAgo: 48, minutes: 90),
+            try session([.legs], hoursAgo: 0, minutes: 10)
+        ])
+        let heavyAlone = try map([try session([.legs], hoursAgo: 48, minutes: 90)])
+
+        XCTAssertEqual(try fraction(heavyThenLight, .legs), 0.5, accuracy: 1e-12)
+        XCTAssertEqual(
+            try fraction(heavyThenLight, .legs),
+            try fraction(heavyAlone, .legs),
+            accuracy: 1e-12,
+            "logging the mobility session must not reduce the figure"
+        )
+        XCTAssertGreaterThan(try fraction(heavyThenLight, .legs), 0.2222222222222222)
+    }
+
+    /// The two instants answer different questions, and the light-session case is where
+    /// they come apart: the figure is measured from Monday's leg day, and the athlete
+    /// nonetheless worked legs this morning. A screen saying "last worked two days ago"
+    /// would be false.
+    func testTheGoverningSessionAndTheLastSessionAreBothReported() throws {
+        let readings = try map([
+            try session([.legs], hoursAgo: 48, minutes: 90),
+            try session([.legs], hoursAgo: 0, minutes: 10)
+        ])
+        let fatigue = try XCTUnwrap(readings[.legs].fatigue)
+        XCTAssertEqual(fatigue.sessionEndedAt, Self.now.addingTimeInterval(-48 * 3_600))
+        XCTAssertEqual(fatigue.mostRecentlyWorkedAt, Self.now)
+        XCTAssertEqual(fatigue.elapsedSeconds, 48 * 3_600)
+    }
+
+    /// The ordinary case: one session, and the two instants are the same.
+    func testTheTwoInstantsAgreeWhenOneSessionIsBothTheLatestAndTheHeaviest() throws {
+        let readings = try map([try session([.core], hoursAgo: 24)])
+        let fatigue = try XCTUnwrap(readings[.core].fatigue)
+        XCTAssertEqual(fatigue.sessionEndedAt, fatigue.mostRecentlyWorkedAt)
+        XCTAssertEqual(fatigue.sessionEndedAt, Self.now.addingTimeInterval(-24 * 3_600))
+    }
+
+    /// A figure cannot claim to have been measured from a session later than the last
+    /// one the group was worked — the type refuses the pair rather than trusting a
+    /// caller to keep them consistent.
+    func testAFigureMeasuredFromAfterTheLastSessionIsRefused() {
+        assertThrows(
+            .inconsistent,
+            try MuscleFatigue(
+                group: .chest,
+                fraction: 0.5,
+                sessionEndedAt: Self.now,
+                mostRecentlyWorkedAt: Self.now.addingTimeInterval(-3_600),
+                elapsedSeconds: 0,
+                sessionWeight: 0.5
+            )
+        )
+    }
+
     /// Input order must not decide the answer, and neither must a shared end instant.
     /// Same-instant sessions are ranked by duration, deterministically.
-    func testTheLatestSessionWinsRegardlessOfInputOrderAndTiesAreDeterministic() throws {
+    func testTheGoverningSessionIsTheSameRegardlessOfInputOrderAndTiesAreDeterministic() throws {
         let older = try session([.legs], hoursAgo: 96)
         let newer = try session([.legs], hoursAgo: 48)
         XCTAssertEqual(try fraction(try map([older, newer]), .legs), 0.5, accuracy: 1e-12)
@@ -225,6 +295,37 @@ final class MuscleFatigueTests: XCTestCase {
         XCTAssertEqual(try fraction(fourteen, .back), 0.0078125, accuracy: 1e-12)
         guard case .fresh = fourteen[.back] else {
             return XCTFail("14 days is below the 1% floor and reads as fresh")
+        }
+    }
+
+    /// **The boundary is temporal, and only temporal.** It is tested against the decay
+    /// factor rather than the finished figure, so a 20-minute session crosses it on the
+    /// same day a 45-minute one does — at 13 days it is still fatigue even though its
+    /// figure (0.0049) is already under 1%, and at 14 days it is fresh.
+    func testTheFreshBoundaryDoesNotMoveWithSessionLength() throws {
+        let thirteen = try map([try session([.arms], hoursAgo: 13 * 24, minutes: 20)])
+        XCTAssertEqual(try fraction(thirteen, .arms), 0.004910463758239913, accuracy: 1e-12)
+        guard case .fatigued = thirteen[.arms] else {
+            return XCTFail("a small figure is not the same fact as an old one")
+        }
+
+        let fourteen = try map([try session([.arms], hoursAgo: 14 * 24, minutes: 20)])
+        XCTAssertEqual(try fraction(fourteen, .arms), 0.003472222222222222, accuracy: 1e-12)
+        guard case .fresh = fourteen[.arms] else {
+            return XCTFail("14 days is past the floor for any session length")
+        }
+    }
+
+    /// The reason the boundary is gated on decay: a mis-started Watch workout of fifteen
+    /// seconds, tagged and read a minute later, has a figure under 1% because it was
+    /// *tiny*, not because time has passed. Calling it `.fresh` would put "enough time
+    /// has passed" on screen about something that just happened.
+    func testATinySessionThatJustFinishedIsNotCalledFresh() throws {
+        let readings = try map([try session([.shoulders], hoursAgo: 0, minutes: 0.25)])
+        XCTAssertEqual(try fraction(readings, .shoulders), 0.005555555555555556, accuracy: 1e-12)
+        XCTAssertLessThan(try fraction(readings, .shoulders), MuscleFatigueModel.standard.negligibleDecay)
+        guard case .fatigued = readings[.shoulders] else {
+            return XCTFail("a session a minute old has not had time to recover, however small")
         }
     }
 
