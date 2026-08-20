@@ -560,7 +560,7 @@ feature was governed by a plan that could not exist).
 | MAX-153 | **The chat shell** — composer, thread list, sheet chrome. The design pass the chat's *shell* never had | Owner | **Opus** ✅ |
 | MAX-157 | **The fact sheet tells Claude "days" over a count of obligations** — `TrainingFactSheet`'s "Effective days" line is the same MAX-134 caption bug one layer into the prompt, not just on screen | MAX-140 | Sonnet ✅ |
 | MAX-161 | **First-run experience spec** — there is no first-run path in the app at all; a fresh install has no Health request, no plan, no key, and nothing pointing at any of them. Spec + A23/A24, decomposed into MAX-162…167 below | Owner | **Opus** ✅ |
-| MAX-162 … MAX-167 | The first-run build, decomposed from MAX-161 | MAX-161 | see below |
+| MAX-162 … MAX-167 | The first-run build, decomposed from MAX-161 | MAX-161 | see below ✅ |
 | MAX-169 | **A store that will not open is a designed state, not a brick** — the whole-store failure is named once, at the root, instead of nine screens each reporting their own; a retry where one could work and none where it could not; the additive-schema migration question settled. **Closes the store half of R15** | MAX-154 | **Opus** ✅ — see the MAX-169 section below |
 
 **MAX-161.** [docs/FIRST-RUN-SPEC.md](./docs/FIRST-RUN-SPEC.md). Verified by search: no
@@ -591,7 +591,7 @@ but is dated before its effective date is permanently unscorable, and nothing te
 | MAX-163 | The first-launch cover — one action, presents the Health sheet, claims no result | MAX-161 | Sonnet ✅ — see the MAX-163 section below for the gate and the recording |
 | MAX-164 | The setup card on the Workouts tab, including the "set up, nothing recorded yet" window | MAX-161 | Sonnet ✅ — see the MAX-164 section below, including how it now reads MAX-163's device-lifetime recording |
 | MAX-165 | **The first plan's effective date** — default covers what is captured; the excluded-workout count on screen. Revisions unchanged | MAX-161 | **Opus** ✅ **built ahead of the rest of this set** — see the MAX-165 section below |
-| MAX-166 | The conversational route to a first plan, offered from the authoring screen. Droppable | MAX-161 | Sonnet |
+| MAX-166 | The conversational route to a first plan, offered from the authoring screen. Droppable | MAX-161 | Sonnet ✅ — see the MAX-166 section below |
 | MAX-167 | The API key section's purpose footer — what the key is for, what it costs, where it lives | MAX-161 | Sonnet 🔒 ✅ |
 | MAX-172 | **The consolidated device-verification checklist** — every *Needs device verification* item from #101–#157, reordered into the sequence a person would actually run them in and ranked by risk, instead of thirty scattered PR sections | Owner | Sonnet ✅ |
 
@@ -4526,6 +4526,79 @@ device). See the PR's "Needs device verification" section for the checklist.
 **`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
 Nothing in this ticket touches `Sources/MaximizeCore/`, so neither suite's *content*
 changed; `swift test` was not re-run to confirm the unmodified suite still passes.
+
+---
+
+## MAX-166 — the conversational route, offered from the authoring screen
+
+FIRST-RUN-SPEC §10 argues at length against a conversational *first run* and settles on
+the one place a conversational route belongs: "the authoring screen is where the
+conversational route should be offered, since that is where a person who dislikes the
+form is standing." §13 decision 5: "Offer it, from the authoring screen only, gated on a
+stored key." This ticket builds the door, not a new drafting mechanism —
+`ChatConversationView`'s "Draft a plan from this conversation" has shipped since MAX-101
+and is unchanged.
+
+**Premise checked against stored data first, per this ticket's own instruction.** The
+affordance did not already exist, `PlanAuthoringView` had no reference to chat, and
+`ChatConversationView`'s drafting entry point is reachable exactly as the spec assumes —
+so the ticket proceeded as briefed.
+
+### The gate, in the core
+
+`PlanAuthoringConversationalRoute` (`Sources/MaximizeCore/Plan/`) reads
+`StoredAPIKeyPresence` — the same three-state read Settings' key section and
+`FirstRunModel` already use — and answers two things: whether the action is enabled, and
+what the screen says either way. `.stored` and `.unknown` both enable it, matching
+`StoredAPIKeyPresence.permitsClearing`'s own reasoning (Settings offers **Clear** on both
+for the same "a failed read is not evidence of absence" argument, and `FirstRunChecklist`
+makes the identical call for its own "add a key" step). Only `.notStored` disables it.
+
+**Never a hidden button.** CLAUDE.md's "absence is a designed state" — the button always
+renders; `PlanAuthoringConversationalRoute.explanation` supplies the sentence under it in
+either state, worded to match `ChatFailureNotice.noAPIKeyStored(for:)`'s own register for
+the missing-key case rather than writing a second sentence about the same fact. Tested in
+`PlanAuthoringConversationalRouteTests` — every case of `StoredAPIKeyPresence`, both
+explanations non-empty and distinct, the unavailable one naming Settings and not claiming
+a key is stored.
+
+### App layer, deliberately thin
+
+`PlanAuthoringModel` gained one `keyStore: AnthropicAPIKeyStoring` parameter (defaults to
+`KeychainAnthropicAPIKeyStore()`, matching `SettingsView`/`FirstRunModel`) and one
+`resolveKeyPresence()` — the same three-state read duplicated a third time rather than
+shared, matching `FirstRunModel`'s own reasoning for its duplicated
+`performHealthAccessRequest`. `PlanAuthoringView` adds one `Section` (placed right after
+"Current plan", ahead of the eleven-field form) with the action button and the core's
+explanation text underneath, and a `.sheet(item:)` presenting `ChatSheet(subject:
+.training(scope))` — a fresh training thread frozen to "this week", the same fallback
+`ChatSheet.defaultInterval()` already resolves to. No change to `ChatSheet` or
+`ChatConversationView`: both already supported this call shape.
+
+**A14 held explicitly.** The button presents a sheet and calls nothing; `ChatModel` fires
+only when the athlete sends a message inside the conversation it opens. **CHAT-FIRST
+§2.5 held too**: the sheet opened is the same one MAX-101 already proved ends at
+`PlanAuthoringView`, reviewed and saved by hand — this ticket adds a second door to it,
+not a second way to write.
+
+### Tests
+
+`PlanAuthoringConversationalRouteTests` — nine tests, all in `MaximizeCore`, all
+synchronous (the type carries no `@MainActor` state). No test touches `App/`, which is
+never run by CI (R2/R13); the gate itself is what is verified there.
+
+### What CI can and cannot prove
+
+CI can prove: the package compiles, `PlanAuthoringConversationalRouteTests` holds the
+gate to every `StoredAPIKeyPresence` case, and the app target still links.
+
+CI cannot prove: that the button renders where intended, at any Dynamic Type size or
+under Increase Contrast/Reduce Transparency; that a tap actually presents `ChatSheet`;
+that the disabled state reads as disabled rather than merely dim; or that the "this week"
+scope resolves sensibly on a real device's clock. See the PR's "Needs device
+verification" section.
+
+**`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
 
 ---
 
