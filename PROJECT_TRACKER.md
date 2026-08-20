@@ -1966,6 +1966,7 @@ free. What landed in the file:
 | MAX-175 | **The app does not invent** — one principle, two expressions: the honest-refusal rule now holds over the *set* of model-facing prompts rather than in four literals that each remember it separately, and *no data, no judgement* is written down as a rule with tests. **The premise it was dispatched on was wrong** — the constraint was reported missing from chat and is not; see the MAX-175 section below | 174 | **Opus** |
 | MAX-176 | **Per-workout strain, computed at ingestion** — the app now measures what a session *cost*, beside everything else it measures, which is whether the athlete did what was asked. A zone-weighted integral of the stored HR curve (Edwards' summated-zone score over the plan's cap-anchored zones), in **zone-weighted minutes**, unbounded, computed once and stored in a new nullable `strainPoints` column. **No curve, no strain** — nil, never zero. A lift gets one and it is heart-rate only (A20). **Nothing already stored is rescored or moved**; existing workouts read back with no strain until something re-runs their metrics. Consumed by MAX-177 and MAX-178 — see the MAX-176 section below | 174, 175 | **Opus** |
 | MAX-179 | **Per-muscle fatigue from the entries A22 already collects** — one session per group, weighted by its duration, decayed on a 48-hour half-life. States in its own doc comment what it cannot know (no sets, no reps, no load) and that **A20's tripwire governs the "just add a weight field" follow-up, not A22's permission**. A group never logged has *no* figure; a group logged a fortnight ago is *fresh* — a different fact. **Departs from the brief's "the last session" in one deliberate place**, which the MAX-179 section below sets out | 174, 175, A20/A22 | **Opus** |
+| MAX-181 | **The fact sheet renders the lift slot** — `TrainingFactSheet`'s plan block now names each weekday's lift ask beside its run ask, tagged `Lift:`, omitted rather than stated when the plan asks nothing of the slot. Closes MAX-174 §5.3's G2, and MAX-136's open item. **Also closes the more severe consequence MAX-175 found and declined to fix**: `PlanProposalInstruction` tells a drafting model to restate each weekday's lift ask from this same fact sheet unchanged — it could not, so an accepted revision could silently zero out an athlete's whole lift schedule. See the MAX-181 section below | 174, 175 | Sonnet ✅ |
 
 **Four collisions the overseer must respect.**
 
@@ -1975,10 +1976,13 @@ free. What landed in the file:
    MAX-095 landed briefed, so MAX-142 is not needed.** Its roll-up is one line per
    *session*, discipline-tagged, with fields that do not apply omitted rather than
    nil-rendered, and the cap counts sessions. **The claim that followed — that the plan
-   block needs no further edit — is wrong, and MAX-136 verified it against the code.** The
-   block iterates `weeklyTemplate.entries` and prints `entry.session`, the *run* slot;
-   MAX-129 put the lift ask on `Entry.liftSession`, so it never appears there. §10.2's plan-block
-   half is still open. See MAX-136's note below.
+   block needs no further edit — was wrong, and MAX-136 verified it against the code.** The
+   block iterated `weeklyTemplate.entries` and printed `entry.session`, the *run* slot;
+   MAX-129 put the lift ask on `Entry.liftSession`, so it never appeared there. §10.2's
+   plan-block half stayed open through MAX-136, MAX-174's competitive read caught it again
+   as G2, and **MAX-181 closed it**: each weekday's line now names the lift ask too, tagged
+   `Lift:`, omitted rather than stated on a day that asks for none. See the MAX-181 section
+   below.
 3. ~~**MAX-110 adds `.lift` to `RestDayBudgeting.costTier` without reordering the existing
    cases.**~~ **Respected — MAX-128 inserted `.lift` between `.easy` and `.hard` and
    renumbered nothing else**, so every existing comparison is unchanged and no historical
@@ -2052,7 +2056,7 @@ lift slot — but each currently answers about the day's *run* while calling it 
 | `RestDayBudgeting` / `TalliesCalculator` | ~~`PlanDay.canBeMissed`, `costTier`~~ **each day's obligations, as of MAX-134** | MAX-134 ✅ |
 | `ScoreCalendar.dayState` / `agreement` | ~~the day's single prescribed kind~~ **each day's obligations, and the scored workout's own slot, as of MAX-135** | MAX-135 ✅ |
 | `WorkoutFactSheet` | ~~`planDay.scheduledSession`~~ **the workout's own slot, as of MAX-136** | MAX-136 ✅ |
-| `TrainingFactSheet` plan block | `entry.session` — the lift slot is still unrendered | **open, see MAX-136** |
+| `TrainingFactSheet` plan block | ~~`entry.session` — the lift slot is unrendered~~ **both slots, as of MAX-181** | MAX-181 ✅ |
 | `PlanDraft` setters, `PlanAuthoringError` | ~~the run slot only~~ **both, as of MAX-137** | MAX-137 ✅ |
 | `PlanDisplayData.WeekdayRow` | ~~one kind/distance/note per weekday~~ **both slots, as of MAX-138** | MAX-138 ✅ |
 | `TrendTileData` planned mileage | sums `planDay.scheduledSession.distanceMeters` | MAX-140 |
@@ -2994,18 +2998,20 @@ settings, and they were being printed under "The plan" as though they governed a
   property that had to be preserved is that the scoring prompt is character-identical: a
   regression here would not look like a failure, it would look like slightly different
   scores, stored forever under D8.
-- **Reported, not done: `TrainingFactSheet`'s plan block still renders only the run slot.**
-  The collision note above records MAX-142 as unnecessary because "the plan block renders
-  the whole stored `WeeklyTemplate`". Verified against the code: **the roll-up half of
-  §10.2 is genuinely done** — one line per session, discipline-tagged, absent fields
-  omitted, the cap counting sessions — but the plan block iterates `plan.weeklyTemplate
-  .entries` and prints `entry.session`, which is the *run* slot. MAX-129 put the lift ask
-  on `Entry.liftSession`, not into `entries`, so it never appears. §10.2's second sentence
-  ("the plan block must carry the weekly template's **lift** slot, or 'am I on plan' is
-  answerable about half the plan") is therefore still open. It is one line in
-  `Context/TrainingFactSheet.swift` plus a decision about whether an all-rest lift column
-  is stated once or per weekday; this ticket's brief scoped it to `WorkoutFactSheet`,
-  `WorkoutContext` and `WorkoutContextBuilder`, so it was left alone.
+- ~~**Reported, not done: `TrainingFactSheet`'s plan block still renders only the run
+  slot.**~~ **Closed by MAX-181.** The collision note above records MAX-142 as unnecessary
+  because "the plan block renders the whole stored `WeeklyTemplate`". Verified against the
+  code: **the roll-up half of §10.2 is genuinely done** — one line per session,
+  discipline-tagged, absent fields omitted, the cap counting sessions — but the plan block
+  iterated `plan.weeklyTemplate.entries` and printed `entry.session`, which is the *run*
+  slot. MAX-129 put the lift ask on `Entry.liftSession`, not into `entries`, so it never
+  appeared. §10.2's second sentence ("the plan block must carry the weekly template's
+  **lift** slot, or 'am I on plan' is answerable about half the plan") stayed open through
+  this ticket's own report of it, was rediscovered by MAX-174's competitive read as G2, and
+  MAX-181 closed it: each weekday's line now names the lift ask too, tagged `Lift:`,
+  omitted rather than stated on a day that asks for none. This ticket's brief had scoped
+  the fix to `WorkoutFactSheet`, `WorkoutContext` and `WorkoutContextBuilder`, which is why
+  it was left alone here rather than taken as a drive-by. See the MAX-181 section below.
 
 **MAX-139 — the workout detail screen stops drawing a lift as a run with holes in it.**
 LIFTING-SPEC §10.1's other half. The fact sheet stopped describing a lift in running
@@ -5557,6 +5563,103 @@ session must leave the figure exactly where the leg day put it.
 CI cannot prove the half-life is the right one. That is a product judgement no test reaches,
 and its first honest check is an athlete reading a map after a real training week — which
 needs MAX-180, since nothing draws this yet.
+## MAX-181 — the fact sheet renders the lift slot
+
+MAX-174 §5.3's G2: `TrainingFactSheet`'s plan block iterated `plan.weeklyTemplate.entries`
+and rendered only `entry.session`, the run slot. `entry.liftSession` — the lift ask
+`WeeklyTemplate` has carried since MAX-129 — sat unrendered. A training thread's model was
+told the week's run prescription and silently not its lift one: a live instance of the
+exact failure MAX-175's absence rule forbids, landing against that rule rather than beside
+it, as MAX-174 sequenced it to.
+
+### What changed
+
+`Context/TrainingFactSheet.swift`'s weekly-template loop now renders both slots. The run
+ask stays first and unlabeled, byte-identical to what it printed before this ticket — it
+is the wire-compatible slot every plan ever authored already prescribes
+(`WeeklyTemplate.Entry`'s own doc comment). A lift ask, when the plan prescribes one, is
+tagged `Lift:` and follows on the same line:
+
+```
+Weekly template, Monday first. A day names a lift ask (tagged "Lift:") only when the plan
+prescribes one — a day with no lift clause prescribes no lifting that day.
+Monday: rest
+Tuesday: easy, 8.0 km · Lift: lift, 45m 0s, muscle groups: chest, shoulders
+Wednesday: hard, (6 × 800m)
+...
+```
+
+A day whose lift slot is rest gains no clause at all — not "Lift: rest", not a line of its
+own. Seven such lines every call is exactly the noise LIFTING-SPEC §10.2's omission rule
+exists to prevent, and it is not a new decision here: `PlanFormatting.weekdayLines`
+already made it for the screen at MAX-138, and this ticket follows that precedent rather
+than inventing a second one.
+
+**One combined line per weekday, not the screen's two rows.** `PlanFormatting`/`PlanCopy`
+render a day with both slots as two rows inside one visually-grouped card, where nothing
+repeats the weekday name — the grouping does that work for free. A flat prompt has no such
+grouping; a second line would have to restate the day's name to say what already followed
+it, spending tokens for zero new information. So the fact sheet stays terser than the
+screen by design, on one line, and says so in its own comment.
+
+**Closing rule 2's gap — telling "no lift this week" from "a lift I cannot see."** The
+per-line omission above is exactly the shape MAX-175's absence rule forbids if left
+unexplained: a model reading seven lines with no `Lift:` clause has no way to tell "the
+plan asks no lifting" from "the renderer dropped something." So the convention is stated
+once, in the header line above the template, rather than per weekday — the same trade the
+sessions section already makes with *"A field missing from a line was not recorded for
+that session."* One sentence, paid once regardless of how many of the seven days carry a
+lift, closes the gap for every day at once.
+
+**`FactSheetFormatting.liftPrescription` moved from `WorkoutFactSheet`,** exactly where
+that private function's own doc comment said it would the day this ticket landed: "It
+moves the moment `TrainingFactSheet`'s plan block carries the lift slot and becomes its
+second caller." A12 rule 3 is why — `WorkoutFactSheet` already had a lift-prescription
+renderer (MAX-136), and inventing a second one for the roll-up would have let the two
+prompts spell the same measurement two ways. The function itself is unchanged; only its
+address moved, and both call sites now read `FactSheetFormatting.liftPrescription(_:)`.
+
+### The severity was higher than G2 recorded, and this closes that too
+
+MAX-175's report flagged the real consequence and declined to fix it: plan drafting reads
+the same `TrainingContext.factSheet()` this ticket corrects
+(`ChatModel.send`/`draftPlan` both pass `context.factSheet()` straight into the
+instruction, and `PlanProposalInstruction.factSheet` is documented as `ContextBuilder`'s
+output verbatim), and `PlanProposalInstruction.taskDescription` tells the drafting model:
+*"restate each weekday's lift ask from the fact sheet exactly as it stands unless the
+conversation asks you to change it."* Before this ticket, the fact sheet never stated a
+lift ask, so the model could only comply by inventing one or by proposing rest for every
+lift day — and an accepted proposal is a new plan version, so a drafting conversation could
+silently zero out an athlete's whole lift schedule. **Rendering the lift slot is the fix
+for both problems at once**: the model can now actually see what it is being told to
+restate.
+
+No test pinned a drafting output that assumed the lift slot was invisible —
+`PlanProposalInstructionTests` and `PlanProposalDraftingTests` construct their fact sheets
+as hand-written literals passed directly to `PlanProposalInstruction`, never through
+`TrainingContext.factSheet()`, and `ChatPlanDraftingTests`'s end-to-end drafting test uses
+a fake model client that returns a fixed reply regardless of what the real fact sheet says.
+So this ticket changed no drafting test's expectation; it closed a live gap nothing was
+exercising.
+
+### Tests
+
+`Tests/MaximizeCoreTests/TrainingFactSheetPlanBlockTests.swift`, new — three cases, each
+pinning whole rendered lines (not loose substrings) so a future edit cannot silently drop
+the slot again the way MAX-136 found it dropped: a week with lifts on some days, a week
+with none (asserting the convention sentence is present and no line anywhere carries
+`Lift:`), and a weekday prescribing both slots on one line with every field
+`liftPrescription` renders — duration, muscle groups and a note.
+
+### Security review
+
+Required — this is a prompt-contents change (D3). Posted as a PR comment before merge.
+**No new field of health data enters the prompt.** Every value the new `Lift:` clause
+renders — `ScheduledSessionKind`, `durationSeconds`, `muscleGroups`, `note` — was already
+stored on `ScheduledSession` (MAX-129/131/137) and already reached a Claude prompt through
+`WorkoutFactSheet`'s lift branch (MAX-136). This ticket renders an existing field in a
+second place the athlete's own plan already governs; it adds no new health data and no new
+data source.
 
 **`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
 

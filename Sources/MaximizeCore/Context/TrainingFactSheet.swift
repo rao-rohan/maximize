@@ -115,14 +115,42 @@ extension TrainingContext {
 
         // The whole template, every weekday, rather than the days that happen to prescribe
         // a run. Rest is an explicit ask (`WeeklyTemplate` makes it one), and "what does
-        // the plan want on a Friday" is a question job two exists to answer. Rendering the
-        // stored template wholesale is also what makes LIFTING-SPEC §10.2's requirement —
-        // that the plan block carry the lift slot — arrive for free the moment
-        // `WeeklyTemplate` grows one, instead of needing this renderer edited again.
-        lines.append("Weekly template, Monday first:")
+        // the plan want on a Friday" is a question job two exists to answer.
+        //
+        // **The lift slot did not arrive for free.** An earlier version of this comment
+        // claimed rendering the template wholesale would pick up LIFTING-SPEC §10.2's lift
+        // slot the moment `WeeklyTemplate` grew one — wrong, and MAX-136 caught it: the
+        // loop below read only `entry.session`, the run slot, so `entry.liftSession` sat
+        // unrendered from MAX-129 until this ticket (MAX-181). A training thread was told
+        // the week's run prescription and silently not its lift one — a live instance of
+        // exactly the failure MAX-175's absence rule forbids, since the model had no way
+        // to tell "this plan asks no lifting" from "this plan asks for lifts I cannot see."
+        //
+        // So each weekday's line now names both slots. The run ask stays first and
+        // unlabeled — it is the wire-compatible slot every plan ever authored already
+        // prescribes (`WeeklyTemplate.Entry`'s own doc comment) — and a lift ask, tagged
+        // "Lift:", follows on the same line **only when the plan prescribes one**.
+        // Omitted rather than a "no lift" line: seven such lines is exactly the noise
+        // §10.2's omission rule exists to prevent, and `PlanFormatting.weekdayLines`
+        // already sets this precedent on the screen (MAX-138) — it never emits a "Rest"
+        // row for the lift slot either. One line per weekday rather than the screen's two
+        // rows per day-with-both: the screen's second row sits inside one visually-grouped
+        // card, where nothing repeats the weekday name; a flat text block has no such
+        // grouping, so a second line would spend tokens restating the day for zero new
+        // information. The sentence below is what keeps the omission from being the
+        // unlabelled absence MAX-175 forbids — it states the convention once, so a model
+        // reading seven lines with no "Lift:" clause is reading a stated fact ("no lifting
+        // is asked for this week"), not guessing at a gap.
+        lines.append("Weekly template, Monday first. A day names a lift ask (tagged "
+            + "\"Lift:\") only when the plan prescribes one — a day with no lift clause "
+            + "prescribes no lifting that day.")
         for entry in plan.weeklyTemplate.entries {
-            lines.append("\(FactSheetFormatting.weekdayName(entry.weekday)): "
-                + "\(FactSheetFormatting.scheduledSession(entry.session))")
+            var line = "\(FactSheetFormatting.weekdayName(entry.weekday)): "
+                + "\(FactSheetFormatting.scheduledSession(entry.session))"
+            if !entry.liftSession.isRest {
+                line += " · Lift: \(FactSheetFormatting.liftPrescription(entry.liftSession))"
+            }
+            lines.append(line)
         }
 
         return lines

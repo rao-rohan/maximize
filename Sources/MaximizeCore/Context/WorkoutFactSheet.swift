@@ -198,47 +198,12 @@ extension WorkoutContext {
     private func prescriptionLine(_ session: ScheduledSession) -> String {
         switch discipline {
         case .run: return FactSheetFormatting.scheduledSession(session)
-        case .lift: return Self.liftPrescription(session)
+        // Moved to `FactSheetFormatting.liftPrescription` (MAX-181) the moment
+        // `TrainingFactSheet`'s plan block became its second caller — see that
+        // function's own doc comment for why it lived here alone until then, and for
+        // the omission rule §10.1 and this ticket both lean on.
+        case .lift: return FactSheetFormatting.liftPrescription(session)
         }
-    }
-
-    /// The lift slot's ask — "lift, 45m 0s, muscle groups: chest, shoulders".
-    ///
-    /// Not `FactSheetFormatting.scheduledSession(_:)`. That function renders a prescribed
-    /// *distance*, which no lift carries, and is silent about the two fields a lift's ask
-    /// is actually written in: `durationSeconds`, which MAX-131 added to `ScheduledSession`
-    /// precisely so a lift could be prescribed in minutes, and `muscleGroups`.
-    ///
-    /// Here rather than in `FactSheetFormatting` for the reason `energy` is (see the
-    /// formatting note at the foot of this file): a formatter with one caller buys no
-    /// shared guarantee by moving. Its numeric part still routes through
-    /// `FactSheetFormatting.duration`, so the one figure it shares with every other
-    /// renderer is already spelled the one way. It moves the moment
-    /// `TrainingFactSheet`'s plan block carries the lift slot and becomes its second
-    /// caller.
-    ///
-    /// **Absences are omitted, not stated** — this renderer's rule inverted again, and
-    /// §10.1's instruction. "Lift on Tuesday, length unstated" and "lift on Tuesday,
-    /// groups unstated" are ordinary asks a plan really makes (`ScheduledSession`
-    /// documents both as distinct from rest), not gaps in a record, so there is nothing
-    /// for a disclaimer to tell Claude that the short line does not.
-    private static func liftPrescription(_ session: ScheduledSession) -> String {
-        var parts = [session.kind.rawValue]
-        if let durationSeconds = session.durationSeconds {
-            parts.append(FactSheetFormatting.duration(durationSeconds))
-        }
-        if !session.muscleGroups.isEmpty {
-            // `ordered`, never the set's own iteration order: a prompt that shuffled its
-            // muscle groups between two builds of the same context would be D3's
-            // determinism failing on a word rather than on a number.
-            parts.append("muscle groups: "
-                + session.muscleGroups.ordered.map(\.rawValue).joined(separator: ", "))
-        }
-        let prescription = parts.joined(separator: ", ")
-        // The note trails the list rather than joining it: it is a gloss on the whole
-        // ask, not another item in it, and ", (upper body)" reads as a fourth field.
-        guard let note = session.note, !note.isEmpty else { return prescription }
-        return "\(prescription) (\(note))"
     }
 
     // MARK: - Lines that must explain their own absence
@@ -364,7 +329,8 @@ extension WorkoutContext {
     // over many sessions — cannot format the same measurement a different way. MAX-095
     // then moved `weekdayName` and the scheduled-session formatter for the same reason,
     // the moment the roll-up gained a second caller for each: every line it prints names
-    // a weekday and a prescription.
+    // a weekday and a prescription. MAX-181 moved `liftPrescription` the same way, the
+    // moment the roll-up's plan block grew a second, lift-carrying caller for it too.
     //
     // What stays here is `energy`, the one formatter with exactly one caller — the
     // roll-up carries no active-energy figure — because moving a formatter nothing else
