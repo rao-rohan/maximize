@@ -5292,6 +5292,31 @@ strapless runs is not the same fact as a 7-day sum of everything that happened. 
 `StoredDerivedMetrics.strainPoints` is a real nullable `Double` column, not a JSON blob,
 precisely so that summing a month of it does not oblige a decode per workout.
 
+### Two limits written into the type rather than left to be discovered
+
+Both came out of the code review and neither is a defect in this ticket; they are
+properties of reading a heart-rate curve, and the fix for each is worse than the property.
+
+- **Strain counts paused time.** Within the span the curve covers, a stop at a level
+  crossing is interpolated across and weighted like any other stretch, so forty minutes of
+  running either side of a twenty-minute stop costs about what a clean easy hour costs.
+  Every other seconds-valued figure in the record already reads the same way —
+  `timeAboveCapSeconds` and `zoneSplits` are cut over exactly this span — and correcting
+  for it would mean scaling by `durationSeconds / coveredSeconds`, which invents a
+  distribution the curve does not contain and breaks the exact identity with `zoneSplits`.
+  If it distorts real numbers, the fix is to record pauses as gaps at ingestion, which is
+  the fix `HeartRateCurve` already names for dropouts.
+- **A zero-span curve reads as recorded strain and unrecorded zone splits.** A
+  single-sample series gives strain `0` and empty splits, so `isRecorded(.strain)` is true
+  while `isRecorded(.zoneSplits)` is false. One fact, not two in tension — "measured, and
+  containing nothing" — pinned by a test and stated in `WorkoutStrain` so **MAX-177 does
+  not draw them as a contradiction**.
+
+Also raised and deliberately not taken: nothing at `WorkoutFactSheet`'s call site records
+that `strain` is intentionally absent from the prompt. That file is MAX-177's, it is
+running in parallel, and a comment there would be a merge conflict bought for a note that
+MAX-177 deletes when it adds the line. Recorded here instead.
+
 ### What CI can and cannot prove
 
 CI can prove: the package compiles; the strain over four hand-computed curves is the value

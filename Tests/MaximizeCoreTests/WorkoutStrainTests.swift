@@ -193,12 +193,18 @@ final class WorkoutStrainTests: XCTestCase {
     /// already takes of this case: a single sample *is* a curve, it truthfully covers
     /// zero seconds, and the integral over zero seconds is zero. There is a measurement
     /// here; there is just nothing in it.
+    ///
+    /// The pairing this produces is pinned here because MAX-177 will meet it on screen:
+    /// strain reads as *recorded* and the zone splits read as *not recorded*, and those
+    /// are one fact rather than two in tension — "measured, and containing nothing". See
+    /// `WorkoutStrain`'s absence section, which a view rendering both must have read.
     func testACurveCoveringNoSpanHasAStrainOfZeroRatherThanNone() throws {
         let metrics = try computeMetrics([(0, 145)])
 
         XCTAssertEqual(try XCTUnwrap(metrics.strain).points, 0)
         XCTAssertTrue(metrics.isRecorded(.strain))
         XCTAssertTrue(metrics.hasHeartRateData)
+        XCTAssertFalse(metrics.isRecorded(.zoneSplits), "empty splits: nothing to distribute")
     }
 
     /// The invariant made unrepresentable rather than merely observed: a record cannot be

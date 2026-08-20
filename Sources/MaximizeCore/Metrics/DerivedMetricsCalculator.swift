@@ -181,12 +181,22 @@ public enum DerivedMetricsCalculator {
             // integral exactly — `zoneSplits` is cut at every boundary crossing, so
             // nothing is approximated by totalling it. See `WorkoutStrain`.
             //
-            // Gated on `.zoneSplits` as well as on itself, which is redundant today and
-            // deliberately so: the two answer the applicability question identically now,
-            // and if a later ticket ever withholds the distribution from a discipline,
-            // the figure derived from it must go absent too rather than quietly total an
-            // empty value to zero. That would be exactly A18's fabricated number.
-            if applies(.strain), applies(.zoneSplits) {
+            // Gated on two other figures as well as on itself, both redundant today and
+            // deliberately so — MAX-130 narrowed `timeAboveCapSeconds` from every
+            // discipline to the run slot, so "these three currently agree" is not a
+            // property to lean on:
+            //
+            // - `.zoneSplits`, because strain is a total of that distribution. If a later
+            //   ticket withholds it from a discipline, the figure derived from it must go
+            //   absent too rather than quietly total an empty value to zero — which would
+            //   be exactly A18's fabricated number.
+            // - `.averageHeartRateBPM`, because that is the figure `DerivedMetrics`'
+            //   cross-field check reads to decide whether a heart-rate series existed. Were
+            //   it ever withheld from a discipline while strain was not, this function would
+            //   assemble a record the initializer rejects, and the whole enrichment stage
+            //   would fail — leaving that workout with no metrics at all instead of with no
+            //   strain. A gate is the cheap way to keep the failure mode "absent".
+            if applies(.strain), applies(.zoneSplits), applies(.averageHeartRateBPM) {
                 strain = try WorkoutStrain(zoneSplits: zoneSplits)
             }
 

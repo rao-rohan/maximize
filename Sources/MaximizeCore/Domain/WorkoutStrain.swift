@@ -82,10 +82,33 @@ import Foundation
 ///
 /// A curve that exists but covers no span — a single sample — is a different fact and
 /// gets `0`: there is a measurement, it truthfully covers zero seconds, and that is the
-/// same reading `timeAboveCapSeconds` already takes of the same case. Time is attributed
-/// only between the first and last sample (`HeartRateCurve` documents why it never
-/// extrapolates), so a strap that joined a run late contributes strain for the stretch it
-/// saw and nothing for the stretch it did not.
+/// same reading `timeAboveCapSeconds` already takes of the same case. **Note the pairing
+/// it produces, because a surface showing both figures will meet it**: such a workout has
+/// a strain of `0` and *empty* zone splits, so `isRecorded(.strain)` is true while
+/// `isRecorded(.zoneSplits)` is false. Those are not two answers in tension — they are one
+/// fact, "measured, and containing nothing" — and a view must not draw them as a
+/// contradiction.
+///
+/// ## What the span is, and what it therefore includes
+///
+/// Time is attributed only between the first and last sample (`HeartRateCurve` documents
+/// why it never extrapolates), so a strap that joined a run late contributes strain for
+/// the stretch it saw and nothing for the stretch it did not.
+///
+/// Within that span, **everything counts, including time the athlete was not training**: a
+/// pause at a level crossing, a long stop mid-run, and a sensor dropout are all
+/// interpolated across and weighted like any other stretch. So forty minutes of running
+/// either side of a twenty-minute stop costs about what a clean easy hour costs. This is a
+/// stated limitation rather than an oversight, and it is deliberate on two grounds: it is
+/// the same reading every other seconds-valued figure in the record already takes —
+/// `timeAboveCapSeconds` and `zoneSplits` are cut over exactly this span — and correcting
+/// for it would mean scaling the integral by `durationSeconds / coveredSeconds`, which
+/// invents a distribution the curve does not contain and breaks the exact identity with
+/// `zoneSplits` that keeps the two figures from ever disagreeing. (`averageCadence`
+/// divides by active duration instead, and can, because it is a rate rather than an
+/// integral.) If paused sessions turn out to distort real numbers, the fix is to record
+/// the pauses as gaps at ingestion — the same fix `HeartRateCurve` names for dropouts —
+/// not to rescale here.
 public struct WorkoutStrain: Hashable, Sendable, Codable, Comparable {
     /// Zone-weighted minutes. Non-negative and finite; unbounded above.
     public let points: Double
