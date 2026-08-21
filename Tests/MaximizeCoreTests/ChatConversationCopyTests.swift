@@ -86,7 +86,7 @@ final class ChatConversationCopyTests: XCTestCase {
         XCTAssertNotEqual(ChatConversationCopy.noVerdict, ChatConversationCopy.notYetScored)
     }
 
-    // MARK: - MAX-150: `ChatModel.DisplayMessage`'s two flags
+    // MARK: - `ChatModel.DisplayMessage`'s flags (MAX-150, MAX-197)
 
     func testTruncatedAndInterruptedCaptionsAreDistinctAndNonEmpty() {
         XCTAssertFalse(ChatConversationCopy.truncatedCaption.isEmpty)
@@ -151,5 +151,54 @@ final class ChatConversationCopyTests: XCTestCase {
         XCTAssertFalse(notice!.lowercased().contains("i don't"))
         // It should be clear and descriptive from the app's perspective
         XCTAssertTrue(notice!.contains("aren't included"))
+    }
+
+    /// Three things that can happen to a reply, three sentences. A stop that read like a
+    /// dropped connection would send somebody to look at their signal for something they
+    /// did themselves (MAX-197).
+    func testTheStoppedStringsAreTheirOwnSentencesAndNotAFailuresWords() {
+        let stopped = [
+            ChatConversationCopy.stoppedByAthleteCaption,
+            ChatConversationCopy.stoppedBeforeAnyReplyArrived,
+        ]
+        for sentence in stopped {
+            XCTAssertFalse(sentence.isEmpty)
+            XCTAssertNotEqual(sentence, ChatConversationCopy.truncatedCaption)
+            XCTAssertNotEqual(sentence, ChatConversationCopy.interruptedByFailureCaption)
+            XCTAssertNotEqual(
+                sentence,
+                ChatFailureNotice.notice(for: .interrupted, subject: .workout).message
+            )
+        }
+        XCTAssertNotEqual(stopped[0], stopped[1])
+    }
+
+    /// MAX-155/156's rule, applied to the two strings this ticket adds: no codes, no
+    /// identifiers, no numerals of any kind. A stop is the least technical thing that
+    /// happens in this app and its words should carry nothing technical at all.
+    func testTheStoppedStringsCarryNoCodesOrNumerals() {
+        for sentence in [
+            ChatConversationCopy.stoppedByAthleteCaption,
+            ChatConversationCopy.stoppedBeforeAnyReplyArrived,
+        ] {
+            XCTAssertNil(
+                sentence.rangeOfCharacter(from: CharacterSet.decimalDigits),
+                sentence
+            )
+            // One vocabulary: the control says "Stop generating", so the transcript says
+            // stopped rather than cancelled. Two words for one act is how a surface
+            // starts sounding like two apps.
+            XCTAssertFalse(sentence.lowercased().contains("cancel"), sentence)
+        }
+    }
+
+    /// The caption is the only place the app says a stopped reply is not being kept.
+    /// Asserted by name so the sentence cannot lose that half in an edit and leave the
+    /// athlete to find out by reopening the thread.
+    func testTheStoppedCaptionSaysWhatBecomesOfTheText() {
+        XCTAssertTrue(
+            ChatConversationCopy.stoppedByAthleteCaption.lowercased().contains("until you close"),
+            ChatConversationCopy.stoppedByAthleteCaption
+        )
     }
 }

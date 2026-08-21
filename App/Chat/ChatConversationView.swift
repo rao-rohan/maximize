@@ -94,6 +94,10 @@ import MaximizeCore
 /// **New chat** is exactly what makes that a routine occurrence rather than a race).
 /// All three funnel into the same private initializer, which is the one place that owns
 /// wiring the closures and `currentInterval`.
+///
+/// `init(subject:...)` also carries `continuityNote` (MAX-194, defaulted nil) — the one
+/// line `PlanConversationDoor` composed when this call is the far side of that door
+/// rather than the Ask button. See that parameter's own documentation.
 struct ChatConversationView: View {
     // `@State`, matching `WorkoutDetailView`'s own pattern: this view creates and owns
     // the model, and `@State` derives `$model.composerText` — the binding
@@ -106,6 +110,15 @@ struct ChatConversationView: View {
     /// (`ChatScopeNotice`'s own rule) and nil for a training subject in the common case
     /// where nothing has drifted.
     let currentInterval: TrendInterval?
+
+    /// MAX-194: the one line of continuity `PlanConversationDoor` composed, when this
+    /// thread was opened by walking through that door from a run's conversation. Nil on
+    /// every other path in — the Ask button, the scope-mismatch banner, **New chat**,
+    /// and the thread list all pass nothing, because none of them carried the athlete
+    /// over from somewhere else. Rendered as a screen-only caption (`continuityBanner`
+    /// below) and never read by anything that builds a prompt — see
+    /// `PlanConversationDoor`'s own "How much continuity is honest".
+    let continuityNote: String?
 
     /// Forwarded from `ChatSheet`: pushes the thread list (§2.3) onto the sheet's own
     /// navigation stack. This view has no path to append to — only the stack's owner
@@ -132,6 +145,13 @@ struct ChatConversationView: View {
     /// stack's owner can do, exactly like `onOpenThreadList` and `onAcceptProposal`
     /// above — this view only ever names which run was tapped.
     let onSelectRun: (UUID) -> Void
+
+    /// Forwarded from `ChatSheet`: MAX-194's door, tapped. Pushing a training thread is
+    /// a reassignment of `ChatSheet`'s own `opening`, which only the sheet's owner can
+    /// do — this view only ever hands up the `PlanConversationDoor.Offer` it rendered,
+    /// exactly as `onAcceptProposal` hands up a `PlanProposal` rather than acting on it
+    /// itself.
+    let onOpenPlanConversation: (PlanConversationDoor.Offer) -> Void
 
     /// Forwarded from `ChatSheet`, whose `\.dismiss` this view does not have — it was
     /// not presented, `ChatSheet` was.
@@ -160,13 +180,19 @@ struct ChatConversationView: View {
     /// §2.2: the Ask button and the scope-mismatch banner's own action, both of which
     /// already know the subject and want *the* thread for it. **New chat** is
     /// `init(startingNewThreadFor:...)` below, not this one (MAX-185).
+    ///
+    /// `continuityNote` defaults to nil — the ordinary case for this initializer. Only
+    /// MAX-194's door passes one, when `ChatSheet` reassigns `opening` to the training
+    /// thread it resolved.
     init(
         subject: ChatSubject,
         currentInterval: TrendInterval?,
+        continuityNote: String? = nil,
         onOpenThreadList: @escaping () -> Void,
         onStartNewChatForCurrentWindow: @escaping () -> Void,
         onAcceptProposal: @escaping (PlanProposal) -> Void,
         onSelectRun: @escaping (UUID) -> Void,
+        onOpenPlanConversation: @escaping (PlanConversationDoor.Offer) -> Void,
         onDone: @escaping () -> Void
     ) {
         self.init(
@@ -181,10 +207,12 @@ struct ChatConversationView: View {
                 planProposalClient: AnthropicPlanProposalClient(keyStore: KeychainAnthropicAPIKeyStore())
             ),
             currentInterval: currentInterval,
+            continuityNote: continuityNote,
             onOpenThreadList: onOpenThreadList,
             onStartNewChatForCurrentWindow: onStartNewChatForCurrentWindow,
             onAcceptProposal: onAcceptProposal,
             onSelectRun: onSelectRun,
+            onOpenPlanConversation: onOpenPlanConversation,
             onDone: onDone
         )
     }
@@ -199,6 +227,7 @@ struct ChatConversationView: View {
         onStartNewChatForCurrentWindow: @escaping () -> Void,
         onAcceptProposal: @escaping (PlanProposal) -> Void,
         onSelectRun: @escaping (UUID) -> Void,
+        onOpenPlanConversation: @escaping (PlanConversationDoor.Offer) -> Void,
         onDone: @escaping () -> Void
     ) {
         self.init(
@@ -213,10 +242,12 @@ struct ChatConversationView: View {
                 planProposalClient: AnthropicPlanProposalClient(keyStore: KeychainAnthropicAPIKeyStore())
             ),
             currentInterval: currentInterval,
+            continuityNote: nil,
             onOpenThreadList: onOpenThreadList,
             onStartNewChatForCurrentWindow: onStartNewChatForCurrentWindow,
             onAcceptProposal: onAcceptProposal,
             onSelectRun: onSelectRun,
+            onOpenPlanConversation: onOpenPlanConversation,
             onDone: onDone
         )
     }
@@ -230,6 +261,7 @@ struct ChatConversationView: View {
         onStartNewChatForCurrentWindow: @escaping () -> Void,
         onAcceptProposal: @escaping (PlanProposal) -> Void,
         onSelectRun: @escaping (UUID) -> Void,
+        onOpenPlanConversation: @escaping (PlanConversationDoor.Offer) -> Void,
         onDone: @escaping () -> Void
     ) {
         self.init(
@@ -244,10 +276,12 @@ struct ChatConversationView: View {
                 planProposalClient: AnthropicPlanProposalClient(keyStore: KeychainAnthropicAPIKeyStore())
             ),
             currentInterval: currentInterval,
+            continuityNote: nil,
             onOpenThreadList: onOpenThreadList,
             onStartNewChatForCurrentWindow: onStartNewChatForCurrentWindow,
             onAcceptProposal: onAcceptProposal,
             onSelectRun: onSelectRun,
+            onOpenPlanConversation: onOpenPlanConversation,
             onDone: onDone
         )
     }
@@ -255,18 +289,22 @@ struct ChatConversationView: View {
     private init(
         model: ChatModel,
         currentInterval: TrendInterval?,
+        continuityNote: String?,
         onOpenThreadList: @escaping () -> Void,
         onStartNewChatForCurrentWindow: @escaping () -> Void,
         onAcceptProposal: @escaping (PlanProposal) -> Void,
         onSelectRun: @escaping (UUID) -> Void,
+        onOpenPlanConversation: @escaping (PlanConversationDoor.Offer) -> Void,
         onDone: @escaping () -> Void
     ) {
         _model = State(initialValue: model)
         self.currentInterval = currentInterval
+        self.continuityNote = continuityNote
         self.onOpenThreadList = onOpenThreadList
         self.onStartNewChatForCurrentWindow = onStartNewChatForCurrentWindow
         self.onAcceptProposal = onAcceptProposal
         self.onSelectRun = onSelectRun
+        self.onOpenPlanConversation = onOpenPlanConversation
         self.onDone = onDone
     }
 
@@ -374,6 +412,16 @@ struct ChatConversationView: View {
                 // a training subject in the first place, so a nil interval here just
                 // means the banner has nothing to compare against, not that the
                 // comparison failed.
+                // MAX-194: shown once, above everything else that can appear here — it
+                // is a fact about how this conversation started, not something either
+                // party said, the same reasoning `scopeMismatchBanner` gives its own
+                // placement. Order relative to that banner does not matter in practice:
+                // this thread was just resolved by `PlanConversationDoor.offer`'s own
+                // scope, so a mismatch against `currentInterval` is no more or less
+                // likely here than on any other freshly opened training thread.
+                if let continuityNote {
+                    continuityBanner(continuityNote)
+                }
                 if let subject = model.subject, let currentInterval,
                    let notice = ChatScopeNotice.text(for: subject, currentInterval: currentInterval) {
                     scopeMismatchBanner(notice)
@@ -430,6 +478,30 @@ struct ChatConversationView: View {
         .padding(.vertical, Spacing.snug)
         .contentSurface(.inset)
         .padding(.horizontal, LayoutMetrics.screenMargin)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// MAX-194: the one line of continuity `PlanConversationDoor` composed. A caption,
+    /// not a button — unlike `scopeMismatchBanner` above, there is nothing to do about
+    /// this fact, only something to know, so it carries no action and no tap target.
+    /// Screen only: this string never reaches `ChatInstruction` or the stored thread —
+    /// see `PlanConversationDoor`'s own "How much continuity is honest".
+    private func continuityBanner(_ note: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.tight) {
+            Image(systemName: "arrow.turn.down.right")
+                .font(.microLabel)
+            Text(note)
+                .font(.microLabel)
+                .multilineTextAlignment(.leading)
+        }
+        .foregroundStyle(Color.textSecondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .screenMargins()
+        .padding(.vertical, Spacing.snug)
+        .contentSurface(.inset)
+        .padding(.horizontal, LayoutMetrics.screenMargin)
+        .padding(.top, Spacing.snug)
+        .accessibilityElement(children: .combine)
     }
 
     private var transcript: some View {
@@ -656,39 +728,81 @@ struct ChatConversationView: View {
     /// **The control reads MAX-152's reply ladder, not a boolean.** `replyPhase` is the
     /// one authority on "is a reply in flight" now that `isStreaming` is derived from it;
     /// `ChatComposerSendControl.resolve(canSend:replyPhase:)` is where those two facts
-    /// become one of four controls, in the core, under test. `cancellation` is left at its
-    /// default — `ChatModel` cannot stop a stream, so the honest control mid-reply is a
-    /// progress indicator, not a stop button that does nothing.
+    /// become one of four controls, in the core, under test. `cancellation` now comes
+    /// from `model.replyCancellation` (MAX-197): the model can stop a stream, and whether
+    /// this particular one has anything to stop is its answer to give, not a literal
+    /// written here.
     ///
     /// **Retry is not here.** MAX-152 put "Try again" in the transcript, beside the
     /// failure notice that explains what went wrong, which is the right place for it: two
     /// retry affordances, or one in each of two registers, is worse than either alone.
     ///
-    /// §4.7's drafting action rides above the input row as the composer's `accessory`, so
-    /// the two are one piece of chrome rather than two floating bars over one transcript —
-    /// both are things you do *to* this conversation. The training/workout branch lives
-    /// here rather than inside `draftPlanButton`, so "which subject offers this" is
-    /// decided once: a workout thread gets the `EmptyView` overload and no empty row.
+    /// §4.7's drafting action, and MAX-194's door, both ride above the input row as the
+    /// composer's `accessory`, so each is one piece of chrome rather than a second
+    /// floating bar over the transcript — both are things you do *to* this
+    /// conversation, one training-only and one workout-only, and the two can never
+    /// appear together because a thread has exactly one subject. The subject branch
+    /// lives here rather than inside either button, so "which subject offers what" is
+    /// decided once: any thread that offers neither gets the `EmptyView` overload and
+    /// no empty row.
     @ViewBuilder
     private var composer: some View {
         if model.subject?.kind == .training {
             ChatComposerView(
                 text: $model.composerText,
                 placeholder: ChatConversationCopy.composerPlaceholder(for: model.subject?.kind),
-                sendControl: .resolve(canSend: model.canSend, replyPhase: model.replyPhase),
+                sendControl: .resolve(
+                    canSend: model.canSend,
+                    replyPhase: model.replyPhase,
+                    cancellation: model.replyCancellation
+                ),
                 isFocused: $isComposerFocused,
-                onActivate: send,
+                onActivate: activateComposerControl,
                 accessory: { draftPlanButton }
             )
-        } else {
+        } else if let doorOffer = model.planConversationDoor {
             ChatComposerView(
                 text: $model.composerText,
                 placeholder: ChatConversationCopy.composerPlaceholder(for: model.subject?.kind),
                 sendControl: .resolve(canSend: model.canSend, replyPhase: model.replyPhase),
                 isFocused: $isComposerFocused,
-                onActivate: send
+                onActivate: send,
+                accessory: { planConversationDoorButton(doorOffer) }
+            )
+        } else {
+            ChatComposerView(
+                text: $model.composerText,
+                placeholder: ChatConversationCopy.composerPlaceholder(for: model.subject?.kind),
+                sendControl: .resolve(
+                    canSend: model.canSend,
+                    replyPhase: model.replyPhase,
+                    cancellation: model.replyCancellation
+                ),
+                isFocused: $isComposerFocused,
+                onActivate: activateComposerControl
             )
         }
+    }
+
+    // MARK: - MAX-194: the door to the plan's conversation
+
+    /// The composer accessory offered on a workout thread — the mirror of
+    /// `draftPlanButton` on a training one. `offer` is `PlanConversationDoor`'s decision
+    /// (`MaximizeCore`, under test); this only lays out the label and hint it already
+    /// chose. Tapping hands the offer up to `ChatSheet`, which is the only thing that
+    /// can reassign what this sheet has open (`onOpenPlanConversation`'s own doc
+    /// comment).
+    private func planConversationDoorButton(_ offer: PlanConversationDoor.Offer) -> some View {
+        Button {
+            onOpenPlanConversation(offer)
+        } label: {
+            Label(offer.buttonLabel, systemImage: ChatSubjectKind.training.glyphSystemImageName)
+                .font(.metricLabel)
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
+        .tint(Color.accent)
+        .accessibilityHint(offer.accessibilityHint)
     }
 
     /// Note what is deliberately **not** here: the field is no longer disabled while a
@@ -700,6 +814,21 @@ struct ChatConversationView: View {
     private func send() {
         guard model.canSend else { return }
         Task { await model.send() }
+    }
+
+    /// The composer's one control, and the two things it can mean (MAX-197).
+    ///
+    /// Which of them it is showing was decided in the core — `ChatComposerSendControl`
+    /// from `canSend`, the reply ladder and `model.replyCancellation` — and this asks the
+    /// model the same question rather than re-deriving it from the control's own case.
+    /// Both branches are already no-ops when their condition is false, so a tap that
+    /// arrives on the boundary between the two does nothing rather than the wrong thing.
+    private func activateComposerControl() {
+        if model.canStop {
+            model.stop()
+            return
+        }
+        send()
     }
 
     /// Carries out whatever `ChatTranscriptFollow` decided. `.stay` is the common answer
@@ -733,8 +862,9 @@ struct ChatConversationView: View {
 }
 
 /// One row of the transcript. Purely a rendering of `ChatModel.DisplayMessage`
-/// — every one of its flags (`wasTruncated`, `wasInterruptedByFailure`) is something
-/// the model already decided, not something this view infers.
+/// — every one of its flags (`wasTruncated`, `wasInterruptedByFailure`,
+/// `wasStoppedByAthlete`) is something the model already decided, not something this
+/// view infers.
 private struct WorkoutChatBubble: View {
     let message: ChatModel.DisplayMessage
 
@@ -757,6 +887,12 @@ private struct WorkoutChatBubble: View {
                     // Constraint #4: partial text survives a failure, on screen.
                     if message.wasInterruptedByFailure {
                         caption(ChatConversationCopy.interruptedByFailureCaption)
+                    }
+                    // MAX-197: and it survives a stop, which is not a failure — the
+                    // caption is the only thing on screen that says this text is not
+                    // being kept with the conversation.
+                    if message.wasStoppedByAthlete {
+                        caption(ChatConversationCopy.stoppedByAthleteCaption)
                     }
                 }
             }

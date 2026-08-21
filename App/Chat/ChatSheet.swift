@@ -42,6 +42,13 @@ import MaximizeCore
 /// has to be its own case, carrying a nonce that makes every tap distinct even when the
 /// scope is not (see `.newThread`'s own doc comment).
 ///
+/// `.subject` also carries a `continuityNote` (MAX-194) — nil on the two ordinary paths
+/// above, and set to the one line `PlanConversationDoor` composed when a run's
+/// conversation walked through its door instead. It is still `.subject`, not a fourth
+/// case: the door resolves *the* training thread for a scope exactly the way the Ask
+/// button and the banner do, and never mints (`openPlanConversation` below). The note
+/// is a passenger on the same reassignment, not a different way of opening something.
+///
 /// ## Reassigning `opening`, not rebuilding the sheet
 ///
 /// Selecting a row, or tapping **New chat**, changes `opening` rather than presenting a
@@ -88,7 +95,10 @@ struct ChatSheet: View {
     /// See this type's "Three ways to open something." Hashable so `.id(opening)` can
     /// key `ChatConversationView`'s identity on it.
     private enum Opening: Hashable {
-        case subject(ChatSubject)
+        /// The Ask button and the scope-mismatch banner (`continuityNote` nil), and
+        /// MAX-194's door (`continuityNote` set). See this type's own note on why the
+        /// door is a passenger on this case rather than a fourth one.
+        case subject(ChatSubject, continuityNote: String?)
         /// **New chat** (MAX-185). The `UUID` is identity for SwiftUI only — a
         /// nonce that guarantees `.id(opening)` changes on *every* tap, including a
         /// second tap on an unchanged scope, which is exactly the case `.subject`
@@ -112,7 +122,7 @@ struct ChatSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     init(subject: ChatSubject, currentInterval: TrendInterval? = nil) {
-        _opening = State(initialValue: .subject(subject))
+        _opening = State(initialValue: .subject(subject, continuityNote: nil))
         self.currentInterval = currentInterval ?? Self.defaultInterval()
     }
 
@@ -160,14 +170,16 @@ struct ChatSheet: View {
     @ViewBuilder
     private var conversation: some View {
         switch opening {
-        case let .subject(subject):
+        case let .subject(subject, continuityNote):
             ChatConversationView(
                 subject: subject,
                 currentInterval: currentInterval,
+                continuityNote: continuityNote,
                 onOpenThreadList: { path.append(Route.threadList) },
                 onStartNewChatForCurrentWindow: startNewTrainingChat,
                 onAcceptProposal: openAuthoring(with:),
                 onSelectRun: openWorkout(_:),
+                onOpenPlanConversation: openPlanConversation(_:),
                 onDone: { dismiss() }
             )
         case let .newThread(subject, _):
@@ -178,6 +190,7 @@ struct ChatSheet: View {
                 onStartNewChatForCurrentWindow: startNewTrainingChat,
                 onAcceptProposal: openAuthoring(with:),
                 onSelectRun: openWorkout(_:),
+                onOpenPlanConversation: openPlanConversation(_:),
                 onDone: { dismiss() }
             )
         case let .threadID(threadID):
@@ -188,6 +201,7 @@ struct ChatSheet: View {
                 onStartNewChatForCurrentWindow: startNewTrainingChat,
                 onAcceptProposal: openAuthoring(with:),
                 onSelectRun: openWorkout(_:),
+                onOpenPlanConversation: openPlanConversation(_:),
                 onDone: { dismiss() }
             )
         }
@@ -226,6 +240,24 @@ struct ChatSheet: View {
     private func startNewTrainingChat() {
         guard let currentInterval, let scope = try? TrainingScope(resolving: currentInterval) else { return }
         opening = .newThread(.training(scope), UUID())
+        path = NavigationPath()
+    }
+
+    // MARK: - MAX-194: the door to the plan's conversation
+
+    /// A run's conversation asked for the training thread covering its own week.
+    /// Reassigns `opening` to `.subject`, exactly the way the Ask button and the
+    /// scope-mismatch banner already do — resolving *the* thread for `offer.scope`,
+    /// never minting one (minting is `startNewTrainingChat`'s job, above, and reusing it
+    /// here would leave a fresh, empty thread every time this door is used). The
+    /// continuity note travels as this reassignment's passenger; see `Opening.subject`'s
+    /// own documentation for why it is not a fourth case.
+    ///
+    /// `offer.scope` — which week this opens — and every word `offer` carries were
+    /// decided once, by `PlanConversationDoor` (`MaximizeCore`, under test); this
+    /// forwards the decision rather than making a second one.
+    private func openPlanConversation(_ offer: PlanConversationDoor.Offer) {
+        opening = .subject(.training(offer.scope), continuityNote: offer.continuityNote)
         path = NavigationPath()
     }
 

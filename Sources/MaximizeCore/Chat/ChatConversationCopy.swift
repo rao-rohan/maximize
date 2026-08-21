@@ -84,7 +84,7 @@ public enum ChatConversationCopy {
     public static let noVerdict =
         "The plan has no rule for this kind of workout, so there's no score — and chat starts from one."
 
-    // MARK: - MAX-150: `ChatModel.DisplayMessage`'s two flags
+    // MARK: - `ChatModel.DisplayMessage`'s flags (MAX-150, MAX-197)
 
     /// `DisplayMessage.wasTruncated` — the reply ran out of the model's usable reply
     /// budget. Moved here for the same reason `notYetScored`/`noVerdict` were: the flag
@@ -96,6 +96,31 @@ public enum ChatConversationCopy {
     /// `DisplayMessage.wasInterruptedByFailure` — a partial reply survived a dropped
     /// connection (constraint #4). See `truncatedCaption`'s own note.
     public static let interruptedByFailureCaption = "Connection dropped before this reply finished."
+
+    /// `DisplayMessage.wasStoppedByAthlete` — the athlete stopped this reply and what had
+    /// arrived by then is still on screen (MAX-197, §6.4).
+    ///
+    /// **The second sentence is the one that earns its place.** A stopped turn is never
+    /// written to the thread — `ChatModel`'s "only completed turns are persisted" rule
+    /// covers it exactly as it covers a dropped connection — so this text will not be
+    /// here after the sheet closes. The athlete cannot know that by looking, and
+    /// `couldNotSaveReply` already sets the precedent for saying it plainly rather than
+    /// letting somebody discover it when they come back.
+    ///
+    /// Says nothing about *why* it stopped: the athlete is the reason, and an app
+    /// explaining a person's own tap back to them is the "never restate a fact the
+    /// surface already stated" rule broken from the other end.
+    public static let stoppedByAthleteCaption =
+        "You stopped this reply. It stays here until you close this conversation."
+
+    /// The `.notice` row for a reply stopped before one token of it had arrived
+    /// (MAX-197) — the case where there is no bubble for `stoppedByAthleteCaption` to sit
+    /// under, and where a blank under the question would otherwise be the whole answer.
+    ///
+    /// Absence as a designed state, in CLAUDE.md's sense: the app knows this happened, so
+    /// it says so.
+    public static let stoppedBeforeAnyReplyArrived =
+        "You stopped this reply before any of it arrived."
 
     // MARK: - MAX-152: the rungs of `ChatReplyPhase`
 
@@ -134,7 +159,7 @@ public enum ChatConversationCopy {
         switch phase {
         case .awaitingFirstToken: return awaitingFirstReply
         case .stalled: return replyStalled
-        case .streaming, .idle, .complete, .truncated, .emptyReply, .failed: return nil
+        case .streaming, .idle, .complete, .truncated, .emptyReply, .stopped, .failed: return nil
         }
     }
 
@@ -152,7 +177,7 @@ public enum ChatConversationCopy {
         case .awaitingFirstToken: return "Waiting for Claude's reply."
         case .streaming: return "Claude is replying."
         case .stalled: return "Still connected. Waiting for more of the reply."
-        case .idle, .complete, .truncated, .emptyReply, .failed: return nil
+        case .idle, .complete, .truncated, .emptyReply, .stopped, .failed: return nil
         }
     }
 

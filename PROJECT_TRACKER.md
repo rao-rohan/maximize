@@ -1982,6 +1982,8 @@ free. What landed in the file:
 | MAX-190 | **The chat sheet and the plan form stop presenting each other** | §2.6. Suppress `conversationalRouteSection` on an authoring screen that was itself pushed from a chat sheet, or reassign rather than present. Whichever, say which in the PR. See the MAX-190 section below | 184 | Sonnet — 🔲 ready |
 | MAX-191 | **The athlete is told when the transcript was capped** | §2.7. Surface `ChatInstruction.droppedTurnCount` as one quiet line above the replayed window, in the same register as the scope banner. See the MAX-191 section below | 184 | Haiku — 🔄 in progress (this session) |
 | MAX-192 | **The training roll-up carries strain and load balance** 🔒 — `TrainingContext` gains each session's stored `strainPoints` (MAX-176) and `LoadBalanceCalculator`'s whole reading (MAX-178), so the acute:chronic figure a tile draws now reaches the prompt one tap away from it. Closes MAX-184 §3.2, the audit's highest-ranked finding: a thread asked *"am I ramping too fast"* used to refuse, correctly under `trainingTask`'s never-invent rule, to answer a question the app had already computed. The reading arrives **already computed** through `LoadBalanceResolver` — never assembled from the roll-up's own records, which cover the scope's weeks and not the chronic window — and is anchored to *today*, which `ContextInputs` enforces. Three absences worded apart; the window's opening sentence now names the one rolling exception. **Per-muscle fatigue (MAX-179) was considered and declined**, and the exclusion is stated in the prompt. **Gated on A30** — A12 rule 2 makes a widening of what leaves the device an amendment, A29 settled the same question for the workout subject, and gating one subject and not the other would make the rule arbitrary; the amendment is in the same PR, first in the diff. See the MAX-192 section below | 176, 177, 178, 179, 184, A12/A29/**A30** | **Opus** 🔒 |
+| MAX-194 | **A run's conversation gets a door to the plan's** — §3.5's fix. A new composer accessory on a workout thread, `PlanConversationDoor` (`MaximizeCore`, under test), decides whether to offer the door and what it says; `ChatModel.planConversationDoor` reads it straight off the same context the fact sheet already rendered. **Targets the run's own Monday-first week** — `WorkoutContext.SurroundingWeek`'s own bounds (MAX-182), reused rather than re-derived, never the dashboard's current window, so the target can never disagree with what the athlete was already told. Resolves *the* thread for that week exactly the way the Ask button and the scope-mismatch banner already do — `ChatSheet`'s existing `.subject` reassignment gained a `continuityNote` passenger rather than a fourth `Opening` case, and never mints (minting stays **New chat**'s job). Carries exactly one honest line of continuity, screen-only and never sent to a prompt — D3 untouched, no widening. The button's own words vary with whether a plan governs that week, matching `PlanAuthoringFormatting`'s canonical "No plan has been authored yet" rather than a second wording of the same fact. **`canDraftPlan`'s training-only gate is untouched** — MAX-184's audit called it correct, and this is the missing route, not a relaxation of it. See the MAX-194 section below | 184, 097, 182 | Sonnet — branch pushed, PR open; not yet reviewed or merged. Package compiles and core unit tests pass by inspection only; no toolchain here to run them (R1). Needs device verification, per the PR |
+| MAX-197 | **A reply in flight can be stopped** — MAX-184 §6.4's craft gap: `ChatModel.stream` ran to its terminal event with nothing able to interrupt it, so the honest composer control mid-reply was a progress indicator. `stop()` now cancels the task consuming the stream — real cancellation, which reaches `URLSession` through the `AsyncStream` termination the transport already handles, not a flag a suspended `for await` would never read. **A stopped turn is a fifth terminal rung, `ChatReplyPhase.stopped`**, rather than a reuse of `.failed(.interrupted)`: that case says the connection dropped and offers a retry, and neither is true of something the athlete did. **What was already on screen is kept on screen and nothing is written** — the same treatment a dropped connection gets, and the caption says out loud that it goes when the conversation closes; storing a half-sentence would read back as a whole one and be replayed to the model as its own completed prior turn. The seam MAX-153 left (`ChatComposerCancellation`, `ChatComposerSendControl.stop`) is filled with no change to the composer view. See the MAX-197 section below | 184, 152, 153, 170 | **Opus** — branch pushed, PR open. **No Swift toolchain in this container**, so nothing here was compiled or run (R1); cancellation reaching the network read is argued, not observed, and needs device verification per the PR |
 
 **Four collisions the overseer must respect.**
 
@@ -6009,7 +6011,7 @@ concatenating N workout contexts holds. Three separate things were being conflat
 - **`canDraftPlan`'s training-only gate is correct and should not be removed.** A `PlanProposal`
   drafted from one run's fact sheet would be inventing most of its fields. The defect is the
   absence of a route from a run's conversation to the plan's — **MAX-194**, which reuses the
-  reassignment mechanism `ChatSheet` already has.
+  reassignment mechanism `ChatSheet` already has. **Built — see the MAX-194 section below.**
 
 ### What the audit says not to touch
 
@@ -6670,6 +6672,231 @@ no pixels.
   ticket, and the two agree today because the resolver is that method moved verbatim.
 - **MAX-193 will want the same resolver** for the workout subject's week block, and will
   collide with this ticket in `ContextBuilder.swift`. It should land after this.
+
+---
+
+## MAX-194 — a door from a run's conversation to the plan's
+
+§3.5's fix, and the last piece of the owner's central ask on this pass: standing in a
+workout thread that has just told the athlete their plan's cap or that week's ask, there
+was no way to act on it — `ChatModel.canDraftPlan` correctly refuses on a workout subject
+(§4.2's reasoning, confirmed again here), and the audit's own position is that the gate
+is right and the defect is the missing route. **The gate is untouched by this ticket.**
+
+### Three decisions, argued
+
+**1. Which training thread — the run's own week, never the dashboard's current
+window.** MAX-182 already gives a workout thread's fact sheet a `## The week around
+this session` block, built from `WorkoutContext.SurroundingWeek` — the exact
+Monday-first week the run sits in, with its own `plan` (nil where none governs it). The
+door reuses that same week's `from`/`through` to build the `TrainingScope` it opens,
+rather than resolving a second, independent notion of "which week" from the dashboard's
+live interval the way **New chat** freezes one. The alternative was tempting and wrong:
+a run opened from three weeks back would land on a training thread about *this* week,
+answering a question nobody asked, and it is exactly the kind of frozen-versus-live
+disagreement `ChatScopeNotice` exists to flag rather than manufacture on arrival. Because
+the target is read straight off the same context the fact sheet already rendered
+(`ChatModel.planConversationDoor`, mirroring `runsStripData`'s own rule), it cannot
+disagree with what the athlete was just told.
+
+**2. How much continuity is honest — one line, on screen, never in a prompt.** A
+workout thread and a training thread have different contexts by design (D3): a training
+thread is not shown that run's splits or heart-rate curve. Replaying any part of the
+workout transcript into the training thread would tell the model it had seen something
+it had not — precisely what MAX-175's never-invent rule forbids, read from the other
+direction. So the carry-over is exactly one sentence, composed once by
+`PlanConversationDoor` and named `continuityNote`: *"Continued from 6 Jan 2026 ·
+Running."*, reusing `ChatThreadTitle.workout`'s own vocabulary for naming a run rather
+than inventing a second one. It travels through `ChatSheet`'s existing `.subject`
+reassignment as a passenger (`continuityNote: String?`, nil on every other path in) and
+is rendered by `ChatConversationView` as a static caption above the transcript. Nothing
+in `ChatInstruction` or `ContextBuilder` reads it, it is never written to the stored
+thread, and it does not survive leaving and reopening the thread from the thread list —
+it is a courtesy for the moment of arrival, not a property of the conversation. This is
+not a widening of what reaches Claude; A29's precedent (a paragraph in
+`docs/PRD-AMENDMENTS.md` before code) does not apply because nothing here changes what a
+prompt carries.
+
+**3. Always offered, worded to whether a plan governs the week.** The door appears on
+every `.ready` workout thread — there is always a week for a run to sit in, plan or no
+plan, unconditionally once MAX-182 built one. What changes is the button's own words:
+governed, it reads "Ask about the plan"; where no plan is in force for that week, it
+reads "Ask about starting a plan" and its VoiceOver hint states "No plan has been
+authored yet" — the exact phrase `PlanAuthoringFormatting.describe(.firstPlan)` already
+uses, rather than a second wording of the same fact. The training thread still opens in
+that case (a training thread with no plan in force is a real, ordinary state, already
+covered by `testATrainingWindowOpensBeforeAnyPlanIsAuthored`) — a first plan can be
+drafted from there.
+
+### How it is wired, without a fourth mechanism
+
+`PlanConversationDoor` (`Sources/MaximizeCore/Chat/PlanConversationDoor.swift`) is a
+pure decision — `offer(for:day:activityType:) -> Offer?` — carrying the target `scope`,
+the button's label and accessibility hint, and the continuity note, all under test in
+`PlanConversationDoorTests`. `ChatModel.planConversationDoor` reads it straight off
+`context` (nil for a training subject, nil before `load()`), mirroring
+`runsStripData`'s own pattern; `ChatModelTests` exercises it end to end against a real
+loaded model rather than the bare decision function alone.
+
+`ChatConversationView` gained a composer accessory for a workout thread —
+`planConversationDoorButton`, the mirror of the training thread's `draftPlanButton`,
+riding the same `accessory` slot `ChatComposerView` already carries, so the two can
+never appear together (one subject, one accessory) — and a `continuityBanner`, rendered
+above the transcript exactly where `scopeMismatchBanner` already sits, but as a caption
+rather than a control: there is nothing to *do* about where a conversation came from,
+only something to know. Both `continuityNote` and `onOpenPlanConversation` were added as
+a new optional parameter and a new closure on **`init(subject:...)`** — the initializer
+MAX-185's review already marked as "the Ask button and the scope-mismatch banner's own
+action" — not as a fourth initializer; `init(threadID:...)` and
+`init(startingNewThreadFor:...)` pass `continuityNote: nil` and forward the closure
+unused.
+
+`ChatSheet.Opening.subject` gained the same passenger: `case subject(ChatSubject,
+continuityNote: String?)`, not a fourth `Opening` case. `openPlanConversation(_:)`
+reassigns `opening` to `.subject(.training(offer.scope), continuityNote:
+offer.continuityNote)` — the exact mechanism `startNewTrainingChat()` already uses for
+**New chat**, except resolving rather than minting, because a second tap of the door
+from the same run should land back in the same conversation about that week, not start a
+new one each time.
+
+**Left for MAX-190, not touched here.** `ChatSheet.swift` is now three tickets deep
+(185 → 194 → 190, the audit's own sequencing note) — this diff is additive to MAX-185's
+shape and does not touch `PlanAuthoringView`'s conversational route or the sheet-over-
+push-over-sheet defect §2.6 named; that is MAX-190's file to fix.
+
+### What CI can and cannot prove
+
+CI can prove: the package compiles; `PlanConversationDoorTests` pins the target week's
+bounds against `ContextBuilder.surroundingWeek`'s own output (never a hand-typed date),
+the copy branch on whether a plan governs the week, the accessibility hint naming the
+destination, and that the continuity note names the run the same way its own thread
+title does and carries no measured figure; `ChatModelTests` pins
+`ChatModel.planConversationDoor` nil for a training subject and before `load()`, and
+correct end to end for a workout subject.
+
+CI cannot prove that the composer accessory looks right beside `ChatComposerView`'s
+glass, that the continuity caption reads as a caption rather than a control at a glance,
+or that tapping it actually lands on the right screen on a device. **Needs device
+verification:** open a run's thread, confirm "Ask about the plan" (or "Ask about
+starting a plan" for a week with none) sits above the composer with a real hit area;
+tap it and confirm the training thread that opens shows the continuity caption once,
+above the transcript, and that its title/subtitle name the run's own week rather than
+the dashboard's current one; confirm VoiceOver reads the button's destination; repeat at
+the largest Dynamic Type size.
+
+**`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
+
+## MAX-197 — a reply in flight can be stopped
+
+[docs/CHAT-AUDIT.md](./docs/CHAT-AUDIT.md) (MAX-184) §6.4. The premise was verified before
+anything was designed: `ChatModel` had no cancellation path of any kind — no `Task` was held,
+no `cancel()` was called anywhere in the chat surface, and the composer's `cancellation:`
+parameter was left at its `.unavailable` default at both call sites. There was no second stop
+to collide with.
+
+### What happens to the partial reply, and why
+
+**Kept on screen, marked as stopped, and not persisted.** A stopped turn takes exactly the path
+a failed one already takes: the question and whatever text arrived stay in `messages`, neither
+reaches `ChatThreadRepository`, and the thread on disk is the thread from before the send — so
+there is nothing half-written for `load()` to read back (D6). The bubble carries
+`ChatConversationCopy.stoppedByAthleteCaption`, which says the text stays until the conversation
+is closed, because that is the one thing the athlete cannot see for themselves.
+
+The alternative — persisting the partial — was rejected on two grounds. The schema has no way
+to mark an assistant message as unfinished, so it would read back as something Claude said in
+full; and `send()` builds every later instruction from `thread.visibleMessages`, so the
+half-sentence would be replayed to the model as its own completed prior turn for the rest of the
+thread's life. A paragraph that does not survive the sheet is a smaller cost than a lie that
+compounds, and the caption means nobody is surprised by it.
+
+A stop before the first token has no bubble to caption, so it gets a `.notice` row of its own
+(`stoppedBeforeAnyReplyArrived`) rather than leaving a blank under the question — absence as a
+designed state.
+
+### How cancellation propagates, and how far that was verified
+
+`stream(_:thread:chatThreadRepository:)` now runs its consumption in a `Task` the model holds and
+awaits; `stop()` cancels it. Cancelling resumes the suspended `AsyncStream` read immediately —
+which is the whole point, because a stalled reply is precisely the one a flag would never
+interrupt — and terminates the stream, which fires `continuation.onTermination`, which
+`AnthropicStreamingChatClient` already implements as `work.cancel()`, which cancels the
+`URLSession.AsyncBytes` read. That last link predates this ticket and is the reason
+`StreamingChatModelInvoking`'s contract already said a stream abandoned part-way emits no
+terminal event.
+
+**The half of that chain inside `MaximizeCore` is under test; the half inside `URLSession` is
+not, and cannot be here.** No toolchain, no device, no network in this container. What CI checks
+is that a stop mid-stream ends the turn on `.stopped`, keeps exactly the text that was on screen,
+writes nothing, and settles every reader of `isStreaming`. What it cannot check is that a real
+HTTPS response body stops being read on a phone.
+
+The outer direction is preserved too: `stream` wraps its `await task.value` in a
+`withTaskCancellationHandler`, so a sheet dismissed mid-answer still cancels the request rather
+than leaving an unstructured task reading a reply nobody will see.
+
+### Telling a stop apart from a stall, a drop and a completion
+
+`ChatReplyProgress` gains one event, `.stoppedByAthlete`, which only `ChatModel.stop()` sends.
+No number of quiet beats can produce it, so MAX-170's calibrating stall bar is untouched and a
+stall — or a stall that recovers — can never be reported as a stop. The reverse is what the new
+rung buys: a cancelled stream yields no terminal event, which from the model's side is
+indistinguishable from a dropped connection, and without the flag a deliberate stop would have
+read as *"The connection dropped before the reply finished"* and offered a retry.
+
+Completion is settled by one rule: **the stop takes effect if, and only if, the reply was still
+live when the tap landed.** `stop()` refuses once the phase is terminal, and the phase becomes
+terminal in the same synchronous run that folds in the stream's last event — there is no
+suspension point in between — so a late tap cannot disturb a reply that is already being
+written, and an accepted tap ends the turn as stopped even if a completion was sitting behind it
+in the buffer. Both directions are tested. The button always means what it says.
+
+### The transcript after a stop
+
+`canSend` returns (the composer was never disabled), `canStop` and `replyCancellation` withdraw,
+`canRetry` stays false — `.stopped` offers no retry, and `pendingTurn` is cleared, so the app
+never offers to re-ask a question the athlete has just ended (A14: stopping spends no call and
+starts none). `canDraftPlan` is unaffected for the right reason: it reads
+`thread.visibleMessages`, which the stopped turn never entered.
+
+### Tests (core, CI-verified — if CI runs them; see below)
+
+`ChatReplyPhaseTests`: a stop from each of the three live rungs; a stop after every ending is a
+no-op; no amount of silence is ever a stop; a recovered stall is streaming, not stopped; asking
+again after a stop resets MAX-170's calibration. `ChatReplyLadderModelTests` (thirteen new
+assertions' worth): the partial kept is exactly what was on screen, nothing is written, the
+no-text case says so, a reload reads the thread back without the stopped turn, a stalled reply
+that is stopped reads as stopped, the failure behind a stop never reaches the transcript, the
+next question is asked without the stopped turn, and `retry()` after a stop calls nothing.
+`ChatComposerStateTests`/`ChatConversationCopyTests`: the stopped rung is not a live control even
+with cancellation available, and the two new strings carry no numerals and no code.
+
+`FakeStreamingChatModelInvoking` now produces one event per read rather than pushing the whole
+script into a buffer before the consumer starts, and gains a `beforeEachEvent` hook. That is what
+makes a mid-stream tap deterministic — no sleeping, no polling, no second task racing the first
+— and it also makes the fake behave like a stream rather than like a completed reply.
+
+### What CI can and cannot prove
+
+CI can prove everything in the paragraph above. CI cannot prove that the stop button appears,
+that it is reachable, that tapping it feels immediate, or that the network read actually stops on
+a device. **Needs device verification:** stop a long reply early and confirm what arrived stays
+with its caption; stop one just as it lands and confirm the completed reply is stored instead of
+being discarded; stop with the network off, before any token arrives, and confirm the transcript
+says the reply was stopped rather than blaming the connection; reopen the thread and confirm the
+stopped turn is gone and the earlier ones are intact.
+
+**`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
+
+### Found outside the ticket, not done
+
+- **The composer loses its progress indicator while a reply arrives**, since every live rung now
+  resolves to `.stop` rather than `.awaitingReply`. That is `ChatComposerSendControl`'s design
+  as written in MAX-153 and matches every mainstream chat client, and the transcript still says
+  *"Thinking…"* — but it is a visible change to a shipped screen and belongs in the device pass.
+- **`ChatConversationView` still draws captions with three parallel `if`s**, one per
+  `DisplayMessage` flag. Folding them into one core-decided caption would be tidier and touches a
+  file MAX-195/196 own concurrently; left alone deliberately.
 
 ---
 
