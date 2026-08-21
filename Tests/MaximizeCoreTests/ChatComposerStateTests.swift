@@ -57,6 +57,28 @@ final class ChatComposerSendControlTests: XCTestCase {
 
     // MARK: - Reading MAX-152's ladder rather than a flag
 
+    /// A reply that has been stopped is not a reply in flight, so offering cancellation
+    /// does not keep the stop button on screen (MAX-197). The composer goes back to being
+    /// a composer the moment the turn ends, however it ended.
+    func testAStoppedReplyLeavesTheControlBackOnSendEvenWithCancellationAvailable() {
+        XCTAssertEqual(
+            ChatComposerSendControl.resolve(
+                canSend: true,
+                replyPhase: .stopped,
+                cancellation: .available
+            ),
+            .send
+        )
+        XCTAssertEqual(
+            ChatComposerSendControl.resolve(
+                canSend: false,
+                replyPhase: .stopped,
+                cancellation: .available
+            ),
+            .unavailable
+        )
+    }
+
     /// The three live rungs are one fact to the send control: a request is open. They are
     /// three different things to say in the *transcript*, and `ChatPendingReplyView` is
     /// where they are said — the composer narrating them a second time, six inches away,
@@ -73,7 +95,7 @@ final class ChatComposerSendControlTests: XCTestCase {
 
     func testEveryTerminalRungLeavesTheControlBackOnSendOrDimmed() {
         let terminal: [ChatReplyPhase] = [
-            .idle, .complete, .truncated, .emptyReply, .failed(.midStreamFailure),
+            .idle, .complete, .truncated, .emptyReply, .stopped, .failed(.midStreamFailure),
         ]
         for phase in terminal {
             XCTAssertEqual(ChatComposerSendControl.resolve(canSend: true, replyPhase: phase), .send, "\(phase)")
@@ -90,7 +112,7 @@ final class ChatComposerSendControlTests: XCTestCase {
     func testThePhaseOverloadAgreesWithTheBooleanOne() {
         let phases: [ChatReplyPhase] = [
             .idle, .awaitingFirstToken, .streaming, .stalled,
-            .complete, .truncated, .emptyReply, .failed(.midStreamFailure),
+            .complete, .truncated, .emptyReply, .stopped, .failed(.midStreamFailure),
         ]
         for phase in phases {
             for canSend in [true, false] {
