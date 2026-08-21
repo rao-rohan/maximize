@@ -40,7 +40,11 @@ public enum PromptContext: Hashable, Sendable {
 /// Everything here is **read from storage, never derived**: a workout, the metrics
 /// computed for it once at ingestion (D2), the ledger the scorer wrote (D8), the plan
 /// calendar, and the athlete's settings. This type computes nothing and validates only
-/// that the pieces describe the same workouts.
+/// that the pieces describe the same workouts — and, since MAX-192, the same day.
+///
+/// `loadBalance` is the one member that is not a stored record. It is not derived here
+/// either: it arrives already computed, from the same function the dashboard tile reads,
+/// for the reason its own documentation gives.
 ///
 /// ## One bundle for both subjects, on purpose
 ///
@@ -155,15 +159,45 @@ public struct ContextInputs: Sendable {
     /// workout subject's own run.
     public let records: [WorkoutRecord]
 
-    /// - Throws: when two records claim the same workout. `records` is indexed by workout
-    ///   id below, and a duplicate would make which of the two a context described depend
-    ///   on array order.
+    /// `LoadBalanceCalculator.compute`'s reading, **already computed by the caller**
+    /// (MAX-178, MAX-192). Read by the training subject only.
+    ///
+    /// ## Why this arrives computed rather than being derived here
+    ///
+    /// `TalliesCalculator` is called by the builder because `records` is exactly the set
+    /// it needs. `LoadBalanceCalculator` is not: its sums run over the 28 days ending
+    /// `today`, which the C1 convention above does not oblige a caller to supply — a
+    /// week-long scope legitimately carries seven days of records — and a calculator
+    /// handed a short set does not fail, it silently returns a smaller sum. A quietly
+    /// undercounted load figure in a prompt is precisely the class of wrongness nothing
+    /// on screen would contradict, so the reading is not assembled from `records` at all.
+    /// It is passed in whole, the same way `TrendTileData` takes it, from the same
+    /// function, so the tile and the prompt cannot disagree (§3.6(a)).
+    ///
+    /// `LoadBalanceResolver.reading(anchor:timeZone:workoutRepository:)` is the supported
+    /// way to obtain one, and it is what `ChatModel` uses.
+    ///
+    /// **It must be anchored to `today`.** Not to the scope's last day — see
+    /// `TrainingContext.loadBalance` for why a frozen window is the wrong anchor for a
+    /// rolling read — and the initializer refuses a reading that names a different day
+    /// rather than letting a prompt describe one day's load under another day's heading.
+    ///
+    /// Nil means the caller supplied none. The fact sheet says so in words; it is never
+    /// silently rendered as `.buildingHistory`, which is a claim about the athlete's
+    /// history rather than about this record.
+    public let loadBalance: LoadBalanceReading?
+
+    /// - Throws: when two records claim the same workout — `records` is indexed by
+    ///   workout id below, and a duplicate would make which of the two a context
+    ///   described depend on array order — or when `loadBalance` describes a day other
+    ///   than `today`.
     public init(
         timeZone: TimeZone,
         today: CalendarDay,
         planCalendar: PlanCalendar?,
         restDayBudget: RestDayBudget,
-        records: [WorkoutRecord]
+        records: [WorkoutRecord],
+        loadBalance: LoadBalanceReading? = nil
     ) throws {
         var seen = Set<UUID>()
         for record in records {
@@ -171,11 +205,23 @@ public struct ContextInputs: Sendable {
                 throw DomainError.duplicate(field: "ContextInputs.records", key: "\(record.workout.id)")
             }
         }
+        // The same class of check the record initializer above makes: an assembly error,
+        // caught where it cannot yet have reached a prompt. A reading anchored to a
+        // different day is not a harmless mismatch — the fact sheet prints the anchor it
+        // was given as the day these figures describe, so the two must be one day or the
+        // sentence is false.
+        if let loadBalance, case let .available(balance) = loadBalance, balance.anchor != today {
+            throw DomainError.inconsistent(
+                reason: "ContextInputs: the load balance is anchored to \(balance.anchor) but "
+                    + "today is \(today)"
+            )
+        }
         self.timeZone = timeZone
         self.today = today
         self.planCalendar = planCalendar
         self.restDayBudget = restDayBudget
         self.records = records
+        self.loadBalance = loadBalance
     }
 }
 
@@ -424,7 +470,11 @@ public enum ContextBuilder {
             planCoverage: planCoverage(of: scope, in: inputs.planCalendar, governing: plan),
             tallies: tallies,
             sessions: sessions,
-            sessionCountInScope: inScope.count
+            sessionCountInScope: inScope.count,
+            // Carried through untouched — not recomputed, not re-anchored, not turned
+            // into a verdict. `ContextInputs` has already refused a reading anchored to
+            // any day but `today`.
+            loadBalance: inputs.loadBalance
         )
     }
 
@@ -450,7 +500,11 @@ public enum ContextBuilder {
             distanceMeters: record.workout.distanceMeters,
             durationSeconds: record.workout.durationSeconds,
             averageHeartRateBPM: record.metrics?.averageHeartRateBPM,
-            heartRateDriftFraction: record.metrics?.heartRateDriftFraction
+            heartRateDriftFraction: record.metrics?.heartRateDriftFraction,
+            // MAX-176's stored figure, read like the two above it. A record with no
+            // metrics, and a record whose metrics predate MAX-176, both arrive here as
+            // nil — and nil stays nil all the way to the line, never a zero.
+            strain: record.metrics?.strain
         )
     }
 
