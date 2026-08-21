@@ -57,6 +57,18 @@ struct ChatThreadListView: View {
             .navigationTitle(ChatThreadListCopy.title)
             .navigationBarTitleDisplayMode(.inline)
             .contentSurface(.screen)
+            .alert(
+                ChatThreadListCopy.couldNotDeleteThreadTitle,
+                isPresented: .constant(model.couldNotDeleteMessage != nil)
+            ) {
+                Button(ChatThreadListCopy.couldNotDeleteThreadDismiss) {
+                    model.dismissDeleteFailure()
+                }
+            } message: {
+                if let message = model.couldNotDeleteMessage {
+                    Text(message)
+                }
+            }
             .task { await model.load() }
     }
 
