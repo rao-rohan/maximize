@@ -1978,6 +1978,7 @@ free. What landed in the file:
 | MAX-188 | 🔒 **`threadSummaries()` no longer decodes a transcript to draw a list of titles** — §2.4's in-memory exposure. `ChatThreadRecord` gains three columnar fields (`summaryFirstUserMessageContent`, `summaryLastVisibleMessageContent`, `summaryFieldsComputed`) written whenever a thread is stored; the fast path builds `ChatThreadSummary` from those columns and never touches the `@Attribute(.externalStorage)` `messagesJSON` blob. A pre-ticket row (`summaryFieldsComputed == false`) still falls back to a full decode for that one row — bounded, self-clearing the next time the thread is written to. The workout lookup is batched into one query for every workout thread in the list, closing the audit's N+1 alongside it. **No schema version bump** — three additive, default-required columns, `distanceSplitsComputed`'s precedent. See the MAX-188 section below | 184 | Sonnet 🔒 |
 | MAX-189 | **A failed thread delete is silent, and the row does not come back** — §2.5. The decision of what to display (row restored or deleted, and whether to show an error) is moved into `ChatThreadListPresentation.deletionOutcome()` as a testable pure function; the model is plumbing. **Needs device verification**: swipe to delete with the store failing, confirm the row returns and the message appears. | 184, 150, 152 | Haiku ✅ — merged as #182. Compiles and core tests pass; **nothing about the alert's appearance or accessibility is verified** — see the PR's device checks. |
 | MAX-192 | **The training roll-up carries strain and load balance** 🔒 — `TrainingContext` gains each session's stored `strainPoints` (MAX-176) and `LoadBalanceCalculator`'s whole reading (MAX-178), so the acute:chronic figure a tile draws now reaches the prompt one tap away from it. Closes MAX-184 §3.2, the audit's highest-ranked finding: a thread asked *"am I ramping too fast"* used to refuse, correctly under `trainingTask`'s never-invent rule, to answer a question the app had already computed. The reading arrives **already computed** through `LoadBalanceResolver` — never assembled from the roll-up's own records, which cover the scope's weeks and not the chronic window — and is anchored to *today*, which `ContextInputs` enforces. Three absences worded apart; the window's opening sentence now names the one rolling exception. **Per-muscle fatigue (MAX-179) was considered and declined**, and the exclusion is stated in the prompt. **Gated on A30** — A12 rule 2 makes a widening of what leaves the device an amendment, A29 settled the same question for the workout subject, and gating one subject and not the other would make the rule arbitrary; the amendment is in the same PR, first in the diff. See the MAX-192 section below | 176, 177, 178, 179, 184, A12/A29/**A30** | **Opus** 🔒 |
+| MAX-194 | **A run's conversation gets a door to the plan's** — §3.5's fix. A new composer accessory on a workout thread, `PlanConversationDoor` (`MaximizeCore`, under test), decides whether to offer the door and what it says; `ChatModel.planConversationDoor` reads it straight off the same context the fact sheet already rendered. **Targets the run's own Monday-first week** — `WorkoutContext.SurroundingWeek`'s own bounds (MAX-182), reused rather than re-derived, never the dashboard's current window, so the target can never disagree with what the athlete was already told. Resolves *the* thread for that week exactly the way the Ask button and the scope-mismatch banner already do — `ChatSheet`'s existing `.subject` reassignment gained a `continuityNote` passenger rather than a fourth `Opening` case, and never mints (minting stays **New chat**'s job). Carries exactly one honest line of continuity, screen-only and never sent to a prompt — D3 untouched, no widening. The button's own words vary with whether a plan governs that week, matching `PlanAuthoringFormatting`'s canonical "No plan has been authored yet" rather than a second wording of the same fact. **`canDraftPlan`'s training-only gate is untouched** — MAX-184's audit called it correct, and this is the missing route, not a relaxation of it. See the MAX-194 section below | 184, 097, 182 | Sonnet — branch pushed, PR open; not yet reviewed or merged. Package compiles and core unit tests pass by inspection only; no toolchain here to run them (R1). Needs device verification, per the PR |
 
 **Four collisions the overseer must respect.**
 
@@ -6005,7 +6006,7 @@ concatenating N workout contexts holds. Three separate things were being conflat
 - **`canDraftPlan`'s training-only gate is correct and should not be removed.** A `PlanProposal`
   drafted from one run's fact sheet would be inventing most of its fields. The defect is the
   absence of a route from a run's conversation to the plan's — **MAX-194**, which reuses the
-  reassignment mechanism `ChatSheet` already has.
+  reassignment mechanism `ChatSheet` already has. **Built — see the MAX-194 section below.**
 
 ### What the audit says not to touch
 
@@ -6668,6 +6669,117 @@ no pixels.
   collide with this ticket in `ContextBuilder.swift`. It should land after this.
 
 ---
+
+## MAX-194 — a door from a run's conversation to the plan's
+
+§3.5's fix, and the last piece of the owner's central ask on this pass: standing in a
+workout thread that has just told the athlete their plan's cap or that week's ask, there
+was no way to act on it — `ChatModel.canDraftPlan` correctly refuses on a workout subject
+(§4.2's reasoning, confirmed again here), and the audit's own position is that the gate
+is right and the defect is the missing route. **The gate is untouched by this ticket.**
+
+### Three decisions, argued
+
+**1. Which training thread — the run's own week, never the dashboard's current
+window.** MAX-182 already gives a workout thread's fact sheet a `## The week around
+this session` block, built from `WorkoutContext.SurroundingWeek` — the exact
+Monday-first week the run sits in, with its own `plan` (nil where none governs it). The
+door reuses that same week's `from`/`through` to build the `TrainingScope` it opens,
+rather than resolving a second, independent notion of "which week" from the dashboard's
+live interval the way **New chat** freezes one. The alternative was tempting and wrong:
+a run opened from three weeks back would land on a training thread about *this* week,
+answering a question nobody asked, and it is exactly the kind of frozen-versus-live
+disagreement `ChatScopeNotice` exists to flag rather than manufacture on arrival. Because
+the target is read straight off the same context the fact sheet already rendered
+(`ChatModel.planConversationDoor`, mirroring `runsStripData`'s own rule), it cannot
+disagree with what the athlete was just told.
+
+**2. How much continuity is honest — one line, on screen, never in a prompt.** A
+workout thread and a training thread have different contexts by design (D3): a training
+thread is not shown that run's splits or heart-rate curve. Replaying any part of the
+workout transcript into the training thread would tell the model it had seen something
+it had not — precisely what MAX-175's never-invent rule forbids, read from the other
+direction. So the carry-over is exactly one sentence, composed once by
+`PlanConversationDoor` and named `continuityNote`: *"Continued from 6 Jan 2026 ·
+Running."*, reusing `ChatThreadTitle.workout`'s own vocabulary for naming a run rather
+than inventing a second one. It travels through `ChatSheet`'s existing `.subject`
+reassignment as a passenger (`continuityNote: String?`, nil on every other path in) and
+is rendered by `ChatConversationView` as a static caption above the transcript. Nothing
+in `ChatInstruction` or `ContextBuilder` reads it, it is never written to the stored
+thread, and it does not survive leaving and reopening the thread from the thread list —
+it is a courtesy for the moment of arrival, not a property of the conversation. This is
+not a widening of what reaches Claude; A29's precedent (a paragraph in
+`docs/PRD-AMENDMENTS.md` before code) does not apply because nothing here changes what a
+prompt carries.
+
+**3. Always offered, worded to whether a plan governs the week.** The door appears on
+every `.ready` workout thread — there is always a week for a run to sit in, plan or no
+plan, unconditionally once MAX-182 built one. What changes is the button's own words:
+governed, it reads "Ask about the plan"; where no plan is in force for that week, it
+reads "Ask about starting a plan" and its VoiceOver hint states "No plan has been
+authored yet" — the exact phrase `PlanAuthoringFormatting.describe(.firstPlan)` already
+uses, rather than a second wording of the same fact. The training thread still opens in
+that case (a training thread with no plan in force is a real, ordinary state, already
+covered by `testATrainingWindowOpensBeforeAnyPlanIsAuthored`) — a first plan can be
+drafted from there.
+
+### How it is wired, without a fourth mechanism
+
+`PlanConversationDoor` (`Sources/MaximizeCore/Chat/PlanConversationDoor.swift`) is a
+pure decision — `offer(for:day:activityType:) -> Offer?` — carrying the target `scope`,
+the button's label and accessibility hint, and the continuity note, all under test in
+`PlanConversationDoorTests`. `ChatModel.planConversationDoor` reads it straight off
+`context` (nil for a training subject, nil before `load()`), mirroring
+`runsStripData`'s own pattern; `ChatModelTests` exercises it end to end against a real
+loaded model rather than the bare decision function alone.
+
+`ChatConversationView` gained a composer accessory for a workout thread —
+`planConversationDoorButton`, the mirror of the training thread's `draftPlanButton`,
+riding the same `accessory` slot `ChatComposerView` already carries, so the two can
+never appear together (one subject, one accessory) — and a `continuityBanner`, rendered
+above the transcript exactly where `scopeMismatchBanner` already sits, but as a caption
+rather than a control: there is nothing to *do* about where a conversation came from,
+only something to know. Both `continuityNote` and `onOpenPlanConversation` were added as
+a new optional parameter and a new closure on **`init(subject:...)`** — the initializer
+MAX-185's review already marked as "the Ask button and the scope-mismatch banner's own
+action" — not as a fourth initializer; `init(threadID:...)` and
+`init(startingNewThreadFor:...)` pass `continuityNote: nil` and forward the closure
+unused.
+
+`ChatSheet.Opening.subject` gained the same passenger: `case subject(ChatSubject,
+continuityNote: String?)`, not a fourth `Opening` case. `openPlanConversation(_:)`
+reassigns `opening` to `.subject(.training(offer.scope), continuityNote:
+offer.continuityNote)` — the exact mechanism `startNewTrainingChat()` already uses for
+**New chat**, except resolving rather than minting, because a second tap of the door
+from the same run should land back in the same conversation about that week, not start a
+new one each time.
+
+**Left for MAX-190, not touched here.** `ChatSheet.swift` is now three tickets deep
+(185 → 194 → 190, the audit's own sequencing note) — this diff is additive to MAX-185's
+shape and does not touch `PlanAuthoringView`'s conversational route or the sheet-over-
+push-over-sheet defect §2.6 named; that is MAX-190's file to fix.
+
+### What CI can and cannot prove
+
+CI can prove: the package compiles; `PlanConversationDoorTests` pins the target week's
+bounds against `ContextBuilder.surroundingWeek`'s own output (never a hand-typed date),
+the copy branch on whether a plan governs the week, the accessibility hint naming the
+destination, and that the continuity note names the run the same way its own thread
+title does and carries no measured figure; `ChatModelTests` pins
+`ChatModel.planConversationDoor` nil for a training subject and before `load()`, and
+correct end to end for a workout subject.
+
+CI cannot prove that the composer accessory looks right beside `ChatComposerView`'s
+glass, that the continuity caption reads as a caption rather than a control at a glance,
+or that tapping it actually lands on the right screen on a device. **Needs device
+verification:** open a run's thread, confirm "Ask about the plan" (or "Ask about
+starting a plan" for a week with none) sits above the composer with a real hit area;
+tap it and confirm the training thread that opens shows the continuity caption once,
+above the transcript, and that its title/subtitle name the run's own week rather than
+the dashboard's current one; confirm VoiceOver reads the button's destination; repeat at
+the largest Dynamic Type size.
+
+**`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
 
 ## Risks
 
