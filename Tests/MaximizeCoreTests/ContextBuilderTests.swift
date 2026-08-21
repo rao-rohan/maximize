@@ -107,10 +107,16 @@ final class ContextBuilderTests: XCTestCase {
 
     // MARK: - The workout subject is delegated, not reimplemented
 
-    /// A12 rule 1: `WorkoutContextBuilder` is unchanged and is called *by* the entry point,
-    /// so the scorer and a workout thread still receive byte-identical context. This is the
-    /// assertion that keeps that sentence true — if this entry point ever starts adding,
-    /// trimming or re-wording anything, the two strings stop matching.
+    /// A12 rule 1: `WorkoutContextBuilder` is called *by* the entry point rather than
+    /// wrapped, reordered or re-worded by it. This is the assertion that keeps that
+    /// sentence true — if the entry point ever starts trimming or re-wording anything, the
+    /// two strings stop matching.
+    ///
+    /// **MAX-182 gives the entry point exactly one thing to add**, the surrounding week, and
+    /// this test now hands the same week to the direct call rather than dropping the
+    /// comparison: the property worth pinning is not "the entry point adds nothing" but
+    /// "the entry point adds nothing *else*". The week is assembled by the same internal
+    /// function the entry point uses, so a second assembler cannot slip in behind it.
     func testWorkoutSubjectRendersExactlyWhatWorkoutContextBuilderProduces() throws {
         let id = UUID()
         let run = try workout(id: id, on: "2026-01-06")
@@ -120,10 +126,8 @@ final class ContextBuilderTests: XCTestCase {
             ledger: try ledger(points: 82, workoutID: id)
         )
 
-        let built = try ContextBuilder.build(
-            for: .workout(id),
-            from: try contextInputs([record], planCalendar: try calendar())
-        )
+        let inputs = try contextInputs([record], planCalendar: try calendar())
+        let built = try ContextBuilder.build(for: .workout(id), from: inputs)
 
         let directly = try WorkoutContextBuilder.build(
             workout: run,
@@ -133,7 +137,11 @@ final class ContextBuilderTests: XCTestCase {
             planCalendar: try calendar(),
             audience: .chat,
             heartRateSeries: nil,
-            existingScore: try Fixture.score(points: 82, workoutID: id)
+            existingScore: try Fixture.score(points: 82, workoutID: id),
+            surroundingWeek: try ContextBuilder.surroundingWeek(
+                around: try day("2026-01-06"),
+                from: inputs
+            )
         )
 
         XCTAssertEqual(built.subjectKind, .workout)

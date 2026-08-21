@@ -169,6 +169,17 @@ extension WorkoutContext {
             lines.append("Rationale given: \(existingScore.rationale)")
         }
 
+        // Chat only (MAX-182), and last: the record of this session is complete above, and
+        // what follows is orientation around it rather than more of it. Absent from a
+        // scoring prompt entirely — not stated-as-absent — because for the scorer this is
+        // not a fact that happens to be missing, it is data the rubric must not be able to
+        // reach. See `WorkoutContext.surroundingWeek`.
+        if audience == .chat, let surroundingWeek {
+            lines.append("")
+            lines.append("## The week around this session")
+            lines.append(contentsOf: Self.surroundingWeekLines(surroundingWeek))
+        }
+
         return lines.joined(separator: "\n")
     }
 
@@ -361,6 +372,182 @@ extension WorkoutContext {
         case .kilometers: return "kilometre"
         case .miles: return "mile"
         }
+    }
+
+    // MARK: - The surrounding week (MAX-182, A29)
+
+    /// Where this session sits in the athlete's week: the window, the arc week, the week's
+    /// tallies, how many sessions it holds, and what the plan asked of each of its days.
+    ///
+    /// Ordered widest-first — the window, then the block, then the week's figures, then the
+    /// asks — so that every number is already inside a stated span by the time it appears.
+    /// §3.6(b)'s rule, applied to a span the athlete did not choose: they opened a
+    /// conversation about one session, and the week is this app's answer to "which week is
+    /// that", so the answer is stated rather than assumed.
+    ///
+    /// **Fixed size.** Every branch below emits a bounded number of lines, and none of them
+    /// is a function of how much the athlete trained — see `WorkoutContext.SurroundingWeek`
+    /// for why the audit made that a constraint rather than a preference.
+    private static func surroundingWeekLines(_ week: WorkoutContext.SurroundingWeek) -> [String] {
+        var lines: [String] = []
+
+        lines.append("\(FactSheetFormatting.weekdayName(week.from.weekday)) \(week.from) through "
+            + "\(FactSheetFormatting.weekdayName(week.through.weekday)) \(week.through) — the "
+            + "Monday-first training week this session falls in, in the athlete's own time "
+            + "zone. Every figure in this section is measured over exactly those seven days "
+            + "and describes no other week.")
+        lines.append(arcWeekLine(week))
+
+        if week.reachesBeyondToday {
+            // Without this, an ask with nothing recorded against it reads the same whether
+            // the day has been and gone or has not arrived — and only one of those is a
+            // session the athlete skipped. `TalliesCalculator` already withholds an
+            // undecided day from both sides of the effective ratio (MAX-110); this is the
+            // same fact said in words, for the plan asks below, which have no ratio to hide
+            // it in.
+            lines.append("This week is not over: today is \(week.today). A day after that has "
+                + "not happened yet, so an ask with no workout recorded against it has not "
+                + "been missed.")
+        }
+
+        lines.append(contentsOf: weekTallyLines(week))
+        lines.append(contentsOf: weekPlanLines(week))
+        return lines
+    }
+
+    /// Where the week sits in the plan's progression — the "does this fit the block" half of
+    /// the question, in one line.
+    ///
+    /// Both absences are stated rather than dropped, and they are different facts: a week no
+    /// plan governs has no arc week at all, and a week past the end of a finite arc has one
+    /// with nothing prescribed for it — which `PlanCalendar` documents as an expected state
+    /// meaning the plan wants a new version (D1), not as a defect.
+    private static func arcWeekLine(_ week: WorkoutContext.SurroundingWeek) -> String {
+        guard let plan = week.plan, let index = week.arcWeekIndex else {
+            return "No plan version governs the end of this week, so it has no arc week and "
+                + "the plan prescribes no long run for it."
+        }
+        guard let distanceMeters = week.arcWeekLongRunMeters else {
+            return "Arc week \(index) under plan \(plan.version). The arc has no entry for that "
+                + "week, so it prescribes no long-run distance."
+        }
+        return "Arc week \(index) under plan \(plan.version), long run prescribed: "
+            + "\(FactSheetFormatting.distance(distanceMeters))."
+    }
+
+    /// The week's four figures, every one of them `TalliesCalculator`'s own (§3.6(a)).
+    ///
+    /// **Deliberately not `TrainingFactSheet`'s tally block, and not a shared function with
+    /// it — yet.** The two print the same three figures through the same formatters, so they
+    /// cannot disagree about a *number*; what differs is the prose, because a week has
+    /// absences a frozen window does not (a week that is not over) and a frozen window has
+    /// one this does not (a streak it actually bounds). MAX-192 is rewriting the roll-up's
+    /// tally block to carry strain and load, and factoring the two into one renderer while
+    /// that is in flight would be a merge conflict bought for nothing. **When MAX-192 lands,
+    /// these two blocks should be reconciled into `FactSheetFormatting`** — that is a real
+    /// follow-up, recorded here rather than left to be noticed.
+    private static func weekTallyLines(_ week: WorkoutContext.SurroundingWeek) -> [String] {
+        let tallies = week.tallies
+        var lines: [String] = []
+
+        // The unit is the *session*, unlike `workoutDays` below, and the two are worth
+        // keeping apart: a Tuesday holding a run and a lift is one day and two sessions.
+        lines.append("Workouts recorded in this week: \(week.sessionCount)")
+        lines.append("Days with at least one workout: \(tallies.workoutDays)")
+
+        let effective = tallies.effectiveDays
+        if effective.rate == nil {
+            // `EffectiveObligationTally` refuses to report 0 for an empty denominator, and
+            // the prompt must not turn that refusal back into a zero: "nothing was eligible"
+            // and "you failed every session" are opposite statements.
+            lines.append("Effective sessions: nothing in this week was eligible — the plan "
+                + "asked for rest, no plan governed these days, or their outcome is not yet "
+                + "known.")
+        } else {
+            // The exact numerator/denominator shape `TrendTileData` puts on the tile, so a
+            // figure quoted here and a figure read on the dashboard cannot differ in shape
+            // or in rounding (§3.6(a) and (c)). "Sessions" and not "days" since MAX-134: the
+            // denominator counts prescribed obligations, and a label reading "days" would
+            // hand the model a number and mislabel its unit.
+            lines.append("Effective sessions: \(effective.effectiveCount)/\(effective.eligibleCount)")
+        }
+
+        // MAX-160: a score labelled miscategorised (A21) is excluded from the average. Three
+        // states, and the model must be told which one it is looking at rather than left to
+        // guess from a bare number or a bare absence.
+        let excludedCount = tallies.averageScoreExcludedMiscategorisedCount
+        if let averageScore = tallies.averageScore {
+            // Through the tile's own formatter — §3.6(c): where a figure appears in both a
+            // tile and a fact sheet, the fact sheet renders it at the tile's precision.
+            var line = "Average score this week: \(TrendTileData.formattedAverageScore(averageScore))"
+            if let note = MiscategorisedScoreCopy.averageExclusionNote(excludedCount: excludedCount) {
+                line += " (\(note))"
+            }
+            lines.append(line)
+        } else if excludedCount > 0 {
+            lines.append(MiscategorisedScoreCopy.onlyExcludedScoresAverageLine(excludedCount: excludedCount))
+        } else {
+            lines.append("Average score this week: nothing in this week has been scored yet, so "
+                + "there is no average. That is an absence of verdicts, not a low one.")
+        }
+
+        if week.holdsNoOtherSession {
+            // Stated in words rather than left to be inferred from a count of 1 (MAX-175),
+            // and worded as a fact about the record: what this app holds for a week and what
+            // the athlete did in it are different claims, and only the first is one it can
+            // make.
+            lines.append("No workout other than this one is recorded anywhere in this week.")
+        }
+
+        // The exclusions, stated in the prompt rather than only in this file's
+        // documentation, because a model told to say when it cannot answer cannot do that
+        // without knowing what it was not given (§3.5).
+        lines.append("These are the week's totals only. This section carries no per-session "
+            + "detail for any other workout in the week — not its distance, its duration, its "
+            + "heart rate, its drift or its score — so a question about a particular other "
+            + "session is best answered in that session's own conversation. Say so rather "
+            + "than estimating, and do not infer one session's figures from these totals.")
+        return lines
+    }
+
+    /// What the plan asked of each of the week's seven days.
+    ///
+    /// **Always seven lines, and never any health data** — the athlete's own configuration,
+    /// which §3.3 item 1 distinguishes from a measurement of their body for exactly this
+    /// reason. They are what the figures above are measured against: "should I back off
+    /// Thursday" is a question about Thursday's ask, and the fact sheet around this block
+    /// carries only the subject day's.
+    private static func weekPlanLines(_ week: WorkoutContext.SurroundingWeek) -> [String] {
+        // Seven repetitions of "no plan version governed this day" is the prompt spending
+        // its budget on absences — `TrainingFactSheet` inverts the same rule for the same
+        // reason. Said once, the day lines carry no plan clause at all and nothing is left
+        // for a model to read into their shortness.
+        guard !week.days.allSatisfy({ $0.planDay == nil }) else {
+            return ["No plan version governed any day of this week, so the plan made no ask for "
+                + "these days and there is nothing here for a session to have met or missed."]
+        }
+
+        var lines = ["What the plan asked of each day of this week, Monday first. A day names a "
+            + "lift ask (tagged \"Lift:\") only when the plan prescribes one — a day with no "
+            + "lift clause prescribes no lifting that day. These are the asks, not a record "
+            + "of what happened on them."]
+        for day in week.days {
+            var fields = ["\(FactSheetFormatting.weekdayName(day.date.weekday)) \(day.date)"]
+            guard let planDay = day.planDay else {
+                // A single day the plan does not reach, inside a week it otherwise does — a
+                // session in the week a plan first took effect. Stated, because the
+                // alternative is a line indistinguishable from a day the plan rested.
+                fields.append("no plan version governed this day")
+                lines.append(fields.joined(separator: " · "))
+                continue
+            }
+            fields.append(FactSheetFormatting.scheduledSession(planDay.scheduledSession))
+            if !planDay.liftSession.isRest {
+                fields.append("Lift: \(FactSheetFormatting.liftPrescription(planDay.liftSession))")
+            }
+            lines.append(fields.joined(separator: " · "))
+        }
+        return lines
     }
 
     // MARK: - Formatting

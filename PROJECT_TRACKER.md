@@ -1970,7 +1970,10 @@ free. What landed in the file:
 | MAX-179 | **Per-muscle fatigue from the entries A22 already collects** — one session per group, weighted by its duration, decayed on a 48-hour half-life. States in its own doc comment what it cannot know (no sets, no reps, no load) and that **A20's tripwire governs the "just add a weight field" follow-up, not A22's permission**. A group never logged has *no* figure; a group logged a fortnight ago is *fresh* — a different fact. **Departs from the brief's "the last session" in one deliberate place**, which the MAX-179 section below sets out | 174, 175, A20/A22 | **Opus** ✅ |
 | MAX-180 | **The muscle map, drawn** — `MuscleFatigueMark` bands MAX-179's reading into five states (`.notLogged`/`.fresh`/`.light`/`.moderate`/`.high`) and marks each with a non-hue geometric channel (fill fraction + dashed outline + glyph), extending `WCAGContrastTests`'s hue-alone test with a third representation rather than a parallel suite. `MuscleMapView` draws it on a flat content surface with `@ScaledMetric` throughout, and `WorkoutDetailView` composes it unconditionally (it is the athlete's state, not the workout's). A group never logged draws dashed-and-glyphed, never a coloured "at rest" fill. **Adapted after #173 landed on top of it**: the "last worked" caption reads `mostRecentlyWorkedAt`, not the removed `elapsedDays`, and the day count is now calendar-correct via `CalendarDay.days(until:)` rather than fixed 86,400-second blocks. See the MAX-180 section below | 179 | Sonnet ✅ — merged as `ae85d0a`. Compiles and its core tests pass in CI; **nothing about how it draws is verified** — see the PR's device checks |
 | MAX-181 | **The fact sheet renders the lift slot** — `TrainingFactSheet`'s plan block now names each weekday's lift ask beside its run ask, tagged `Lift:`, omitted rather than stated when the plan asks nothing of the slot. Closes MAX-174 §5.3's G2, and MAX-136's open item. **Also closes the more severe consequence MAX-175 found and declined to fix**: `PlanProposalInstruction` tells a drafting model to restate each weekday's lift ask from this same fact sheet unchanged — it could not, so an accepted revision could silently zero out an athlete's whole lift schedule. See the MAX-181 section below | 174, 175 | Sonnet ✅ |
+| MAX-182 | **A workout conversation knows where the session sits in the week** — a chat-only `## The week around this session` block on the workout fact sheet: the Monday-first week's bounds, its arc week and prescribed long run, four aggregates from `TalliesCalculator` (workouts recorded, workout-days, effective sessions, average score), a "this week is not over" line, and what the plan asked of each of the seven days. **Aggregates and plan configuration only** — MAX-184's audit rejected the first draft's one-line-per-sibling-session shape as `TrainingContext` by a side door and as an unbounded term in the longest prompt the app sends, and a test pins that the block does not grow with training volume. **Nothing reaches `.scoring`**: two gates plus `ContextDisciplineTests`' byte-for-byte literal, because a scorer that could read the week would make an immutable score depend on days other than the one it is scoring (D1/D8). **Gated on A29** — A12 rule 2 makes a widening of what leaves the device an amendment, and the amendment is in the same PR, first in the diff. The acute:chronic ratio is sanctioned by A29 and deliberately not built here; see the MAX-182 note below | 095, 096, **184**, A12/A29 | Sonnet 🔒 — **PR open, not yet merged.** Blocked on A29 being accepted. No toolchain here, so nothing was compiled or run (R1) |
 | MAX-184 | **An audit of the chat surface and its context continuity** — `docs/CHAT-AUDIT.md`. Seven defects, the worst of them a **"New chat" button that is inert on the ordinary path** and a **workout chat card that is not tappable and never refreshes**; a ranked craft list; and a position on the owner's central ask. **Nothing dangerous was found** — no data loss, no leak off the device, no crash. The one context finding that matters is not the one it was dispatched on: **strain, acute:chronic load balance and per-muscle fatigue reach a tile and reach no prompt**, so a training thread asked "am I ramping too fast" correctly refuses to answer a question the app has already computed. Proposes MAX-185–201; MAX-193 is blocked on a new amendment. See the MAX-184 section below | 090, 152, 153, 170, 177, 178, 179 | **Opus** — audit only, no behaviour changed |
+| MAX-185 | **"New chat" now actually creates a new thread** — the chat audit's worst-ranked defect (MAX-184 §2.1). `ChatSheet.startNewTrainingChat()` reassigned `opening` to the same `.subject(scope)` value the Ask button already produces on the common path, so `.id(opening)` never changed and the toolbar button was inert; `ChatThreadRepository.thread(for:newThreadID:at:)` would have resolved to the thread already open even if the view had been recreated. **Both no-ops confirmed by reading, independently — the diagnosis was correct.** Fixed with a third `ChatModel.Opening` case, `.newThread`, reached by a new `init(startingNewThreadFor:)`: it mints a thread unconditionally rather than ever asking the repository to resolve one, under test in `ChatModelTests`. `ChatSheet.Opening.newThread(ChatSubject, UUID)` carries a nonce so `.id(opening)` changes on every tap, including a second tap on an unchanged scope. See the MAX-185 section below | 184, 097 | Sonnet — **PR open, not yet merged.** Package compiles and core unit tests pass by inspection only; no toolchain here to run them (R1). Needs device verification, per the PR |
+| MAX-186 | **The workout chat card becomes a door, and refreshes** — `WorkoutChatSectionView`'s card had no tap target of any kind (MAX-098 removed its "Open chat" button and never replaced it) and reloaded only in `.task`, which does not re-fire on return from the chat sheet — so *chat about this run → Done* left the card still showing the invitation, verbatim the defect MAX-098's own doc comment says the card exists to prevent. Both confirmed against current source before anything was changed, per `docs/CHAT-AUDIT.md` §2.2 (MAX-184). Fixed: the whole card is now a `Button` presenting `ChatSheet(subject: .workout(workoutID))` — the same route `ChatEntryPoint.resolve(focus:currentInterval:)` already resolves for this screen, not a second one — and `.sheet(item:onDismiss:)` reloads the preview exactly once, on dismissal, however it happened (no polling, no `onAppear`/`onDisappear` pair, no model call — A14). What the card says moved into `MaximizeCore` (`WorkoutChatCardPresentation`, built on `ChatThreadSummary` rather than a parallel notion of "the last thing said"), under test. **Reconciles §2.1's "two chat buttons on one screen" argument**: this was never a second *button* saying the same thing as the Ask control, it is a preview the audit found had no affordance at all — see the MAX-186 section below | 184 | Sonnet — **PR open, not yet merged.** Package compiles and core unit tests pass by inspection only; no toolchain here to run them (R1). Needs device verification, per the PR |
 | MAX-187 | **A plan proposal card does not outlive its save** — §2.3's defect: accepting a proposal, saving, and pressing Back used to leave a diff card on screen describing a change already applied, **Accept** still live, a second tap writing a genuine duplicate plan version (D1 intact throughout — the screen was lying, not the data). `ChatModel.endProposalIfAlreadyStored()` reuses `discardProposal()`'s one door (`planDrafting = .idle` plus a transcript `.notice`) rather than adding a second mechanism, and decides by asking storage: `PlanProposalReview.standing`'s captured version against a fresh `PlanAuthoring.currentVersion(of:)` read — not a callback from `PlanAuthoringModel`, which has no reference back to the `ChatModel` that opened it and was kept that way rather than wired up across `ChatSheet.swift` (owned by MAX-185 concurrently). `ChatConversationView` calls it from `.onAppear`, since `.task` does not re-run when `PlanAuthoringView` pops back off the stack. See the MAX-187 section below | 184 | Sonnet — branch pushed, PR open; not yet reviewed or merged |
 
 **Four collisions the overseer must respect.**
@@ -6018,6 +6021,323 @@ conversation starters, thread-list search). Tiers, collisions and a dispatch ord
 document's §8. Three collisions to respect: 192 before 193 (`ContextBuilder.swift`), 188 before
 201 (the thread list), and 185 → 194 → 190 in sequence (all three are `ChatSheet.swift`).
 
+---
+
+## MAX-186 — the workout chat card becomes a door, and refreshes
+
+[docs/CHAT-AUDIT.md](./docs/CHAT-AUDIT.md) (MAX-184) §2.2 ranked this its second-worst
+defect. Both halves were verified against current source before anything was changed,
+per that ticket's standing instruction to refuse a brief built on a false premise:
+
+- **No tap target of any kind.** `WorkoutChatSectionView`'s card renders either the
+  invitation copy or a preview of the last exchange with a relative timestamp, and
+  neither was wrapped in a `Button`, a `NavigationLink`, or any other interactive
+  container — MAX-098 removed the card's "Open chat" button on the argument that the
+  persistent Ask control was the app's one door into chat, and nothing took the
+  button's place.
+- **Stale on return.** The read ran in `.task { await model.load() }`, which fires on
+  this view's first appearance and does not re-fire when a sheet presented over the
+  screen dismisses. *Open a run → Ask about this run → have a conversation → Done*
+  returned to a card still reading the invitation — the exact defect MAX-098's own doc
+  comment (`WorkoutChatSectionView.swift:15-18` at the time) says the card exists to
+  prevent.
+
+Both confirmed. Fixed.
+
+### Reconciling §2.1's "two chat buttons" argument
+
+MAX-098's reasoning — two chat buttons on one screen, opening the same conversation, is
+worse than either alone — is not wrong, and this ticket does not reverse it. What
+changed is what the card *is*. It was never meant to be a second, wordless button
+duplicating the Ask control; §4.4's original design review asked for a preview with
+nothing to press. The audit's finding is that a preview showing your last message and
+its timestamp reads as tappable to anyone who has used a phone, so "no button" landed
+as "a broken button" rather than as "correctly not a button." The fix is not a second
+door with its own idea of how to reach a thread — it is completing the affordance the
+preview already implied, through the one route that already exists for this subject.
+
+### The route, matched rather than invented
+
+The whole card is now a `Button` that opens
+`ChatSheet(subject: .workout(workoutID))` — precisely the subject
+`ChatEntryPoint.resolve(focus:currentInterval:)` (`MaximizeCore`) resolves when this
+screen is focused, i.e. exactly what the persistent Ask control would open from here.
+Nothing about *which thread* is a second decision: `ChatSheet` resolves "the" thread
+for a subject the same way it always has
+(`ChatThreadRepository.mostRecentThread(for:)`, newest activity wins), so there is one
+notion of "this run's conversation," reached two ways.
+
+Presenting `ChatSheet` locally, from a `.sheet(item:)` this view owns, rather than
+routing through `RootTabView`'s `chatOpening`, follows `PlanAuthoringView`'s own
+precedent (MAX-166): that screen already presents `ChatSheet` from its own state for
+the conversational-route door, entirely separate from the persistent Ask control's
+presentation. Two presentation sites for the same sheet type is an established pattern
+in this codebase, not a new one.
+
+### The refresh mechanism, and why
+
+`.sheet(item: $opening, onDismiss: { Task { await model.load() } })` — SwiftUI's own
+dismissal callback, not a hand-rolled substitute.
+
+`.task` fires on the view's *appearance*; returning from a sheet presented over an
+unchanged screen is not a new appearance, which is the entire mechanism of the bug.
+The two idioms that reach for next were both rejected:
+
+- **A polling timer** re-reads storage on a cadence with no event to justify it,
+  keeps a `Task` alive for as long as the screen is, and would still show a stale card
+  for up to one interval after Done.
+- **`onAppear`/`onDisappear` bookkeeping** (mirroring `ChatEntryPointFocus`'s own
+  ordering problem) needs a boolean or an identifier kept in sync by hand, and this
+  view has no sibling screens whose transitions it would have to filter out — a sheet
+  dismissing is the only case that needs to reload.
+
+`sheet(item:onDismiss:)` fires exactly once, exactly when the sheet goes away, however
+it was dismissed — Done, a downward drag, or the system — with no state this view has
+to track itself. The closure calls `model.load()`, the same local read `.task` already
+performs on first appearance; opening or closing the sheet never calls Claude (A14).
+
+### What moved into the core, and why
+
+`WorkoutChatCardState` and `WorkoutChatCardPresentation` (`Sources/MaximizeCore/Chat/
+WorkoutChatCardPresentation.swift`) now decide: whether the card has anything to
+preview, what a `ChatThread?` resolves to, and the VoiceOver sentence for the
+`.lastExchange` case. None of that was previously untested — it lived in
+`WorkoutChatPreviewModel`, an app-layer `@Observable` class CI compiles but never
+executes (R13's shape, restated at a new seam). It builds on `ChatThreadSummary`
+rather than beside it: the preview is that type's own `preview` field, already
+whitespace-collapsed and truncated on a word boundary, so this card and the same
+thread's row in the thread list (§2.3) can never show two different ideas of "the last
+thing said." `WorkoutChatPreviewModel` is now two lines of plumbing — read the
+repository, hand the result to the core function — which is what CLAUDE.md's thin-shell
+rule asks a view model to be.
+
+The visible "Chat" heading stayed in the view, deliberately, matching
+`RunsStripData`'s own note on the same split: a fixed string with no data dependency is
+not a decision, and moving every literal into the core is not the rule — moving the
+*decisions* is.
+
+### Accessibility
+
+The whole card carries `.accessibilityElement(children: .ignore)` with one explicit
+label (`"Chat. " + ` the state's sentence) and `.accessibilityHint("Opens this run's
+conversation.")` — the same hint wording `ChatEntryPoint.resolve` gives the persistent
+Ask control for a focused workout, so the two doors describe the same destination in
+the same words. A hand-drawn chevron (`WorkoutRow`'s own device for a row outside a
+`List`) gives sighted readers a shape cue that the card opens something, so
+tappability is not conveyed by colour alone. `.frame(minHeight:
+LayoutMetrics.minimumTapTarget)` matches `ChatEntryButton`'s own floor for a
+content-sized control that must still clear 44pt.
+
+### What CI can and cannot prove
+
+CI can prove: the package compiles; `WorkoutChatCardPresentationTests` — no thread,
+a thread nobody has spoken in, a thread with only the system seed, and a real exchange
+all resolve to the state this ticket specifies; the `.lastExchange` preview is asserted
+equal to what `ChatThreadSummary` itself returns for the same thread, not to a
+hand-typed string that could drift from it the same way the implementation might; the
+VoiceOver sentence is asserted against its actual output.
+
+CI cannot prove that the card is tappable on a screen, that the sheet visibly opens
+this run's own thread, that the card visibly updates after Done, that VoiceOver reads
+the label and hint this ticket wrote, or that the layout holds at the largest Dynamic
+Type sizes. See the PR's own "Needs device verification" section.
+## MAX-185 — "New chat" must actually do something
+
+### The diagnosis, verified before anything was touched
+
+The ticket's brief was to confirm the audit's finding before building on it, not to trust
+it. Both no-ops were real:
+
+1. `ChatSheet.startNewTrainingChat()` resolved the dashboard's current interval into a
+   `TrainingScope` and assigned `opening = .subject(.training(scope))`. On the ordinary
+   path — Ask button, then **New chat** — the Ask button had already built `opening` from
+   the identical scope (`ChatEntryPoint`'s own construction), so the reassignment was an
+   equal value. `ChatConversationView` is keyed `.id(opening)`; an equal value does not
+   change a `Hashable` identity, so SwiftUI never recreated the view.
+2. Independently, even a recreated view would not have helped:
+   `ChatThreadRepository.thread(for:newThreadID:at:)` (the extension on the protocol) is a
+   create-or-fetch — `mostRecentThread(for:)` first, mint only if nothing exists. An
+   unchanged scope resolves to the thread already open, every time.
+
+Two independent no-ops stacked, exactly as read. Nothing about the diagnosis was wrong, so
+the ticket proceeded.
+
+### The second-order question, and the decision
+
+`ChatThread`'s own documentation already states the product answer: "more than one thread
+per subject is now representable... for a training subject that is the product ('New chat'
+over a newer window')," and `ChatThreadRepository`'s fake carries the same line. The
+repository was never the gap — the UI had no way to reach the second thread a training
+scope is explicitly allowed to have. So the fix is not "New chat should say 'you are
+already here' and disable" (the audit's other option) — it is "New chat mints a thread
+distinct from any already open, on the current scope, unconditionally," matching what the
+type system already permitted.
+
+### Where the decision lives, and why
+
+**In `MaximizeCore`, not the view — CLAUDE.md's rule, applied at the one seam that
+mattered.** `ChatModel.Opening` (private, exhaustive over in `load()`) gained a third case:
+
+```swift
+private enum Opening {
+    case subject(ChatSubject)   // resolve — the Ask button
+    case newThread(ChatSubject) // mint, unconditionally — New chat
+    case threadID(UUID)         // exact — the thread list
+}
+```
+
+A new public initializer, `ChatModel.init(startingNewThreadFor:...)`, sets `opening =
+.newThread(subject)`. `load()`'s `.newThread` branch builds the same `PromptContext` the
+`.subject` branch does, but constructs `ChatThread(id: UUID(), subject:, lastActivityAt:)`
+directly rather than calling `chatThreadRepository.thread(for:newThreadID:at:)` — the
+resolve-or-create helper is deliberately never reached from this path, which is the whole
+of the fix. `ChatModelTests` adds four tests under "New chat": minting never resolves to an
+existing, populated thread on the same subject even when one is stored; two mints in a row
+are two distinct thread ids; nothing is written to the repository until a turn completes
+(A14/"only completed turns are persisted" still holds — no repository write, and no model
+call, happens on open); and title/subtitle degrade for a freshly-minted thread exactly the
+way they do for any other empty training thread.
+
+**At the call site, not in the repository.** `thread(for:newThreadID:at:)` is unchanged —
+it is still correct for what it is: the Ask button's "open *the* thread for this subject."
+Changing its contract to sometimes-resolve-sometimes-mint would have made every caller
+carry a flag explaining which behaviour they wanted, which is the same decision pushed
+into every call site instead of into one type. A new `Opening` case — and a new
+initializer — keeps "resolve" and "mint" as two closed, separately-testable paths through
+one exhaustive `load()`.
+
+### The App layer: a real identity change, not a `.id()` trick one layer along
+
+`ChatSheet.Opening` (the App-layer mirror, private to that type) gained a matching case:
+`.newThread(ChatSubject, UUID)`. The `UUID` is identity for SwiftUI only — it is never
+read as the minted thread's actual id, which `ChatModel` mints itself — but it is load-
+bearing: without it, two consecutive taps of **New chat** on an unchanged scope would
+produce two equal `Opening.newThread(scope, ...)` values only if the nonce were omitted,
+and `.id(opening)` would again fail to change on the second tap. This is not the bug the
+audit warned against re-committing (a `.id()` trick standing in for a fix) — the
+underlying fact really has changed on every tap (`ChatModel` really does mint a new
+thread each time `.newThread` is reached), and the nonce is what lets SwiftUI observe a
+fact that is genuinely true, the same way `.threadID(UUID)` already carries a concrete,
+externally-sourced id for the thread-list path. `startNewTrainingChat()` now assigns
+`opening = .newThread(.training(scope), UUID())` unconditionally — it no longer branches
+on whether the scope changed, because "New chat" never needs to.
+
+`ChatConversationView` gained a third initializer, `init(startingNewThreadFor:...)`,
+mirroring `init(subject:...)` and `init(threadID:...)` exactly, constructing `ChatModel`
+via the new initializer with the same explicitly-named repositories every other call site
+already requires (MAX-049's rule: no defaulted repository parameter).
+
+### What this does not touch
+
+`ChatScopeNotice` and its banner are unchanged — the banner already called
+`onStartNewChatForCurrentWindow`, the same handler the toolbar button calls, and both now
+mint correctly. The thread list, `PlanAuthoringView`'s conversational route, and the
+workout chat card are untouched — MAX-194 and MAX-190 also touch `ChatSheet.swift` and the
+audit's own sequencing note (185 → 194 → 190) says not to parallelise them; this ticket
+did not do either's work; it only fixed the one no-op it was asked to fix.
+
+### What CI can and cannot prove
+
+CI can prove: the package compiles; `ChatModelTests`' four new cases pass — minting never
+resolves to an existing thread, two mints are always distinct, nothing is written until a
+turn completes, and title/subtitle degrade correctly for an empty minted thread.
+
+CI cannot prove anything about how this reads on a real screen. **Needs device
+verification**, from the PR: open a training thread from the Ask button, tap **New chat**,
+confirm the transcript clears to empty rather than staying on the previous conversation;
+open the thread list and confirm both the old and the new thread are present as separate
+rows; repeat at the largest Dynamic Type size to confirm the toolbar button still fits.
+
+**`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
+## MAX-182 — a workout conversation knows where the session sits in the week
+
+**This PR is gated on A29.** A12 rule 2 makes a widening of what leaves the device an
+amendment-level question rather than a ticket-level one, and this is a widening. The
+amendment is in the same diff, first; the code is a proposal until it is accepted.
+
+### The premise held, and the first shape of the fix did not
+
+The brief's claim was checkable and true: `WorkoutFactSheet` carried `## Workout`, `## The
+plan`, `## Measured`, `## Heart-rate shape`, `## Pace by …` and `## Score already assigned`,
+and nothing at all about the days either side of the session. *"Was this consistent with my
+week"*, *"should I back off Thursday"* and *"is this my third hard day running"* were
+unanswerable where a person would ask them.
+
+The first implementation carried **one line per sibling session** — day, type,
+classification, distance, duration, verdict. **MAX-184's audit rejected that shape mid-build
+and was right to.** Two reasons, either sufficient: it is `TrainingContext` arriving by a
+side door, which A12 rule 1 exists to prevent; and it puts an unbounded term into the longest
+prompt this app sends, so a workout thread's cost would grow with how much the athlete
+trains. The block was rebuilt as aggregates plus plan configuration, and
+`testTheBlockDoesNotGrowWithHowMuchTheAthleteTrained` pins the bound — a week with one
+session and a week with fourteen render the same number of lines.
+
+**The cost of that is real and is not hidden.** The model can say *"you were 2 of 3 on the
+plan this week"* and cannot say *"your Thursday run was 9.2 km"*. The fact sheet says so in
+the prompt, so the gap is a stated fact rather than something the model discovers by
+guessing.
+
+### The window: the Monday-first week containing the session's own day
+
+Not a trailing seven days — that straddles two template weeks, so an effective-sessions
+figure over it corresponds to nothing the plan asks and nothing any screen shows, and
+`TalliesCalculator` ranks a missed day against the other misses *in its week* (C1) and cannot
+widen what it is handed. Not the week containing *today* — the conversation is about the
+session, and a run ninety days back must get its own week or the same thread answers
+differently next month. Not the arc week as a separate notion: `PlanCalendar.arcWeek` anchors
+to the Monday on or before the plan's effective date, so the arc week *is* this week, and the
+block can quote it without a second resolution of "what week is it".
+
+Resolved through `CalendarDay.startOfTrainingWeek()` and `adding(days:)` — civil-date
+arithmetic through `Calendar`, never 86,400-second blocks, which is the defect
+`MuscleFatigue`'s own note points at. The athlete's zone enters exactly once, at
+`Workout.calendarDay(in:)`, and a test pins that the same instant belongs to two different
+weeks in GMT and in America/Los_Angeles.
+
+### The scorer is not shown this, and the gate is stronger than MAX-068's
+
+MAX-068 withholds the pace breakdown because the rubric never reads it — surplus, not
+harmful. This is withheld because a scorer that *could* read it would produce a verdict
+depending on days other than the one being scored: D1 fixes the judgement to the plan version
+in effect on the workout's date, D8 stores it forever, and two identical runs would then
+score differently according to what happened around them. Two gates —
+`WorkoutContextBuilder` drops a week for any audience but `.chat`, `WorkoutFactSheet` renders
+the section only for `.chat` — and `ContextDisciplineTests`' byte-for-byte literal **did not
+change**, which is the evidence rather than the claim.
+
+### One contract this changes, and it is the sharp edge
+
+`ContextInputs`' C1 obligation now binds the **workout** subject too: `records` must cover
+every day of the Monday-first week containing the subject, because the week's tallies come
+from `TalliesCalculator` and that calculator cannot widen what it is handed. A caller passing
+only the subject's own record gets a week reporting every other prescribed day as a miss —
+not a thinner answer but a *wrong* one, stated confidently. `ChatModel`'s workout path was
+widened accordingly, and it now reads `AppSettings.restDayBudget` rather than assuming
+`.standard`, which is a new way for a workout thread to fail and the price of the thread and
+the dashboard being unable to contradict each other.
+
+### Deliberately not built
+
+**The acute:chronic load ratio.** A29 sanctions the field; this PR does not add it. The only
+resolution of `LoadBalanceInput.historyStart` lives in the app layer
+(`App/Dashboard/TrendTilesModel.swift`), so wiring it from `ChatModel` today would create a
+second answer to "how far back do our records reach" — the divergence §3.6(a) forbids.
+**MAX-192 should add it**, since it is already lifting strain, load and fatigue into a prompt
+and already touches `ContextBuilder`; one resolution shared by both surfaces beats two born a
+week apart.
+
+**A shared tally renderer.** `WorkoutFactSheet.weekTallyLines` and `TrainingFactSheet`'s
+tally block print the same three figures through the same formatters — so they cannot
+disagree about a *number* — but they are two pieces of prose. Factoring them into
+`FactSheetFormatting` was drafted and then reverted: MAX-192 is rewriting the roll-up's tally
+block, and the merge conflict would have been bought for nothing. **Reconciling the two is a
+real follow-up**, recorded here and in a comment on the function rather than left to be
+noticed.
+
+**`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1). CI
+is the first compiler this code meets.
+
+---
 ## MAX-187 — a plan proposal card does not outlive its save
 
 Verified the audit's chain first, since a duplicate plan version is a permanent data

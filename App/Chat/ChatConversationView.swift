@@ -77,15 +77,22 @@ import MaximizeCore
 /// resolving to a no-op stub in two files; there is nothing here for a future edit to
 /// default away by accident.
 ///
-/// ## Two initializers, mirroring `ChatModel`'s two entry points (MAX-097 review)
+/// ## Three initializers, mirroring `ChatModel`'s three entry points (MAX-097 review,
+/// MAX-185)
 ///
-/// `init(subject:...)` is the Ask button and **New chat** — the subject is what they
-/// are asking for. `init(threadID:...)` is the thread list (§2.3) — a specific row was
-/// tapped, and `ChatModel.init(threadID:...)` is what reads its subject off the *stored*
-/// thread rather than trusting whatever this view might have been told, which is what
-/// keeps a row tap from ever opening a different thread than the one shown (subjects are
-/// not unique: two training threads can legitimately share an identical frozen window).
-/// Both funnel into the same private initializer, which is the one place that owns
+/// `init(subject:...)` is the Ask button and the scope-mismatch banner's own action —
+/// the subject is what they are asking for, and `ChatModel` resolves *the* thread for
+/// it. `init(startingNewThreadFor:...)` is **New chat**: the same subject, but
+/// `ChatModel.init(startingNewThreadFor:...)` mints a fresh thread rather than
+/// resolving one — see that initializer's own documentation for why "New chat" cannot
+/// share `init(subject:...)`'s resolve behaviour, even when the scope has not changed.
+/// `init(threadID:...)` is the thread list (§2.3) — a specific row was tapped, and
+/// `ChatModel.init(threadID:...)` is what reads its subject off the *stored* thread
+/// rather than trusting whatever this view might have been told, which is what keeps a
+/// row tap from ever opening a different thread than the one shown (subjects are not
+/// unique: two training threads can legitimately share an identical frozen window, and
+/// **New chat** is exactly what makes that a routine occurrence rather than a race).
+/// All three funnel into the same private initializer, which is the one place that owns
 /// wiring the closures and `currentInterval`.
 struct ChatConversationView: View {
     // `@State`, matching `WorkoutDetailView`'s own pattern: this view creates and owns
@@ -150,7 +157,9 @@ struct ChatConversationView: View {
     /// as a reply streams, and its own height changes underneath the scroll.
     private static let transcriptBottomAnchor = "transcript-bottom"
 
-    /// §2.2: the Ask button and **New chat**, both of which already know the subject.
+    /// §2.2: the Ask button and the scope-mismatch banner's own action, both of which
+    /// already know the subject and want *the* thread for it. **New chat** is
+    /// `init(startingNewThreadFor:...)` below, not this one (MAX-185).
     init(
         subject: ChatSubject,
         currentInterval: TrendInterval?,
@@ -180,7 +189,39 @@ struct ChatConversationView: View {
         )
     }
 
-    /// §2.3: a row tapped in the thread list. See this type's own "Two initializers"
+    /// **New chat** (MAX-185): a fresh thread on this subject, distinct from any
+    /// already open. See `ChatModel.init(startingNewThreadFor:...)` for why this is a
+    /// separate initializer rather than a flag on `init(subject:...)`.
+    init(
+        startingNewThreadFor subject: ChatSubject,
+        currentInterval: TrendInterval?,
+        onOpenThreadList: @escaping () -> Void,
+        onStartNewChatForCurrentWindow: @escaping () -> Void,
+        onAcceptProposal: @escaping (PlanProposal) -> Void,
+        onSelectRun: @escaping (UUID) -> Void,
+        onDone: @escaping () -> Void
+    ) {
+        self.init(
+            model: ChatModel(
+                startingNewThreadFor: subject,
+                workoutRepository: PersistenceComposition.store,
+                scoreRepository: PersistenceComposition.store,
+                planRepository: PersistenceComposition.store,
+                settingsRepository: PersistenceComposition.store,
+                chatThreadRepository: PersistenceComposition.store,
+                chatClient: AnthropicStreamingChatClient(keyStore: KeychainAnthropicAPIKeyStore()),
+                planProposalClient: AnthropicPlanProposalClient(keyStore: KeychainAnthropicAPIKeyStore())
+            ),
+            currentInterval: currentInterval,
+            onOpenThreadList: onOpenThreadList,
+            onStartNewChatForCurrentWindow: onStartNewChatForCurrentWindow,
+            onAcceptProposal: onAcceptProposal,
+            onSelectRun: onSelectRun,
+            onDone: onDone
+        )
+    }
+
+    /// §2.3: a row tapped in the thread list. See this type's own "Three initializers"
     /// note for why the subject is never a parameter here.
     init(
         threadID: UUID,
