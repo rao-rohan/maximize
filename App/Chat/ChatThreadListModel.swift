@@ -4,7 +4,10 @@ import Observation
 
 /// Loads and edits the thread list (§2.3). All it does is call the repository, hand what
 /// comes back to `ChatThreadListPresentation`, and hold the result — see CLAUDE.md's
-/// "thin shell": there is no sorting, banding, date formatting or copy decision here.
+/// "thin shell": there is no sorting, banding, date formatting, filtering, or copy
+/// decision here. `searchText` (§4.3, MAX-201) is no exception — it is state to hold and
+/// a trigger to re-present, and the decision of which rows a query matches, and that the
+/// banding above them survives being filtered, is `ChatThreadListPresentation`'s.
 ///
 /// ## Why the presented sections are stored rather than computed in the view
 ///
@@ -29,6 +32,25 @@ final class ChatThreadListModel {
     }
 
     private(set) var state: LoadState = .loading
+
+    /// §4.3: bound to `.searchable`'s field. Every change re-presents from `summaries`,
+    /// the same way a delete does — filtering runs in `ChatThreadListPresentation`
+    /// (`MaximizeCore`), this only decides *when* to ask for it again.
+    var searchText: String = "" {
+        didSet {
+            guard case .loaded = state else { return }
+            present()
+        }
+    }
+
+    /// Whether `searchText` is actively filtering, for the view to choose which absence
+    /// state to draw. Not a second filtering decision — the core still solely decides
+    /// which rows match — just the same blank-means-nothing-typed rule
+    /// `ChatThreadListPresentation.sections(for:matching:now:timeZone:)` already applies,
+    /// read back so the view is not left re-deriving it to pick a headline.
+    var isSearching: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
     /// Kept alongside the presented sections so a delete can re-present from the same
     /// source the load did, rather than surgically removing a row from a banded structure
@@ -93,7 +115,12 @@ final class ChatThreadListModel {
 
     private func present() {
         state = .loaded(
-            ChatThreadListPresentation.sections(for: summaries, now: now(), timeZone: timeZone)
+            ChatThreadListPresentation.sections(
+                for: summaries,
+                matching: searchText,
+                now: now(),
+                timeZone: timeZone
+            )
         )
     }
 }

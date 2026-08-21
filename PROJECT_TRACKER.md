@@ -1977,6 +1977,7 @@ free. What landed in the file:
 | MAX-187 | **A plan proposal card does not outlive its save** — §2.3's defect: accepting a proposal, saving, and pressing Back used to leave a diff card on screen describing a change already applied, **Accept** still live, a second tap writing a genuine duplicate plan version (D1 intact throughout — the screen was lying, not the data). `ChatModel.endProposalIfAlreadyStored()` reuses `discardProposal()`'s one door (`planDrafting = .idle` plus a transcript `.notice`) rather than adding a second mechanism, and decides by asking storage: `PlanProposalReview.standing`'s captured version against a fresh `PlanAuthoring.currentVersion(of:)` read — not a callback from `PlanAuthoringModel`, which has no reference back to the `ChatModel` that opened it and was kept that way rather than wired up across `ChatSheet.swift` (owned by MAX-185 concurrently). `ChatConversationView` calls it from `.onAppear`, since `.task` does not re-run when `PlanAuthoringView` pops back off the stack. See the MAX-187 section below | 184 | Sonnet — branch pushed, PR open; not yet reviewed or merged |
 | MAX-188 | 🔒 **`threadSummaries()` no longer decodes a transcript to draw a list of titles** — §2.4's in-memory exposure. `ChatThreadRecord` gains three columnar fields (`summaryFirstUserMessageContent`, `summaryLastVisibleMessageContent`, `summaryFieldsComputed`) written whenever a thread is stored; the fast path builds `ChatThreadSummary` from those columns and never touches the `@Attribute(.externalStorage)` `messagesJSON` blob. A pre-ticket row (`summaryFieldsComputed == false`) still falls back to a full decode for that one row — bounded, self-clearing the next time the thread is written to. The workout lookup is batched into one query for every workout thread in the list, closing the audit's N+1 alongside it. **No schema version bump** — three additive, default-required columns, `distanceSplitsComputed`'s precedent. See the MAX-188 section below | 184 | Sonnet 🔒 |
 | MAX-192 | **The training roll-up carries strain and load balance** 🔒 — `TrainingContext` gains each session's stored `strainPoints` (MAX-176) and `LoadBalanceCalculator`'s whole reading (MAX-178), so the acute:chronic figure a tile draws now reaches the prompt one tap away from it. Closes MAX-184 §3.2, the audit's highest-ranked finding: a thread asked *"am I ramping too fast"* used to refuse, correctly under `trainingTask`'s never-invent rule, to answer a question the app had already computed. The reading arrives **already computed** through `LoadBalanceResolver` — never assembled from the roll-up's own records, which cover the scope's weeks and not the chronic window — and is anchored to *today*, which `ContextInputs` enforces. Three absences worded apart; the window's opening sentence now names the one rolling exception. **Per-muscle fatigue (MAX-179) was considered and declined**, and the exclusion is stated in the prompt. **Gated on A30** — A12 rule 2 makes a widening of what leaves the device an amendment, A29 settled the same question for the workout subject, and gating one subject and not the other would make the rule arbitrary; the amendment is in the same PR, first in the diff. See the MAX-192 section below | 176, 177, 178, 179, 184, A12/A29/**A30** | **Opus** 🔒 |
+| MAX-201 | **The thread list is searchable, and the transcript is dateable** — §4.3, §6.8. `.searchable` over `ChatThreadSummary`'s stored `title` and `preview` — never a transcript, keeping MAX-188's fix intact — with the match and the filter both decided in `ChatThreadListPresentation`, which composes the new `sections(for:matching:now:timeZone:)` from the existing banded `sections(for:now:timeZone:)` so a filtered list bands exactly as the unfiltered one does: a band emptied by a filter disappears rather than surviving as a heading over nothing. A third `ContentUnavailableView`, distinct from "no conversations yet", for a search that found nothing — quoting the query back, in `ChatThreadListCopy`'s voice. Separately, `ChatTranscriptDaySeparators` (new, core) decides which transcript turns start a new calendar day and what to call it — Today / Yesterday / a weekday name / a dated label, the same ladder `compactTimestamp` already uses — from a thread's own stored `ChatMessage` timestamps, timezone-aware via `CalendarDay.days(until:)`. `ChatConversationView`'s only change is one `if let` inside the existing transcript `ForEach`, reading the core's answer. See the MAX-201 section below | 153, 184, 188 | Sonnet |
 
 **Four collisions the overseer must respect.**
 
@@ -6665,6 +6666,157 @@ no pixels.
   ticket, and the two agree today because the resolver is that method moved verbatim.
 - **MAX-193 will want the same resolver** for the workout subject's week block, and will
   collide with this ticket in `ContextBuilder.swift`. It should land after this.
+
+---
+
+## MAX-201 — the thread list is searchable, and the transcript is dateable
+
+`docs/CHAT-AUDIT.md` §4.3 and §6.9: a training thread accumulates roughly one per week,
+and after a year that is dozens of rows with no way to find one again. §6.8: a
+conversation resumed across days reads as one continuous exchange, with nothing on
+screen saying when anything was said. Both premises checked against current source
+before anything was built — neither `.searchable` nor a day separator existed anywhere
+in `App/` — so this is new work, not a duplicate of something already shipped.
+
+Sequenced after MAX-188, per the audit's own collision note: MAX-188 changed what a
+summary is read from (stored columns, not a decoded transcript); this ticket filters
+those same summaries, and must not reintroduce the decode MAX-188 removed. It does not:
+`ChatThreadListPresentation.matches(_:query:)` reads `ChatThreadSummary.title` and
+`.preview` only, both already-materialised strings on the type MAX-188 built.
+
+### Search: the filter composes with the existing banding, rather than re-implementing it
+
+The audit's warning was specific — a filtered list must not lose its section headers or
+keep one with nothing under it. The fix is composition, not a second banding pass:
+`ChatThreadListPresentation.sections(for:matching:now:timeZone:)` filters the summaries
+first (`matches(_:query:)`, case-insensitive over title and preview, nothing cleverer —
+matching `compactTimestamp`'s own no-locale reasoning), then calls the existing
+`sections(for:now:timeZone:)` on the surviving subset. MAX-153's "an empty band is
+never emitted" rule already holds for whatever list is handed in, so it holds for a
+filtered one for free — there is no separate "did filtering just empty a band" branch to
+get wrong, because there is only ever one banding implementation.
+
+`ChatThreadListSearchTests.testAFilterThatMatchesAcrossBandsKeepsEachBandSeparate` is
+the audit's warning made concrete: five threads across four bands, a query matching one
+in three of them, asserting the result keeps three separate section headers, each with
+exactly its own row — not a flat list, and not a heading standing over nothing.
+`testABandEmptiedByAFilterIsNotEmittedAsAHeadingOverNothing` is the same claim from the
+other side: a band whose only matching row gets filtered out disappears entirely.
+
+A blank query — nothing typed, or only whitespace — is "not searching," not "a filter
+matching nothing": `sections(for:matching:now:timeZone:)` returns the exact unfiltered
+list in that case, asserted equal to the plain three-argument overload's output.
+
+**The empty-result absence, decided rather than left as a blank list.** A search that
+matches nothing is a different fact from a store with no conversations at all, and
+`ChatThreadListView` now draws a third `ContentUnavailableView` for it — "No matches" /
+`ChatThreadListCopy.noConversationsMatch(query)`, which quotes the query back for the
+same reason the platform's own "No Results for '…'" does: it is the one fact that tells
+the athlete whether their search actually reached the field. The two absences are
+distinguished by `ChatThreadListModel.isSearching` (a blank-check, not a second filtering
+decision), and the more specific `where` clause is ordered before the general one so
+Swift's first-match rule cannot pick the wrong sentence.
+
+`.searchable(text:prompt:)` is the current platform affordance — placement, cancel
+button and keyboard handling all come from the system rather than a hand-rolled field in
+a toolbar item, matching CLAUDE.md's "prefer the current component to the familiar one."
+
+### The day separator: a display-data decision, timezone-aware, in the core
+
+`ChatTranscriptDaySeparators.labels(for:now:timeZone:)` (new, `Sources/MaximizeCore/Chat/`)
+takes a thread's own `visibleMessages` — real `ChatMessage`s, each with a stored
+`timestamp` — and returns message id → separator text for every message whose calendar
+day differs from the one immediately before it, including the first (so a conversation
+states which day it belongs to whether or not it has ever been resumed). The wording
+ladder — Today / Yesterday / a weekday name within the previous week / a dated label
+beyond that, with the year stated only when it differs from the current one — is the
+same one `ChatThreadListPresentation.compactTimestamp` already uses past its own first
+rung, so the list and the transcript read as one system rather than two independently
+invented vocabularies.
+
+**Deliberately built on `ChatMessage`, never `ChatModel.DisplayMessage`.** The
+transcript's rendered rows can include an app-generated notice or a reply still
+streaming, neither of which has a stored timestamp — inventing one (the moment the row
+was drawn) would let a separator claim a day for something the thread does not yet
+agree happened. `ChatConversationView`'s only change is reading
+`model.thread?.visibleMessages` (already public) and looking up each row's id in the
+result; a live-appended row with no match in that dictionary simply draws with no
+separator, which is correct rather than a gap — such a row is at most seconds older than
+the turn before it, in the same session, and can never itself be a day boundary.
+
+**Timezone correctness, proven the way MAX-180 proved it.**
+`ChatTranscriptDaySeparatorTests` reuses MAX-180's own two instants (a message sent
+Sunday 22:00 UTC, a reply read back Monday 08:00 UTC, ten hours apart) and its
+`Pacific/Honolulu` zone rather than inventing a second fixture: in UTC the pair crosses a
+calendar-day boundary and gets two separators ("Yesterday" then "Today"); in Honolulu
+(UTC−10, no DST) both instants fall on the same local day and the second message gets
+none. Same two instants, two zones, two different — and each individually
+calendar-correct — answers, which is what proves the code reads a real calendar rather
+than carrying a second fixed-offset constant next to `MuscleFatigue`'s. The rest of the
+ladder (same-day, yesterday, the weekday-name and dated-label rungs, a gap of several
+days producing exactly one new separator on the far side of it, a future-dated message
+clamping to "Today") is covered in the same file, with the same-year and cross-year
+dated-label cases reusing `ChatThreadListPresentationTests`' own validated fixtures for
+their exact day offsets rather than a second hand-computed pair.
+
+### `App/Chat/ChatConversationView.swift` was touched, per the coordination note
+
+This file is contended (MAX-195/MAX-196). The diff here is two small additions: one
+`if let` inside the existing transcript `ForEach` (reads a dictionary, draws a row if
+present) and one private `daySeparatorLabels` computed property beside it, plus a
+`private struct ChatDaySeparatorView` near `WorkoutChatBubble`. Nothing else in the file
+moved. `App/Chat/ChatModel.swift` (MAX-197) was **not** touched — `ChatModel.thread` was
+already public, so the separator reads it directly rather than needing a new field on
+`DisplayMessage`.
+
+### Tests (core, CI-verified)
+
+`ChatThreadListSearchTests`: banding survives a filter across bands, an emptied band
+disappears, a non-matching query produces no sections, a blank query returns the
+unfiltered list verbatim, filtered rows keep the unfiltered order within a surviving
+band, title and preview both count as a match, a nil preview does not force a match, and
+a training thread's scope/window label is not itself searched. `ChatTranscriptDaySeparatorTests`:
+the UTC/Honolulu timezone-boundary pair above, a thread entirely within one day gets
+exactly one separator, each rung of the wording ladder, a gap of several days produces
+exactly one new separator, a future-dated message clamps to "Today," and an empty
+message list produces no separators.
+
+### What could not be verified
+
+**No Swift toolchain in this container** — nothing here was compiled, and neither
+`swift build` nor `swift test` was run. `App/Chat/ChatThreadListView.swift` and
+`ChatConversationView.swift` are App-layer and CI has never executed them (R2/R13); the
+core changes they depend on (`ChatThreadListPresentation.sections(for:matching:...)`,
+`ChatThreadListPresentation.matches`, `ChatTranscriptDaySeparators`) are covered by the
+tests above, which *would* run in CI, but this session could not confirm they pass by
+running them.
+
+**Needs device verification:**
+
+- Open the thread list with several conversations across more than one recency band,
+  type a query matching threads in more than one band, and confirm each surviving band
+  keeps its own header and only its matching rows — then clear the query and confirm the
+  full list, bands and all, returns.
+- Type a query that matches nothing and confirm the "No matches" state appears (not the
+  fresh-install "No conversations yet" state), with the query quoted back correctly,
+  including for a query containing punctuation or an emoji.
+- Confirm `.searchable`'s field, cancel button and keyboard behave as the platform
+  default — this ticket adds no custom handling for any of them.
+- Open a training thread whose conversation spans more than one calendar day and confirm
+  a separator appears at each resumption, reads correctly for "yesterday" and older
+  dates, and is visually quiet enough not to be mistaken for something either party said.
+- Change the device's time zone (Settings → General → Date & Time) and confirm a
+  separator's wording follows the new zone rather than staying fixed to whatever it read
+  when the thread was first opened.
+
+### Found outside the ticket, not done
+
+- **MAX-189** ("a failed delete says so," which this brief pointed at for its
+  `deletionOutcome(...)` shape) has not merged to `main` as of this branch — the shape was
+  read from its branch and followed for `sections(for:matching:...)`'s own composition,
+  but nothing here depends on its code landing first, and it is not listed as a
+  dependency above for that reason.
+- Nothing else found outside this ticket's two surfaces.
 
 ---
 
