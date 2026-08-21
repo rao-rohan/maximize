@@ -353,6 +353,7 @@ public enum ChatThreadListCopy {
     /// screen itself is the noun.
     public static let title = "Chats"
 
+<<<<<<< HEAD
     // MARK: - MAX-201: §4.3's search
 
     /// `.searchable`'s own placeholder — what the field says before anything is typed.
@@ -374,6 +375,19 @@ public enum ChatThreadListCopy {
 
     public static let noSearchResultsTitle = "No matches"
     public static let noSearchResultsGlyphSystemImageName = "magnifyingglass"
+=======
+    /// A thread could not be deleted from storage (§2.5). The row stays on screen, and the
+    /// athlete can try again — matching `ChatFailureNotice.couldNotSaveReply`'s voice for a
+    /// storage failure: what happened, what will happen next, no retry button offered.
+    public static let couldNotDeleteThread =
+        "This conversation could not be deleted. It is still here, and you can try again."
+
+    /// The delete-failure alert's title and its one dismissal. In the core beside the
+    /// sentence they frame, for the reason `noConversationsYet` gives: a state whose
+    /// message lives here and whose title lives in a view is the shape that drifts.
+    public static let couldNotDeleteThreadTitle = "Could not delete"
+    public static let couldNotDeleteThreadDismiss = "OK"
+>>>>>>> origin/main
 }
 
 /// Turning a turn of a conversation into one line of a list row.

@@ -57,6 +57,10 @@ final class ChatThreadListModel {
     /// and hoping the bands still make sense afterwards.
     private var summaries: [ChatThreadSummary] = []
 
+    /// The message when a thread deletion fails (§2.5). Cleared on the next successful
+    /// delete or when the list is reloaded.
+    private(set) var couldNotDeleteMessage: String?
+
     private let chatThreadRepository: (any ChatThreadRepository)?
     private let now: () -> Date
     private let timeZone: TimeZone
@@ -86,6 +90,7 @@ final class ChatThreadListModel {
         }
         do {
             summaries = try await chatThreadRepository.threadSummaries()
+            couldNotDeleteMessage = nil
             present()
         } catch {
             state = .failed
@@ -96,6 +101,9 @@ final class ChatThreadListModel {
     /// reload — §2.3's swipe (and its no-gesture equivalent) should feel instant, and a
     /// second read of the whole list for one row leaving it is wasted work.
     ///
+    /// If the deletion fails, the row is restored and an error message is set (§2.5).
+    /// The decision of what to show is made in the core; this method is plumbing.
+    ///
     /// A no-op if `state` is not `.loaded` (the delete affordance is not on screen
     /// otherwise) or the repository is unavailable.
     ///
@@ -104,13 +112,33 @@ final class ChatThreadListModel {
     /// collapse that band rather than leave a heading behind.
     func delete(threadID: UUID) async {
         guard let chatThreadRepository, case .loaded = state else { return }
-        summaries.removeAll { $0.id == threadID }
-        present()
-        // Best-effort: the row is already gone from what the athlete sees, and a failed
-        // on-disk delete here is the same class of "local storage problem" that does not
-        // warrant clawing back something already removed (`ChatModel`'s own reasoning for
-        // a failed `store(_:)`, e.g. "This reply could not be saved").
-        try? await chatThreadRepository.deleteThread(id: threadID)
+
+        var deleteError: Error? = nil
+        do {
+            try await chatThreadRepository.deleteThread(id: threadID)
+        } catch {
+            deleteError = error
+        }
+
+        // Hand the outcome to the core to decide what to show
+        let outcome = ChatThreadListPresentation.deletionOutcome(
+            from: summaries,
+            attemptedThreadID: threadID,
+            error: deleteError,
+            now: now(),
+            timeZone: timeZone
+        )
+
+        summaries = outcome.summaries
+        state = .loaded(outcome.sections)
+        couldNotDeleteMessage = outcome.errorMessage
+    }
+
+    /// Dismisses the delete-failure alert. A method rather than a settable property so
+    /// the view cannot put this model into a state it did not compute — the same reason
+    /// `couldNotDeleteMessage` is `private(set)`.
+    func dismissDeleteFailure() {
+        couldNotDeleteMessage = nil
     }
 
     private func present() {
