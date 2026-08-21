@@ -22,6 +22,13 @@ public enum WorkoutContextBuilder {
     ///     Kept as its own parameter rather than folded into `audience`: its absence is
     ///     also a real data state — an unscored run has no score to show anybody — so
     ///     it is a value the caller supplies, not a policy this builder applies.
+    ///   - surroundingWeek: where this workout sits in the athlete's training week
+    ///     (MAX-182). **Assembled by `ContextBuilder` and dropped here for any audience but
+    ///     `.chat`**, whatever the caller passes. Nil is the default and the scorer's call
+    ///     site does not mention it, so the scoring prompt is byte-identical to what it was
+    ///     before this parameter existed. See `WorkoutContext.surroundingWeek` for why a
+    ///     scorer shown the surrounding week would produce a score that depends on days
+    ///     other than the one it is scoring.
     ///
     /// - Throws: when the pieces do not describe the same workout under the same plan.
     ///   These are assembly errors, not data errors, and they are worth failing on:
@@ -35,7 +42,8 @@ public enum WorkoutContextBuilder {
         planCalendar: PlanCalendar,
         audience: WorkoutContext.Audience = .scoring,
         heartRateSeries: HeartRateSeries? = nil,
-        existingScore: Score? = nil
+        existingScore: Score? = nil,
+        surroundingWeek: WorkoutContext.SurroundingWeek? = nil
     ) throws -> WorkoutContext {
         guard metrics.workoutID == workout.id else {
             throw DomainError.inconsistent(
@@ -50,6 +58,17 @@ public enum WorkoutContextBuilder {
         if let existingScore, existingScore.workoutID != workout.id {
             throw DomainError.inconsistent(
                 reason: "WorkoutContext: score belongs to a different workout"
+            )
+        }
+        // The block is titled "the week around this session", so a week the session does
+        // not fall in is not a smaller truth — it is a false heading over real figures, and
+        // the model has no way to notice. Checked before the audience gate so a caller that
+        // assembled the wrong week is told regardless of who was going to be shown it.
+        if let surroundingWeek, day < surroundingWeek.from || day > surroundingWeek.through {
+            throw DomainError.inconsistent(
+                reason: "WorkoutContext: the surrounding week \(surroundingWeek.from)…"
+                    + "\(surroundingWeek.through) does not contain \(day), the day this "
+                    + "workout falls on"
             )
         }
 
@@ -98,7 +117,14 @@ public enum WorkoutContextBuilder {
             paceBreakdown: audience == .chat && workout.activityType.discipline == .run
                 ? metrics.distanceSplits?.series(in: WorkoutContext.paceBreakdownUnit)
                 : nil,
-            existingScore: existingScore
+            existingScore: existingScore,
+            // MAX-182's whole decision, in the same expression shape and the same place as
+            // MAX-068's above, so "does this health data leave the device" keeps being
+            // answered by the single assembler D3 names rather than by a branch downstream.
+            // The scorer's own call site passes nothing, so this is belt and braces — but
+            // it is the belt that makes the guarantee structural: no audience but `.chat`
+            // can hold a surrounding week, whatever a future caller hands in.
+            surroundingWeek: audience == .chat ? surroundingWeek : nil
         )
     }
 }

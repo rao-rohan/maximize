@@ -29,13 +29,16 @@ import Foundation
 /// - **No workout UUID, source device, or ingestion timestamp.** Identifiers and
 ///   provenance are ours; Claude has no use for them and they cannot help an answer.
 ///
-/// ## Who is being told (MAX-068)
+/// ## Who is being told (MAX-068, MAX-182)
 ///
-/// Two things are sent to chat and withheld from the scorer: `existingScore`, and the
-/// `paceBreakdown` this ticket added. The asymmetry is the point — the two consumers
-/// need genuinely different things, and the scoring call is the one that happens
-/// *automatically, for every ingested run, whether or not anybody asked a question*.
-/// That is the payload worth being strictest about. See `Audience`.
+/// Three things are sent to chat and withheld from the scorer: `existingScore`, the
+/// `paceBreakdown` MAX-068 added, and the `surroundingWeek` MAX-182 added. The asymmetry
+/// is the point — the two consumers need genuinely different things, and the scoring call
+/// is the one that happens *automatically, for every ingested run, whether or not anybody
+/// asked a question*. That is the payload worth being strictest about. See `Audience`.
+///
+/// The third of those is withheld for a reason the first two are not: it is not merely
+/// surplus to the rubric, it would be *corrupting* to it. See `surroundingWeek`.
 ///
 /// ## Why the pace breakdown is sent at all, and in this form
 ///
@@ -135,6 +138,25 @@ public struct WorkoutContext: Hashable, Sendable {
     /// all: the section does not appear (LIFTING-SPEC §10.1).
     public let paceBreakdown: DistanceSplitSeries?
 
+    /// Where this workout sits in the athlete's training week — **present for chat, absent
+    /// for scoring** (MAX-182, PRD-AMENDMENTS.md A29), and nil for chat too when the caller
+    /// supplied no week.
+    ///
+    /// The scoring half of that is the load-bearing half, and it is a stronger rule than
+    /// the one governing `paceBreakdown`. Splits are withheld from the scorer because the
+    /// rubric never reads them; the surrounding week is withheld because a scorer that
+    /// *could* read it would produce a score that depends on days other than the one being
+    /// scored. D1 fixes a workout's verdict to the plan version in effect on its date and
+    /// D8 stores that verdict forever, so "the athlete has been slacking this week" leaking
+    /// into a rubric prompt would make two identical runs score differently according to
+    /// what happened around them — permanently, invisibly, and with nothing on screen to
+    /// contradict it. `WorkoutContextBuilder` therefore drops whatever it is handed for any
+    /// audience but `.chat`, and `WorkoutFactSheet` renders the section only for `.chat`.
+    ///
+    /// See `SurroundingWeek` for what it carries, what it deliberately does not, and why
+    /// the window is the Monday-first week rather than a trailing seven days.
+    public let surroundingWeek: SurroundingWeek?
+
     // MARK: - Which prescription this workout answers to (A17, LIFTING-SPEC §10.1)
 
     /// Which of the plan's two slots this workout is judged against.
@@ -193,10 +215,12 @@ public struct WorkoutContext: Hashable, Sendable {
         planDay: PlanDay?,
         heartRateShape: HeartRateShape?,
         paceBreakdown: DistanceSplitSeries?,
-        existingScore: Score?
+        existingScore: Score?,
+        surroundingWeek: SurroundingWeek?
     ) {
         self.audience = audience
         self.paceBreakdown = paceBreakdown
+        self.surroundingWeek = surroundingWeek
         self.day = day
         self.workout = workout
         self.metrics = metrics
