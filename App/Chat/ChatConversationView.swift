@@ -36,6 +36,16 @@ import MaximizeCore
 /// athlete had scrolled up to re-read something. Both types are in `MaximizeCore` with
 /// tests; what is left here is classifying an `onChange` and obeying the directive.
 ///
+/// ## A day separator, decided in the core (§6.8, MAX-201)
+///
+/// The one addition this ticket makes to the transcript loop: `daySeparatorLabels`
+/// below asks `ChatTranscriptDaySeparators` (`MaximizeCore`) which rows start a new
+/// calendar day, and `ForEach` draws `ChatDaySeparatorView` before any row it names.
+/// Nothing about *which* rows those are, or what the label says, is decided in this
+/// file — a conversation resumed the next morning is a `CalendarDay` comparison over
+/// stored timestamps, and that is exactly the kind of date arithmetic CLAUDE.md's
+/// "thin shell" rule keeps out of a view.
+///
 /// ## Subject-dependent copy, never re-decided here
 ///
 /// The empty-transcript invitation, the composer's placeholder and the "could not load"
@@ -490,6 +500,16 @@ struct ChatConversationView: View {
                     }
 
                     ForEach(model.messages) { message in
+                        // §6.8, MAX-201: which turns start a new calendar day, and what
+                        // that day is called, is `ChatTranscriptDaySeparators`' decision
+                        // (`MaximizeCore`) — this reads the answer for this row's id and
+                        // draws it, nothing more. Nil for a row `MaximizeCore` has no
+                        // stored timestamp for (a notice, or a reply still arriving);
+                        // see that type's own note on why that is the correct answer,
+                        // not a gap.
+                        if let day = daySeparatorLabels[message.id] {
+                            ChatDaySeparatorView(label: day)
+                        }
                         WorkoutChatBubble(message: message)
                     }
 
@@ -593,6 +613,21 @@ struct ChatConversationView: View {
             }
             .accessibleAnimation(Motion.stateChange, value: follow.showsJumpToLatest)
         }
+    }
+
+    /// §6.8, MAX-201: message id → the day separator that precedes it, read fresh at
+    /// render time from `model.thread?.visibleMessages` — the thread's own stored
+    /// turns, each with a real timestamp — rather than from `model.messages`, which can
+    /// hold a row (a notice, an in-flight reply) `MaximizeCore` has no stored timestamp
+    /// for. See `ChatTranscriptDaySeparators`' own note on why that is the intended
+    /// degradation and not a gap: such a row cannot itself need a separator relative to
+    /// the turn immediately before it, which is at most seconds old in the same session.
+    private var daySeparatorLabels: [UUID: String] {
+        ChatTranscriptDaySeparators.labels(
+            for: model.thread?.visibleMessages ?? [],
+            now: Date(),
+            timeZone: .current
+        )
     }
 
     /// Whether the newest row is something the athlete just wrote.
@@ -835,6 +870,23 @@ struct ChatConversationView: View {
             .screenMargins()
             .padding(.top, Spacing.hero)
             .frame(maxHeight: .infinity, alignment: .top)
+    }
+}
+
+/// §6.8, MAX-201: a day separator between turns — the label `ChatTranscriptDaySeparators`
+/// decided, drawn centered and quiet. Never a bubble and never `.notice`'s styling: a
+/// separator states a fact about the transcript itself, not something either party said,
+/// and CLAUDE.md's "a separator must not read as a message" is the reason it takes the
+/// smallest type in the file rather than borrowing the notice row's.
+private struct ChatDaySeparatorView: View {
+    let label: String
+
+    var body: some View {
+        Text(label)
+            .font(.microLabel)
+            .foregroundStyle(Color.textTertiary)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .accessibilityAddTraits(.isHeader)
     }
 }
 
