@@ -310,4 +310,48 @@ public enum ChatThreadListPresentation {
                 : CalendarDayLabel.full(day)
         }
     }
+
+    /// The outcome of attempting to delete a thread (§2.5, MAX-189).
+    ///
+    /// Given the state before a delete, the id of the thread to delete, and the error
+    /// (if any) that occurred, returns the new summaries, sections, and error message
+    /// to display.
+    ///
+    /// A successful delete (error is nil) removes the thread from storage. A failed
+    /// delete keeps it and surfaces a notice saying so, in the same voice as
+    /// `couldNotSaveReply`: what happened, what remains, what to do.
+    ///
+    /// - Parameters:
+    ///   - summaries: the current list of stored threads
+    ///   - attemptedThreadID: the id of the thread the model tried to delete
+    ///   - error: nil if the delete succeeded, the error thrown if it failed
+    ///   - now: the present time, for banding
+    ///   - timeZone: the athlete's zone, for banding
+    ///
+    /// Returns a tuple of:
+    /// - `summaries`: the list to store (with the thread removed on success, unchanged on failure)
+    /// - `sections`: the banded, ordered list to display
+    /// - `errorMessage`: the notice to show (nil on success, the failure message on error)
+    public static func deletionOutcome(
+        from summaries: [ChatThreadSummary],
+        attemptedThreadID: UUID,
+        error: Error?,
+        now: Date,
+        timeZone: TimeZone
+    ) -> (summaries: [ChatThreadSummary], sections: [ChatThreadListSection], errorMessage: String?) {
+        var updated = summaries
+        let errorMessage: String?
+
+        if error == nil {
+            // Successful delete — remove the thread
+            updated.removeAll { $0.id == attemptedThreadID }
+            errorMessage = nil
+        } else {
+            // Failed delete — keep the thread and state the failure
+            errorMessage = ChatThreadListCopy.couldNotDeleteThread
+        }
+
+        let sections = Self.sections(for: updated, now: now, timeZone: timeZone)
+        return (updated, sections, errorMessage)
+    }
 }
