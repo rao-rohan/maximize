@@ -39,9 +39,24 @@ import Foundation
 /// nothing" — the view still renders the action, disabled, with `explanation` underneath
 /// stating why, the same way every other absence in this app gets real copy rather than a
 /// control that silently stops appearing.
+///
+/// ## Bounding the loop with `ChatSheet` (MAX-190, `docs/CHAT-AUDIT.md` §2.6)
+///
+/// This screen is reachable two ways: directly (Plan tab, Settings, Workouts — no
+/// proposal), or pushed by `ChatSheet` itself, prefilled from an accepted proposal
+/// (MAX-101). The second case is already standing inside a conversation this exact
+/// button would reopen — tapping it presented a second `ChatSheet` on top of the first,
+/// and if *that* one's own proposal were accepted, a third, unbounded. `arrivedFromConversation`
+/// is what tells this screen which case it is in, and it wins outright over
+/// `apiKeyPresence`: a stored key does not make reopening the conversation you are
+/// already inside a sensible action. The screen still renders the button, disabled, with
+/// `explanation` naming the way back — Back, not a second door — matching this type's own
+/// "never a hidden button" rule above. Nothing else about the gate changes: the ordinary,
+/// direct-authoring path still reads `apiKeyPresence` exactly as before.
 public struct PlanAuthoringConversationalRoute: Hashable, Sendable {
 
-    /// Whether the action should be enabled. `false` only for `.notStored`.
+    /// Whether the action should be enabled. `false` for `.notStored`, and for
+    /// `arrivedFromConversation == true` regardless of `apiKeyPresence`.
     public let isAvailable: Bool
 
     /// What the screen says under the action, in either state — never empty, and never
@@ -49,7 +64,22 @@ public struct PlanAuthoringConversationalRoute: Hashable, Sendable {
     /// nothing here claims to know more about the key than `StoredAPIKeyPresence` does.
     public let explanation: String
 
-    public init(apiKeyPresence: StoredAPIKeyPresence) {
+    /// - Parameters:
+    ///   - apiKeyPresence: whether a Claude call could succeed at all. Ignored when
+    ///     `arrivedFromConversation` is true — see this type's own "Bounding the loop".
+    ///   - arrivedFromConversation: true exactly when this authoring screen was pushed by
+    ///     `ChatSheet` from an accepted proposal, rather than opened directly. Fixed for
+    ///     the screen's whole lifetime — `PlanAuthoringModel` snapshots it once at `init`
+    ///     from `proposal != nil` rather than reading the mutable `proposal` property
+    ///     each time, precisely so a successful `save()` (which clears `proposal`) does
+    ///     not reopen this door. Defaults to `false`, the ordinary case of an athlete
+    ///     opening this screen by hand.
+    public init(apiKeyPresence: StoredAPIKeyPresence, arrivedFromConversation: Bool = false) {
+        if arrivedFromConversation {
+            isAvailable = false
+            explanation = PlanAuthoringConversationalRoute.arrivedFromConversationExplanation
+            return
+        }
         switch apiKeyPresence {
         case .stored, .unknown:
             isAvailable = true
@@ -79,4 +109,11 @@ public struct PlanAuthoringConversationalRoute: Hashable, Sendable {
     /// the same fact.
     static let unavailableExplanation =
         "Add an Anthropic API key in Settings to describe a plan in a conversation."
+
+    /// MAX-190: this screen was reached from the conversation this button would reopen.
+    /// Names the way back rather than repeating `availableExplanation`'s "opens a
+    /// conversation" — that sentence would read as an offer to open a second one.
+    static let arrivedFromConversationExplanation =
+        "This form came from the conversation you were just in. Go back to keep "
+            + "describing changes there, rather than opening another one."
 }

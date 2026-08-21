@@ -161,6 +161,12 @@ struct PlanAuthoringView: View {
     /// sentence under it — a missing key reads as a designed absence, not a control that
     /// silently stopped appearing. This view renders exactly what that value says and
     /// decides nothing itself.
+    ///
+    /// That includes MAX-190's fix for `docs/CHAT-AUDIT.md` §2.6: when this screen was
+    /// itself pushed by `ChatSheet` from an accepted proposal, `conversationalRoute`
+    /// disables this same button rather than let it open a second `ChatSheet` on top of
+    /// the first. The section still renders unconditionally on every path — the gate is
+    /// entirely `PlanAuthoringConversationalRoute`'s, never a branch here.
     @ViewBuilder
     private func conversationalRouteSection(_ editing: PlanAuthoringModel.Editing) -> some View {
         Section {
