@@ -778,6 +778,121 @@ guards.
 
 ---
 
+## A29 — A workout thread's prompt carries the week around the session, in aggregates only.
+
+**Amends:** A12's list of what a workout subject may carry. Supersedes nothing.
+**Source:** MAX-182, constrained by MAX-184's audit — `docs/CHAT-AUDIT.md`, landing in PR
+#177, so the link is dead until that merges.
+
+A12 rule 2 makes the set of subjects closed, and its reasoning generalises: *every subject
+is a new answer to what health data leaves the device, and that is not a question a ticket
+should be able to answer on its own.* Widening what an **existing** subject carries is the
+same question in a smaller frame, so it is recorded here rather than settled inside MAX-182.
+
+### What is being widened, and why at all
+
+A workout thread's fact sheet carries that day's prescription in detail — the plan version,
+the cap, the cadence band, the ask for that day — and **nothing about the days either side
+of it**. So three questions a person would naturally ask standing on the session they have
+just finished were unanswerable in the one conversation where asking them is natural:
+
+- *"Was this consistent with my week?"*
+- *"Should I back off Thursday?"*
+- *"Is this my third hard day running?"*
+
+Each needs the surrounding week. None of them needs a second copy of the athlete's recent
+movement record, and the distinction between those two sentences is the whole of this
+amendment.
+
+### The fields, and what each one earns
+
+A new section, `## The week around this session`, present for `.chat` only:
+
+| Field | Source | Why the model's answer is worse without it |
+|---|---|---|
+| The week's bounds, stated, with the weekday names | `CalendarDay.startOfTrainingWeek()` | Every figure below it is measured over exactly these days; a span that is not named is a span the model will guess at (§3.6(b)) |
+| Arc week, and the long run the plan prescribes for it | `Tallies.currentWeek.arcWeekIndex`, `LongRunArc` | "Does this fit the block" is a different question from "does this fit the week", and the arc is the plan's own answer to it. Configuration, not measurement |
+| Workouts recorded in the week | counted from the records supplied | Tells "the app holds one session for this week" apart from "the app holds nine" — which no other figure here says, and which is what makes the absence state honest rather than blank |
+| Days with at least one workout | `TalliesCalculator` | Showing up, independent of how it graded |
+| Effective sessions, as `n/m` | `TalliesCalculator` | The app's own answer to "was this consistent with my week", applying D9's rest allowance and A21's exclusions — which a model counting for itself could not |
+| Average score over the week | `TalliesCalculator`, through `TrendTileData`'s formatter | Prevents the model producing its own average from figures it half has; carries MAX-160's exclusion caption so the caveat cannot drift from the tile's |
+| "This week is not over", when the week reaches past today | `ContextInputs.today` | An ask with nothing recorded against it reads identically whether the day has been and gone or has not arrived, and only one of those is a skipped session |
+| What the plan asked of each of the seven days, both slots | `PlanCalendar.planDay(on:)` per day | The reference every figure above is measured against. "Should I back off Thursday" is a question about *Thursday's ask*, and the sheet around this block carries only the subject day's |
+
+**Fixed size by construction.** Every row above is O(1), or exactly seven lines of the
+athlete's own plan. A week with one session and a week with fourteen render the same number
+of lines; what changes is the value of four numbers. That is the property MAX-184's audit
+asked for and it is pinned by a test, not by intention.
+
+### What is deliberately excluded
+
+- **One line per sibling session** — the shape MAX-182 first built and the audit rejected.
+  Two reasons, either sufficient. It is `TrainingContext` arriving by a side door, which A12
+  rule 1 exists to prevent; and it reintroduces an unbounded term into the longest prompt
+  this app sends, so a workout thread's cost would grow with how much the athlete trains.
+  **The cost of excluding it is real and is accepted**: the model can say *"you were 2 of 3
+  on the plan this week"* and cannot say *"your Thursday run was 9.2 km"*. The second belongs
+  in that Thursday's own conversation, and the fact sheet says so in the prompt rather than
+  leaving the model to discover the gap.
+- **Every per-session figure that would come with those lines**: another session's distance,
+  duration, activity type, classification, average heart rate, drift or score.
+  `TrainingContext.Session` carries all of them, drift included, and that is the deliberate
+  difference between the two records — reading a trend across sessions is a training
+  thread's whole job, and orientation is not.
+- **Heart-rate curves, splits, routes, score rationales** for any session. The reasoning
+  `WorkoutContext` and `TrainingContext` already give only gets stronger for a session that
+  is not even the subject of the conversation.
+- **The current streak.** It walks backwards *out* of the week it was computed over, so it
+  is not measured over the days this block names — and over a seven-day window it is a
+  truncated lower bound with no way to say so.
+
+### Audience: chat only, and this gate is stronger than MAX-068's
+
+**Nothing here reaches `.scoring`.** MAX-068 withholds the pace breakdown from the scorer
+because the rubric never reads it — surplus, not harmful. This is withheld because a scorer
+that *could* read it would produce a verdict that depends on days other than the one being
+scored: D1 fixes a workout's judgement to the plan version in effect on its date, D8 stores
+that judgement forever, and "the athlete has been slacking this week" leaking into a rubric
+prompt would make two identical runs score differently according to what happened around
+them — permanently, invisibly, and with nothing on screen to contradict it.
+
+Two gates, and a pinned literal. `WorkoutContextBuilder` drops a surrounding week for any
+audience but `.chat`; `WorkoutFactSheet` renders the section only for `.chat`; and
+`ContextDisciplineTests` pins the scoring prompt byte for byte. **If that literal ever
+changes as a side effect of work on this section, context has leaked into the scorer** —
+treat it as that and not as a literal needing an update.
+
+### What this costs, plainly
+
+More leaves the device on a workout-thread turn than before: eight aggregate lines and seven
+lines of the athlete's own plan. It is bounded by construction rather than by a cap, it
+contains no per-session health data for any workout but the subject's, and — per A14 — it is
+sent only on a turn the athlete typed. Every ticket touching `Context/` still gets a
+`/security-review`.
+
+### What is sanctioned but not built
+
+**The acute:chronic load ratio as of the session's day** (MAX-178's `LoadBalanceReading`)
+belongs in this section and is sanctioned by this amendment. MAX-182 did not build it, and
+the reason is sequencing rather than doubt: the only resolution of `LoadBalanceInput
+.historyStart` in the codebase lives in the app layer (`App/Dashboard/TrendTilesModel.swift`),
+so wiring it in from `ChatModel` today would create a **second** answer to "how far back do
+our records reach" — precisely the divergence §3.6(a) forbids. MAX-192 is already lifting
+strain, load balance and per-muscle fatigue into a prompt and already touches
+`ContextBuilder`; adding this figure there gives one resolution shared by both surfaces
+instead of two born a week apart.
+
+### Tripwire
+
+**A request to "just add what the other sessions were" is a request to build the shape this
+amendment rejected.** If it becomes genuinely necessary, the honest route is a training
+thread — whose subject *is* the window, whose scope the athlete chose, and whose prompt is
+already designed to carry per-session lines under a stated cap. Adding them here instead
+would give the app two roll-ups, one of them unbounded and neither of them chosen by the
+person whose data it is.
+
+---
+
 ## Requirements unaffected
 
 Everything in §7 (features), §9 (metric definitions), §10 (scoring logic), §13 (risks)

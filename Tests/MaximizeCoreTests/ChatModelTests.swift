@@ -110,6 +110,35 @@ final class ChatModelTests: XCTestCase {
         return (chatModel, resolvedStore)
     }
 
+    /// Opens by minting a fresh thread rather than resolving one — MAX-185's
+    /// **New chat**. Mirrors `model(subject:...)` in every other respect.
+    private func model(
+        startingNewThreadFor subject: ChatSubject,
+        store: InMemoryWorkoutStore? = nil,
+        threadRepository: FakeChatThreadRepository = FakeChatThreadRepository(),
+        chatClient: FakeStreamingChatModelInvoking = FakeStreamingChatModelInvoking(),
+        now: @escaping @Sendable () -> Date = { Fixture.epoch }
+    ) async throws -> (ChatModel, InMemoryWorkoutStore) {
+        let resolvedStore: InMemoryWorkoutStore
+        if let store {
+            resolvedStore = store
+        } else {
+            resolvedStore = try await readyStore()
+        }
+        let chatModel = ChatModel(
+            startingNewThreadFor: subject,
+            workoutRepository: resolvedStore,
+            scoreRepository: resolvedStore,
+            planRepository: resolvedStore,
+            settingsRepository: resolvedStore,
+            chatThreadRepository: threadRepository,
+            chatClient: chatClient,
+            timeZone: utc,
+            now: now
+        )
+        return (chatModel, resolvedStore)
+    }
+
     // MARK: - Loading
 
     func testAllRepositoriesNilFailsRatherThanLookingEmpty() async throws {
@@ -383,6 +412,68 @@ final class ChatModelTests: XCTestCase {
         XCTAssertEqual(chatModel.loadState, .notYetScored)
         XCTAssertEqual(chatModel.subject, .workout(Fixture.workoutID))
         XCTAssertEqual(chatModel.subtitle, "This run")
+    }
+
+    // MARK: - New chat (MAX-185)
+
+    /// **The regression this ticket fixes.** A populated thread already exists for the
+    /// scope; `init(startingNewThreadFor:...)` must not silently reopen it the way
+    /// `init(subject:...)` — and the toolbar button's old implementation — did.
+    func testStartingNewThreadNeverResolvesToAnExistingThreadOnTheSameSubject() async throws {
+        let threadRepository = FakeChatThreadRepository()
+        let sharedScope = try scope()
+        var existing = try Fixture.thread(subject: .training(sharedScope), lastActivityAt: Fixture.at(0))
+        existing = try existing.appending(try Fixture.message(.user, "What did week one look like?", at: 0))
+        try await threadRepository.store(existing)
+
+        let (chatModel, _) = try await model(
+            startingNewThreadFor: .training(sharedScope),
+            threadRepository: threadRepository
+        )
+        await chatModel.load()
+
+        XCTAssertEqual(chatModel.loadState, .ready)
+        XCTAssertEqual(chatModel.subject, .training(sharedScope))
+        XCTAssertNotEqual(chatModel.thread?.id, existing.id)
+        XCTAssertTrue(chatModel.messages.isEmpty, "a new thread starts with nothing said in it")
+    }
+
+    /// Every mint is distinct — pressing **New chat** twice must not converge on the
+    /// same thread the second time, which is what would leave the second tap inert too.
+    func testStartingNewThreadMintsADistinctThreadEachTime() async throws {
+        let threadRepository = FakeChatThreadRepository()
+        let (first, _) = try await model(startingNewThreadFor: .training(try scope()), threadRepository: threadRepository)
+        await first.load()
+        let (second, _) = try await model(startingNewThreadFor: .training(try scope()), threadRepository: threadRepository)
+        await second.load()
+
+        XCTAssertEqual(first.loadState, .ready)
+        XCTAssertEqual(second.loadState, .ready)
+        XCTAssertNotEqual(first.thread?.id, second.thread?.id)
+    }
+
+    /// A14/"only completed turns are persisted": minting a thread for **New chat** must
+    /// not write anything by itself — the repository sees no new row until a turn
+    /// completes, exactly as the resolve-or-create path already behaves.
+    func testStartingNewThreadWritesNothingUntilATurnIsSent() async throws {
+        let threadRepository = FakeChatThreadRepository()
+        let (chatModel, _) = try await model(startingNewThreadFor: .training(try scope()), threadRepository: threadRepository)
+        await chatModel.load()
+
+        XCTAssertEqual(chatModel.loadState, .ready)
+        XCTAssertEqual(threadRepository.writes, 0)
+        XCTAssertEqual(threadRepository.threadCount, 0)
+    }
+
+    /// The minted thread's title and subtitle degrade exactly the way any other empty
+    /// training thread's do (§2.4) — **New chat** is not a second, unstyled state.
+    func testAFreshlyStartedThreadsTitleFallsBackToItsWindowLikeAnyEmptyOne() async throws {
+        let (chatModel, _) = try await model(startingNewThreadFor: .training(try scope()))
+        await chatModel.load()
+
+        XCTAssertEqual(chatModel.loadState, .ready)
+        XCTAssertEqual(chatModel.title, (try scope()).label)
+        XCTAssertEqual(chatModel.subtitle, (try scope()).label)
     }
 
     // MARK: - Sending: the happy path

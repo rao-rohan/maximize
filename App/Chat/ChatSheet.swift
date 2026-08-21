@@ -14,23 +14,33 @@ import MaximizeCore
 /// (§2.4, §3.6(b)) — actually lives; a title read up here would either be a second,
 /// unloaded copy or force this type to reach into a child's private state.
 ///
-/// ## Two ways to open something (§2.2 vs §2.3, MAX-097 review)
+/// ## Three ways to open something (§2.2 vs §2.3, MAX-097 review, MAX-185)
 ///
 /// `Opening` below mirrors `ChatModel`'s own `Opening` (private to that type, so this is
 /// a second, App-layer value of the same shape rather than a shared one): a `.subject`
-/// is what the Ask button and **New chat** hand in, and `ChatConversationView(subject:...)`
-/// resolves "the" thread for it exactly as `ChatModel.load()` already does
-/// (`ChatThreadRepository.thread(for:newThreadID:at:)`, newest activity wins). A
-/// `.threadID` is what selecting a row in the thread list hands in, and
-/// `ChatConversationView(threadID:...)` opens *exactly* that thread.
+/// is what the Ask button and the scope-mismatch banner hand in, and
+/// `ChatConversationView(subject:...)` resolves "the" thread for it exactly as
+/// `ChatModel.load()` already does (`ChatThreadRepository.thread(for:newThreadID:at:)`,
+/// newest activity wins). A `.newThread` is what **New chat** hands in — same subject,
+/// but `ChatConversationView(startingNewThreadFor:...)` mints a fresh thread rather than
+/// resolving one, exactly the way `ChatModel.init(startingNewThreadFor:...)`'s own
+/// documentation explains. A `.threadID` is what selecting a row in the thread list
+/// hands in, and `ChatConversationView(threadID:...)` opens *exactly* that thread.
 ///
-/// **Why the second case has to exist.** Two training threads can legitimately share an
-/// identical frozen `TrainingScope` — `ChatThreadRepository`'s own contract does not
-/// deduplicate training subjects, because **New chat** over an unchanged window is still
-/// a real, if unusual, thing to do. If the thread list resolved a tapped row *by
-/// subject*, tapping the older of two such rows would silently reopen the newer one —
-/// the list would show two conversations and only ever let you reach one. Carrying the
-/// tapped row's own id through instead is what makes the list mean what it shows.
+/// **Why the second and third cases both have to exist, and why they're not the same
+/// case.** Two training threads can legitimately share an identical frozen
+/// `TrainingScope` — `ChatThreadRepository`'s own contract does not deduplicate
+/// training subjects, because **New chat** over an unchanged window is the entire
+/// point of the button (MAX-185 — this repository already permitted several
+/// threads per scope; the toolbar item is the door to the second one). If the thread
+/// list resolved a tapped row *by subject*, tapping the older of two such rows would
+/// silently reopen the newer one — the list would show two conversations and only ever
+/// let you reach one. Carrying the tapped row's own id through instead is what makes
+/// the list mean what it shows. And if **New chat** reassigned `opening` to the same
+/// `.subject(scope)` value the Ask button already produced, `.id(opening)` below would
+/// not change on an unchanged scope — the exact defect this ticket fixes — so minting
+/// has to be its own case, carrying a nonce that makes every tap distinct even when the
+/// scope is not (see `.newThread`'s own doc comment).
 ///
 /// ## Reassigning `opening`, not rebuilding the sheet
 ///
@@ -75,10 +85,17 @@ struct ChatSheet: View {
         case workout(UUID)
     }
 
-    /// See this type's "Two ways to open something." Hashable so `.id(opening)` can key
-    /// `ChatConversationView`'s identity on it.
+    /// See this type's "Three ways to open something." Hashable so `.id(opening)` can
+    /// key `ChatConversationView`'s identity on it.
     private enum Opening: Hashable {
         case subject(ChatSubject)
+        /// **New chat** (MAX-185). The `UUID` is identity for SwiftUI only — a
+        /// nonce that guarantees `.id(opening)` changes on *every* tap, including a
+        /// second tap on an unchanged scope, which is exactly the case `.subject`
+        /// reassignment used to collapse into a no-op. It is never read as the minted
+        /// thread's actual id — `ChatModel.init(startingNewThreadFor:...)` mints that
+        /// id itself, the same way the resolve path already mints its own.
+        case newThread(ChatSubject, UUID)
         case threadID(UUID)
     }
 
@@ -108,8 +125,9 @@ struct ChatSheet: View {
                     case .threadList:
                         ChatThreadListView(chatThreadRepository: PersistenceComposition.store) { threadID in
                             // The tapped row's own id, not its subject — see this
-                            // type's "Two ways to open something" for why resolving by
-                            // subject here would be the defect, not a simplification.
+                            // type's "Three ways to open something" for why resolving
+                            // by subject here would be the defect, not a
+                            // simplification.
                             opening = .threadID(threadID)
                             // Selecting a thread opens it — it does not leave the list
                             // on screen underneath it.
@@ -152,6 +170,16 @@ struct ChatSheet: View {
                 onSelectRun: openWorkout(_:),
                 onDone: { dismiss() }
             )
+        case let .newThread(subject, _):
+            ChatConversationView(
+                startingNewThreadFor: subject,
+                currentInterval: currentInterval,
+                onOpenThreadList: { path.append(Route.threadList) },
+                onStartNewChatForCurrentWindow: startNewTrainingChat,
+                onAcceptProposal: openAuthoring(with:),
+                onSelectRun: openWorkout(_:),
+                onDone: { dismiss() }
+            )
         case let .threadID(threadID):
             ChatConversationView(
                 threadID: threadID,
@@ -187,15 +215,17 @@ struct ChatSheet: View {
 
     // MARK: - New chat
 
-    /// §3.4: "New chat" gives a newer window a real job. Resolves the *current*
-    /// dashboard interval into a fresh, frozen `TrainingScope` and reassigns the sheet
-    /// to open it by subject — a distinct scope opens (or continues) a distinct
-    /// thread; an unchanged scope resumes the thread already open, which is correct
-    /// rather than a duplicate (`ChatThreadRepository.mostRecentThread(for:)` is what
-    /// resolves that, unchanged).
+    /// §3.4, MAX-185: "New chat" mints a genuinely new thread on the window the
+    /// dashboard is showing right now — never reopens whatever is already open,
+    /// scope unchanged or not. Resolves the *current* dashboard interval into a fresh,
+    /// frozen `TrainingScope` and reassigns `opening` to `.newThread`, which
+    /// `ChatModel.init(startingNewThreadFor:...)` mints unconditionally
+    /// (`ChatThreadRepository.mostRecentThread(for:)` is deliberately never consulted
+    /// on this path — see `Opening.newThread`'s own doc comment for why an equal scope
+    /// used to make this a no-op).
     private func startNewTrainingChat() {
         guard let currentInterval, let scope = try? TrainingScope(resolving: currentInterval) else { return }
-        opening = .subject(.training(scope))
+        opening = .newThread(.training(scope), UUID())
         path = NavigationPath()
     }
 

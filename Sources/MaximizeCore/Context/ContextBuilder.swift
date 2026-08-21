@@ -61,8 +61,17 @@ public enum PromptContext: Hashable, Sendable {
 /// Sunday, will misjudge misses at the edges — and the roll-up and the dashboard would
 /// then disagree, which is the failure §3.6 exists to make impossible.
 ///
-/// Supplying more than that is harmless: the session list filters to the scope itself
-/// rather than trusting the caller to have narrowed it, exactly as `TrendTileData` does.
+/// **And since MAX-182 the same obligation binds a workout subject**, which used to need
+/// only the one workout: a workout context now carries the training week around its run,
+/// and that week's tallies come from the same calculator over the same kind of window. A
+/// caller supplying only the subject's own record would produce a week that reports every
+/// other prescribed day as a miss — not a thinner answer but a *wrong* one, stated
+/// confidently, with nothing on screen to contradict it. So `records` must cover every day
+/// of the Monday-first week containing the subject workout.
+///
+/// Supplying more than that is harmless for either subject: the session list filters to the
+/// span it describes rather than trusting the caller to have narrowed it, exactly as
+/// `TrendTileData` does.
 public struct ContextInputs: Sendable {
 
     /// One workout and everything stored alongside it.
@@ -141,8 +150,9 @@ public struct ContextInputs: Sendable {
     /// D9's weekly allowance, from `AppSettings`. Read by `TalliesCalculator` only.
     public let restDayBudget: RestDayBudget
 
-    /// See the type's documentation for the range this must cover for a training subject.
-    /// For a workout subject it need only contain that workout.
+    /// See the type's documentation for the range this must cover — the Monday-first weeks
+    /// touching a training scope, and since MAX-182 the Monday-first week containing a
+    /// workout subject's own run.
     public let records: [WorkoutRecord]
 
     /// - Throws: when two records claim the same workout. `records` is indexed by workout
@@ -180,11 +190,21 @@ public struct ContextInputs: Sendable {
 /// D3's guarantee is *one assembler per subject, shared by every consumer of that
 /// subject*. The workout subject has two consumers — the scorer and a workout thread —
 /// and they share `WorkoutContextBuilder`, which this calls and does not wrap, reorder or
-/// re-word. **The scorer keeps calling that builder directly, byte for byte**, so a
-/// scoring prompt and a workout chat prompt still cannot diverge. The training subject has
-/// one consumer and nothing to diverge from. Two cases behind one entry point is one
+/// re-word. **The scorer keeps calling that builder directly**, and every section the two
+/// consumers share is rendered from the same values by the same code, so a scoring prompt
+/// and a workout chat prompt cannot describe the same run differently. The training subject
+/// has one consumer and nothing to diverge from. Two cases behind one entry point is one
 /// place; a view model or a transport composing its own text would be a second, and that
 /// is what A12 forbids.
+///
+/// **What this entry point adds, it adds for chat only.** MAX-182 gives a workout thread
+/// the training week around its session, assembled here (`surroundingWeek(around:from:)`)
+/// and handed to the builder, which drops it for any audience but `.chat`. A chat prompt
+/// stays a *superset* of a scoring one, never a second wording of it — and the scorer's
+/// input is unchanged to the byte, which `ContextDisciplineTests` pins because D8 stores
+/// whatever verdict comes back forever. The fields it may carry are fixed by
+/// PRD-AMENDMENTS.md A29, not by this ticket: A12 rule 2 makes every widening of what
+/// leaves the device an amendment-level question.
 ///
 /// ## The audience is always chat
 ///
@@ -260,7 +280,94 @@ public enum ContextBuilder {
             planCalendar: planCalendar,
             audience: .chat,
             heartRateSeries: record.heartRateSeries,
-            existingScore: ledger.automatic
+            existingScore: ledger.automatic,
+            surroundingWeek: try surroundingWeek(around: day, from: inputs)
+        )
+    }
+
+    // MARK: - The week around a workout (MAX-182)
+
+    /// Assembles where one workout sits in the athlete's training week.
+    ///
+    /// **Here, and nowhere else.** D3 makes this module the single place that decides what
+    /// enters a prompt, and A12 makes each addition to that an amendment-level question
+    /// rather than a ticket-level one, precisely because every field is new health data
+    /// leaving the device. `WorkoutContextBuilder` receives this already assembled and only
+    /// decides who may hold it; a view model or a transport composing any part of it would
+    /// be the second assembler A12 forbids.
+    ///
+    /// Internal rather than private so that `ContextBuilderTests` can assert this entry
+    /// point adds *exactly* this to what `WorkoutContextBuilder` produces and nothing else.
+    ///
+    /// **Aggregates and plan configuration only** (A29). Nothing assembled here is a
+    /// per-session figure for any workout but the subject's own, and the subject's own are
+    /// already on the sheet this hangs off — see `WorkoutContext.SurroundingWeek` for the
+    /// shape MAX-184's audit imposed and why an earlier draft's sibling session lines were
+    /// the wrong one.
+    static func surroundingWeek(
+        around day: CalendarDay,
+        from inputs: ContextInputs
+    ) throws -> WorkoutContext.SurroundingWeek {
+        // Calendar-correct, both of them: `startOfTrainingWeek` steps back through
+        // `Calendar` and `adding(days:)` counts days as days. Fixed 86,400-second blocks are
+        // the defect `MuscleFatigue`'s own note points at, and a week is exactly the span
+        // where they land an hour on the wrong side of midnight twice a year.
+        let from = try day.startOfTrainingWeek()
+        let through = try from.adding(days: 6)
+
+        // §3.6(a): the same function the dashboard's tiles read, over this exact window,
+        // carried verbatim. Nothing below re-derives one of these figures. The window is a
+        // whole Monday-first week by construction, which is exactly the shape C1 requires of
+        // what this calculator is handed.
+        let tallies = try TalliesCalculator.compute(
+            TalliesInput(
+                from: from,
+                through: through,
+                timeZone: inputs.timeZone,
+                today: inputs.today,
+                workouts: inputs.records.map(\.workout),
+                scoreLedgers: scoreLedgers(in: inputs),
+                planCalendar: inputs.planCalendar,
+                restDayBudget: inputs.restDayBudget
+            )
+        )
+
+        // The one number this assembles, and it counts lines of record rather than measuring
+        // an athlete. Sessions, not days: `Tallies.workoutDays` already counts days, and a
+        // Tuesday holding a run and a lift is one of those and two of these.
+        var sessionCount = 0
+        for record in inputs.records {
+            let recordDay = try record.workout.calendarDay(in: inputs.timeZone)
+            guard recordDay >= from, recordDay <= through else { continue }
+            sessionCount += 1
+        }
+
+        // Resolved per day rather than off one plan's weekly template, so a week straddling
+        // a revision shows each day the ask that actually governed it (D1). No workout is
+        // read here at all — these are the athlete's own configuration.
+        var days: [WorkoutContext.SurroundingWeek.Day] = []
+        for date in try CalendarDay.days(from: from, through: through) {
+            // Spelled out rather than optional-chained: `planDay(on:)` already returns an
+            // optional, so chaining through `planCalendar?` would nest a second one and the
+            // two nils mean different things — no plan authored at all, and no version
+            // governing this day.
+            var planDay: PlanDay?
+            if let planCalendar = inputs.planCalendar {
+                planDay = try planCalendar.planDay(on: date)
+            }
+            days.append(WorkoutContext.SurroundingWeek.Day(date: date, planDay: planDay))
+        }
+
+        return try WorkoutContext.SurroundingWeek(
+            from: from,
+            through: through,
+            today: inputs.today,
+            // The version governing the week's last day, matching `TrainingContext.plan` and
+            // the arc week `tallies` already resolved from the same day.
+            plan: inputs.planCalendar?.plan(on: through),
+            tallies: tallies,
+            days: days,
+            sessionCount: sessionCount
         )
     }
 
