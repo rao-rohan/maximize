@@ -281,6 +281,12 @@ public enum ChatThreadListCopy {
         "This conversation could not be deleted. It is still here, and you can try again."
 }
 
+    /// The delete-failure alert's title and its one dismissal. In the core beside the
+    /// sentence they frame, for the reason `noConversationsYet` gives: a state whose
+    /// message lives here and whose title lives in a view is the shape that drifts.
+    public static let couldNotDeleteThreadTitle = "Could not delete"
+    public static let couldNotDeleteThreadDismiss = "OK"
+
 /// Turning a turn of a conversation into one line of a list row.
 ///
 /// Internal: this is how `ChatThreadTitle` and `ChatThreadSummary` shorten text, not a

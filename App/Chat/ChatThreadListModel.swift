@@ -112,6 +112,13 @@ final class ChatThreadListModel {
         couldNotDeleteMessage = outcome.errorMessage
     }
 
+    /// Dismisses the delete-failure alert. A method rather than a settable property so
+    /// the view cannot put this model into a state it did not compute — the same reason
+    /// `couldNotDeleteMessage` is `private(set)`.
+    func dismissDeleteFailure() {
+        couldNotDeleteMessage = nil
+    }
+
     private func present() {
         state = .loaded(
             ChatThreadListPresentation.sections(for: summaries, now: now(), timeZone: timeZone)
