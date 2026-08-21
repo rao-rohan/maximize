@@ -318,16 +318,11 @@ public final class ChatModel {
     /// (MAX-191).
     ///
     /// While streaming, this is the count from the pending instruction. Otherwise, it is
-    /// calculated from the current thread's size: how many would be dropped if a message
-    /// were sent now. Returns zero when there is no thread.
+    /// zero — the conversation as it stands has nothing dropped. This property describes
+    /// the present state, not a future send.
     public var droppedTurnCount: Int {
-        if let pending = pendingTurn {
-            return pending.instruction.droppedTurnCount
-        }
-        guard let thread else { return 0 }
-        let visibleCount = thread.visibleMessages.count
-        // +1 for the message that would be added
-        return max(0, visibleCount + 1 - ChatInstruction.maximumReplayedTurns)
+        guard let pending = pendingTurn else { return 0 }
+        return pending.instruction.droppedTurnCount
     }
 
     /// §4, MAX-101. Nothing here ever sets this to anything but `.idle` on its own.

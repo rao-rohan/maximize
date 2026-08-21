@@ -378,7 +378,7 @@ struct ChatConversationView: View {
                    let notice = ChatScopeNotice.text(for: subject, currentInterval: currentInterval) {
                     scopeMismatchBanner(notice)
                 }
-                if let notice = ChatConversationCopy.droppedTurnsNotice(for: model.subject?.kind, droppedTurnCount: model.droppedTurnCount) {
+                if let notice = ChatConversationCopy.droppedTurnsNotice(droppedMessageCount: model.droppedTurnCount) {
                     droppedTurnsNotice(notice)
                 }
                 transcript
