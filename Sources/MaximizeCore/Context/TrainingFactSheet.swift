@@ -60,7 +60,14 @@ extension TrainingContext {
             // quoting an aggregate can name it, which is what turns an ambush — a July
             // thread answering while the dashboard shows August — into a labelled
             // difference.
-            "Every figure below is measured over exactly these days. This window is frozen "
+            // MAX-192 qualified the opening sentence rather than leaving it standing.
+            // The acute:chronic load balance is measured over two rolling windows
+            // anchored to the athlete's current day, so the unqualified claim became
+            // false the moment it was carried — and a prompt whose framing sentence
+            // contradicts a figure four lines below it is worse than either alone.
+            "Every figure below is measured over exactly these days, except the "
+                + "acute:chronic load balance, which is measured over its own rolling "
+                + "windows and says so where it appears. This window is frozen "
                 + "at the conversation's creation and does not move with the calendar, so it "
                 + "may differ from the interval the app is showing right now. Name the window "
                 + "whenever you quote a figure from it.",
@@ -242,7 +249,148 @@ extension TrainingContext {
         // against, not a fix for it.
         lines.append("Current streak: \(tallies.currentStreak) days")
 
+        lines.append(contentsOf: loadBalanceLines)
+        // MAX-192 decided against carrying MAX-179's per-muscle reading here and states
+        // the exclusion rather than leaving it silent — see `TrainingContext` for the
+        // decision. Stated because the plan block above names the muscle groups the plan
+        // *prescribes* and the session lines below name every lift: a model given both
+        // and no sentence like this one can assemble a recovery narrative out of an ask
+        // and a duration, which is exactly the invented figure §3.5 and MAX-175 forbid.
+        lines.append("Per-muscle recovery is not in this summary. The app estimates one "
+            + "from the strength sessions the athlete has tagged with muscle groups, and "
+            + "it is read on the muscle map rather than here — so say it is not in front "
+            + "of you rather than inferring which muscles are recovered from the sessions "
+            + "below. It would not settle the question anyway: nothing in this app records "
+            + "sets, reps or weight.")
+
         return lines
+    }
+
+    // MARK: - Acute versus chronic load (MAX-178 via MAX-192)
+
+    /// The rolling load figures, or the named reason there are none.
+    ///
+    /// ## Four states, worded apart, none of them a bare number
+    ///
+    /// `LoadBalanceReading` has two cases and the available one has two shapes; the
+    /// fourth is a caller that supplied nothing. They are four different facts:
+    ///
+    /// - **A ratio.** The ordinary case.
+    /// - **No baseline.** A full chronic window exists and carried no strain at all, so
+    ///   the ratio would be a division by zero. The acute sum is real and still stated —
+    ///   `TrendTileData` makes the same split, in the same order.
+    /// - **`.buildingHistory`.** Fewer than 28 days are on record. **Not a ratio computed
+    ///   from a short window and not a zero**: the app cannot vouch for days before its
+    ///   own history began.
+    /// - **Nothing supplied.** A fact about this record, not about the athlete.
+    ///
+    /// ## The three things the wording has to carry
+    ///
+    /// 1. **The unit is zone-weighted minutes, unbounded** — the same disclaimer
+    ///    `WorkoutFactSheet`'s strain line carries, because a bare `1.08` beside a bare
+    ///    `412` invites reading one of them as a rating out of a hundred.
+    /// 2. **The denominator is the chronic sum scaled to a week, not the raw 28-day
+    ///    total** (`LoadBalanceCalculator`'s own decision). Both sums are printed, so a
+    ///    model that tries the division itself gets the same answer the app did rather
+    ///    than ~0.25 and a wrong conclusion.
+    /// 3. **No verdict.** `LoadBalanceCalculator` reports and does not grade, and
+    ///    `TrendTileData` honours that; a prompt is the one surface where the omission
+    ///    could be undone by inference, so the instruction is explicit here.
+    ///
+    /// And the anchor, which is the fourth thing: these two windows roll back from the
+    /// athlete's current day, so unlike every other figure in this sheet they are not
+    /// measured over the frozen window. §3.6(b)'s rule — the mismatch cannot be
+    /// prevented, so it is made legible — applied to the one figure that has it by
+    /// construction.
+    private var loadBalanceLines: [String] {
+        guard let loadBalance else {
+            return ["Acute:chronic load balance: not carried in this summary. The app "
+                + "measures one, and it is not in this record — say so rather than "
+                + "estimating one from the sessions below."]
+        }
+
+        switch loadBalance {
+        case let .buildingHistory(daysRecorded, daysNeeded):
+            // The tile's own words for this state ("building load history", over
+            // "\(daysRecorded)/\(daysNeeded) days") rather than a second phrasing of it.
+            return ["Acute:chronic load balance: building load history — \(daysRecorded)/"
+                + "\(daysNeeded) days of the four-week baseline are on record. No ratio is "
+                + "reported until the whole 28-day window sits inside the app's own "
+                + "history, because a ratio over days nothing observed would be a "
+                + "confident number about a period the app cannot vouch for. That is an "
+                + "absence of a baseline, not a light month."]
+        case let .available(balance):
+            var lines = [figures(for: balance)]
+            lines.append("Those strain sums are in zone-weighted minutes — the unit each "
+                + "session line's strain figure below carries — and the 7-day and 28-day "
+                + "windows both end on the day named above and roll back from it. They are "
+                + "not this conversation's window: they can include sessions no line below "
+                + "describes and leave out sessions that are listed. Name that day whenever "
+                + "you quote one of these figures. The unit is unbounded, not a score out "
+                + "of 100.")
+            // Only where there is a ratio to explain. The no-baseline shape below states
+            // the acute sum and nothing else, and a sentence about a denominator would be
+            // describing a figure the line above has just said does not exist.
+            if balance.ratio != nil {
+                lines.append("The ratio's denominator is the 28-day total scaled to one "
+                    + "week, not the raw 28-day sum, so 1.00 is a week matching the "
+                    + "athlete's recent normal, above it a heavier week and below it a "
+                    + "lighter one. The app attaches no threshold, no band and no verdict "
+                    + "to this figure — state it and say what it measures; do not call a "
+                    + "number high, low, safe or risky.")
+            }
+            if let coverage = coverageCaveat(for: balance) {
+                lines.append(coverage)
+            }
+            return lines
+        }
+    }
+
+    private func figures(for balance: LoadBalance) -> String {
+        let acute = "7-day strain \(FactSheetFormatting.number(balance.acuteStrainPoints))"
+        guard let ratio = balance.ratio else {
+            // A real chronic window that carried no strain at all. Worded apart from
+            // `.buildingHistory` because the history exists here — what is missing is the
+            // baseline, and `LoadBalance.ratio` withholds the division rather than
+            // reporting one over zero.
+            return "Acute:chronic load balance as of \(balance.anchor): \(acute) zone-weighted "
+                + "minutes. There is no four-week baseline to compare it against — nothing in "
+                + "the 28 days ending that day carried a strain figure, either because no "
+                + "session did or because none happened — so no ratio is reported. Dividing "
+                + "by that baseline would be dividing by zero, which is why it is withheld "
+                + "rather than shown as a large number."
+        }
+        // Through the tile's own formatter (§3.6(c)): the ratio is a figure that appears
+        // in both places, and a fact sheet rounding it differently from the tile beside
+        // it is the disagreement §3.6 exists to prevent.
+        return "Acute:chronic load balance as of \(balance.anchor): \(acute), typical week over "
+            + "the last 28 days \(FactSheetFormatting.number(balance.chronicWeeklyAveragePoints)), "
+            + "28-day total \(FactSheetFormatting.number(balance.chronicStrainPoints)), "
+            + "ratio \(TrendTileData.formattedLoadBalanceRatio(ratio))"
+    }
+
+    /// MAX-176's instruction, which the tile's caption already follows: *"a 7-day sum
+    /// missing two strapless runs is not the same fact as a 7-day sum of everything that
+    /// happened."* Silent when nothing is missing, the same "say nothing was excluded by
+    /// saying nothing" rule the average-score line keeps.
+    ///
+    /// Both counts, not just the acute one the tile has room for: a chronic window with
+    /// gaps understates the denominator, which moves the ratio in the opposite direction
+    /// from a gappy acute window, and a model told only about one of them would correct
+    /// for the wrong end.
+    private func coverageCaveat(for balance: LoadBalance) -> String? {
+        guard balance.acuteWorkoutsWithoutStrain > 0 || balance.chronicWorkoutsWithoutStrain > 0
+        else { return nil }
+        return "Coverage: \(countedSessions(balance.acuteWorkoutsWithoutStrain)) in the 7-day "
+            + "window and \(countedSessions(balance.chronicWorkoutsWithoutStrain)) in the "
+            + "28-day window carried no strain figure, the first count being part of the "
+            + "second. They are in neither sum — skipped, not counted as zero — so both sums "
+            + "describe less training than actually happened, and the ratio is a comparison "
+            + "of two incomplete figures."
+    }
+
+    private func countedSessions(_ count: Int) -> String {
+        "\(count) \(count == 1 ? "session" : "sessions")"
     }
 
     // MARK: - One line per session (§3.3 item 3, LIFTING-SPEC §10.2)
@@ -269,6 +417,26 @@ extension TrainingContext {
             + "any of those is best answered in that session's own conversation — say so rather "
             + "than estimating.")
         lines.append("A field missing from a line was not recorded for that session.")
+        // Strain gets a sentence of its own beside that convention, rather than sharing
+        // it, for the reason the verdict is never omitted at all: a missing figure that
+        // reads as a zero is worse than a missing figure that reads as missing, and a
+        // strain of zero says the session cost nothing. Stated once, per this file's
+        // inverted convention — the alternative is up to `maximumRenderedSessions` lines
+        // each carrying the same three caveats.
+        //
+        // The caveats themselves are `WorkoutFactSheet`'s, in the same order and to the
+        // same effect (A12 rule 3 is about the *figure*, and these two renderers now
+        // print the same one): unbounded rather than a rating, ambiguous between a longer
+        // session and a harder one, and heart-rate only — which A20 makes load-bearing
+        // for a lift, where it is the whole of what the app knows about intensity.
+        lines.append("Strain, where a line carries one, is that session's stored figure in "
+            + "zone-weighted minutes: unbounded, not a score out of 100. A bigger number "
+            + "can mean a longer session, a harder one, or both, and it does not "
+            + "distinguish them. It is measured from heart rate alone, so on a lift it "
+            + "says nothing about sets, reps or weight — nothing in this app records "
+            + "those. A line with no strain figure has none stored, either because the "
+            + "session has no heart-rate curve or because its metrics predate the figure; "
+            + "that is not a session that cost nothing.")
         lines.append(contentsOf: sessions.map(Self.line))
         return lines
     }
@@ -289,6 +457,16 @@ extension TrainingContext {
         }
         if let drift = session.heartRateDriftFraction {
             fields.append("Heart-rate drift: \(FactSheetFormatting.signedPercent(drift))")
+        }
+        if let strain = session.strain {
+            // Bare, and after the measurements it belongs with rather than beside the
+            // verdict: strain is what the session cost, and the verdict is whether it was
+            // the session the plan asked for. The unit and its two limits are stated once
+            // in the preamble; repeating them here would cost a paragraph per line.
+            // `FactSheetFormatting.number` is whole zone-weighted minutes — the same
+            // rounding `WorkoutFactSheet` gives this identical stored figure, and the same
+            // one `SummaryTileData.formattedStrain` puts on the tile (§3.6(c)).
+            fields.append("Strain: \(FactSheetFormatting.number(strain.points))")
         }
         fields.append(verdict(session))
         return fields.joined(separator: " · ")

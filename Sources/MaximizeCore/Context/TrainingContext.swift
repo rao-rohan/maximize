@@ -19,10 +19,13 @@ import Foundation
 /// 2. **The tallies** (`tallies`) — `TalliesCalculator`'s output for this exact window,
 ///    verbatim. See "No arithmetic here" below.
 /// 3. **One line per session** (`sessions`) — day, weekday, discipline, classification,
-///    the plan's ask for that day, distance, duration, average heart rate, drift, and
-///    the verdict. That is all.
+///    the plan's ask for that day, distance, duration, average heart rate, drift, the
+///    session's stored strain, and the verdict. That is all.
 /// 4. **The scope itself** (`scope`), stated in prose by the renderer, together with how
 ///    many sessions were dropped by the cap and why.
+/// 5. **The load balance** (`loadBalance`) — `LoadBalanceCalculator`'s already-computed
+///    reading, carried verbatim. The one figure here that does *not* describe the
+///    window; see the field's own documentation.
 ///
 /// ## What is deliberately absent, and why each one
 ///
@@ -34,6 +37,15 @@ import Foundation
 ///   in the prompt"*. Twelve of them is not a marginal increase.
 /// - **No route, no coordinates.** `WorkoutContext` already gives the reasoning; a month
 ///   of them is a home address and a routine.
+/// - **No per-muscle recovery reading.** MAX-179's map is computed from the entries A22
+///   collects and drawn beside a run (MAX-180), and MAX-192 declined to carry it here:
+///   it is six figures rather than one, it is a function of *now* rather than of the
+///   window — so it would age inside a cached prompt prefix that the frozen scope
+///   otherwise makes stable — and it answers "what should I train today", which is not
+///   the question a roll-up over a fixed window is for. **The renderer states that
+///   exclusion in the prompt** rather than leaving it silent, because the plan block
+///   already names the muscle groups the plan *prescribes*, and a model given those and
+///   a list of lifts can otherwise assemble a recovery narrative out of nothing.
 /// - **No score rationales.** `Session.verdict` carries the whole `Score`, because that is
 ///   the value `WorkoutVerdict` produces and re-deriving a narrower one here would be a
 ///   second resolution of "what is this workout's verdict". The **renderer never prints
@@ -46,9 +58,13 @@ import Foundation
 ///
 /// Every aggregate this type quotes is produced by *the same core function the
 /// corresponding screen reads*. `tallies` is `TalliesCalculator.compute`'s own value, the
-/// one `TrendTileData` presents on the dashboard; `currentArcWeekIndex` is the arc week
-/// that calculator resolved, through `PlanCalendar.arcWeek(for:under:)`; every per-session
-/// figure is a stored `Workout` or `DerivedMetrics` field read verbatim (D2).
+/// one `TrendTileData` presents on the dashboard; `loadBalance` is
+/// `LoadBalanceCalculator.compute`'s own value, the one that tile presents beside it;
+/// `currentArcWeekIndex` is the arc week that calculator resolved, through
+/// `PlanCalendar.arcWeek(for:under:)`; every per-session figure is a stored `Workout` or
+/// `DerivedMetrics` field read verbatim (D2) — including `Session.strain`, which is the
+/// `WorkoutStrain` MAX-176 computed once at ingestion and stored, never a sum or an
+/// integral taken here.
 ///
 /// **This type contains no arithmetic over more than one workout.** The single number it
 /// derives is `sessionCountInScope`, which counts lines in a prompt rather than measuring
@@ -72,6 +88,19 @@ import Foundation
 /// session and not the day. The mitigations are the four bounds above and A14's invariant
 /// that no chat call is ever unattended. Every ticket touching this file gets a
 /// `/security-review`.
+///
+/// **MAX-192 widened it again, and the widening has two halves worth separating.** One
+/// figure joins each session line — the `WorkoutStrain` MAX-176 already computed from
+/// that session's own heart-rate curve, where there is one — which adds no new
+/// *category*: this context already carries that session's average heart rate and its
+/// drift, both reads of the same curve. The other half is `loadBalance`, and it is the
+/// one that is genuinely new: three sums and a ratio that describe **the 28 days ending
+/// on the athlete's current day**, which for a frozen historical window is training the
+/// scope does not cover. They are four scalars, they name no session, no day and no
+/// distance, and they are exactly the figures the dashboard tile already draws — but
+/// "derived from data already in the prompt" is not true of them the way it is of strain,
+/// and the honest description is that a training thread now also sends a four-number
+/// summary of the athlete's last month of load.
 public struct TrainingContext: Hashable, Sendable {
 
     /// One session in the window — one workout, not one day.
@@ -127,6 +156,29 @@ public struct TrainingContext: Hashable, Sendable {
         /// compute it, as well as when there was no series to measure.
         public let heartRateDriftFraction: Double?
 
+        /// `DerivedMetrics.strain`, verbatim (D2, MAX-176) — what this session **cost**,
+        /// beside the fields above, which describe whether it was executed as asked.
+        ///
+        /// Carried as the domain type rather than as a bare `Double` so the unit travels
+        /// with the figure: `WorkoutStrain.points` is zone-weighted minutes, unbounded,
+        /// and a loose `Double` on this struct would be one refactor away from being read
+        /// as a rating. The renderer states the unit and both of the figure's limits once
+        /// for the whole roll-up.
+        ///
+        /// **Nil is two states that are not distinguished here**, deliberately: the
+        /// session has no heart-rate curve to integrate, or it has one and MAX-176's
+        /// metrics were never computed for it (MAX-176 rescored nothing already stored).
+        /// `WorkoutFactSheet` words those apart because one run's prompt has room to;
+        /// this file's convention is the opposite one (see `TrainingFactSheet`), and
+        /// `LoadBalanceInput.derivedMetricsByWorkoutID` already treats the two
+        /// identically for the same reason — neither licenses reading the session as
+        /// free.
+        ///
+        /// **Never zero for an absent figure.** A zero would say the session cost
+        /// nothing (A18, MAX-175), and — unlike a missing distance — it would be a
+        /// plausible-looking number in a column of real ones.
+        public let strain: WorkoutStrain?
+
         init(
             workoutID: UUID,
             day: CalendarDay,
@@ -135,7 +187,8 @@ public struct TrainingContext: Hashable, Sendable {
             distanceMeters: Double?,
             durationSeconds: Double,
             averageHeartRateBPM: Double?,
-            heartRateDriftFraction: Double?
+            heartRateDriftFraction: Double?,
+            strain: WorkoutStrain?
         ) {
             self.workoutID = workoutID
             self.day = day
@@ -145,6 +198,7 @@ public struct TrainingContext: Hashable, Sendable {
             self.durationSeconds = durationSeconds
             self.averageHeartRateBPM = averageHeartRateBPM
             self.heartRateDriftFraction = heartRateDriftFraction
+            self.strain = strain
         }
     }
 
@@ -208,6 +262,39 @@ public struct TrainingContext: Hashable, Sendable {
     /// athlete — see "No arithmetic here".
     public let sessionCountInScope: Int
 
+    /// `LoadBalanceCalculator.compute`'s reading, carried verbatim (MAX-178, MAX-192), or
+    /// nil when the caller supplied none.
+    ///
+    /// ## Read, never computed — and the anchor is not the window
+    ///
+    /// This arrives already computed, exactly as it does at `TrendTileData.init`, and for
+    /// the same reason stated there: one function decides these sums and this file is not
+    /// it. `ContextInputs` documents where the caller gets it and what it must be
+    /// anchored to.
+    ///
+    /// **It is anchored to the athlete's current day, not to `scope.through`**, which
+    /// makes it the one figure in this type that does not describe the window. That is
+    /// deliberate, and it is the dashboard's own decision restated: `TrendTileData`
+    /// anchors load balance to *now* regardless of which week or month the dashboard is
+    /// showing, because a rolling 7-day and 28-day read is not a property of a selected
+    /// interval. Anchoring it to a frozen window's last day instead would have been worse
+    /// than inconsistent: a window ending in the future — an ordinary this-week thread
+    /// opened on a Wednesday — would sum an acute window running four days past today and
+    /// report a load figure quietly deflated by days that have not happened.
+    ///
+    /// The renderer says which day it is anchored to and says the windows are rolling, so
+    /// the model cannot read it as measured over the scope (§3.6(b): freezing is made
+    /// legible rather than prevented).
+    ///
+    /// ## Nil is a state, not a gap to paper over
+    ///
+    /// A caller that supplies nothing gets a fact sheet that **says** no load figure is
+    /// carried. That is worth an honest sentence rather than a fabricated absence
+    /// (`.buildingHistory` would be a lie about the athlete's history, not a fallback),
+    /// and it is why this is `LoadBalanceReading?` rather than a defaulted
+    /// `.buildingHistory` — the two are different facts about different things.
+    public let loadBalance: LoadBalanceReading?
+
     /// The most sessions the roll-up will list before saying so and listing none.
     ///
     /// **200, matching `WorkoutContext.maximumRenderedSplits`,** and chosen against the
@@ -234,7 +321,8 @@ public struct TrainingContext: Hashable, Sendable {
         planCoverage: PlanCoverage,
         tallies: Tallies,
         sessions: [Session],
-        sessionCountInScope: Int
+        sessionCountInScope: Int,
+        loadBalance: LoadBalanceReading?
     ) {
         self.scope = scope
         self.plan = plan
@@ -242,6 +330,7 @@ public struct TrainingContext: Hashable, Sendable {
         self.tallies = tallies
         self.sessions = sessions
         self.sessionCountInScope = sessionCountInScope
+        self.loadBalance = loadBalance
     }
 
     /// Whether the window's sessions were withheld by `maximumRenderedSessions` rather
