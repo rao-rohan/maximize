@@ -110,8 +110,8 @@ final class ChatModelTests: XCTestCase {
         return (chatModel, resolvedStore)
     }
 
-    /// Opens by minting a fresh thread rather than resolving one (§2.1, MAX-185's
-    /// **New chat**). Mirrors `model(subject:...)` in every other respect.
+    /// Opens by minting a fresh thread rather than resolving one — MAX-185's
+    /// **New chat**. Mirrors `model(subject:...)` in every other respect.
     private func model(
         startingNewThreadFor subject: ChatSubject,
         store: InMemoryWorkoutStore? = nil,
@@ -414,7 +414,7 @@ final class ChatModelTests: XCTestCase {
         XCTAssertEqual(chatModel.subtitle, "This run")
     }
 
-    // MARK: - New chat (§2.1, MAX-185)
+    // MARK: - New chat (MAX-185)
 
     /// **The regression this ticket fixes.** A populated thread already exists for the
     /// scope; `init(startingNewThreadFor:...)` must not silently reopen it the way
