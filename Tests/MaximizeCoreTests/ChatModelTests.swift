@@ -59,7 +59,12 @@ final class ChatModelTests: XCTestCase {
         store: InMemoryWorkoutStore? = nil,
         threadRepository: FakeChatThreadRepository = FakeChatThreadRepository(),
         chatClient: FakeStreamingChatModelInvoking = FakeStreamingChatModelInvoking(),
-        now: @escaping @Sendable () -> Date = { Fixture.epoch }
+        now: @escaping @Sendable () -> Date = { Fixture.epoch },
+        // A fresh store per call, not `.shared` — the app's default, but the wrong one
+        // for a suite whose cases must not see each other's drafts. MAX-198's own tests
+        // pass one explicitly, shared across the two `ChatModel`s a case constructs, to
+        // exercise the thing the ticket is about.
+        composerDraftStore: ChatComposerDraftStore = ChatComposerDraftStore()
     ) async throws -> (ChatModel, InMemoryWorkoutStore) {
         let resolvedStore: InMemoryWorkoutStore
         if let store {
@@ -76,7 +81,8 @@ final class ChatModelTests: XCTestCase {
             chatThreadRepository: threadRepository,
             chatClient: chatClient,
             timeZone: utc,
-            now: now
+            now: now,
+            composerDraftStore: composerDraftStore
         )
         return (chatModel, resolvedStore)
     }
@@ -88,7 +94,8 @@ final class ChatModelTests: XCTestCase {
         store: InMemoryWorkoutStore? = nil,
         threadRepository: FakeChatThreadRepository = FakeChatThreadRepository(),
         chatClient: FakeStreamingChatModelInvoking = FakeStreamingChatModelInvoking(),
-        now: @escaping @Sendable () -> Date = { Fixture.epoch }
+        now: @escaping @Sendable () -> Date = { Fixture.epoch },
+        composerDraftStore: ChatComposerDraftStore = ChatComposerDraftStore()
     ) async throws -> (ChatModel, InMemoryWorkoutStore) {
         let resolvedStore: InMemoryWorkoutStore
         if let store {
@@ -105,7 +112,8 @@ final class ChatModelTests: XCTestCase {
             chatThreadRepository: threadRepository,
             chatClient: chatClient,
             timeZone: utc,
-            now: now
+            now: now,
+            composerDraftStore: composerDraftStore
         )
         return (chatModel, resolvedStore)
     }
@@ -117,7 +125,8 @@ final class ChatModelTests: XCTestCase {
         store: InMemoryWorkoutStore? = nil,
         threadRepository: FakeChatThreadRepository = FakeChatThreadRepository(),
         chatClient: FakeStreamingChatModelInvoking = FakeStreamingChatModelInvoking(),
-        now: @escaping @Sendable () -> Date = { Fixture.epoch }
+        now: @escaping @Sendable () -> Date = { Fixture.epoch },
+        composerDraftStore: ChatComposerDraftStore = ChatComposerDraftStore()
     ) async throws -> (ChatModel, InMemoryWorkoutStore) {
         let resolvedStore: InMemoryWorkoutStore
         if let store {
@@ -134,7 +143,8 @@ final class ChatModelTests: XCTestCase {
             chatThreadRepository: threadRepository,
             chatClient: chatClient,
             timeZone: utc,
-            now: now
+            now: now,
+            composerDraftStore: composerDraftStore
         )
         return (chatModel, resolvedStore)
     }
@@ -1140,5 +1150,118 @@ final class ChatModelTests: XCTestCase {
             turns: try alternatingTurns(ChatInstruction.maximumReplayedTurns * 2)
         )
         XCTAssertEqual(instruction.factSheet, sheet)
+    }
+
+    // MARK: - MAX-198: an unsent draft outlives the sheet
+
+    /// The repro in the ticket, expressed as two `ChatModel`s rather than one sheet
+    /// dismissed and reopened — which is exactly what dismissing and reopening the
+    /// sheet actually does to this type (`ChatSheet`'s `.id(opening)` discards the old
+    /// `ChatModel` outright). If the draft only lived on the instance that typed it,
+    /// this is where it would come back empty.
+    func testADraftReturnsToAFreshModelOpenedOnTheSameSubject() async throws {
+        let sharedDrafts = ChatComposerDraftStore()
+        let subject = ChatSubject.workout(Fixture.workoutID)
+
+        let (firstOpen, _) = try await model(subject: subject, composerDraftStore: sharedDrafts)
+        await firstOpen.load()
+        firstOpen.composerText = "How rough should I take the long run this weekend?"
+        // No send — this is the sheet being dismissed mid-thought, `firstOpen` simply
+        // going out of scope the way `ChatSheet` throws its `ChatModel` away.
+
+        let (secondOpen, _) = try await model(subject: subject, composerDraftStore: sharedDrafts)
+        await secondOpen.load()
+
+        XCTAssertEqual(secondOpen.composerText, "How rough should I take the long run this weekend?")
+    }
+
+    /// Decision #1 in the ticket: per subject, not global. Two different conversations
+    /// sharing one draft store must not leak into each other.
+    func testADraftDoesNotAppearWhenADifferentSubjectIsOpened() async throws {
+        let sharedDrafts = ChatComposerDraftStore()
+
+        let (workoutThread, _) = try await model(
+            subject: .workout(Fixture.workoutID),
+            composerDraftStore: sharedDrafts
+        )
+        await workoutThread.load()
+        workoutThread.composerText = "Only about this run."
+
+        let (trainingThread, _) = try await model(
+            subject: .training(try scope()),
+            composerDraftStore: sharedDrafts
+        )
+        await trainingThread.load()
+
+        XCTAssertEqual(trainingThread.composerText, "")
+    }
+
+    /// Sending is what ends drafting — the ticket's own words. What happens to the
+    /// exact text after a tap is `pendingTurn`'s job (`testRetryAfterFailureDoesNotReplayTheDroppedTurn`
+    /// exercises that separately); this asserts the *draft* specifically does not
+    /// survive a send, whatever the reply does afterward.
+    func testSendingClearsTheDraftSoALaterOpenSeesNothing() async throws {
+        let sharedDrafts = ChatComposerDraftStore()
+        let subject = ChatSubject.workout(Fixture.workoutID)
+        let threadRepository = FakeChatThreadRepository()
+
+        let (sender, _) = try await model(
+            subject: subject,
+            threadRepository: threadRepository,
+            composerDraftStore: sharedDrafts
+        )
+        await sender.load()
+        sender.composerText = "Ask and send."
+        await sender.send()
+
+        XCTAssertEqual(sender.composerText, "")
+
+        let (reopened, _) = try await model(
+            subject: subject,
+            threadRepository: threadRepository,
+            composerDraftStore: sharedDrafts
+        )
+        await reopened.load()
+
+        XCTAssertEqual(reopened.composerText, "", "a sent turn is not a draft the next open should offer back")
+    }
+
+    /// A14 and D6, restated for the composer: typing something and never tapping send
+    /// must not call the model and must not touch the thread this subject resolves to.
+    func testAnUnsentDraftNeverReachesTheModelOrTheStoredThread() async throws {
+        let threadRepository = FakeChatThreadRepository()
+        let chatClient = FakeStreamingChatModelInvoking()
+        let (chatModel, _) = try await model(threadRepository: threadRepository, chatClient: chatClient)
+        await chatModel.load()
+
+        chatModel.composerText = "Never actually sent."
+
+        XCTAssertTrue(chatClient.receivedInstructions.isEmpty)
+        XCTAssertEqual(threadRepository.writes, 0)
+        XCTAssertTrue(chatModel.messages.isEmpty)
+    }
+
+    /// The thread-list path (§2.3): `subject` is unknown until `load()` reads it off the
+    /// stored thread, so hydration has to happen after that resolution rather than at
+    /// construction — this is the one opening where those two moments are different.
+    func testADraftRestoresForAThreadIDOpenedModelOnceItsSubjectResolves() async throws {
+        let sharedDrafts = ChatComposerDraftStore()
+        let subject = ChatSubject.workout(Fixture.workoutID)
+        let threadRepository = FakeChatThreadRepository()
+        let thread = try Fixture.thread(subject: subject)
+        try await threadRepository.store(thread)
+        // Written directly, standing in for a draft left behind by an earlier
+        // subject-opened `ChatModel` before the thread list was ever opened.
+        sharedDrafts.setDraft("Left behind before the row was tapped.", for: subject)
+
+        let (chatModel, _) = try await model(
+            threadID: thread.id,
+            threadRepository: threadRepository,
+            composerDraftStore: sharedDrafts
+        )
+        await chatModel.load()
+
+        XCTAssertEqual(chatModel.loadState, .ready)
+        XCTAssertEqual(chatModel.composerText, "Left behind before the row was tapped.")
     }
 }
