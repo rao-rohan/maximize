@@ -254,6 +254,54 @@ public enum ChatThreadListPresentation {
         }
     }
 
+    /// §4.3: `.searchable` over titles and previews, filtered here so the app layer
+    /// never holds a second notion of "what matches" — and so a filter and the banding
+    /// above it can never disagree about which rows exist.
+    ///
+    /// Composed from the two calls a caller could otherwise make separately —
+    /// `matches(_:query:)`, then the plain `sections(for:now:timeZone:)` — rather than a
+    /// second banding implementation. That is the whole answer to the audit's warning
+    /// (§4.3, §6.9) that a filtered list must not lose its section headers or keep one
+    /// with nothing under it: MAX-153's "an empty band is never emitted" already holds
+    /// for whatever list is handed in, so it holds for a filtered one for free.
+    ///
+    /// - Parameter query: exactly what `.searchable` hands back on every keystroke.
+    ///   Blank, including whitespace-only, means "not searching" — the unfiltered list,
+    ///   never a filter nothing can match.
+    public static func sections(
+        for summaries: [ChatThreadSummary],
+        matching query: String,
+        now: Date,
+        timeZone: TimeZone
+    ) -> [ChatThreadListSection] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return sections(for: summaries, now: now, timeZone: timeZone)
+        }
+        return sections(for: summaries.filter { matches($0, query: trimmed) }, now: now, timeZone: timeZone)
+    }
+
+    /// Whether `summary` matches a search typed into §4.3's field — over the same two
+    /// fields its own row draws, title and preview, and nothing a row does not show:
+    /// not the scope line, which is a derived label rather than something the athlete
+    /// wrote or Claude said.
+    ///
+    /// Case-insensitive, and deliberately nothing more clever than that — matching
+    /// `compactTimestamp`'s own reasoning for staying off `DateFormatter`: the app is
+    /// single-user and not distributed, so a search that found something on one phone
+    /// and not another for the same query, because the two disagreed about a locale,
+    /// would be a worse bug than the one this ticket is fixing.
+    ///
+    /// Does not itself treat a blank query specially — see
+    /// `sections(for:matching:now:timeZone:)`, which decides that once rather than
+    /// leaving every caller of this function to reimplement "empty means everything".
+    public static func matches(_ summary: ChatThreadSummary, query: String) -> Bool {
+        let needle = query.lowercased()
+        if summary.title.lowercased().contains(needle) { return true }
+        if let preview = summary.preview, preview.lowercased().contains(needle) { return true }
+        return false
+    }
+
     /// The narrowest honest timestamp for a list row.
     ///
     /// | Age | Reads |

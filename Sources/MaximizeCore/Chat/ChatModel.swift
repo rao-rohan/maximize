@@ -266,6 +266,21 @@ public final class ChatModel {
         /// each path rather than trusting the sentence.
         public let wasStoppedByAthlete: Bool
 
+        /// The one caption a row draws below its bubble, if any (MAX-195).
+        ///
+        /// `wasTruncated`, `wasInterruptedByFailure` and `wasStoppedByAthlete` are set at
+        /// three separate construction sites in this file and, per this type's own note
+        /// above, at most one is ever true of a given row — so the view no longer needs
+        /// three parallel `if`s to find the one that is, it asks this once. Order matters
+        /// only in the sense that it does not: the three are mutually exclusive by
+        /// construction, not by the order these are checked in.
+        public var trailingCaption: String? {
+            if wasTruncated { return ChatConversationCopy.truncatedCaption }
+            if wasInterruptedByFailure { return ChatConversationCopy.interruptedByFailureCaption }
+            if wasStoppedByAthlete { return ChatConversationCopy.stoppedByAthleteCaption }
+            return nil
+        }
+
         init(
             id: UUID = UUID(),
             kind: Kind,

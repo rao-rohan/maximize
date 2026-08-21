@@ -137,6 +137,13 @@ final class PlanAuthoringModel {
     /// on top of it — banner and all — would offer to make the same change twice.
     private var proposal: PlanProposal?
 
+    /// MAX-190: whether this instance was opened from `ChatSheet`, set once from
+    /// `proposal != nil` at `init` and never touched again. `proposal` itself is cleared
+    /// by `save()` (its own doc comment explains why) — a `let` snapshot is what keeps
+    /// `conversationalRoute`'s gate true for the screen's whole lifetime rather than
+    /// re-enabling the door back into the same conversation the moment the athlete saves.
+    private let arrivedFromConversation: Bool
+
     /// - Parameters:
     ///   - planRepository: defaults to `PersistenceComposition.store`. Overridable only
     ///     so a preview or a test can inject a fake; there is deliberately no other
@@ -189,6 +196,7 @@ final class PlanAuthoringModel {
         self.timeZone = timeZone
         self.todayOverride = today
         self.proposal = proposal
+        self.arrivedFromConversation = proposal != nil
     }
 
     // MARK: - Loading
@@ -220,7 +228,8 @@ final class PlanAuthoringModel {
                         confirmation: nil,
                         prefill: applied?.notice,
                         conversationalRoute: PlanAuthoringConversationalRoute(
-                            apiKeyPresence: resolveKeyPresence()
+                            apiKeyPresence: resolveKeyPresence(),
+                            arrivedFromConversation: arrivedFromConversation
                         )
                     )
                 )
