@@ -85,11 +85,31 @@ public enum ChatThreadTitle {
     ///   cheaply resolve a run may pass nil for every thread and still get correct
     ///   training titles.
     public static func derive(for thread: ChatThread, workoutFacts: WorkoutThreadFacts?) -> String {
-        switch thread.subject {
+        Self.derive(
+            subject: thread.subject,
+            firstUserMessageContent: thread.firstUserMessage?.content,
+            workoutFacts: workoutFacts
+        )
+    }
+
+    /// The same rule as `derive(for:workoutFacts:)`, in the primitives it actually needs
+    /// (MAX-188).
+    ///
+    /// A full `ChatThread` carries every message; titling reads exactly one of them. This
+    /// overload lets a caller that has stored the opening question as a column — rather
+    /// than decoded it out of a transcript blob — title a thread without ever touching the
+    /// rest of the conversation. `derive(for:workoutFacts:)` is the convenience form built
+    /// on top of it, not a second rule.
+    public static func derive(
+        subject: ChatSubject,
+        firstUserMessageContent: String?,
+        workoutFacts: WorkoutThreadFacts?
+    ) -> String {
+        switch subject {
         case .workout:
             return Self.workout(workoutFacts)
         case let .training(scope):
-            return Self.training(scope: scope, firstUserMessage: thread.firstUserMessage?.content)
+            return Self.training(scope: scope, firstUserMessage: firstUserMessageContent)
         }
     }
 }
@@ -125,6 +145,27 @@ public enum ChatThreadSubtitle {
     }
 }
 
+/// One line of a message, whitespace collapsed and truncated, or nil for no message
+/// (§2.3).
+///
+/// Pulled out of `ChatThreadSummary.init(_ thread:workoutFacts:)` (MAX-188) so the same
+/// rule can run on a raw stored string, not only on a decoded `ChatMessage` — see
+/// `ChatThreadSummary.init(id:subject:lastActivityAt:firstUserMessageContent:lastVisibleMessageContent:workoutFacts:)`.
+enum ChatThreadPreview {
+    static func line(for content: String?) -> String? {
+        // `ChatMessage` already rejects whitespace-only content, so an empty result
+        // here is unreachable in practice; it is mapped back to nil anyway so "no
+        // preview" has one representation rather than two a view would have to test
+        // for separately.
+        guard let content else { return nil }
+        let line = SingleLineText.truncated(
+            SingleLineText.collapsed(content),
+            to: ChatThreadSummary.maximumPreviewLength
+        )
+        return line.isEmpty ? nil : line
+    }
+}
+
 /// What a thread-list row renders from (§2.3).
 ///
 /// A value, not a view model: the row shows a title, a subject glyph, a relative
@@ -135,6 +176,16 @@ public enum ChatThreadSubtitle {
 /// twenty full conversations is twenty JSON blobs decoded to render twenty single lines,
 /// and — the reason that matters more — health data in memory for a screen that shows
 /// none of it.
+///
+/// **MAX-188: this is also why the type's initializers are shaped the way they are.**
+/// `init(_ thread:workoutFacts:)` below is convenient and used freely by callers who
+/// already hold a decoded `ChatThread` — the in-memory `FakeChatThreadRepository`, for
+/// one, which never persists a blob to begin with. But the *only* implementation the
+/// running app calls, `MaximizeStore.threadSummaries()`, must not decode a transcript
+/// merely to build this type — that was the defect. The
+/// `init(id:subject:lastActivityAt:firstUserMessageContent:lastVisibleMessageContent:workoutFacts:)`
+/// overload exists so that store can honour the doc comment above by construction: it
+/// takes exactly the two raw strings a summary is a pure function of, not a thread.
 public struct ChatThreadSummary: Hashable, Sendable, Identifiable {
     /// The thread's own identifier — what `ChatThreadRepository.thread(id:)` and
     /// `deleteThread(id:)` take, so a row can open or delete itself without the list
@@ -174,23 +225,51 @@ public struct ChatThreadSummary: Hashable, Sendable, Identifiable {
     /// - Parameter workoutFacts: the run's facts for a workout subject; see
     ///   `WorkoutThreadFacts`. Ignored for a training subject.
     public init(_ thread: ChatThread, workoutFacts: WorkoutThreadFacts? = nil) {
-        // `ChatMessage` already rejects whitespace-only content, so an empty result here
-        // is unreachable; it is mapped back to nil anyway so that "no preview" has one
-        // representation rather than two the view would have to test for separately.
-        var preview: String?
-        if let last = thread.lastVisibleMessage {
-            let line = SingleLineText.truncated(
-                SingleLineText.collapsed(last.content),
-                to: Self.maximumPreviewLength
-            )
-            preview = line.isEmpty ? nil : line
-        }
         self.init(
             id: thread.id,
             subject: thread.subject,
-            title: ChatThreadTitle.derive(for: thread, workoutFacts: workoutFacts),
             lastActivityAt: thread.lastActivityAt,
-            preview: preview
+            firstUserMessageContent: thread.firstUserMessage?.content,
+            lastVisibleMessageContent: thread.lastVisibleMessage?.content,
+            workoutFacts: workoutFacts
+        )
+    }
+
+    /// Builds a summary from the primitives it is actually a pure function of, without
+    /// requiring a decoded `ChatThread` (MAX-188).
+    ///
+    /// This is what makes `MaximizeStore.threadSummaries()` able to honour this type's
+    /// own contract (see the type-level doc comment): a caller that has stored a
+    /// thread's opening question and last-visible-message content as columns — rather
+    /// than a `messagesJSON` blob it would have to decode to get at them — reaches this
+    /// initializer with those two strings and nothing else about the conversation.
+    ///
+    /// - Parameters:
+    ///   - firstUserMessageContent: the raw content of `thread.firstUserMessage`, or nil
+    ///     for a thread nobody has asked anything in. Titles a training subject only —
+    ///     see `ChatThreadTitle`.
+    ///   - lastVisibleMessageContent: the raw content of `thread.lastVisibleMessage`, or
+    ///     nil for a thread with no visible turns yet. Previews the row.
+    ///   - workoutFacts: the run's facts for a workout subject; see `WorkoutThreadFacts`.
+    ///     Ignored for a training subject.
+    public init(
+        id: UUID,
+        subject: ChatSubject,
+        lastActivityAt: Date,
+        firstUserMessageContent: String?,
+        lastVisibleMessageContent: String?,
+        workoutFacts: WorkoutThreadFacts?
+    ) {
+        self.init(
+            id: id,
+            subject: subject,
+            title: ChatThreadTitle.derive(
+                subject: subject,
+                firstUserMessageContent: firstUserMessageContent,
+                workoutFacts: workoutFacts
+            ),
+            lastActivityAt: lastActivityAt,
+            preview: ChatThreadPreview.line(for: lastVisibleMessageContent)
         )
     }
 

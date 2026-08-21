@@ -162,6 +162,34 @@ final class ChatThreadTitleTests: XCTestCase {
         )
         XCTAssertEqual(ChatThreadTitle.derive(for: thread, workoutFacts: nil), question)
     }
+
+    // MARK: - MAX-188: titling from raw content, not a decoded thread
+
+    /// `derive(for:workoutFacts:)` is now a convenience built on
+    /// `derive(subject:firstUserMessageContent:workoutFacts:)` — this pins that the two
+    /// agree, so a caller reaching for the primitive overload (because it stored the
+    /// opening question as a column rather than a transcript) gets the identical title.
+    func testDerivingFromRawContentAgreesWithDerivingFromAFullThread() throws {
+        let thread = try trainingThread(
+            scope: try august,
+            messages: [try Fixture.message(.user, "Has my drift flattened?", at: 0)]
+        )
+        XCTAssertEqual(
+            ChatThreadTitle.derive(for: thread, workoutFacts: nil),
+            ChatThreadTitle.derive(
+                subject: thread.subject,
+                firstUserMessageContent: thread.firstUserMessage?.content,
+                workoutFacts: nil
+            )
+        )
+    }
+
+    func testDerivingFromRawContentFallsBackToTheScopeLabelWhenNilIsPassed() throws {
+        XCTAssertEqual(
+            ChatThreadTitle.derive(subject: .training(try august), firstUserMessageContent: nil, workoutFacts: nil),
+            try august.label
+        )
+    }
 }
 
 /// §2.2 / §3.6(b): the sheet's subtitle.
@@ -245,6 +273,69 @@ final class ChatThreadSummaryTests: XCTestCase {
         )
         XCTAssertFalse(preview.contains("\n"), "a row draws one line")
         XCTAssertLessThanOrEqual(preview.count, ChatThreadSummary.maximumPreviewLength + 1)
+    }
+
+    // MARK: - MAX-188: building a summary without a decoded ChatThread
+
+    /// `MaximizeStore.threadSummaries()`'s fast path builds a summary from raw stored
+    /// strings, never a `ChatThread`. This pins that the result is identical to the one
+    /// built the old way, from a fully decoded thread — the two paths must never
+    /// disagree about what a row shows.
+    func testALightweightSummaryMatchesOneBuiltFromTheFullThread() throws {
+        let facts = WorkoutThreadFacts(day: try Fixture.day(2026, 8, 3), activityType: .running)
+        let thread = try Fixture.thread(
+            subject: .workout(Fixture.workoutID),
+            messages: [
+                try Fixture.message(.user, "Was that on plan?", at: 0),
+                try Fixture.message(.assistant, "Yes — Tuesday is an 8 km easy run.", at: 9),
+            ]
+        )
+
+        let fromThread = ChatThreadSummary(thread, workoutFacts: facts)
+        let lightweight = ChatThreadSummary(
+            id: thread.id,
+            subject: thread.subject,
+            lastActivityAt: thread.lastActivityAt,
+            firstUserMessageContent: thread.firstUserMessage?.content,
+            lastVisibleMessageContent: thread.lastVisibleMessage?.content,
+            workoutFacts: facts
+        )
+
+        XCTAssertEqual(fromThread, lightweight)
+    }
+
+    /// An empty training thread, built without ever constructing a `ChatThread`: no
+    /// preview, and the title falls back to the frozen window's label — the same
+    /// fallback `ChatThreadTitle.training(scope:firstUserMessage:)` documents.
+    func testALightweightSummaryOfAnEmptyTrainingThreadHasNoPreviewAndNamesItsWindow() throws {
+        let scope = try Fixture.scope(from: (2026, 8, 1), through: (2026, 8, 31))
+        let summary = ChatThreadSummary(
+            id: UUID(),
+            subject: .training(scope),
+            lastActivityAt: Fixture.epoch,
+            firstUserMessageContent: nil,
+            lastVisibleMessageContent: nil,
+            workoutFacts: nil
+        )
+
+        XCTAssertNil(summary.preview)
+        XCTAssertEqual(summary.title, scope.label)
+    }
+
+    /// The primitive init's preview goes through the same collapsing and truncation as
+    /// the full-thread path — this is the case that would silently diverge if the two
+    /// initializers ever used different rules.
+    func testALightweightSummaryPreviewIsCollapsedAndTruncatedLikeTheFullThreadPath() throws {
+        let raw = "  Has   my\n\n  drift\tflattened?  "
+        let summary = ChatThreadSummary(
+            id: UUID(),
+            subject: .workout(Fixture.workoutID),
+            lastActivityAt: Fixture.epoch,
+            firstUserMessageContent: nil,
+            lastVisibleMessageContent: raw,
+            workoutFacts: nil
+        )
+        XCTAssertEqual(summary.preview, "Has my drift flattened?")
     }
 
     // MARK: - Ordering
