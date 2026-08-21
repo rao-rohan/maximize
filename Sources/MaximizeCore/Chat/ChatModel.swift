@@ -700,7 +700,8 @@ public final class ChatModel {
                 subject: subject,
                 workoutRepository: workoutRepository,
                 scoreRepository: scoreRepository,
-                planRepository: planRepository
+                planRepository: planRepository,
+                settingsRepository: settingsRepository
             )
         case let .training(scope):
             return try await trainingContext(
@@ -722,13 +723,21 @@ public final class ChatModel {
     /// them, so the guards stay here — `.notYetScored` and `.noVerdict` are product
     /// states a thrown error cannot carry.
     ///
+    /// **The fetch is widened to the subject's own Monday-first training week** (MAX-182) —
+    /// C1, restated by `ContextInputs`' own documentation, now binding this subject too. The
+    /// week around the run is part of a workout context, its tallies come from
+    /// `TalliesCalculator`, and that calculator cannot widen the workouts it was handed: a
+    /// caller passing only the subject's record would have every other prescribed day in the
+    /// week reported as a miss. `ContextBuilder` narrows the extra records back out itself.
+    ///
     /// - Returns: nil when a terminal state other than `.ready` has already been set.
     private func workoutContext(
         for workoutID: UUID,
         subject: ChatSubject,
         workoutRepository: any WorkoutRepository,
         scoreRepository: any ScoreRepository,
-        planRepository: any PlanRepository
+        planRepository: any PlanRepository,
+        settingsRepository: any SettingsRepository
     ) async throws -> PromptContext? {
         guard let workout = try await workoutRepository.workout(id: workoutID) else {
             loadState = .failed
@@ -764,12 +773,43 @@ public final class ChatModel {
         // pins the `.chat` audience itself; the scoring path reaches
         // `WorkoutContextBuilder` directly and is shown strictly less.
         let heartRateSeries = try await workoutRepository.heartRateSeries(forWorkout: workoutID)
-        let record = try ContextInputs.WorkoutRecord(
-            workout: workout,
-            metrics: metrics,
-            ledger: ledger,
-            heartRateSeries: heartRateSeries
+        var records = [
+            try ContextInputs.WorkoutRecord(
+                workout: workout,
+                metrics: metrics,
+                ledger: ledger,
+                heartRateSeries: heartRateSeries
+            ),
+        ]
+
+        let day = try workout.calendarDay(in: timeZone)
+        let weekStart = try day.startOfTrainingWeek()
+        let week = try DateInterval.covering(
+            from: weekStart,
+            through: weekStart.adding(days: 6),
+            in: timeZone
         )
+        for other in try await workoutRepository.workouts(startingIn: week) where other.id != workoutID {
+            records.append(try ContextInputs.WorkoutRecord(
+                workout: other,
+                // The week block carries no metric for any session but the subject's — see
+                // `WorkoutContext.SurroundingWeek` for the list it leaves behind and why. The
+                // cheapest way not to send a drift figure is not to load one.
+                metrics: nil,
+                // Read, because the week's verdicts and its tallies are both built from the
+                // ledger the scorer wrote (D8), never from a judgement made here.
+                ledger: try await scoreRepository.ledger(forWorkout: other.id),
+                heartRateSeries: nil
+            ))
+        }
+
+        // Read by `TalliesCalculator`, which a workout subject now does reach: the week's
+        // effective-sessions figure applies D9's weekly rest allowance, and computing it
+        // against `.standard` for an athlete who set something else would make a figure in
+        // this thread disagree with the identical figure on the dashboard. That is a new way
+        // for a workout thread to fail — the settings store can refuse to open — and it is
+        // the price of the two surfaces being unable to contradict each other (§3.6(a)).
+        let settings = try await settingsRepository.settings()
         let currentDay = try today()
         return try ContextBuilder.build(
             for: subject,
@@ -777,12 +817,8 @@ public final class ChatModel {
                 timeZone: timeZone,
                 today: currentDay,
                 planCalendar: planCalendar,
-                // Read by `TalliesCalculator` only, which no workout subject reaches, so
-                // this path deliberately does not open the settings store: a read a
-                // subject does not need is a new way for this thread to fail that it did
-                // not have before MAX-096.
-                restDayBudget: .standard,
-                records: [record]
+                restDayBudget: settings.restDayBudget,
+                records: records
             )
         )
     }
