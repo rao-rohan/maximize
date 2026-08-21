@@ -94,6 +94,65 @@ final class ChatConversationCopyTests: XCTestCase {
         XCTAssertNotEqual(ChatConversationCopy.truncatedCaption, ChatConversationCopy.interruptedByFailureCaption)
     }
 
+    // MARK: - MAX-191: dropped turns notice
+
+    /// Zero dropped messages is the common case — no notice is needed, following CLAUDE.md's
+    /// "absence is a designed state" rule.
+    func testZeroDroppedMessagesReturnsNil() {
+        XCTAssertNil(ChatConversationCopy.droppedTurnsNotice(droppedMessageCount: 0))
+    }
+
+    /// Negative counts should also return nil — they are not meaningful.
+    func testNegativeDroppedMessagesReturnsNil() {
+        XCTAssertNil(ChatConversationCopy.droppedTurnsNotice(droppedMessageCount: -1))
+    }
+
+    /// Singular: "1 earlier message".
+    func testOneMessageUsesCorrectSingular() {
+        let notice = ChatConversationCopy.droppedTurnsNotice(droppedMessageCount: 1)
+        XCTAssertNotNil(notice)
+        XCTAssertTrue(notice!.contains("1 earlier message"))
+        XCTAssertFalse(notice!.contains("messages"))
+    }
+
+    /// Plural: "N earlier messages".
+    func testMultipleMessagesUseCorrectPlural() {
+        let notice = ChatConversationCopy.droppedTurnsNotice(droppedMessageCount: 2)
+        XCTAssertNotNil(notice)
+        XCTAssertTrue(notice!.contains("2 earlier messages"))
+    }
+
+    /// Large numbers also use plural.
+    func testLargeCountUsesPlural() {
+        let notice = ChatConversationCopy.droppedTurnsNotice(droppedMessageCount: 40)
+        XCTAssertNotNil(notice)
+        XCTAssertTrue(notice!.contains("40 earlier messages"))
+    }
+
+    /// The message does not leak internal details like "turn count", "tokens", or implementation details.
+    func testTheMessageDoesNotLeakInternalDetails() {
+        for count in [1, 2, 5, 10, 20] {
+            let notice = ChatConversationCopy.droppedTurnsNotice(droppedMessageCount: count)
+            XCTAssertNotNil(notice)
+            let lowercased = notice!.lowercased()
+            XCTAssertFalse(lowercased.contains("turn"), "message should say 'message' not 'turn'")
+            XCTAssertFalse(lowercased.contains("token"), "message should not mention tokens")
+            XCTAssertFalse(lowercased.contains("exchange"), "message should be plain language")
+            XCTAssertFalse(lowercased.contains("buffer"), "message should not leak implementation")
+        }
+    }
+
+    /// The message speaks in the app's voice, not the model's.
+    func testTheMessageIsInAppVoice() {
+        let notice = ChatConversationCopy.droppedTurnsNotice(droppedMessageCount: 5)
+        XCTAssertNotNil(notice)
+        // The message should not impersonate the model
+        XCTAssertFalse(notice!.lowercased().contains("i don't have"))
+        XCTAssertFalse(notice!.lowercased().contains("i don't"))
+        // It should be clear and descriptive from the app's perspective
+        XCTAssertTrue(notice!.contains("aren't included"))
+    }
+
     /// Three things that can happen to a reply, three sentences. A stop that read like a
     /// dropped connection would send somebody to look at their signal for something they
     /// did themselves (MAX-197).

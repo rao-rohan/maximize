@@ -1141,4 +1141,88 @@ final class ChatModelTests: XCTestCase {
         )
         XCTAssertEqual(instruction.factSheet, sheet)
     }
+
+    // MARK: - MAX-191: droppedTurnCount exposure
+
+    /// At rest, a long thread's count describes how many of its current messages would
+    /// be dropped if sent — a standing property of the thread, visible when the athlete
+    /// reads it. This count must equal what the shared helper computes (MAX-191).
+    func testDroppedTurnCountDescribesThreadAtRest() async throws {
+        let threadRepository = FakeChatThreadRepository()
+        var thread = try Fixture.thread(subject: .workout(Fixture.workoutID))
+        // Store more than the cap — 46 messages means 20 would be dropped.
+        let messageCount = ChatInstruction.maximumReplayedTurns + 6  // 46 total
+        for index in 0..<messageCount {
+            thread = try thread.appending(try Fixture.message(
+                index.isMultiple(of: 2) ? .user : .assistant,
+                "turn \(index)",
+                at: Double(index + 1)
+            ))
+        }
+        try await threadRepository.store(thread)
+
+        let (chatModel, _) = try await model(threadRepository: threadRepository)
+        await chatModel.load()
+        // At rest, the count reflects what would be dropped from these messages.
+        let expectedDrop = ChatInstruction.droppedCount(for: messageCount)
+        XCTAssertEqual(chatModel.droppedTurnCount, expectedDrop)
+        XCTAssertEqual(chatModel.droppedTurnCount, 6)
+    }
+
+    /// While streaming, the model's count matches the pending instruction's count.
+    /// At rest, it matches what the shared helper computes from the stored messages.
+    /// Both are stable and equal because both use the same helper.
+    func testDroppedTurnCountMatchesInstructionAndSharedHelper() async throws {
+        let threadRepository = FakeChatThreadRepository()
+        var thread = try Fixture.thread(subject: .workout(Fixture.workoutID))
+        // Store more than cap: 46 messages, 6 would drop.
+        let messageCount = ChatInstruction.maximumReplayedTurns + 6
+        for index in 0..<messageCount {
+            thread = try thread.appending(try Fixture.message(
+                index.isMultiple(of: 2) ? .user : .assistant,
+                "turn \(index)",
+                at: Double(index + 1)
+            ))
+        }
+        try await threadRepository.store(thread)
+
+        let chatClient = FakeStreamingChatModelInvoking(events: [.text("Answer."), .completed(.endTurn)])
+        let (chatModel, _) = try await model(
+            threadRepository: threadRepository,
+            chatClient: chatClient,
+            now: { Fixture.at(1_000) }
+        )
+        await chatModel.load()
+        // At rest, the count describes the current thread.
+        let atRestCount = chatModel.droppedTurnCount
+        XCTAssertEqual(atRestCount, 6)
+        XCTAssertEqual(atRestCount, ChatInstruction.droppedCount(for: messageCount))
+
+        // Send a message — this creates a pending instruction.
+        chatModel.composerText = "Question?"
+        await chatModel.send()
+
+        // The two counts answer different questions and are deliberately not equal once
+        // the turn has completed. The instruction is a *snapshot* of what was sent: 46
+        // stored messages plus the new question, 47, dropping 7. The model's count
+        // describes the thread *as it now stands*, and `send()` has since persisted both
+        // the question and the reply — 48, dropping 8. Asserting they match would pin an
+        // equality that only holds mid-stream.
+        let instruction = try XCTUnwrap(chatClient.receivedInstructions.last)
+        XCTAssertEqual(instruction.droppedTurnCount, 7, "the instruction sent 46 + 1 = 47 turns")
+        XCTAssertEqual(chatModel.droppedTurnCount, 8, "the thread now holds 46 + question + reply")
+    }
+
+    /// The instruction's dropped count equals what the shared helper computes.
+    func testInstructionDroppedCountMatchesSharedHelper() async throws {
+        let turnCount = ChatInstruction.maximumReplayedTurns + 7
+        let sharedCount = ChatInstruction.droppedCount(for: turnCount)
+        let instruction = try ChatInstruction(
+            task: "task",
+            factSheet: "sheet",
+            turns: try alternatingTurns(turnCount)
+        )
+        XCTAssertEqual(instruction.droppedTurnCount, sharedCount)
+        XCTAssertEqual(sharedCount, 7)
+    }
 }
