@@ -105,14 +105,16 @@ final class TrainingContextAgreementTests: XCTestCase {
         _ stored: StoredRecords,
         from: String,
         through: String,
-        today: String = TrainingContextAgreementTests.today
+        today: String = TrainingContextAgreementTests.today,
+        loadBalance: LoadBalanceReading? = nil
     ) throws -> TrainingContext {
         let inputs = try ContextInputs(
             timeZone: .gmt,
             today: try day(today),
             planCalendar: try calendar(),
             restDayBudget: .standard,
-            records: stored.records
+            records: stored.records,
+            loadBalance: loadBalance
         )
         switch try ContextBuilder.build(
             for: .training(try TrainingScope(from: try day(from), through: try day(through))),
@@ -146,9 +148,21 @@ final class TrainingContextAgreementTests: XCTestCase {
     private func dashboardTiles(
         _ stored: StoredRecords,
         kind: TrendIntervalKind,
-        tallies: Tallies
+        tallies: Tallies,
+        loadBalance: LoadBalanceReading? = nil
     ) throws -> TrendTileData {
-        try TrendTileData(
+        if let loadBalance {
+            return try TrendTileData(
+                kind: kind,
+                tallies: tallies,
+                workouts: stored.workouts,
+                timeZone: .gmt,
+                planCalendar: try calendar(),
+                distanceUnit: .kilometers,
+                loadBalance: loadBalance
+            )
+        }
+        return try TrendTileData(
             kind: kind,
             tallies: tallies,
             workouts: stored.workouts,
@@ -383,5 +397,149 @@ final class TrainingContextAgreementTests: XCTestCase {
             sheet.contains("Average score: nothing in this window has been scored yet"),
             "a verdict does exist here — it was excluded, which is a different fact — \(sheet)"
         )
+    }
+
+    // MARK: - MAX-192: the load figures, on both surfaces
+
+    /// One set of stored records with strain on it, wide enough for a real chronic
+    /// window, plus the reading `LoadBalanceCalculator` produces from it.
+    ///
+    /// Deliberately **computed, not hand-built**: a fixture `LoadBalance` handed to both
+    /// surfaces would prove they format the same value, which is the weaker half of the
+    /// property. Running the dashboard's own calculator over the same stored records is
+    /// what makes this §3.6(a) rather than a formatting test.
+    private func storedWithStrain(
+        on days: [(day: String, strainPoints: Double?)],
+        historyStart: String,
+        anchor: String = TrainingContextAgreementTests.today
+    ) throws -> (records: StoredRecords, reading: LoadBalanceReading) {
+        var workouts: [Workout] = []
+        var records: [ContextInputs.WorkoutRecord] = []
+        var metricsByID: [UUID: DerivedMetrics] = [:]
+
+        for entry in days {
+            let id = UUID()
+            let run = try workout(id: id, on: entry.day)
+            var strain: WorkoutStrain?
+            if let points = entry.strainPoints {
+                strain = try WorkoutStrain(points: points)
+            }
+            let metrics = try DerivedMetrics(
+                workoutID: id,
+                averageHeartRateBPM: 142,
+                maximumHeartRateBPM: 160,
+                timeAboveCapSeconds: 250,
+                heartRateDriftFraction: 0.032,
+                strain: strain,
+                planVersion: PlanVersion(1)
+            )
+            workouts.append(run)
+            metricsByID[id] = metrics
+            records.append(try ContextInputs.WorkoutRecord(workout: run, metrics: metrics))
+        }
+
+        let reading = try LoadBalanceCalculator.compute(
+            LoadBalanceInput(
+                anchor: try day(anchor),
+                timeZone: .gmt,
+                historyStart: try day(historyStart),
+                workouts: workouts,
+                derivedMetricsByWorkoutID: metricsByID
+            )
+        )
+        return (
+            records: StoredRecords(workouts: workouts, ledgers: [:], records: records),
+            reading: reading
+        )
+    }
+
+    /// The tile and the roll-up quote the same ratio, character for character, from the
+    /// same calculator over the same records — §3.6(a) for the figure MAX-192 added, and
+    /// §3.6(c) for its rounding.
+    func testTheLoadBalanceRatioAgreesWithTheDashboardTile() throws {
+        // Two runs inside the acute window and two outside it but inside the chronic one,
+        // so the two sums genuinely differ and a ratio of 1.00 cannot pass by accident.
+        let built = try storedWithStrain(
+            on: [
+                (day: "2026-05-30", strainPoints: 140),
+                (day: "2026-05-28", strainPoints: 100),
+                (day: "2026-05-15", strainPoints: 120),
+                (day: "2026-05-08", strainPoints: 120),
+            ],
+            historyStart: "2026-01-01"
+        )
+        guard case let .available(balance) = built.reading, let ratio = balance.ratio else {
+            return XCTFail("28 days of history with strain on it must produce a ratio")
+        }
+
+        let context = try rollUp(
+            built.records, from: "2026-05-25", through: "2026-05-31", loadBalance: built.reading
+        )
+        let tallies = try dashboardTallies(built.records, from: "2026-05-25", through: "2026-05-31")
+        let tiles = try dashboardTiles(
+            built.records, kind: .week, tallies: tallies, loadBalance: built.reading
+        )
+
+        XCTAssertEqual(try XCTUnwrap(context.loadBalance), built.reading, "carried, never recomputed")
+        // 240 acute over a typical week of (480 / 4) = 120 → 2.00, and both surfaces say so.
+        XCTAssertEqual(balance.acuteStrainPoints, 240, accuracy: 1e-9)
+        XCTAssertEqual(ratio, 2, accuracy: 1e-9)
+        XCTAssertEqual(tiles.loadBalance.value, "2.00")
+        XCTAssertTrue(
+            context.factSheet().contains(", ratio \(tiles.loadBalance.value)\n"),
+            context.factSheet()
+        )
+    }
+
+    /// A session's strain reaches the roll-up at the same precision the workout detail
+    /// screen's own tile draws it — the same delegation `Average score` already makes,
+    /// applied to the figure MAX-192 put on every session line.
+    func testASessionsStrainAgreesWithTheDetailTile() throws {
+        let built = try storedWithStrain(
+            on: [(day: "2026-05-27", strainPoints: 138.4)],
+            historyStart: "2026-01-01"
+        )
+        let metrics = try XCTUnwrap(built.records.records.first?.metrics)
+        let detail = SummaryTileData(
+            workout: try XCTUnwrap(built.records.workouts.first),
+            metrics: metrics,
+            distanceUnit: .kilometers
+        )
+        let tile = try XCTUnwrap(detail.strain)
+
+        let context = try rollUp(
+            built.records, from: "2026-05-25", through: "2026-05-31", loadBalance: built.reading
+        )
+        XCTAssertEqual(tile.value, "138")
+        XCTAssertTrue(context.factSheet().contains("· Strain: \(tile.value) ·"), context.factSheet())
+    }
+
+    /// The absence agrees too, and this is where a fabricated figure would be easiest to
+    /// write: a young account has no ratio on the tile and must have none in the prompt —
+    /// **and not a zero**, which would read as "you have done nothing" rather than "the
+    /// app has not watched you long enough".
+    func testAShortHistoryIsTheSameDesignedAbsenceOnBothSurfaces() throws {
+        let built = try storedWithStrain(
+            on: [(day: "2026-05-30", strainPoints: 140)],
+            historyStart: "2026-05-20"
+        )
+        XCTAssertEqual(built.reading, .buildingHistory(daysRecorded: 13, daysNeeded: 28))
+
+        let context = try rollUp(
+            built.records, from: "2026-05-25", through: "2026-05-31", loadBalance: built.reading
+        )
+        let tallies = try dashboardTallies(built.records, from: "2026-05-25", through: "2026-05-31")
+        let tiles = try dashboardTiles(
+            built.records, kind: .week, tallies: tallies, loadBalance: built.reading
+        )
+
+        XCTAssertEqual(tiles.loadBalance.value, "13/28 days")
+        XCTAssertEqual(tiles.loadBalance.caption, "building load history")
+        let sheet = context.factSheet()
+        XCTAssertTrue(
+            sheet.contains("Acute:chronic load balance: building load history — 13/28 days"),
+            sheet
+        )
+        XCTAssertFalse(sheet.contains("ratio 0.00"), sheet)
     }
 }
