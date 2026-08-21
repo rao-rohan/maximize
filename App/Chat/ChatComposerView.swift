@@ -198,6 +198,14 @@ struct ChatComposerView<Accessory: View>: View {
         // two whole controls. Reduce Motion is honoured by `accessibleAnimation`, which is
         // MAX-070's seam for exactly this and not something re-derived here.
         .accessibleAnimation(.easeOut(duration: 0.15), value: sendControl)
+        // MAX-199: light haptic feedback when send is tapped. Fires only once per send
+        // action — when the button transitions from enabled to disabled (athlete tapped
+        // send and the request opened). Does not fire again when the reply completes and
+        // the button re-enables. Respects Reduce Motion through `.sensoryFeedback`.
+        .sensoryFeedback(.selection, trigger: sendControl) { old, new in
+            // Fire only on send initiation: button goes from enabled to disabled
+            return old.isEnabled && !new.isEnabled
+        }
     }
 
     @ViewBuilder
