@@ -410,12 +410,58 @@ extension MaximizeStore: PlanRepository {
 extension MaximizeStore: ChatThreadRepository {
 
     /// Rows for §2.3's list, newest activity first.
+    ///
+    /// **MAX-188: this used to decode every stored transcript to draw a screen that
+    /// shows none of it** — exactly the exposure `ChatThreadSummary`'s own doc comment
+    /// says the type exists to prevent. Fixed by never touching `record.stored` (which
+    /// reads `messagesJSON`, the `@Attribute(.externalStorage)` blob) for a row this
+    /// build wrote: `record.summaryFieldsComputed` and the two summary columns beside it
+    /// are enough to build a `ChatThreadSummary` on their own, via
+    /// `ChatThreadSummary.init(id:subject:lastActivityAt:firstUserMessageContent:lastVisibleMessageContent:workoutFacts:)`.
+    /// A row written before this ticket has `summaryFieldsComputed == false` and falls
+    /// back to the old full decode for that one row only — see
+    /// `StoredChatThread.summaryFieldsComputed`'s doc comment for why `nil` alone cannot
+    /// stand in for that flag.
+    ///
+    /// The workout lookup is batched (§2.4's second finding, N+1): one fetch for every
+    /// workout a thread in this list is about, not one fetch per thread.
     func threadSummaries() async throws -> [ChatThreadSummary] {
+        let records = try modelContext.fetch(FetchDescriptor<ChatThreadRecord>())
+        let workoutIDs = Set(records.compactMap { record -> UUID? in
+            record.subjectKindRawValue == ChatSubjectKind.workout.rawValue ? record.workoutUUID : nil
+        })
+        let factsByWorkoutID = try workoutFacts(forWorkoutIDs: workoutIDs)
+
         var summaries: [ChatThreadSummary] = []
-        for record in try modelContext.fetch(FetchDescriptor<ChatThreadRecord>()) {
-            let thread = try record.stored.toDomain()
-            let facts = try workoutFacts(for: thread.subject)
-            summaries.append(ChatThreadSummary(thread, workoutFacts: facts))
+        summaries.reserveCapacity(records.count)
+        for record in records {
+            if record.summaryFieldsComputed {
+                let subject = try StoredChatThread.subject(
+                    kindRawValue: record.subjectKindRawValue,
+                    workoutUUID: record.workoutUUID,
+                    scopeFromISO8601: record.scopeFromISO8601,
+                    scopeThroughISO8601: record.scopeThroughISO8601
+                )
+                summaries.append(ChatThreadSummary(
+                    id: record.threadUUID,
+                    subject: subject,
+                    lastActivityAt: record.lastActivityAt,
+                    firstUserMessageContent: record.summaryFirstUserMessageContent,
+                    lastVisibleMessageContent: record.summaryLastVisibleMessageContent,
+                    workoutFacts: subject.workoutID.flatMap { factsByWorkoutID[$0] }
+                ))
+            } else {
+                // A legacy row from before MAX-188 — no summary columns to read, so
+                // this one thread is decoded in full, exactly as every thread used to
+                // be. `store(_:)` recomputes the fast-path columns the next time this
+                // thread is written to, so the cost here is bounded to threads that
+                // have not been touched since this build shipped.
+                let thread = try record.stored.toDomain()
+                summaries.append(ChatThreadSummary(
+                    thread,
+                    workoutFacts: thread.subject.workoutID.flatMap { factsByWorkoutID[$0] }
+                ))
+            }
         }
         return ChatThreadSummary.sortedByActivity(summaries)
     }
@@ -494,18 +540,40 @@ extension MaximizeStore: ChatThreadRepository {
         try modelContext.save()
     }
 
-    /// The run a workout thread's title names (§2.4). `nil` for a training subject —
-    /// there is no single run to look up.
+    /// The runs a batch of workout threads' titles name (§2.4), in one fetch rather than
+    /// one per thread (MAX-188 — the audit's N+1 alongside the transcript decode).
+    ///
+    /// - Parameter ids: every workout a thread in the list being summarised is about.
+    ///   Empty is common (an all-training thread list) and short-circuits before any
+    ///   fetch runs.
     ///
     /// `TimeZone.current` matches `WorkoutDetailModel`'s own default and its reasoning:
     /// the day a run belongs to is the day the athlete was in when they started it, and
     /// the device's zone is the app's only account of that.
-    private func workoutFacts(for subject: ChatSubject) throws -> WorkoutThreadFacts? {
-        guard let workoutID = subject.workoutID else { return nil }
-        guard let record = try workoutRecords(for: workoutID).first else { return nil }
-        let workout = try record.stored.toDomain()
-        let day = try workout.calendarDay(in: TimeZone.current)
-        return WorkoutThreadFacts(day: day, activityType: workout.activityType)
+    ///
+    /// A workout id absent from the result carries no facts, matching what the old
+    /// per-thread lookup returned for the same case — `ChatThreadTitle.workout(_:)`'s
+    /// documented fallback, not a new failure mode.
+    private func workoutFacts(forWorkoutIDs ids: Set<UUID>) throws -> [UUID: WorkoutThreadFacts] {
+        guard !ids.isEmpty else { return [:] }
+        let idList = Array(ids)
+        let records = try modelContext.fetch(
+            FetchDescriptor<WorkoutRecord>(
+                predicate: #Predicate<WorkoutRecord> { idList.contains($0.workoutUUID) },
+                sortBy: [SortDescriptor<WorkoutRecord>(\.ingestedAt, order: .forward)]
+            )
+        )
+        var factsByWorkoutID: [UUID: WorkoutThreadFacts] = [:]
+        for record in records {
+            // Oldest `ingestedAt` first, same tiebreak `workoutRecords(for:).first`
+            // uses (a CloudKit-race duplicate, see that method's doc comment) — the
+            // first record seen per id is kept and every later duplicate is skipped.
+            guard factsByWorkoutID[record.workoutUUID] == nil else { continue }
+            let workout = try record.stored.toDomain()
+            let day = try workout.calendarDay(in: TimeZone.current)
+            factsByWorkoutID[record.workoutUUID] = WorkoutThreadFacts(day: day, activityType: workout.activityType)
+        }
+        return factsByWorkoutID
     }
 
     private func threadRecord(id: UUID) throws -> ChatThreadRecord? {
