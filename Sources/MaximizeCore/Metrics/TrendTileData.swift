@@ -398,7 +398,7 @@ public struct TrendTileData: Hashable, Sendable {
                 )
             }
             return Tile(
-                value: String(format: "%.2f", locale: nil, ratio),
+                value: Self.formattedLoadBalanceRatio(ratio),
                 caption: Self.loadBalanceCaption(balance)
             )
         }
@@ -414,6 +414,18 @@ public struct TrendTileData: Hashable, Sendable {
         guard missing > 0 else { return "acute:chronic load" }
         let session = missing == 1 ? "session" : "sessions"
         return "acute:chronic load (\(missing) \(session) this week without strain)"
+    }
+
+    /// Two decimal places — enough to tell "1.00" from "1.08", not enough to imply a
+    /// precision an Edwards-weighted integral over a heart-rate curve does not have.
+    ///
+    /// Internal rather than private for `formattedAverageScore`'s reason and by its
+    /// precedent: `TrainingFactSheet` prints this ratio too since MAX-192, and §3.6(c)
+    /// asks the fact sheet to render a shared figure at the tile's precision. Delegating
+    /// is stronger than asserting the two agree — there is one `%.2f` in the codebase and
+    /// both surfaces reach it.
+    static func formattedLoadBalanceRatio(_ ratio: Double) -> String {
+        String(format: "%.2f", locale: nil, ratio)
     }
 
     /// One decimal place.

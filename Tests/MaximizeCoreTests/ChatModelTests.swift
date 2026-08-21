@@ -643,6 +643,137 @@ final class ChatModelTests: XCTestCase {
         XCTAssertTrue(chatModel.messages.isEmpty)
     }
 
+    // MARK: - Load balance on the training path (MAX-192)
+
+    /// A session at a chosen offset from `epoch`, with or without a strain figure — the
+    /// records `LoadBalanceResolver` reads. `Fixture.workout()` always starts at `epoch`,
+    /// so the dates these tests turn on are built here.
+    private func storeSession(
+        in store: InMemoryWorkoutStore,
+        daysFromEpoch: Int,
+        strainPoints: Double?
+    ) async throws {
+        let id = UUID()
+        let start = Fixture.epoch.addingTimeInterval(Double(daysFromEpoch) * 86_400)
+        try await store.store(
+            try Workout(
+                id: id,
+                activityType: .running,
+                start: start,
+                end: start.addingTimeInterval(3_600),
+                durationSeconds: 3_600,
+                distanceMeters: 8_000,
+                activeEnergyKilocalories: 500,
+                hasRoute: true,
+                source: .appleWatch,
+                ingestedAt: start.addingTimeInterval(3_660)
+            )
+        )
+        var strain: WorkoutStrain?
+        if let strainPoints {
+            strain = try WorkoutStrain(points: strainPoints)
+        }
+        try await store.store(
+            try DerivedMetrics(
+                workoutID: id,
+                averageHeartRateBPM: 142,
+                maximumHeartRateBPM: 160,
+                timeAboveCapSeconds: 250,
+                heartRateDriftFraction: 0.032,
+                strain: strain,
+                planVersion: PlanVersion(1)
+            )
+        )
+    }
+
+    private func sentFactSheet(
+        store: InMemoryWorkoutStore,
+        question: String = "Am I ramping too fast?"
+    ) async throws -> String {
+        let chatClient = FakeStreamingChatModelInvoking(events: [.text("A."), .completed(.endTurn)])
+        let (chatModel, _) = try await model(
+            subject: .training(try scope()), store: store, chatClient: chatClient
+        )
+        await chatModel.load()
+        chatModel.composerText = question
+        await chatModel.send()
+        return try XCTUnwrap(chatClient.receivedInstructions.last).factSheet
+    }
+
+    /// The finding MAX-192 closes, asserted end to end: the figure the dashboard tile
+    /// draws now reaches the prompt, resolved through `LoadBalanceResolver` from the same
+    /// stored records. Before this the thread refused — correctly, under `trainingTask`'s
+    /// never-invent rule — to answer a question the app had already answered.
+    ///
+    /// 100 points three days before `epoch` and 300 twenty days before it: an acute sum of
+    /// 100 against a chronic 400, whose weekly scaling is also 100, so the ratio is 1.00.
+    /// The fortieth-day session is what puts the app's own history behind the whole chronic
+    /// window; it contributes to neither sum.
+    func testATrainingThreadSendsAResolvedLoadBalance() async throws {
+        let store = try await readyStore()
+        try await storeSession(in: store, daysFromEpoch: -3, strainPoints: 100)
+        try await storeSession(in: store, daysFromEpoch: -20, strainPoints: 300)
+        try await storeSession(in: store, daysFromEpoch: -40, strainPoints: 500)
+
+        let factSheet = try await sentFactSheet(store: store)
+
+        XCTAssertTrue(
+            factSheet.contains(
+                "Acute:chronic load balance as of 2026-01-01: 7-day strain 100, typical week "
+                    + "over the last 28 days 100, 28-day total 400, ratio 1.00\n"
+            ),
+            factSheet
+        )
+        // `readyStore`'s own workout sits on `epoch` with metrics that carry no strain, so
+        // the coverage note is not decoration here — it is the one session in the acute
+        // window that neither sum could count.
+        XCTAssertTrue(
+            factSheet.contains(
+                "Coverage: 1 session in the 7-day window and 1 session in the 28-day window "
+                    + "carried no strain figure"
+            ),
+            factSheet
+        )
+    }
+
+    /// A young account: one day of history against the 28 a baseline needs. The prompt
+    /// says which state that is, in the tile's own words, rather than dividing over a
+    /// window nothing observed.
+    func testAShortHistoryReachesThePromptAsTheDesignedAbsence() async throws {
+        let factSheet = try await sentFactSheet(store: try await readyStore())
+
+        XCTAssertTrue(
+            factSheet.contains(
+                "Acute:chronic load balance: building load history — 1/28 days of the "
+                    + "four-week baseline are on record."
+            ),
+            factSheet
+        )
+        XCTAssertFalse(factSheet.contains("ratio 0.00"), factSheet)
+        XCTAssertFalse(factSheet.contains("not carried in this summary"), factSheet)
+    }
+
+    /// The strain a session carries reaches its own line, and a session whose metrics
+    /// carry none simply has no such field — never a zero.
+    ///
+    /// The strained session is placed three days *after* `epoch` so that it lands inside
+    /// the thread's own scope (`scope()` runs 2026-01-01 through 2026-01-07): the builder
+    /// narrows session lines back to the scope, so a session in the widened C1 fetch but
+    /// outside the window would not be listed at all.
+    func testSessionLinesCarryTheirStoredStrain() async throws {
+        let store = try await readyStore()
+        try await storeSession(in: store, daysFromEpoch: 3, strainPoints: 100)
+
+        let factSheet = try await sentFactSheet(store: store)
+        let sessionLines = factSheet.split(separator: "\n").map(String.init).filter {
+            $0.hasPrefix("2026-01-")
+        }
+
+        XCTAssertEqual(sessionLines.count, 2, factSheet)
+        XCTAssertEqual(sessionLines.filter { $0.contains("· Strain: 100 ·") }.count, 1, factSheet)
+        XCTAssertFalse(sessionLines.contains { $0.contains("Strain: 0") }, factSheet)
+    }
+
     // MARK: - The runs strip (§2.2, §6.2, MAX-103)
 
     /// A workout thread's sheet already sits on top of that run's own screen (§6.1), so

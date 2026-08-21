@@ -507,6 +507,15 @@ enum MaximizeSchemaV1: VersionedSchema {
     /// `MaximizeSchemaV1`'s version number does not move — see
     /// `distanceSplitsJSON`'s doc comment above for why a version bump is not owed until
     /// this schema is actually promoted to CloudKit production, which A8 keeps off.
+    ///
+    /// ## MAX-188's additive columns, same shape
+    ///
+    /// `summaryFirstUserMessageContent`, `summaryLastVisibleMessageContent` and
+    /// `summaryFieldsComputed` are the same story again: two optional, default-less
+    /// strings and a `Bool` defaulting `false`. A row written before this ticket reads
+    /// back with both strings `nil` and the flag `false` — see each property's own doc
+    /// comment, and `StoredChatThread`'s for why `threadSummaries()` reads that flag
+    /// rather than treating `nil` as self-explanatory.
     @Model
     final class ChatThreadRecord {
         var threadUUID: UUID = UUID()
@@ -547,6 +556,24 @@ enum MaximizeSchemaV1: VersionedSchema {
         /// written by this build always sets it explicitly.
         var lastActivityAt: Date = StoredChatThread.unsetLastActivityAt
 
+        /// MAX-188's denormalised summary columns — see `StoredChatThread`'s doc comment
+        /// for the full reasoning. Deliberately **not** `@Attribute(.externalStorage)`:
+        /// these are short strings a summary row actually renders, not a transcript, so
+        /// they belong in the row SwiftData already reads for `threadSummaries()`'s
+        /// `FetchDescriptor<ChatThreadRecord>()`, the same way `lastActivityAt` above
+        /// does. `messagesJSON` stays the only externally-stored attribute on this model.
+        var summaryFirstUserMessageContent: String?
+
+        /// See `summaryFirstUserMessageContent`.
+        var summaryLastVisibleMessageContent: String?
+
+        /// `false` on every row written before this ticket — CloudKit's "every
+        /// non-optional property needs a default" rule makes that the only legal default,
+        /// and it is also the honest one: a pre-MAX-188 row's two summary columns above
+        /// are `nil` because nothing ever wrote them, not because the thread has no first
+        /// question or no last message. See `StoredChatThread.summaryFieldsComputed`.
+        var summaryFieldsComputed: Bool = false
+
         init(_ stored: StoredChatThread) {
             threadUUID = stored.threadUUID
             subjectKindRawValue = stored.subjectKindRawValue
@@ -556,6 +583,9 @@ enum MaximizeSchemaV1: VersionedSchema {
             messagesJSON = stored.messagesJSON
             createdAt = stored.createdAt
             lastActivityAt = stored.lastActivityAt
+            summaryFirstUserMessageContent = stored.firstUserMessageContent
+            summaryLastVisibleMessageContent = stored.lastVisibleMessageContent
+            summaryFieldsComputed = stored.summaryFieldsComputed
         }
 
         var stored: StoredChatThread {
@@ -568,7 +598,10 @@ enum MaximizeSchemaV1: VersionedSchema {
                     scopeThroughISO8601: scopeThroughISO8601,
                     messagesJSON: messagesJSON,
                     createdAt: createdAt,
-                    lastActivityAt: lastActivityAt
+                    lastActivityAt: lastActivityAt,
+                    firstUserMessageContent: summaryFirstUserMessageContent,
+                    lastVisibleMessageContent: summaryLastVisibleMessageContent,
+                    summaryFieldsComputed: summaryFieldsComputed
                 )
             }
             set {
@@ -580,6 +613,9 @@ enum MaximizeSchemaV1: VersionedSchema {
                 messagesJSON = newValue.messagesJSON
                 createdAt = newValue.createdAt
                 lastActivityAt = newValue.lastActivityAt
+                summaryFirstUserMessageContent = newValue.firstUserMessageContent
+                summaryLastVisibleMessageContent = newValue.lastVisibleMessageContent
+                summaryFieldsComputed = newValue.summaryFieldsComputed
             }
         }
     }

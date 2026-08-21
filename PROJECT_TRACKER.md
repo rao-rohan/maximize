@@ -1975,6 +1975,8 @@ free. What landed in the file:
 | MAX-185 | **"New chat" now actually creates a new thread** — the chat audit's worst-ranked defect (MAX-184 §2.1). `ChatSheet.startNewTrainingChat()` reassigned `opening` to the same `.subject(scope)` value the Ask button already produces on the common path, so `.id(opening)` never changed and the toolbar button was inert; `ChatThreadRepository.thread(for:newThreadID:at:)` would have resolved to the thread already open even if the view had been recreated. **Both no-ops confirmed by reading, independently — the diagnosis was correct.** Fixed with a third `ChatModel.Opening` case, `.newThread`, reached by a new `init(startingNewThreadFor:)`: it mints a thread unconditionally rather than ever asking the repository to resolve one, under test in `ChatModelTests`. `ChatSheet.Opening.newThread(ChatSubject, UUID)` carries a nonce so `.id(opening)` changes on every tap, including a second tap on an unchanged scope. See the MAX-185 section below | 184, 097 | Sonnet — **PR open, not yet merged.** Package compiles and core unit tests pass by inspection only; no toolchain here to run them (R1). Needs device verification, per the PR |
 | MAX-186 | **The workout chat card becomes a door, and refreshes** — `WorkoutChatSectionView`'s card had no tap target of any kind (MAX-098 removed its "Open chat" button and never replaced it) and reloaded only in `.task`, which does not re-fire on return from the chat sheet — so *chat about this run → Done* left the card still showing the invitation, verbatim the defect MAX-098's own doc comment says the card exists to prevent. Both confirmed against current source before anything was changed, per `docs/CHAT-AUDIT.md` §2.2 (MAX-184). Fixed: the whole card is now a `Button` presenting `ChatSheet(subject: .workout(workoutID))` — the same route `ChatEntryPoint.resolve(focus:currentInterval:)` already resolves for this screen, not a second one — and `.sheet(item:onDismiss:)` reloads the preview exactly once, on dismissal, however it happened (no polling, no `onAppear`/`onDisappear` pair, no model call — A14). What the card says moved into `MaximizeCore` (`WorkoutChatCardPresentation`, built on `ChatThreadSummary` rather than a parallel notion of "the last thing said"), under test. **Reconciles §2.1's "two chat buttons on one screen" argument**: this was never a second *button* saying the same thing as the Ask control, it is a preview the audit found had no affordance at all — see the MAX-186 section below | 184 | Sonnet — **PR open, not yet merged.** Package compiles and core unit tests pass by inspection only; no toolchain here to run them (R1). Needs device verification, per the PR |
 | MAX-187 | **A plan proposal card does not outlive its save** — §2.3's defect: accepting a proposal, saving, and pressing Back used to leave a diff card on screen describing a change already applied, **Accept** still live, a second tap writing a genuine duplicate plan version (D1 intact throughout — the screen was lying, not the data). `ChatModel.endProposalIfAlreadyStored()` reuses `discardProposal()`'s one door (`planDrafting = .idle` plus a transcript `.notice`) rather than adding a second mechanism, and decides by asking storage: `PlanProposalReview.standing`'s captured version against a fresh `PlanAuthoring.currentVersion(of:)` read — not a callback from `PlanAuthoringModel`, which has no reference back to the `ChatModel` that opened it and was kept that way rather than wired up across `ChatSheet.swift` (owned by MAX-185 concurrently). `ChatConversationView` calls it from `.onAppear`, since `.task` does not re-run when `PlanAuthoringView` pops back off the stack. See the MAX-187 section below | 184 | Sonnet — branch pushed, PR open; not yet reviewed or merged |
+| MAX-188 | 🔒 **`threadSummaries()` no longer decodes a transcript to draw a list of titles** — §2.4's in-memory exposure. `ChatThreadRecord` gains three columnar fields (`summaryFirstUserMessageContent`, `summaryLastVisibleMessageContent`, `summaryFieldsComputed`) written whenever a thread is stored; the fast path builds `ChatThreadSummary` from those columns and never touches the `@Attribute(.externalStorage)` `messagesJSON` blob. A pre-ticket row (`summaryFieldsComputed == false`) still falls back to a full decode for that one row — bounded, self-clearing the next time the thread is written to. The workout lookup is batched into one query for every workout thread in the list, closing the audit's N+1 alongside it. **No schema version bump** — three additive, default-required columns, `distanceSplitsComputed`'s precedent. See the MAX-188 section below | 184 | Sonnet 🔒 |
+| MAX-192 | **The training roll-up carries strain and load balance** 🔒 — `TrainingContext` gains each session's stored `strainPoints` (MAX-176) and `LoadBalanceCalculator`'s whole reading (MAX-178), so the acute:chronic figure a tile draws now reaches the prompt one tap away from it. Closes MAX-184 §3.2, the audit's highest-ranked finding: a thread asked *"am I ramping too fast"* used to refuse, correctly under `trainingTask`'s never-invent rule, to answer a question the app had already computed. The reading arrives **already computed** through `LoadBalanceResolver` — never assembled from the roll-up's own records, which cover the scope's weeks and not the chronic window — and is anchored to *today*, which `ContextInputs` enforces. Three absences worded apart; the window's opening sentence now names the one rolling exception. **Per-muscle fatigue (MAX-179) was considered and declined**, and the exclusion is stated in the prompt. **Gated on A30** — A12 rule 2 makes a widening of what leaves the device an amendment, A29 settled the same question for the workout subject, and gating one subject and not the other would make the rule arbitrary; the amendment is in the same PR, first in the diff. See the MAX-192 section below | 176, 177, 178, 179, 184, A12/A29/**A30** | **Opus** 🔒 |
 | MAX-194 | **A run's conversation gets a door to the plan's** — §3.5's fix. A new composer accessory on a workout thread, `PlanConversationDoor` (`MaximizeCore`, under test), decides whether to offer the door and what it says; `ChatModel.planConversationDoor` reads it straight off the same context the fact sheet already rendered. **Targets the run's own Monday-first week** — `WorkoutContext.SurroundingWeek`'s own bounds (MAX-182), reused rather than re-derived, never the dashboard's current window, so the target can never disagree with what the athlete was already told. Resolves *the* thread for that week exactly the way the Ask button and the scope-mismatch banner already do — `ChatSheet`'s existing `.subject` reassignment gained a `continuityNote` passenger rather than a fourth `Opening` case, and never mints (minting stays **New chat**'s job). Carries exactly one honest line of continuity, screen-only and never sent to a prompt — D3 untouched, no widening. The button's own words vary with whether a plan governs that week, matching `PlanAuthoringFormatting`'s canonical "No plan has been authored yet" rather than a second wording of the same fact. **`canDraftPlan`'s training-only gate is untouched** — MAX-184's audit called it correct, and this is the missing route, not a relaxation of it. See the MAX-194 section below | 184, 097, 182 | Sonnet — branch pushed, PR open; not yet reviewed or merged. Package compiles and core unit tests pass by inspection only; no toolchain here to run them (R1). Needs device verification, per the PR |
 
 **Four collisions the overseer must respect.**
@@ -6405,6 +6407,267 @@ it, save it on the authoring screen, press Back, and confirm the card no longer 
 one new version was written.
 
 **`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
+
+## MAX-188 — the thread list stops decoding every transcript
+
+§2.4's finding, confirmed before anything was built: `ChatThreadSummary`'s own doc comment
+(`ChatThreadSummary.swift:134-137` pre-ticket) states a summary must carry no transcript — "health
+data in memory for a screen that shows none of it" — and `MaximizeStore.threadSummaries()` was
+the one implementation the app actually calls, and it violated that rule on every call: full
+`record.stored.toDomain()` per row (a `messagesJSON` JSON decode, `@Attribute(.externalStorage)`),
+plus a separate `workoutFacts(for:)` fetch per workout-subject thread. The premise held; nothing
+here is a refusal.
+
+### The shape chosen: stored summary fields, not a projection fetch
+
+Two viable shapes were on the table. A `FetchDescriptor` projection (`propertiesToFetch`) was
+rejected first: there is no Swift toolchain in this container to confirm SwiftData actually
+returns a partial `ChatThreadRecord` rather than faulting in the rest on first property access —
+and this ticket's own brief says not to assume it. Denormalised fields are the shape that does
+not depend on an unverifiable SwiftData behaviour.
+
+**`ChatThreadRecord` gains three columns**, mirrored on `StoredChatThread` in the core:
+
+- `summaryFirstUserMessageContent: String?` — the raw content of `thread.firstUserMessage`.
+- `summaryLastVisibleMessageContent: String?` — the raw content of `thread.lastVisibleMessage`.
+- `summaryFieldsComputed: Bool = false` — whether the two strings above were actually written by
+  a build that knows about them, as opposed to defaulting to `nil` because the row predates the
+  column.
+
+**Raw content, not a formatted title or preview.** `ChatThreadTitle` and the new `ChatThreadPreview`
+still do the collapsing, truncation and scope-label fallback — at read time, from whichever source
+handed them a string. A decoded `ChatMessage.content` and this column's value are interchangeable
+inputs to the same pure functions, so a future change to how a title or preview is *formatted*
+needs no backfill of stored data.
+
+**What keeps them honest.** `StoredChatThread.init(_ thread:createdAt:)` — `MaximizeStore.store(_:)`'s
+only path to a written row — recomputes all three columns from the thread being written, every
+time. So a thread being talked to never drifts: the columns are exactly what a full decode would
+have produced, one turn behind at most (never stale across a completed write). A thread that is
+never written to again keeps whatever it last wrote, which is correct — nothing about it changed.
+The one place drift could enter — the write and the read using different rules — is closed by
+construction: `ChatThreadSummary`'s new lightweight initializer and the full-thread initializer
+both bottom out in the same `ChatThreadTitle.derive(subject:firstUserMessageContent:workoutFacts:)`
+and `ChatThreadPreview.line(for:)`, pinned equal by
+`testALightweightSummaryMatchesOneBuiltFromTheFullThread`.
+
+### Why `summaryFieldsComputed`, not just checking the strings for `nil`
+
+`nil` is also the *correct* value for a thread nobody has asked anything in, or one with no
+visible turns yet — so a bare `nil` cannot distinguish "empty thread" from "row written before
+this ticket, nothing backfilled." The flag is what does: `false` on every row `ChatThreadRecord`
+already held, `true` on every row this build's `store(_:)` ever writes, permanently after. It is
+the same shape `DerivedMetricsRecord.distanceSplitsComputed` already established for exactly this
+"a column some rows will not have written" case.
+
+`MaximizeStore.threadSummaries()` reads the flag: `true` builds the summary from the three
+columns and the subject's own plain-column fields (`subjectKindRawValue`, `workoutUUID`,
+`scopeFromISO8601`, `scopeThroughISO8601`) — `messagesJSON` never touched. `false` falls back to
+exactly the old full decode, for that one row only. That fallback is bounded and self-clearing:
+the next time the athlete writes to that thread, `store(_:)` recomputes the columns and the row
+joins the fast path. A thread that is never spoken to again keeps paying the old cost for
+itself alone — never for the whole list, which was the defect.
+
+### Schema version: unchanged, and the argument for it
+
+Every new property is either `String?` with no default or `Bool` with a `false` default — the two
+shapes `DerivedMetricsRecord.distanceSplitsJSON`/`.distanceSplitsComputed` already used for an
+additive column under A8 (mirroring off, so the CloudKit promotion that would demand a version
+bump has not happened). SwiftData's lightweight migration adds the column to an existing table
+without rewriting a row: a `ChatThreadRecord` written before this build reads back with both
+strings `nil` and the flag `false` — the legacy shape, read honestly, not backfilled with an
+invented value. `MaximizeSchemaV1`'s version number does not move.
+
+### The batched workout lookup
+
+`workoutFacts(for subject:)` (one `WorkoutRecord` fetch per workout-subject thread) is replaced
+by `workoutFacts(forWorkoutIDs ids: Set<UUID>)` — one `FetchDescriptor<WorkoutRecord>` with an
+`ids.contains($0.workoutUUID)` predicate over every workout id the list's threads name, sorted by
+`ingestedAt` so a CloudKit-race duplicate resolves to the same oldest record `workoutRecords(for:)`
+already picks. An empty id set (an all-training thread list) short-circuits before any fetch runs.
+
+### Existing rows are safe — the load-bearing test
+
+`StoredRecordRoundTripTests.testALegacyRowPredatingTheSummaryColumnsStillReadsBackWhole`
+hand-constructs a `StoredChatThread` the way the memberwise initializer's now-defaulted trailing
+parameters make trivial — omitting `firstUserMessageContent`, `lastVisibleMessageContent` and
+`summaryFieldsComputed` entirely, the exact shape a pre-MAX-188 row reads back as. It asserts the
+flag reads `false`, both new columns read `nil`, and — the part that actually matters —
+`toDomain()` still reconstructs the full transcript, subject and `lastActivityAt` unchanged. A
+device holding history from before this build loses nothing and keeps reading correct summaries,
+through the fallback path, until the next time each thread is written to.
+
+### Tests (core, CI-verified)
+
+`StoredRecordRoundTripTests`: writing a thread computes its summary columns; an empty thread's
+columns are `nil` but `summaryFieldsComputed` is `true`; the seed-only case; the legacy-payload
+read-back above; `StoredChatThread.subject(kindRawValue:workoutUUID:scopeFromISO8601:scopeThroughISO8601:)`
+decodes both subject kinds from columns alone and rejects the same two corrupted shapes
+`toDomain()` already rejected. `ChatThreadSummaryTests`/`ChatThreadTitleTests`: the lightweight
+`ChatThreadSummary` initializer agrees with the full-thread one; an empty training thread's
+lightweight summary states its window; the lightweight preview collapses and truncates
+identically; `ChatThreadTitle.derive(subject:firstUserMessageContent:workoutFacts:)` agrees with
+`derive(for:workoutFacts:)` and falls back to the scope label.
+
+### What could not be verified
+
+**No Swift toolchain in this container** — `App/Persistence/MaximizeStore.swift` and
+`MaximizeSchema.swift` were never built. Both files are App-layer and CI has never executed
+them (R2/R13); the core changes they depend on (`StoredChatThread`, `ChatThreadSummary`,
+`ChatThreadTitle`) are covered by the tests above, which *would* run in CI, but this session could
+not run `swift build`/`swift test` itself to confirm they pass. The `ids.contains($0.workoutUUID)`
+`#Predicate` shape is SwiftData's documented pattern for a captured-array membership test; it was
+not compiled here either. **Needs device verification**: install over an existing store carrying
+several threads (ideally some pre-dating this build) and confirm the thread list still shows
+correct titles, previews and ordering, and that opening any of them shows the full history intact.
+
+### Security review
+
+`/security-review` was run — mandatory, this changes how health data (chat transcripts) sits in
+memory. See the PR for its findings.
+---
+
+## MAX-192 — the training roll-up carries strain and load balance
+
+**This PR is gated on A30.** A12 rule 2 makes a widening of what health data leaves the
+device an amendment-level question rather than a ticket-level one, and A29 settled exactly
+that question for the *workout* subject one merge earlier. This is the same question for the
+training subject. It reached the security review as the one open point — the review's own
+note — and the overseer decided it the cautious way, on the argument that gating one subject
+and not the other would make the rule arbitrary, and a rule applied arbitrarily stops
+constraining anything. **A30 is in this PR, first in the diff**, and the code is a proposal
+until it is accepted.
+
+A30 also records the two halves separately, because they are not the same widening: the
+per-session strain figure adds no new *category* — it is an integral of the same heart-rate
+curve whose average and drift already sit on that line — while the four load-balance scalars
+genuinely do describe days the athlete's frozen scope does not cover.
+
+MAX-184 §3.2's finding, and the one it ranked first: strain (MAX-176/177), acute:chronic load
+balance (MAX-178) and per-muscle fatigue (MAX-179) were computed, stored and drawn on a tile,
+and reached **no prompt on the training side at all**. So a training thread asked *"am I
+ramping too fast?"* refused — correctly, under `trainingTask`'s never-invent rule — to answer
+a question the app had already answered one tap away. That refusal is honest and useless, and
+it makes the honesty rule look like a defect.
+
+What now reaches the prompt:
+
+- **Each session line carries its stored strain**, `Strain: 138`, read off
+  `DerivedMetrics.strain` (D2 — no integral is taken here). Absent where the record has none.
+- **The tallies block carries the whole load-balance reading**: the 7-day sum, the 28-day
+  total, the 28-day total *scaled to a week* (which is the ratio's actual denominator), and
+  the ratio, at the tile's own `%.2f` through `TrendTileData.formattedLoadBalanceRatio`.
+
+### The reading arrives computed, and the reason is not style
+
+`ContextBuilder` calls `TalliesCalculator` itself because `records` is exactly the set that
+calculator needs. `LoadBalanceCalculator` is the opposite case: its windows are the 7 and 28
+days ending **today**, and C1 obliges a caller to supply only the Monday-first weeks touching
+the scope — seven days for a weekly thread. A calculator handed a short set does not fail; it
+returns a smaller sum. That would have put a quietly undercounted load figure into a prompt,
+where nothing on screen contradicts it.
+
+So the reading is passed in whole, exactly as `TrendTileData` takes it, and
+`LoadBalanceResolver` (new, in the core) is the one place that resolves it — the two
+repository reads the dashboard's `TrendTilesModel` was doing privately, moved down where a
+unit test can drive them. **`TrendTilesModel` still has its own copy and should be migrated
+onto the resolver**; that is a follow-up, noted below, not done here. A29 named this ticket as the place that
+would produce one shared resolution, and A30 records that rule — until the dashboard is
+migrated the two agree by history rather than by construction.
+
+### The anchor is *today*, not the frozen window, and the prompt says so
+
+Anchoring a rolling read to `scope.through` would have been worse than inconsistent with the
+dashboard: an ordinary this-week thread opened on a Wednesday ends its window on Sunday, so
+the acute sum would have run four days into the future and reported a load deflated by days
+that had not happened. `ContextInputs` refuses a reading anchored to any day but `today`.
+
+The consequence is that one figure in the sheet is not measured over the window, which made
+the block's opening sentence — *"Every figure below is measured over exactly these days"* —
+false. It now names the exception. A prompt whose framing sentence contradicts a figure four
+lines below it is worse than either alone.
+
+### Per-muscle fatigue: considered, declined, and the exclusion stated
+
+MAX-179's map exists and MAX-180 draws it. It is **not** carried here, on three grounds:
+
+1. It is six figures, not one, for a signal its own doc comment describes as *"roughly one bit
+   of real information"*.
+2. It is a function of **now**, and the fact sheet is a cached prefix that is stable for the
+   life of a thread precisely because the scope is frozen. A fatigue map would age inside it —
+   day three of a conversation would still assert Tuesday's reading.
+3. It answers *"what should I train today"*, which is not the question a roll-up over a fixed —
+   and possibly historical — window is for.
+
+**The exclusion is stated in the prompt rather than left silent**, because silence would not
+have been neutral here: the plan block already names the muscle groups the plan *prescribes*
+and the session lines name every lift, so a model with both and no such sentence can assemble
+a recovery narrative out of an ask and a duration. The sentence also carries MAX-179's own
+limit — nothing in this app records sets, reps or weight.
+
+### Three absences, worded apart, because they are three different facts
+
+| State | What it says |
+|---|---|
+| Under 28 days of history | *"building load history — 6/28 days …"*, in `TrendTileData`'s own words. **Not a ratio over a short window, and not a zero.** |
+| A full chronic window carrying no strain | The acute sum is real and stated; the ratio is withheld because its denominator is zero. The days exist — what is missing is a baseline. |
+| No reading supplied at all | A fact about this record, not about the athlete. Never borrows `.buildingHistory`'s sentence. |
+
+A fourth absence sits on the session lines: a line with no strain figure has none stored —
+**never a zero**, which would say the session cost nothing. Stated once in the sessions
+preamble, per this file's inverted convention, together with the unit and both of the figure's
+limits (unbounded rather than a rating; heart-rate only, so on a lift it says nothing about
+sets, reps or load — A20).
+
+### Why the no-verdict scan is scoped rather than reused wholesale
+
+`TrendTileDataTests.testLoadBalanceTilesNeverEditorialise` scans a tile's rendered strings for
+coaching words. The fact sheet cannot reuse that scan as-is: the sentence beside the figures
+says *"do not call a number high, low, safe or risky"* — it contains the words **because it
+forbids them**. `TrainingFactSheetLoadTests.testTheLinesCarryingTheFiguresNeverEditorialise`
+therefore scans only the lines carrying the figures, and matches whole words rather than
+substrings ("below" is not a verdict).
+
+### What this widens, stated plainly
+
+A training thread already sent, per turn, a plan, a set of tallies and up to 200 session
+lines. It now also sends one stored figure per session line — the strain integral of a curve
+whose average and drift were already in the same prompt, so no new *category* of health data —
+and four scalars describing the 28 days ending today. **That last part is a genuine widening**,
+not a re-derivation: for a frozen historical window those days are training the scope does not
+cover. They name no session, no day, no distance and no route, they are the same figures the
+dashboard tile already draws, and they are what makes the owner's own question answerable —
+but "it's the same numbers" does not make it not a widening, and it is recorded here as one.
+`/security-review` run, per CLAUDE.md's rule for anything touching what enters a prompt — and it is A30, not this ticket, that decides the four scalars are an acceptable widening. The review raised the missing amendment as its one finding; writing A30 is the answer to it.
+
+### What CI can and cannot prove
+
+CI can prove: the package compiles; every rendered line is pinned as a literal, including the
+complete set of session lines for a window mixing sessions with and without strain; each of
+the four load states renders its own sentence and no two are equal; the ratio the sheet prints
+is the string the tile prints, from one `LoadBalanceCalculator` run over one set of stored
+records (`TrainingContextAgreementTests`); a reading anchored to another day is refused at
+assembly; and — end to end through `ChatModel` against the in-memory store — the figure that
+reaches the transport is the one the resolver computed.
+
+CI cannot prove that the wording works on a model. Nothing here has been put in front of
+Claude: whether the ratio's denominator sentence actually stops a model dividing the raw sums,
+and whether the no-verdict instruction holds under a direct *"is that bad?"*, are behavioural
+claims this repository has no way to test. **No device check is needed** — this ticket draws
+no pixels.
+
+**`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
+
+### Found outside the ticket, not done
+
+- **`TrendTilesModel.loadBalance(anchor:workoutRepository:)` duplicates
+  `LoadBalanceResolver`.** The App copy is now the second implementation of the same
+  two-read history probe; it should delegate. Left alone deliberately — App/ is outside this
+  ticket, and the two agree today because the resolver is that method moved verbatim.
+- **MAX-193 will want the same resolver** for the workout subject's week block, and will
+  collide with this ticket in `ContextBuilder.swift`. It should land after this.
+
+---
 
 ## MAX-194 — a door from a run's conversation to the plan's
 

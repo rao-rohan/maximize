@@ -728,6 +728,137 @@ final class StoredRecordRoundTripTests: XCTestCase {
         assertThrows(.malformed, try stored.toDomain())
     }
 
+    // MARK: - MAX-188: the summary's own columns
+
+    /// A thread written by this build always sets its summary columns, so a summary
+    /// can be built from them without ever decoding `messagesJSON` — the property this
+    /// pins.
+    func testWritingAThreadComputesItsSummaryColumns() throws {
+        let thread = try Fixture.thread(
+            subject: .workout(Fixture.workoutID),
+            messages: [
+                try Fixture.message(.user, "Was that on plan?", at: 0),
+                try Fixture.message(.assistant, "Yes — Tuesday is an 8 km easy run.", at: 9),
+            ]
+        )
+        let stored = try StoredChatThread(thread, createdAt: Fixture.epoch)
+
+        XCTAssertTrue(stored.summaryFieldsComputed)
+        XCTAssertEqual(stored.firstUserMessageContent, "Was that on plan?")
+        XCTAssertEqual(stored.lastVisibleMessageContent, "Yes — Tuesday is an 8 km easy run.")
+    }
+
+    /// An empty thread's summary columns are `nil` — same as a thread nobody has
+    /// spoken in — but `summaryFieldsComputed` is still `true`, because this build did
+    /// compute them; there is just nothing to say. That flag, not the `nil`s, is what a
+    /// reader must use to tell "empty" apart from "not computed yet" (a legacy row).
+    func testAnEmptyThreadHasNilSummaryColumnsButIsMarkedComputed() throws {
+        let thread = try Fixture.thread(subject: .workout(Fixture.workoutID))
+        let stored = try StoredChatThread(thread, createdAt: Fixture.epoch)
+
+        XCTAssertTrue(stored.summaryFieldsComputed)
+        XCTAssertNil(stored.firstUserMessageContent)
+        XCTAssertNil(stored.lastVisibleMessageContent)
+    }
+
+    /// The system-only seed turn is not a bubble and must not become the preview, the
+    /// same rule `ChatThreadSummary` enforces for a decoded thread — pinned here
+    /// because MAX-188 gives this column its own write path.
+    func testASeedOnlyThreadHasNoLastVisibleMessageColumn() throws {
+        let thread = try Fixture.thread(
+            subject: .training(try Fixture.scope(from: (2026, 8, 1), through: (2026, 8, 31))),
+            messages: [try Fixture.message(.system, "Training roll-up for August…", at: 0)]
+        )
+        let stored = try StoredChatThread(thread, createdAt: Fixture.epoch)
+
+        XCTAssertNil(stored.firstUserMessageContent)
+        XCTAssertNil(stored.lastVisibleMessageContent)
+    }
+
+    /// **The load-bearing test for this ticket.** A `ChatThreadRecord` written before
+    /// MAX-188's three columns existed has no way to have set them — SwiftData hands
+    /// back each column's default when such a row is read: `nil` for the two strings,
+    /// `false` for the flag. This constructs exactly that payload by hand (the same
+    /// technique `testALegacyRowWithNoLastActivityColumnDerivesItExactlyAsMAX092Did`
+    /// uses for MAX-093's migration) and proves the one thing this ticket must not
+    /// break: a thread stored before this change still reads back whole, transcript
+    /// included.
+    func testALegacyRowPredatingTheSummaryColumnsStillReadsBackWhole() throws {
+        let messages = [
+            try Fixture.message(.user, "Was that on plan?", at: 0),
+            try Fixture.message(.assistant, "Yes — Tuesday is an 8 km easy run.", at: 90),
+        ]
+        let legacyRow = StoredChatThread(
+            threadUUID: Fixture.workoutID,
+            subjectKindRawValue: ChatSubjectKind.workout.rawValue,
+            workoutUUID: Fixture.workoutID,
+            scopeFromISO8601: nil,
+            scopeThroughISO8601: nil,
+            messagesJSON: try PersistencePayload.encode(messages, field: "test"),
+            createdAt: Fixture.at(-1_000),
+            lastActivityAt: Fixture.at(90)
+            // firstUserMessageContent, lastVisibleMessageContent and
+            // summaryFieldsComputed are all omitted — exactly the shape SwiftData
+            // hands back for a row that predates these columns.
+        )
+
+        XCTAssertFalse(legacyRow.summaryFieldsComputed, "a pre-MAX-188 row never set this flag")
+        XCTAssertNil(legacyRow.firstUserMessageContent)
+        XCTAssertNil(legacyRow.lastVisibleMessageContent)
+
+        let restored = try legacyRow.toDomain()
+        XCTAssertEqual(restored.messages, messages, "the transcript itself is untouched by this ticket")
+        XCTAssertEqual(restored.subject, .workout(Fixture.workoutID))
+        XCTAssertEqual(restored.lastActivityAt, Fixture.at(90))
+    }
+
+    // MARK: - MAX-188: the subject alone, without messagesJSON in reach
+
+    /// What `MaximizeStore.threadSummaries()`'s fast path calls instead of `toDomain()`
+    /// — the subject, decoded from the same columns `toDomain()` reads, with no
+    /// `messagesJSON` parameter for a caller to accidentally reach for.
+    func testSubjectDecodesAWorkoutFromItsColumnsAlone() throws {
+        let subject = try StoredChatThread.subject(
+            kindRawValue: ChatSubjectKind.workout.rawValue,
+            workoutUUID: Fixture.workoutID,
+            scopeFromISO8601: nil,
+            scopeThroughISO8601: nil
+        )
+        XCTAssertEqual(subject, .workout(Fixture.workoutID))
+    }
+
+    func testSubjectDecodesATrainingScopeFromItsColumnsAlone() throws {
+        let scope = try Fixture.scope(from: (2026, 8, 1), through: (2026, 8, 31))
+        let subject = try StoredChatThread.subject(
+            kindRawValue: ChatSubjectKind.training.rawValue,
+            workoutUUID: StoredChatThread.noWorkoutSentinel,
+            scopeFromISO8601: scope.from.description,
+            scopeThroughISO8601: scope.through.description
+        )
+        XCTAssertEqual(subject, .training(scope))
+    }
+
+    /// Same rejection `testTrainingRowMissingAScopeColumnIsRejected` pins through
+    /// `toDomain()` — restated for the standalone function so the fast path cannot
+    /// silently misread a corrupted row as a workout in disguise either.
+    func testSubjectRejectsATrainingRowMissingAScopeColumn() {
+        assertThrows(.inconsistent, try StoredChatThread.subject(
+            kindRawValue: ChatSubjectKind.training.rawValue,
+            workoutUUID: StoredChatThread.noWorkoutSentinel,
+            scopeFromISO8601: nil,
+            scopeThroughISO8601: "2026-08-31"
+        ))
+    }
+
+    func testSubjectRejectsAnUnknownKindRawValue() {
+        assertThrows(.malformed, try StoredChatThread.subject(
+            kindRawValue: "coaching",
+            workoutUUID: Fixture.workoutID,
+            scopeFromISO8601: nil,
+            scopeThroughISO8601: nil
+        ))
+    }
+
     func testAppSettingsRoundTripUnchanged() throws {
         let settings = AppSettings(
             restDayBudget: try RestDayBudget(daysPerWeek: 2),
