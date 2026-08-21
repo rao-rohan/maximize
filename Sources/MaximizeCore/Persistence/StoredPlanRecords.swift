@@ -166,6 +166,32 @@ public struct StoredRestDayOverride: Hashable, Sendable {
 /// `MaximizeStore.workoutThreadRecords(for:)` needs the same kind of explicit ordering
 /// `workoutRecords(for:)` already has via `StoredWorkout.ingestedAt`. That job is
 /// unchanged and untouched by this ticket.
+///
+/// ## `firstUserMessageContent` / `lastVisibleMessageContent` — a summary's own columns
+/// (MAX-188)
+///
+/// `ChatThreadSummary`'s own doc comment states the rule it exists to enforce: a list of
+/// threads must not be built by decoding every stored transcript to draw rows that show
+/// none of it. `MaximizeStore.threadSummaries()` did exactly that, because
+/// `messagesJSON` was the only place the two strings a summary needs — the opening
+/// question and the last visible turn — lived. These two columns are that data lifted
+/// out, the same move `subjectKindRawValue` already made for the subject at MAX-093.
+///
+/// They store **raw content, not a formatted title or preview.** `ChatThreadTitle` and
+/// `ChatThreadPreview` still do the collapsing and truncation, at read time, from
+/// whichever source handed them a string — a decoded `ChatMessage.content` or this
+/// column's value are interchangeable inputs to the same pure functions. That is
+/// deliberate: it means a future change to how a title or preview is formatted needs no
+/// backfill, because nothing formatted is ever what gets stored.
+///
+/// `summaryFieldsComputed` is the flag that tells a fast, columns-only read (a row this
+/// build wrote) apart from a row that predates these columns and must still be read
+/// through a full decode this one time — see that property's own doc for why `nil` alone
+/// cannot make that distinction. No schema version bump: both new `String?` columns are
+/// optional and default-less, and `summaryFieldsComputed` is `Bool` with a `false`
+/// default — the same additive shape `distanceSplitsComputed`/`distanceSplitsJSON`
+/// already established, so a pre-MAX-188 row reads back with the two strings `nil` and
+/// the flag `false`, and nothing is rewritten.
 public struct StoredChatThread: Hashable, Sendable {
     public var threadUUID: UUID
 
@@ -194,6 +220,39 @@ public struct StoredChatThread: Hashable, Sendable {
     /// type-level doc for the fallback `toDomain()` applies in that case.
     public var lastActivityAt: Date
 
+    /// The raw content of `ChatThread.firstUserMessage`, denormalised (MAX-188). Nil for
+    /// a thread nobody has asked anything in yet, and for every row written before this
+    /// column existed — see `summaryFieldsComputed`, which is what tells the two apart.
+    ///
+    /// Titles a training subject (`ChatThreadTitle.training(scope:firstUserMessage:)`
+    /// still does the collapsing and truncation — this column stores the same raw string
+    /// `thread.firstUserMessage?.content` always was, not a pre-formatted title, so a
+    /// change to the title rule needs no backfill).
+    public var firstUserMessageContent: String?
+
+    /// The raw content of `ChatThread.lastVisibleMessage`, denormalised (MAX-188). Nil
+    /// for a thread with no visible turns yet, and for every row written before this
+    /// column existed — see `summaryFieldsComputed`.
+    ///
+    /// Previews the row (`ChatThreadPreview.line(for:)` does the collapsing and
+    /// truncation at read time), for the same "store the raw string, format on read"
+    /// reason `firstUserMessageContent` does.
+    public var lastVisibleMessageContent: String?
+
+    /// Whether `firstUserMessageContent` and `lastVisibleMessageContent` were set by a
+    /// write that knew about them (MAX-188), as opposed to defaulting to `nil` because
+    /// the row predates this column and there is nothing to backfill it with.
+    ///
+    /// The distinction matters because `nil` is also the correct value for a thread that
+    /// genuinely has no first user message or no visible turns yet — an empty column
+    /// alone cannot tell "legacy row" apart from "empty thread". This flag is what does:
+    /// `false` on every row written before this ticket (CloudKit's default-required rule,
+    /// same shape as `DerivedMetricsRecord.distanceSplitsComputed`), `true` on every row
+    /// `init(_ thread:createdAt:)` below writes, forever after. `MaximizeStore
+    /// .threadSummaries()` reads this to decide whether it may build a summary from these
+    /// two columns alone, or must fall back to a full decode for that one row.
+    public var summaryFieldsComputed: Bool
+
     /// A fixed, deterministic stand-in for "no workout" — not a fresh `UUID()` on every
     /// construction, which would make two `StoredChatThread` values built from the same
     /// training thread compare unequal for a reason that has nothing to do with their
@@ -205,6 +264,14 @@ public struct StoredChatThread: Hashable, Sendable {
     /// existed. See the type-level doc.
     public static let unsetLastActivityAt = Date.distantPast
 
+    /// - Parameters:
+    ///   - firstUserMessageContent, lastVisibleMessageContent, summaryFieldsComputed:
+    ///     default to "not computed" (MAX-188) — the shape a row written before these
+    ///     columns existed reads back as. A caller building a genuinely fresh record
+    ///     always goes through `init(_ thread:createdAt:)` below, which sets all three
+    ///     explicitly; this memberwise form defaulting to the legacy shape is what lets
+    ///     `StoredRecordRoundTripTests` construct a pre-MAX-188 payload by simply not
+    ///     mentioning them, the same way it already does for `lastActivityAt`.
     public init(
         threadUUID: UUID,
         subjectKindRawValue: String,
@@ -213,7 +280,10 @@ public struct StoredChatThread: Hashable, Sendable {
         scopeThroughISO8601: String?,
         messagesJSON: Data,
         createdAt: Date,
-        lastActivityAt: Date
+        lastActivityAt: Date,
+        firstUserMessageContent: String? = nil,
+        lastVisibleMessageContent: String? = nil,
+        summaryFieldsComputed: Bool = false
     ) {
         self.threadUUID = threadUUID
         self.subjectKindRawValue = subjectKindRawValue
@@ -223,6 +293,9 @@ public struct StoredChatThread: Hashable, Sendable {
         self.messagesJSON = messagesJSON
         self.createdAt = createdAt
         self.lastActivityAt = lastActivityAt
+        self.firstUserMessageContent = firstUserMessageContent
+        self.lastVisibleMessageContent = lastVisibleMessageContent
+        self.summaryFieldsComputed = summaryFieldsComputed
     }
 
     /// - Parameter createdAt: Not derived from `thread`. The caller (`MaximizeStore`)
@@ -233,6 +306,8 @@ public struct StoredChatThread: Hashable, Sendable {
             thread.messages,
             field: "StoredChatThread.messagesJSON"
         )
+        let firstUserMessageContent = thread.firstUserMessage?.content
+        let lastVisibleMessageContent = thread.lastVisibleMessage?.content
         switch thread.subject {
         case let .workout(workoutUUID):
             self.init(
@@ -243,7 +318,10 @@ public struct StoredChatThread: Hashable, Sendable {
                 scopeThroughISO8601: nil,
                 messagesJSON: messagesJSON,
                 createdAt: createdAt,
-                lastActivityAt: thread.lastActivityAt
+                lastActivityAt: thread.lastActivityAt,
+                firstUserMessageContent: firstUserMessageContent,
+                lastVisibleMessageContent: lastVisibleMessageContent,
+                summaryFieldsComputed: true
             )
         case let .training(scope):
             self.init(
@@ -254,33 +332,54 @@ public struct StoredChatThread: Hashable, Sendable {
                 scopeThroughISO8601: scope.through.description,
                 messagesJSON: messagesJSON,
                 createdAt: createdAt,
-                lastActivityAt: thread.lastActivityAt
+                lastActivityAt: thread.lastActivityAt,
+                firstUserMessageContent: firstUserMessageContent,
+                lastVisibleMessageContent: lastVisibleMessageContent,
+                summaryFieldsComputed: true
             )
         }
     }
 
-    public func toDomain() throws -> ChatThread {
-        guard let kind = ChatSubjectKind(rawValue: subjectKindRawValue) else {
+    /// `ChatSubject`, decoded from the columnar fields alone (MAX-188) — no
+    /// `messagesJSON` in reach. `toDomain()` below is built on this rather than
+    /// duplicating the switch, and it is also what `MaximizeStore.threadSummaries()`'s
+    /// fast path calls: a summary needs a subject and never needs the transcript that
+    /// would otherwise be decoded to get one.
+    public static func subject(
+        kindRawValue: String,
+        workoutUUID: UUID,
+        scopeFromISO8601: String?,
+        scopeThroughISO8601: String?
+    ) throws -> ChatSubject {
+        guard let kind = ChatSubjectKind(rawValue: kindRawValue) else {
             throw DomainError.malformed(
                 field: "StoredChatThread.subjectKindRawValue",
-                value: subjectKindRawValue
+                value: kindRawValue
             )
         }
-        let subject: ChatSubject
         switch kind {
         case .workout:
-            subject = .workout(workoutUUID)
+            return .workout(workoutUUID)
         case .training:
             guard let scopeFromISO8601, let scopeThroughISO8601 else {
                 throw DomainError.inconsistent(
                     reason: "StoredChatThread has a training subjectKind but is missing its scope columns"
                 )
             }
-            subject = .training(try TrainingScope(
+            return .training(try TrainingScope(
                 from: try CalendarDay(iso8601: scopeFromISO8601),
                 through: try CalendarDay(iso8601: scopeThroughISO8601)
             ))
         }
+    }
+
+    public func toDomain() throws -> ChatThread {
+        let subject = try Self.subject(
+            kindRawValue: subjectKindRawValue,
+            workoutUUID: workoutUUID,
+            scopeFromISO8601: scopeFromISO8601,
+            scopeThroughISO8601: scopeThroughISO8601
+        )
         let messages = try PersistencePayload.decode(
             [ChatMessage].self,
             from: messagesJSON,

@@ -1971,6 +1971,7 @@ free. What landed in the file:
 | MAX-180 | **The muscle map, drawn** — `MuscleFatigueMark` bands MAX-179's reading into five states (`.notLogged`/`.fresh`/`.light`/`.moderate`/`.high`) and marks each with a non-hue geometric channel (fill fraction + dashed outline + glyph), extending `WCAGContrastTests`'s hue-alone test with a third representation rather than a parallel suite. `MuscleMapView` draws it on a flat content surface with `@ScaledMetric` throughout, and `WorkoutDetailView` composes it unconditionally (it is the athlete's state, not the workout's). A group never logged draws dashed-and-glyphed, never a coloured "at rest" fill. **Adapted after #173 landed on top of it**: the "last worked" caption reads `mostRecentlyWorkedAt`, not the removed `elapsedDays`, and the day count is now calendar-correct via `CalendarDay.days(until:)` rather than fixed 86,400-second blocks. See the MAX-180 section below | 179 | Sonnet ✅ — merged as `ae85d0a`. Compiles and its core tests pass in CI; **nothing about how it draws is verified** — see the PR's device checks |
 | MAX-181 | **The fact sheet renders the lift slot** — `TrainingFactSheet`'s plan block now names each weekday's lift ask beside its run ask, tagged `Lift:`, omitted rather than stated when the plan asks nothing of the slot. Closes MAX-174 §5.3's G2, and MAX-136's open item. **Also closes the more severe consequence MAX-175 found and declined to fix**: `PlanProposalInstruction` tells a drafting model to restate each weekday's lift ask from this same fact sheet unchanged — it could not, so an accepted revision could silently zero out an athlete's whole lift schedule. See the MAX-181 section below | 174, 175 | Sonnet ✅ |
 | MAX-184 | **An audit of the chat surface and its context continuity** — `docs/CHAT-AUDIT.md`. Seven defects, the worst of them a **"New chat" button that is inert on the ordinary path** and a **workout chat card that is not tappable and never refreshes**; a ranked craft list; and a position on the owner's central ask. **Nothing dangerous was found** — no data loss, no leak off the device, no crash. The one context finding that matters is not the one it was dispatched on: **strain, acute:chronic load balance and per-muscle fatigue reach a tile and reach no prompt**, so a training thread asked "am I ramping too fast" correctly refuses to answer a question the app has already computed. Proposes MAX-185–201; MAX-193 is blocked on a new amendment. See the MAX-184 section below | 090, 152, 153, 170, 177, 178, 179 | **Opus** — audit only, no behaviour changed |
+| MAX-188 | 🔒 **`threadSummaries()` no longer decodes a transcript to draw a list of titles** — §2.4's in-memory exposure. `ChatThreadRecord` gains three columnar fields (`summaryFirstUserMessageContent`, `summaryLastVisibleMessageContent`, `summaryFieldsComputed`) written whenever a thread is stored; the fast path builds `ChatThreadSummary` from those columns and never touches the `@Attribute(.externalStorage)` `messagesJSON` blob. A pre-ticket row (`summaryFieldsComputed == false`) still falls back to a full decode for that one row — bounded, self-clearing the next time the thread is written to. The workout lookup is batched into one query for every workout thread in the list, closing the audit's N+1 alongside it. **No schema version bump** — three additive, default-required columns, `distanceSplitsComputed`'s precedent. See the MAX-188 section below | 184 | Sonnet 🔒 |
 
 **Four collisions the overseer must respect.**
 
@@ -6018,7 +6019,123 @@ document's §8. Three collisions to respect: 192 before 193 (`ContextBuilder.swi
 201 (the thread list), and 185 → 194 → 190 in sequence (all three are `ChatSheet.swift`).
 
 
-## Risks
+## MAX-188 — the thread list stops decoding every transcript
+
+§2.4's finding, confirmed before anything was built: `ChatThreadSummary`'s own doc comment
+(`ChatThreadSummary.swift:134-137` pre-ticket) states a summary must carry no transcript — "health
+data in memory for a screen that shows none of it" — and `MaximizeStore.threadSummaries()` was
+the one implementation the app actually calls, and it violated that rule on every call: full
+`record.stored.toDomain()` per row (a `messagesJSON` JSON decode, `@Attribute(.externalStorage)`),
+plus a separate `workoutFacts(for:)` fetch per workout-subject thread. The premise held; nothing
+here is a refusal.
+
+### The shape chosen: stored summary fields, not a projection fetch
+
+Two viable shapes were on the table. A `FetchDescriptor` projection (`propertiesToFetch`) was
+rejected first: there is no Swift toolchain in this container to confirm SwiftData actually
+returns a partial `ChatThreadRecord` rather than faulting in the rest on first property access —
+and this ticket's own brief says not to assume it. Denormalised fields are the shape that does
+not depend on an unverifiable SwiftData behaviour.
+
+**`ChatThreadRecord` gains three columns**, mirrored on `StoredChatThread` in the core:
+
+- `summaryFirstUserMessageContent: String?` — the raw content of `thread.firstUserMessage`.
+- `summaryLastVisibleMessageContent: String?` — the raw content of `thread.lastVisibleMessage`.
+- `summaryFieldsComputed: Bool = false` — whether the two strings above were actually written by
+  a build that knows about them, as opposed to defaulting to `nil` because the row predates the
+  column.
+
+**Raw content, not a formatted title or preview.** `ChatThreadTitle` and the new `ChatThreadPreview`
+still do the collapsing, truncation and scope-label fallback — at read time, from whichever source
+handed them a string. A decoded `ChatMessage.content` and this column's value are interchangeable
+inputs to the same pure functions, so a future change to how a title or preview is *formatted*
+needs no backfill of stored data.
+
+**What keeps them honest.** `StoredChatThread.init(_ thread:createdAt:)` — `MaximizeStore.store(_:)`'s
+only path to a written row — recomputes all three columns from the thread being written, every
+time. So a thread being talked to never drifts: the columns are exactly what a full decode would
+have produced, one turn behind at most (never stale across a completed write). A thread that is
+never written to again keeps whatever it last wrote, which is correct — nothing about it changed.
+The one place drift could enter — the write and the read using different rules — is closed by
+construction: `ChatThreadSummary`'s new lightweight initializer and the full-thread initializer
+both bottom out in the same `ChatThreadTitle.derive(subject:firstUserMessageContent:workoutFacts:)`
+and `ChatThreadPreview.line(for:)`, pinned equal by
+`testALightweightSummaryMatchesOneBuiltFromTheFullThread`.
+
+### Why `summaryFieldsComputed`, not just checking the strings for `nil`
+
+`nil` is also the *correct* value for a thread nobody has asked anything in, or one with no
+visible turns yet — so a bare `nil` cannot distinguish "empty thread" from "row written before
+this ticket, nothing backfilled." The flag is what does: `false` on every row `ChatThreadRecord`
+already held, `true` on every row this build's `store(_:)` ever writes, permanently after. It is
+the same shape `DerivedMetricsRecord.distanceSplitsComputed` already established for exactly this
+"a column some rows will not have written" case.
+
+`MaximizeStore.threadSummaries()` reads the flag: `true` builds the summary from the three
+columns and the subject's own plain-column fields (`subjectKindRawValue`, `workoutUUID`,
+`scopeFromISO8601`, `scopeThroughISO8601`) — `messagesJSON` never touched. `false` falls back to
+exactly the old full decode, for that one row only. That fallback is bounded and self-clearing:
+the next time the athlete writes to that thread, `store(_:)` recomputes the columns and the row
+joins the fast path. A thread that is never spoken to again keeps paying the old cost for
+itself alone — never for the whole list, which was the defect.
+
+### Schema version: unchanged, and the argument for it
+
+Every new property is either `String?` with no default or `Bool` with a `false` default — the two
+shapes `DerivedMetricsRecord.distanceSplitsJSON`/`.distanceSplitsComputed` already used for an
+additive column under A8 (mirroring off, so the CloudKit promotion that would demand a version
+bump has not happened). SwiftData's lightweight migration adds the column to an existing table
+without rewriting a row: a `ChatThreadRecord` written before this build reads back with both
+strings `nil` and the flag `false` — the legacy shape, read honestly, not backfilled with an
+invented value. `MaximizeSchemaV1`'s version number does not move.
+
+### The batched workout lookup
+
+`workoutFacts(for subject:)` (one `WorkoutRecord` fetch per workout-subject thread) is replaced
+by `workoutFacts(forWorkoutIDs ids: Set<UUID>)` — one `FetchDescriptor<WorkoutRecord>` with an
+`ids.contains($0.workoutUUID)` predicate over every workout id the list's threads name, sorted by
+`ingestedAt` so a CloudKit-race duplicate resolves to the same oldest record `workoutRecords(for:)`
+already picks. An empty id set (an all-training thread list) short-circuits before any fetch runs.
+
+### Existing rows are safe — the load-bearing test
+
+`StoredRecordRoundTripTests.testALegacyRowPredatingTheSummaryColumnsStillReadsBackWhole`
+hand-constructs a `StoredChatThread` the way the memberwise initializer's now-defaulted trailing
+parameters make trivial — omitting `firstUserMessageContent`, `lastVisibleMessageContent` and
+`summaryFieldsComputed` entirely, the exact shape a pre-MAX-188 row reads back as. It asserts the
+flag reads `false`, both new columns read `nil`, and — the part that actually matters —
+`toDomain()` still reconstructs the full transcript, subject and `lastActivityAt` unchanged. A
+device holding history from before this build loses nothing and keeps reading correct summaries,
+through the fallback path, until the next time each thread is written to.
+
+### Tests (core, CI-verified)
+
+`StoredRecordRoundTripTests`: writing a thread computes its summary columns; an empty thread's
+columns are `nil` but `summaryFieldsComputed` is `true`; the seed-only case; the legacy-payload
+read-back above; `StoredChatThread.subject(kindRawValue:workoutUUID:scopeFromISO8601:scopeThroughISO8601:)`
+decodes both subject kinds from columns alone and rejects the same two corrupted shapes
+`toDomain()` already rejected. `ChatThreadSummaryTests`/`ChatThreadTitleTests`: the lightweight
+`ChatThreadSummary` initializer agrees with the full-thread one; an empty training thread's
+lightweight summary states its window; the lightweight preview collapses and truncates
+identically; `ChatThreadTitle.derive(subject:firstUserMessageContent:workoutFacts:)` agrees with
+`derive(for:workoutFacts:)` and falls back to the scope label.
+
+### What could not be verified
+
+**No Swift toolchain in this container** — `App/Persistence/MaximizeStore.swift` and
+`MaximizeSchema.swift` were never built. Both files are App-layer and CI has never executed
+them (R2/R13); the core changes they depend on (`StoredChatThread`, `ChatThreadSummary`,
+`ChatThreadTitle`) are covered by the tests above, which *would* run in CI, but this session could
+not run `swift build`/`swift test` itself to confirm they pass. The `ids.contains($0.workoutUUID)`
+`#Predicate` shape is SwiftData's documented pattern for a captured-array membership test; it was
+not compiled here either. **Needs device verification**: install over an existing store carrying
+several threads (ideally some pre-dating this build) and confirm the thread list still shows
+correct titles, previews and ordering, and that opening any of them shows the full history intact.
+
+### Security review
+
+`/security-review` was run — mandatory, this changes how health data (chat transcripts) sits in
+memory. See the PR for its findings.
 
 | # | Item | Impact | Status |
 |---|---|---|---|
