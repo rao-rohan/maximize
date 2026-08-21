@@ -27,8 +27,9 @@ import Foundation
 /// 3. `.stalled` — the transport says the connection is open and the model is not
 ///    speaking. Distinct from both of the above, and see `ChatReplyProgress` for the
 ///    signal that distinguishes it.
-/// 4. `.complete` / `.truncated` / `.emptyReply` / `.failed` — the four ways a reply
-///    stops. Each is a designed state with its own words; none of them is a blank.
+/// 4. `.complete` / `.truncated` / `.emptyReply` / `.stopped` / `.failed` — the five
+///    ways a reply stops. Each is a designed state with its own words; none of them is
+///    a blank, and the fifth is the only one the athlete chose (MAX-197).
 public enum ChatReplyPhase: Hashable, Sendable {
 
     /// No reply has been asked for, or the last one has been read and cleared by a
@@ -59,6 +60,23 @@ public enum ChatReplyPhase: Hashable, Sendable {
     /// of those cases rather than being folded into whichever one is nearer.
     case emptyReply
 
+    /// The athlete stopped the reply (MAX-197, §6.4). The one terminal rung this app
+    /// arrives at because somebody asked it to.
+    ///
+    /// **Its own rung rather than `.failed(.interrupted)`**, which was the alternative
+    /// the audit offered. That case means "the connection ended before the turn did" and
+    /// `ChatFailureNotice` says so in as many words — *"The connection dropped before the
+    /// reply finished"* — which would be a sentence about the network describing
+    /// something the network did not do. It is also `isWorthRetrying`, so reusing it
+    /// would put "Try again" under a reply somebody had just chosen to end. Two states
+    /// that need different words and offer different actions are two rungs.
+    ///
+    /// **Nothing but an athlete's tap reaches it.** `ChatReplyEvent.stoppedByAthlete` is
+    /// the only event that lands here and `ChatModel.stop()` is the only thing that sends
+    /// it, so a quiet stream, a stall, or a dropped connection can never be reported as a
+    /// stop — see `ChatReplyProgress.apply`.
+    case stopped
+
     /// The turn did not finish. Carries the failure so the surface can say which one it
     /// was and whether asking again is worth it — see `ChatFailureNotice`, the single
     /// place a `ChatStreamError` becomes words.
@@ -73,7 +91,7 @@ public enum ChatReplyPhase: Hashable, Sendable {
         switch self {
         case .awaitingFirstToken, .streaming, .stalled:
             return true
-        case .idle, .complete, .truncated, .emptyReply, .failed:
+        case .idle, .complete, .truncated, .emptyReply, .stopped, .failed:
             return false
         }
     }
@@ -81,7 +99,7 @@ public enum ChatReplyPhase: Hashable, Sendable {
     /// Whether the reply has stopped for good, one way or another.
     public var isTerminal: Bool {
         switch self {
-        case .complete, .truncated, .emptyReply, .failed:
+        case .complete, .truncated, .emptyReply, .stopped, .failed:
             return true
         case .idle, .awaitingFirstToken, .streaming, .stalled:
             return false
@@ -104,6 +122,12 @@ public enum ChatReplyPhase: Hashable, Sendable {
         case .emptyReply:
             return true
         case .idle, .awaitingFirstToken, .streaming, .stalled, .complete, .truncated:
+            return false
+        case .stopped:
+            // A stop is the athlete saying "not this answer". Offering to ask the
+            // identical question again, one line under the reply they just ended, is the
+            // app arguing with them — and the composer is already back, with the thread
+            // unchanged, so asking again is a sentence away rather than a state away.
             return false
         }
     }
@@ -140,6 +164,12 @@ public enum ChatReplyEvent: Hashable, Sendable {
 
     /// The stream ended with `ChatStreamEvent.failed`.
     case failed(ChatStreamError)
+
+    /// The athlete stopped the reply (MAX-197). Sent by `ChatModel.stop()` and by
+    /// nothing else — this is a fact about a tap, which is why it is not derived here
+    /// from the stream falling quiet. A stream that simply stops arriving is
+    /// `.endedWithoutTerminalEvent` below and always was.
+    case stoppedByAthlete
 
     /// The stream stopped without a terminal event at all. Forbidden by
     /// `ChatStreamEvent`'s contract and handled anyway, because nothing in the type
@@ -337,6 +367,21 @@ public struct ChatReplyProgress: Hashable, Sendable {
         case let .failed(error):
             guard phase.isLive else { return }
             phase = .failed(error)
+
+        case .stoppedByAthlete:
+            // Only from a live rung, and that guard is the whole of "a stop cannot
+            // swallow an ending that already happened": once a reply has completed,
+            // failed or been stopped, a late tap changes nothing. `ChatModel.stop()`
+            // makes the same check before it cancels anything, so the two agree, and
+            // this one is the backstop that keeps the ladder true whatever a caller does.
+            //
+            // Reachable from `.awaitingFirstToken` as well as from `.streaming` and
+            // `.stalled`: a reply that has said nothing yet is exactly the one somebody
+            // most wants out of. Stopping while stalled is likewise ordinary — and note
+            // that the reverse cannot happen, because no number of quiet beats produces
+            // this event.
+            guard phase.isLive else { return }
+            phase = .stopped
 
         case .endedWithoutTerminalEvent:
             guard phase.isLive else { return }

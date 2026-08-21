@@ -30,20 +30,66 @@ public final class FakeStreamingChatModelInvoking: StreamingChatModelInvoking, @
 
     public var callCount: Int { receivedInstructions.count }
 
+    /// Runs immediately before the event at `index` is produced — and therefore after
+    /// every earlier event has been consumed in full, because production is on demand
+    /// (see `stream(_:)`). Nil by default, which is every test that predates MAX-197.
+    ///
+    /// The seam a cancellation test needs. Stopping a reply is a tap that lands *between*
+    /// two frames of a live stream, and there is no way to place one there from outside:
+    /// a test awaiting `send()` is suspended for exactly as long as the stream runs.
+    /// Isolated to the main actor because the thing a test wants to do from here is call
+    /// a method on `ChatModel`, which is `@MainActor`.
+    public var beforeEachEvent: (@MainActor @Sendable (Int) -> Void)?
+
     /// Defaults to a short, complete reply so a caller that only cares that the
     /// transport was invoked does not have to script one.
     public init(events: [ChatStreamEvent] = [.text("Fixture "), .text("reply."), .completed(.endTurn)]) {
         self.events = events
     }
 
+    /// One event per `next()`, produced when it is asked for rather than pushed into a
+    /// buffer up front (MAX-197).
+    ///
+    /// The eager version this replaces handed the whole reply over before the consumer
+    /// had read a word of it, which made the fake the one kind of stream a real one can
+    /// never be: entirely arrived before it started. Nothing about a full drain changes —
+    /// the same events come out in the same order — but a consumer that stops reading
+    /// part-way now gets what a stopped connection actually gives it, nothing more, and
+    /// `beforeEachEvent` has somewhere real to sit.
     public func stream(_ instruction: ChatInstruction) -> AsyncStream<ChatStreamEvent> {
         receivedInstructions.append(instruction)
         let scripted = events
-        return AsyncStream { continuation in
-            for event in scripted {
-                continuation.yield(event)
+        let hook = beforeEachEvent
+        let cursor = Cursor()
+        // Typed explicitly rather than inferred from the initializer's parameter: this
+        // closure is the fake's whole contract now, and the one thing a reader should not
+        // have to work out from context is what it is allowed to return.
+        let produce: @Sendable () async -> ChatStreamEvent? = {
+            let index = cursor.take()
+            guard index < scripted.count else { return nil }
+            // Awaited rather than optional-chained: the hook is main-actor isolated and
+            // this closure is not, so the hop is the point — by the time it returns, a
+            // `stop()` it performed has already been seen by the model.
+            if let hook {
+                await hook(index)
             }
-            continuation.finish()
+            return scripted[index]
+        }
+        return AsyncStream(unfolding: produce)
+    }
+
+    /// How far through the script one call to `stream(_:)` has got.
+    ///
+    /// A box rather than a captured `var` because a producing closure cannot mutate one,
+    /// and one per call rather than per fake so a retry replays the script from the top —
+    /// which is what the streaming tests that script a failure and then a clean reply
+    /// already assume.
+    private final class Cursor: @unchecked Sendable {
+        private var index = 0
+
+        func take() -> Int {
+            defer { index += 1 }
+            return index
         }
     }
 }

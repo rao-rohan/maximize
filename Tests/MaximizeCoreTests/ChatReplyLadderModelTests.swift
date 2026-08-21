@@ -221,6 +221,279 @@ final class ChatReplyLadderModelTests: XCTestCase {
         XCTAssertTrue(model.canSend)
     }
 
+    // MARK: - MAX-197: stopping a reply in flight
+
+    /// Sends a question and stops the reply immediately before the stream's `index`-th
+    /// event is produced.
+    ///
+    /// The fake produces one event per read, so a hook that runs before event *n* runs
+    /// after events *0..n-1* have been consumed in full — which is what puts the tap
+    /// between two frames of a live stream deterministically, with no sleeping, no
+    /// polling and no second task racing the first.
+    private func askAndStop(
+        _ model: ChatModel,
+        _ client: FakeStreamingChatModelInvoking,
+        beforeEvent index: Int,
+        sampling probe: StreamProbe? = nil
+    ) async {
+        client.beforeEachEvent = { [weak model] produced in
+            guard let model else { return }
+            probe?.sample(model)
+            guard produced == index else { return }
+            model.stop()
+        }
+        await ask(model)
+    }
+
+    /// The decision this ticket is mostly about: what happens to a reply that was
+    /// half-read when the athlete ended it.
+    func testStoppingMidReplyKeepsWhatArrivedAndPersistsNothing() async throws {
+        let (model, client, threads) = try await readyModel(events: [
+            .text("Your drift was "),
+            .text("under three percent."),
+            .completed(.endTurn),
+        ])
+        await askAndStop(model, client, beforeEvent: 1)
+
+        XCTAssertEqual(model.replyPhase, .stopped)
+        XCTAssertEqual(model.messages.map(\.kind), [.user, .assistant])
+        XCTAssertEqual(
+            model.messages[1].text,
+            "Your drift was ",
+            "what is kept is exactly what was on screen when the tap landed"
+        )
+        XCTAssertTrue(model.messages[1].wasStoppedByAthlete)
+        XCTAssertFalse(model.messages[1].wasInterruptedByFailure, "nothing failed")
+        XCTAssertFalse(model.messages[1].wasTruncated, "stopped is not cut short")
+        XCTAssertEqual(threads.writes, 0, "a stopped turn is never written")
+        XCTAssertEqual(model.streamingText, "")
+    }
+
+    /// The absence case: stopped before one token arrived, so there is no bubble for a
+    /// caption to sit under and the app says what happened instead of leaving a blank.
+    func testStoppingBeforeAnyTextArrivesSaysSoRatherThanShowingNothing() async throws {
+        let (model, client, threads) = try await readyModel(events: [
+            .text("Nothing of this arrives."),
+            .completed(.endTurn),
+        ])
+        await askAndStop(model, client, beforeEvent: 0)
+
+        XCTAssertEqual(model.replyPhase, .stopped)
+        XCTAssertEqual(model.messages.map(\.kind), [.user, .notice])
+        XCTAssertEqual(model.messages.last?.text, ChatConversationCopy.stoppedBeforeAnyReplyArrived)
+        XCTAssertEqual(threads.writes, 0)
+    }
+
+    /// D6: whatever a stop leaves behind has to round-trip. It does, by leaving the store
+    /// exactly as it was — an earlier completed turn is still there and the stopped one
+    /// was never written, so a reload shows a transcript with no gap in it.
+    func testAStopLeavesAThreadTheLoaderReadsBackWithoutTheStoppedTurn() async throws {
+        let (model, client, threads) = try await readyModel(events: [
+            .text("First answer."), .completed(.endTurn),
+        ])
+        await ask(model, "First question?")
+        XCTAssertEqual(threads.writes, 1)
+
+        client.events = [.text("Second, "), .text("interrupted."), .completed(.endTurn)]
+        await askAndStop(model, client, beforeEvent: 1)
+        XCTAssertEqual(model.messages.map(\.kind), [.user, .assistant, .user, .assistant])
+
+        await model.load()
+
+        XCTAssertEqual(model.loadState, .ready)
+        XCTAssertEqual(model.replyPhase, .idle)
+        XCTAssertEqual(model.messages.map(\.kind), [.user, .assistant])
+        XCTAssertEqual(model.messages.map(\.text), ["First question?", "First answer."])
+        XCTAssertEqual(threads.writes, 1, "the stop wrote nothing, so the store never moved")
+        XCTAssertEqual(model.thread?.visibleMessages.count, 2)
+    }
+
+    /// Every reader of `isStreaming` settles, and it settles the way a finished turn
+    /// does: the composer is a composer again, the stop is withdrawn, and nothing offers
+    /// to ask the question the athlete just ended.
+    func testAStopSettlesEveryReaderOfIsStreaming() async throws {
+        let (model, client, _) = try await readyModel(events: [
+            .text("Half an answer"), .text(" and the rest."), .completed(.endTurn),
+        ])
+        await askAndStop(model, client, beforeEvent: 1)
+
+        XCTAssertFalse(model.isStreaming)
+        XCTAssertFalse(model.canStop)
+        XCTAssertEqual(model.replyCancellation, .unavailable)
+        XCTAssertFalse(model.canRetry, "the athlete ended this one; the app does not re-offer it")
+        XCTAssertTrue(
+            model.thread?.visibleMessages.isEmpty ?? false,
+            "nothing to draft a plan from either: the stopped turn never reached the thread"
+        )
+
+        model.composerText = "And the cadence?"
+        XCTAssertTrue(model.canSend)
+        XCTAssertEqual(
+            ChatComposerSendControl.resolve(
+                canSend: model.canSend,
+                replyPhase: model.replyPhase,
+                cancellation: model.replyCancellation
+            ),
+            .send
+        )
+    }
+
+    /// The stop is offered for exactly as long as there is something to stop, and the
+    /// composer says so in the control it draws. Sampled from inside the live stream,
+    /// because "what the composer showed while the reply was arriving" cannot be seen
+    /// from either side of an awaited `send()`.
+    func testTheStopIsOfferedForExactlyAsLongAsAReplyIsInFlight() async throws {
+        let (model, client, _) = try await readyModel(events: [
+            .text("A"), .heartbeat, .text("B"), .completed(.endTurn),
+        ])
+        XCTAssertFalse(model.canStop, "nothing in flight before anything is sent")
+        XCTAssertEqual(model.replyCancellation, .unavailable)
+
+        let probe = StreamProbe()
+        client.beforeEachEvent = { [weak model] _ in
+            guard let model else { return }
+            probe.sample(model)
+        }
+        await ask(model)
+
+        let stopThroughout: [ChatComposerSendControl] = [.stop, .stop, .stop, .stop]
+        XCTAssertEqual(probe.controls, stopThroughout, "one sample per event, all four live")
+        XCTAssertTrue(probe.canStop.allSatisfy({ $0 }))
+        XCTAssertFalse(model.canStop, "and it is withdrawn the moment the reply lands")
+        XCTAssertEqual(model.replyPhase, .complete)
+    }
+
+    /// A tap that lands after the reply has already finished is not a stop. The reply is
+    /// whole, it is written, and nothing about it changes.
+    func testAStopAfterTheReplyLandedChangesNothing() async throws {
+        let (model, _, threads) = try await readyModel(events: [
+            .text("All of it."), .completed(.endTurn),
+        ])
+        await ask(model)
+        XCTAssertEqual(model.replyPhase, .complete)
+
+        model.stop()
+
+        XCTAssertEqual(model.replyPhase, .complete)
+        XCTAssertEqual(model.messages.map(\.kind), [.user, .assistant])
+        XCTAssertFalse(model.messages[1].wasStoppedByAthlete)
+        XCTAssertEqual(threads.writes, 1, "a late tap cannot unwrite a stored reply")
+    }
+
+    /// The other side of that boundary, and the reason the rule is "was the reply live
+    /// when the tap landed" rather than "did a terminal event arrive first": a stop
+    /// accepted while the reply was still live ends the turn as stopped even though the
+    /// stream had a completion waiting behind it. The button means what it says.
+    func testAStopAcceptedBeforeTheTerminalEventEndsTheTurnAsStopped() async throws {
+        let (model, client, threads) = try await readyModel(events: [
+            .text("The whole answer."), .completed(.endTurn),
+        ])
+        await askAndStop(model, client, beforeEvent: 1)
+
+        XCTAssertEqual(model.replyPhase, .stopped)
+        XCTAssertTrue(model.messages[1].wasStoppedByAthlete)
+        XCTAssertEqual(threads.writes, 0)
+    }
+
+    /// A stop is not a stall, at the seam as well as in the ladder. The reply reaches
+    /// `.stalled` first — the connection is open and quiet — and what the transcript says
+    /// afterwards is that the athlete stopped it, not that anything went wrong.
+    func testAStalledReplyThatIsStoppedReadsAsStoppedNotAsAFailure() async throws {
+        let quietBeats = ChatReplyProgress().heartbeatsRequiredForStall
+        let (model, client, threads) = try await readyModel(
+            events: [.text("Half a thought")]
+                + Array(repeating: ChatStreamEvent.heartbeat, count: quietBeats)
+                + [.text(" finished later."), .completed(.endTurn)]
+        )
+
+        let probe = StreamProbe()
+        // One past the last heartbeat: by then every beat has been folded in, so the
+        // reply is genuinely on the stalled rung when the tap lands.
+        await askAndStop(model, client, beforeEvent: quietBeats + 1, sampling: probe)
+
+        XCTAssertEqual(probe.phases.last, .stalled, "the reply had stalled before it was stopped")
+        XCTAssertEqual(model.replyPhase, .stopped)
+        XCTAssertEqual(model.messages.map(\.kind), [.user, .assistant])
+        XCTAssertEqual(model.messages[1].text, "Half a thought")
+        XCTAssertTrue(model.messages[1].wasStoppedByAthlete)
+        XCTAssertEqual(threads.writes, 0)
+    }
+
+    /// The failure the transport would have reported never reaches the transcript,
+    /// because the athlete had already ended the turn. A stop must not be dressed up as a
+    /// dropped connection, and a dropped connection must not be swallowed by a stop.
+    func testAStopIsNeverReportedAsAnInterruption() async throws {
+        let (model, client, _) = try await readyModel(events: [
+            .text("Half a thought"), .failed(.interrupted),
+        ])
+        await askAndStop(model, client, beforeEvent: 1)
+
+        XCTAssertEqual(model.replyPhase, .stopped)
+        XCTAssertEqual(model.messages.map(\.kind), [.user, .assistant])
+        XCTAssertFalse(
+            model.messages.contains(where: { $0.kind == .notice }),
+            "nothing failed, so the transcript carries no failure notice"
+        )
+    }
+
+    /// A14: stopping spends no call and starts none. The one thing this app must never do
+    /// is decide by itself to talk to the model again.
+    func testStoppingNeverAsksAgainOnItsOwn() async throws {
+        let (model, client, threads) = try await readyModel(events: [
+            .text("Half"), .text(" the answer."), .completed(.endTurn),
+        ])
+        await askAndStop(model, client, beforeEvent: 1)
+
+        XCTAssertEqual(client.callCount, 1)
+        XCTAssertFalse(model.canRetry)
+
+        // And a view forwarding the tap anyway gets nothing, the same way it does for
+        // every other rung that offers no retry.
+        await model.retry()
+
+        XCTAssertEqual(client.callCount, 1)
+        XCTAssertEqual(model.replyPhase, .stopped)
+        XCTAssertEqual(threads.writes, 0)
+    }
+
+    /// The question after a stop is asked on its own. The stopped pair was never
+    /// persisted, so the thread the next instruction is built from has never heard of
+    /// it — which is also what keeps a half-sentence from being replayed to the model as
+    /// something it said in full.
+    func testTheQuestionAfterAStopIsAskedWithoutTheStoppedTurn() async throws {
+        let (model, client, threads) = try await readyModel(events: [
+            .text("Half"), .text(" the answer."), .completed(.endTurn),
+        ])
+        await askAndStop(model, client, beforeEvent: 1)
+
+        client.beforeEachEvent = nil
+        client.events = [.text("A whole answer."), .completed(.endTurn)]
+        await ask(model, "Second question?")
+
+        XCTAssertEqual(model.replyPhase, .complete)
+        let second = try XCTUnwrap(client.receivedInstructions.last)
+        XCTAssertEqual(second.turns.map(\.text), ["Second question?"])
+        XCTAssertEqual(threads.writes, 1, "only the turn that finished is on disk")
+        XCTAssertEqual(
+            model.thread?.visibleMessages.map(\.content),
+            ["Second question?", "A whole answer."]
+        )
+    }
+
+    func testStopBeforeAnythingIsSentIsANoOp() async throws {
+        let (model, client, threads) = try await readyModel(events: [
+            .text("Untouched."), .completed(.endTurn),
+        ])
+
+        model.stop()
+
+        XCTAssertEqual(model.replyPhase, .idle)
+        XCTAssertFalse(model.canStop)
+        XCTAssertTrue(model.messages.isEmpty)
+        XCTAssertEqual(client.callCount, 0)
+        XCTAssertEqual(threads.writes, 0)
+    }
+
     // MARK: - Retry: a button, never a policy
 
     func testATransientFailureOffersARetryAndAPermanentOneDoesNot() async throws {
@@ -328,5 +601,29 @@ final class ChatReplyLadderModelTests: XCTestCase {
         XCTAssertEqual(model.replyPhase, .idle)
         XCTAssertFalse(model.canRetry, "the question it would ask again is no longer in the transcript")
         XCTAssertEqual(model.streamingText, "")
+    }
+}
+/// Samples what the surface looked like from *inside* a live stream (MAX-197).
+///
+/// Mid-stream state is invisible from either side of an awaited `send()` — the test is
+/// suspended for exactly as long as the reply is arriving — so the assertions that matter
+/// most here are gathered as the stream runs and read afterwards. `@MainActor` because
+/// everything it touches is, which is also what lets the fake's hook hold one.
+@MainActor
+private final class StreamProbe {
+    private(set) var phases: [ChatReplyPhase] = []
+    private(set) var controls: [ChatComposerSendControl] = []
+    private(set) var canStop: [Bool] = []
+
+    func sample(_ model: ChatModel) {
+        phases.append(model.replyPhase)
+        canStop.append(model.canStop)
+        controls.append(
+            .resolve(
+                canSend: model.canSend,
+                replyPhase: model.replyPhase,
+                cancellation: model.replyCancellation
+            )
+        )
     }
 }
