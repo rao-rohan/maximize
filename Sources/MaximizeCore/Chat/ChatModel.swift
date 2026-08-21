@@ -40,24 +40,31 @@ import Observation
 /// `WorkoutContextBuilder` byte for byte, so the fact sheet a workout thread sends is
 /// the same string it sent yesterday.
 ///
-/// ## Two ways in: a subject, or an exact thread (MAX-097)
+/// ## Three ways in: resolve a subject, mint one fresh, or open an exact thread
+/// (MAX-097, MAX-185)
 ///
-/// `init(subject:...)` is "open the thread for this subject" — the Ask button and
-/// **New chat** both already know the subject, because it is what they are asking for,
-/// and `load()` resolves "the" thread for it (`ChatThreadRepository.thread(for:...)`,
-/// newest activity wins). `init(threadID:...)` is "open exactly this thread" — the
-/// thread list (§2.3) knows a specific conversation, not a subject, and the subject is
-/// read off the stored thread once `load()` fetches it by id, never supplied by the
-/// caller. The distinction matters because subjects are not unique: two training
-/// threads can legitimately share an identical frozen window (`ChatThreadRepository`'s
-/// own contract does not deduplicate them), so resolving "the" thread for a subject
-/// after a specific row was tapped could silently open a different one than the
-/// athlete chose. `Opening` (below) is the closed, private choice between the two —
-/// `load()` is exhaustive over it the same way it is exhaustive over `ChatSubject`.
+/// `init(subject:...)` is "open *the* thread for this subject" — the Ask button, and
+/// the scope-mismatch banner's own action (`ChatScopeNotice`) — and `load()` resolves
+/// it (`ChatThreadRepository.thread(for:...)`, newest activity wins, minting only when
+/// nothing exists yet). `init(startingNewThreadFor:...)` is **New chat** (MAX-185): it
+/// shares `init(subject:...)`'s subject but never resolves to what is already
+/// there — `load()` mints a fresh, empty thread every time, because
+/// `ChatThreadRepository`'s own contract deliberately allows several threads per
+/// training subject and a button named "New chat" that silently reopens the one
+/// already on screen is the defect this exists to fix. `init(threadID:...)` is "open
+/// exactly this thread" — the thread list (§2.3) knows a specific conversation, not a
+/// subject, and the subject is read off the stored thread once `load()` fetches it by
+/// id, never supplied by the caller. The distinction between resolving and minting
+/// matters because subjects are not unique: two training threads can legitimately
+/// share an identical frozen window, so resolving "the" thread for a subject after a
+/// specific row was tapped — or after **New chat** was — could silently open a
+/// different one than the athlete meant. `Opening` (below) is the closed, private
+/// choice between the three — `load()` is exhaustive over it the same way it is
+/// exhaustive over `ChatSubject`.
 ///
-/// The two paths converge before `.ready`: whichever way the thread was found, `subject`
-/// ends up holding the same value, and every subject-driven read `load()`/`send()` do
-/// afterward is subject-driven once more.
+/// All three paths converge before `.ready`: however the thread was found or minted,
+/// `subject` ends up holding the same value, and every subject-driven read
+/// `load()`/`send()` do afterward is subject-driven once more.
 ///
 /// ## D3 — the fact sheet is never re-assembled
 ///
@@ -331,18 +338,27 @@ public final class ChatModel {
         return thread?.visibleMessages.contains(where: { $0.role == .user }) ?? false
     }
 
-    /// How this model was asked to open (MAX-097, §2.2 vs §2.3).
+    /// How this model was asked to open (MAX-097, MAX-185, §2.2 vs §2.3).
     ///
-    /// Two entry points, one loader. A caller either already knows the subject — the
-    /// Ask button and **New chat** both do, because the subject *is* what they are
-    /// asking for — or already knows which thread — the thread list does, because the
-    /// athlete tapped a specific row. The two must never be conflatable: a caller that
-    /// could supply both a thread id and a subject could hand this type a context for
-    /// the wrong window, which is §3.6's disagreement in its most direct form. So
-    /// opening by id never takes a subject from the caller at all — see `subject`'s own
-    /// documentation for where it comes from instead.
+    /// Three entry points, one loader. A caller either already knows the subject and
+    /// wants *the* thread for it — the Ask button and the scope-mismatch banner — or
+    /// already knows the subject and wants a *fresh* thread regardless of what already
+    /// exists for it — **New chat** (MAX-185) — or already knows which thread — the
+    /// thread list does, because the athlete tapped a specific row. None of the three
+    /// are conflatable: a caller that could supply both a thread id and a subject could
+    /// hand this type a context for the wrong window, which is §3.6's disagreement in
+    /// its most direct form, and a caller that could ask to both resolve and mint would
+    /// leave `load()` guessing which the athlete meant. So opening by id never takes a
+    /// subject from the caller at all — see `subject`'s own documentation for where it
+    /// comes from instead — and resolving versus minting is a different `Opening` case,
+    /// not a flag on one.
     private enum Opening {
         case subject(ChatSubject)
+        /// MAX-185: **New chat**. `load()` never asks `ChatThreadRepository` to resolve
+        /// an existing thread for this case — it mints one, unconditionally, every
+        /// time. See this type's "Three ways in" for why that has to be a distinct case
+        /// rather than a parameter on `.subject`.
+        case newThread(ChatSubject)
         case threadID(UUID)
     }
 
@@ -477,6 +493,45 @@ public final class ChatModel {
         self.now = now
     }
 
+    /// Opens a genuinely new, empty thread on this subject — **New chat** (MAX-185).
+    ///
+    /// Unlike `init(subject:...)`, `load()` never resolves this to a thread that
+    /// already exists, even when the subject is unchanged from the one already open:
+    /// `ChatThreadRepository`'s own contract deliberately allows several threads per
+    /// training subject ("one thread per workout is a policy this method keeps, not a
+    /// shape the type forbids"), and **New chat** silently reopening the thread already
+    /// on screen — because its scope had not changed — was the shipped defect this
+    /// initializer exists to fix. The minted thread is unstored until a turn completes,
+    /// exactly as `init(subject:...)`'s fallback thread is (`ChatThreadRepository`'s
+    /// "create-or-fetch" — "reaches disk only when a completed turn is appended" — A14
+    /// still holds: nothing here calls the model).
+    ///
+    /// - Parameters and everything else: identical in meaning to `init(subject:...)`.
+    public init(
+        startingNewThreadFor subject: ChatSubject,
+        workoutRepository: (any WorkoutRepository)?,
+        scoreRepository: (any ScoreRepository)?,
+        planRepository: (any PlanRepository)?,
+        settingsRepository: (any SettingsRepository)?,
+        chatThreadRepository: (any ChatThreadRepository)?,
+        chatClient: any StreamingChatModelInvoking,
+        planProposalClient: (any PlanProposalModelInvoking)? = nil,
+        timeZone: TimeZone = .current,
+        now: @escaping @Sendable () -> Date = { Date() }
+    ) {
+        self.opening = .newThread(subject)
+        self.subject = subject
+        self.workoutRepository = workoutRepository
+        self.scoreRepository = scoreRepository
+        self.planRepository = planRepository
+        self.settingsRepository = settingsRepository
+        self.chatThreadRepository = chatThreadRepository
+        self.chatClient = chatClient
+        self.planProposalClient = planProposalClient
+        self.timeZone = timeZone
+        self.now = now
+    }
+
     /// Opens a specific, already-existing thread by identity rather than resolving
     /// "the" thread for a subject (§2.3: the thread list). `subject` starts `nil` and
     /// is set only once `load()` has read it off the stored thread — see `subject`'s
@@ -569,6 +624,24 @@ public final class ChatModel {
                     newThreadID: UUID(),
                     at: now()
                 )
+
+            case let .newThread(openingSubject):
+                resolvedSubject = openingSubject
+                guard let resolvedContext = try await buildContext(
+                    for: resolvedSubject,
+                    workoutRepository: workoutRepository,
+                    scoreRepository: scoreRepository,
+                    planRepository: planRepository,
+                    settingsRepository: settingsRepository
+                ) else { return }
+                self.context = resolvedContext
+                // MAX-185: mint, never resolve. `ChatThreadRepository.thread(for:...)`
+                // is deliberately not called here — it would return
+                // `mostRecentThread(for:)` when one exists, which is exactly the no-op
+                // **New chat** exists to not be. A fresh, unstored thread every time is
+                // the point; it reaches disk the same way any other minted thread does,
+                // on the first completed turn.
+                resolvedThread = try ChatThread(id: UUID(), subject: resolvedSubject, lastActivityAt: now())
 
             case let .threadID(threadID):
                 // §2.3: the thread list knows a specific conversation, not a subject.

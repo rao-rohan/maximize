@@ -1970,6 +1970,7 @@ free. What landed in the file:
 | MAX-179 | **Per-muscle fatigue from the entries A22 already collects** — one session per group, weighted by its duration, decayed on a 48-hour half-life. States in its own doc comment what it cannot know (no sets, no reps, no load) and that **A20's tripwire governs the "just add a weight field" follow-up, not A22's permission**. A group never logged has *no* figure; a group logged a fortnight ago is *fresh* — a different fact. **Departs from the brief's "the last session" in one deliberate place**, which the MAX-179 section below sets out | 174, 175, A20/A22 | **Opus** |
 | MAX-180 | **The muscle map, drawn** — `MuscleFatigueMark` bands MAX-179's reading into five states (`.notLogged`/`.fresh`/`.light`/`.moderate`/`.high`) and marks each with a non-hue geometric channel (fill fraction + dashed outline + glyph), extending `WCAGContrastTests`'s hue-alone test with a third representation rather than a parallel suite. `MuscleMapView` draws it on a flat content surface with `@ScaledMetric` throughout, and `WorkoutDetailView` composes it unconditionally (it is the athlete's state, not the workout's). A group never logged draws dashed-and-glyphed, never a coloured "at rest" fill. **Adapted after #173 landed on top of it**: the "last worked" caption reads `mostRecentlyWorkedAt`, not the removed `elapsedDays`, and the day count is now calendar-correct via `CalendarDay.days(until:)` rather than fixed 86,400-second blocks. See the MAX-180 section below | 179 | Sonnet — **PR open, not yet merged.** Package compiles and core unit tests pass by inspection only; no toolchain here to run them (R1). Needs device verification, per the PR |
 | MAX-181 | **The fact sheet renders the lift slot** — `TrainingFactSheet`'s plan block now names each weekday's lift ask beside its run ask, tagged `Lift:`, omitted rather than stated when the plan asks nothing of the slot. Closes MAX-174 §5.3's G2, and MAX-136's open item. **Also closes the more severe consequence MAX-175 found and declined to fix**: `PlanProposalInstruction` tells a drafting model to restate each weekday's lift ask from this same fact sheet unchanged — it could not, so an accepted revision could silently zero out an athlete's whole lift schedule. See the MAX-181 section below | 174, 175 | Sonnet ✅ |
+| MAX-185 | **"New chat" now actually creates a new thread** — the chat audit's worst-ranked defect (MAX-184 §2.1). `ChatSheet.startNewTrainingChat()` reassigned `opening` to the same `.subject(scope)` value the Ask button already produces on the common path, so `.id(opening)` never changed and the toolbar button was inert; `ChatThreadRepository.thread(for:newThreadID:at:)` would have resolved to the thread already open even if the view had been recreated. **Both no-ops confirmed by reading, independently — the diagnosis was correct.** Fixed with a third `ChatModel.Opening` case, `.newThread`, reached by a new `init(startingNewThreadFor:)`: it mints a thread unconditionally rather than ever asking the repository to resolve one, under test in `ChatModelTests`. `ChatSheet.Opening.newThread(ChatSubject, UUID)` carries a nonce so `.id(opening)` changes on every tap, including a second tap on an unchanged scope. See the MAX-185 section below | 184, 097 | Sonnet — **PR open, not yet merged.** Package compiles and core unit tests pass by inspection only; no toolchain here to run them (R1). Needs device verification, per the PR |
 
 **Four collisions the overseer must respect.**
 
@@ -5921,6 +5922,117 @@ CI cannot prove anything about how the tile reads on a real screen — no device
 yet, and no verification exists that a genuine six-day-old install or a genuine four-week
 history renders legibly at every Dynamic Type size and in both colour schemes. See the PR's
 own "Needs device verification" section.
+
+**`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
+
+---
+
+## MAX-185 — "New chat" must actually do something
+
+### The diagnosis, verified before anything was touched
+
+The ticket's brief was to confirm the audit's finding before building on it, not to trust
+it. Both no-ops were real:
+
+1. `ChatSheet.startNewTrainingChat()` resolved the dashboard's current interval into a
+   `TrainingScope` and assigned `opening = .subject(.training(scope))`. On the ordinary
+   path — Ask button, then **New chat** — the Ask button had already built `opening` from
+   the identical scope (`ChatEntryPoint`'s own construction), so the reassignment was an
+   equal value. `ChatConversationView` is keyed `.id(opening)`; an equal value does not
+   change a `Hashable` identity, so SwiftUI never recreated the view.
+2. Independently, even a recreated view would not have helped:
+   `ChatThreadRepository.thread(for:newThreadID:at:)` (the extension on the protocol) is a
+   create-or-fetch — `mostRecentThread(for:)` first, mint only if nothing exists. An
+   unchanged scope resolves to the thread already open, every time.
+
+Two independent no-ops stacked, exactly as read. Nothing about the diagnosis was wrong, so
+the ticket proceeded.
+
+### The second-order question, and the decision
+
+`ChatThread`'s own documentation already states the product answer: "more than one thread
+per subject is now representable... for a training subject that is the product ('New chat'
+over a newer window')," and `ChatThreadRepository`'s fake carries the same line. The
+repository was never the gap — the UI had no way to reach the second thread a training
+scope is explicitly allowed to have. So the fix is not "New chat should say 'you are
+already here' and disable" (the audit's other option) — it is "New chat mints a thread
+distinct from any already open, on the current scope, unconditionally," matching what the
+type system already permitted.
+
+### Where the decision lives, and why
+
+**In `MaximizeCore`, not the view — CLAUDE.md's rule, applied at the one seam that
+mattered.** `ChatModel.Opening` (private, exhaustive over in `load()`) gained a third case:
+
+```swift
+private enum Opening {
+    case subject(ChatSubject)   // resolve — the Ask button
+    case newThread(ChatSubject) // mint, unconditionally — New chat
+    case threadID(UUID)         // exact — the thread list
+}
+```
+
+A new public initializer, `ChatModel.init(startingNewThreadFor:...)`, sets `opening =
+.newThread(subject)`. `load()`'s `.newThread` branch builds the same `PromptContext` the
+`.subject` branch does, but constructs `ChatThread(id: UUID(), subject:, lastActivityAt:)`
+directly rather than calling `chatThreadRepository.thread(for:newThreadID:at:)` — the
+resolve-or-create helper is deliberately never reached from this path, which is the whole
+of the fix. `ChatModelTests` adds four tests under "New chat": minting never resolves to an
+existing, populated thread on the same subject even when one is stored; two mints in a row
+are two distinct thread ids; nothing is written to the repository until a turn completes
+(A14/"only completed turns are persisted" still holds — no repository write, and no model
+call, happens on open); and title/subtitle degrade for a freshly-minted thread exactly the
+way they do for any other empty training thread.
+
+**At the call site, not in the repository.** `thread(for:newThreadID:at:)` is unchanged —
+it is still correct for what it is: the Ask button's "open *the* thread for this subject."
+Changing its contract to sometimes-resolve-sometimes-mint would have made every caller
+carry a flag explaining which behaviour they wanted, which is the same decision pushed
+into every call site instead of into one type. A new `Opening` case — and a new
+initializer — keeps "resolve" and "mint" as two closed, separately-testable paths through
+one exhaustive `load()`.
+
+### The App layer: a real identity change, not a `.id()` trick one layer along
+
+`ChatSheet.Opening` (the App-layer mirror, private to that type) gained a matching case:
+`.newThread(ChatSubject, UUID)`. The `UUID` is identity for SwiftUI only — it is never
+read as the minted thread's actual id, which `ChatModel` mints itself — but it is load-
+bearing: without it, two consecutive taps of **New chat** on an unchanged scope would
+produce two equal `Opening.newThread(scope, ...)` values only if the nonce were omitted,
+and `.id(opening)` would again fail to change on the second tap. This is not the bug the
+audit warned against re-committing (a `.id()` trick standing in for a fix) — the
+underlying fact really has changed on every tap (`ChatModel` really does mint a new
+thread each time `.newThread` is reached), and the nonce is what lets SwiftUI observe a
+fact that is genuinely true, the same way `.threadID(UUID)` already carries a concrete,
+externally-sourced id for the thread-list path. `startNewTrainingChat()` now assigns
+`opening = .newThread(.training(scope), UUID())` unconditionally — it no longer branches
+on whether the scope changed, because "New chat" never needs to.
+
+`ChatConversationView` gained a third initializer, `init(startingNewThreadFor:...)`,
+mirroring `init(subject:...)` and `init(threadID:...)` exactly, constructing `ChatModel`
+via the new initializer with the same explicitly-named repositories every other call site
+already requires (MAX-049's rule: no defaulted repository parameter).
+
+### What this does not touch
+
+`ChatScopeNotice` and its banner are unchanged — the banner already called
+`onStartNewChatForCurrentWindow`, the same handler the toolbar button calls, and both now
+mint correctly. The thread list, `PlanAuthoringView`'s conversational route, and the
+workout chat card are untouched — MAX-194 and MAX-190 also touch `ChatSheet.swift` and the
+audit's own sequencing note (185 → 194 → 190) says not to parallelise them; this ticket
+did not do either's work; it only fixed the one no-op it was asked to fix.
+
+### What CI can and cannot prove
+
+CI can prove: the package compiles; `ChatModelTests`' four new cases pass — minting never
+resolves to an existing thread, two mints are always distinct, nothing is written until a
+turn completes, and title/subtitle degrade correctly for an empty minted thread.
+
+CI cannot prove anything about how this reads on a real screen. **Needs device
+verification**, from the PR: open a training thread from the Ask button, tap **New chat**,
+confirm the transcript clears to empty rather than staying on the previous conversation;
+open the thread list and confirm both the old and the new thread are present as separate
+rows; repeat at the largest Dynamic Type size to confirm the toolbar button still fits.
 
 **`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
 
