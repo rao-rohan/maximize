@@ -1975,6 +1975,10 @@ free. What landed in the file:
 | MAX-185 | **"New chat" now actually creates a new thread** — the chat audit's worst-ranked defect (MAX-184 §2.1). `ChatSheet.startNewTrainingChat()` reassigned `opening` to the same `.subject(scope)` value the Ask button already produces on the common path, so `.id(opening)` never changed and the toolbar button was inert; `ChatThreadRepository.thread(for:newThreadID:at:)` would have resolved to the thread already open even if the view had been recreated. **Both no-ops confirmed by reading, independently — the diagnosis was correct.** Fixed with a third `ChatModel.Opening` case, `.newThread`, reached by a new `init(startingNewThreadFor:)`: it mints a thread unconditionally rather than ever asking the repository to resolve one, under test in `ChatModelTests`. `ChatSheet.Opening.newThread(ChatSubject, UUID)` carries a nonce so `.id(opening)` changes on every tap, including a second tap on an unchanged scope. See the MAX-185 section below | 184, 097 | Sonnet — **PR open, not yet merged.** Package compiles and core unit tests pass by inspection only; no toolchain here to run them (R1). Needs device verification, per the PR |
 | MAX-186 | **The workout chat card becomes a door, and refreshes** — `WorkoutChatSectionView`'s card had no tap target of any kind (MAX-098 removed its "Open chat" button and never replaced it) and reloaded only in `.task`, which does not re-fire on return from the chat sheet — so *chat about this run → Done* left the card still showing the invitation, verbatim the defect MAX-098's own doc comment says the card exists to prevent. Both confirmed against current source before anything was changed, per `docs/CHAT-AUDIT.md` §2.2 (MAX-184). Fixed: the whole card is now a `Button` presenting `ChatSheet(subject: .workout(workoutID))` — the same route `ChatEntryPoint.resolve(focus:currentInterval:)` already resolves for this screen, not a second one — and `.sheet(item:onDismiss:)` reloads the preview exactly once, on dismissal, however it happened (no polling, no `onAppear`/`onDisappear` pair, no model call — A14). What the card says moved into `MaximizeCore` (`WorkoutChatCardPresentation`, built on `ChatThreadSummary` rather than a parallel notion of "the last thing said"), under test. **Reconciles §2.1's "two chat buttons on one screen" argument**: this was never a second *button* saying the same thing as the Ask control, it is a preview the audit found had no affordance at all — see the MAX-186 section below | 184 | Sonnet — **PR open, not yet merged.** Package compiles and core unit tests pass by inspection only; no toolchain here to run them (R1). Needs device verification, per the PR |
 | MAX-187 | **A plan proposal card does not outlive its save** — §2.3's defect: accepting a proposal, saving, and pressing Back used to leave a diff card on screen describing a change already applied, **Accept** still live, a second tap writing a genuine duplicate plan version (D1 intact throughout — the screen was lying, not the data). `ChatModel.endProposalIfAlreadyStored()` reuses `discardProposal()`'s one door (`planDrafting = .idle` plus a transcript `.notice`) rather than adding a second mechanism, and decides by asking storage: `PlanProposalReview.standing`'s captured version against a fresh `PlanAuthoring.currentVersion(of:)` read — not a callback from `PlanAuthoringModel`, which has no reference back to the `ChatModel` that opened it and was kept that way rather than wired up across `ChatSheet.swift` (owned by MAX-185 concurrently). `ChatConversationView` calls it from `.onAppear`, since `.task` does not re-run when `PlanAuthoringView` pops back off the stack. See the MAX-187 section below | 184 | Sonnet — branch pushed, PR open; not yet reviewed or merged |
+| MAX-188 | **The thread list stops decoding every transcript** | §2.4. Give `ChatThreadRecord` the fields a summary needs (preview line, last-activity) or fetch with a projection, so `threadSummaries()` reads no `messagesJSON`. Batch the workout lookup. Honour `ChatThreadSummary`'s stated contract in the one implementation the app uses. See the MAX-188 section below | 184 | Sonnet 🔒 — ⬜ blocked on concurrent work |
+| MAX-189 | **A failed delete says so** | §2.5. Restore the row and state the failure, in `ChatThreadListCopy`'s voice, the way `couldNotSaveReply` does one surface over. See the MAX-189 section below | 184 | Haiku — 🔲 ready |
+| MAX-190 | **The chat sheet and the plan form stop presenting each other** | §2.6. Suppress `conversationalRouteSection` on an authoring screen that was itself pushed from a chat sheet, or reassign rather than present. Whichever, say which in the PR. See the MAX-190 section below | 184 | Sonnet — 🔲 ready |
+| MAX-191 | **The athlete is told when the transcript was capped** | §2.7. Surface `ChatInstruction.droppedTurnCount` as one quiet line above the replayed window, in the same register as the scope banner. See the MAX-191 section below | 184 | Haiku — 🔄 in progress (this session) |
 
 **Four collisions the overseer must respect.**
 
@@ -6402,6 +6406,55 @@ inert. **Needs device verification:** draft a plan proposal in a training thread
 it, save it on the authoring screen, press Back, and confirm the card no longer offers
 **Accept this plan** and a notice explains why; then open Plan history and confirm exactly
 one new version was written.
+
+**`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
+
+## MAX-191 — the athlete is told when the transcript was capped
+
+A long conversation rolls up and gets capped at 40 turns before replaying to the model.
+`ChatInstruction.droppedTurnCount` is public and already computed; nothing reads it.
+So a person scrolls up into their own older messages, asks a follow-up, and gets "I no
+longer have that stretch of the conversation" with no prior warning that anything was
+missing. The model is told in the instructions; the athlete is not.
+
+**Verification first.** `ChatInstruction.droppedTurnCount` reflects the mechanical count
+from initializing an instruction: `let dropped = max(0, turns.count - Self.maximumReplayedTurns)`.
+It is set correctly, public (line 123), and does exactly what the audit describes — no
+false premise.
+
+**Exposed through `ChatModel` as a new computed property.** When streaming, it reads from
+the pending instruction; otherwise, it calculates from the current thread's size what
+would be dropped if a message were sent now. Returns zero when there is no thread.
+
+**The sentence lives in `ChatConversationCopy`** as `droppedTurnsNotice(for:droppedTurnCount:)`,
+matching `ChatScopeNotice`'s pattern: nil when nothing to say (zero count), one quiet line
+when dropping occurs. Singular and plural both correct. Does not leak "turns", "tokens",
+or any implementation detail. Worded the same for all kinds — the fact of a cap is what
+matters, not the subject.
+
+**Displayed in `ChatConversationView`** above the transcript, in the same visual register
+as the scope notice. Uses `.microLabel` and `.textSecondary`, with the same `.contentSurface`
+inset and margins. A quiet line that reads as a property of the thread, not as something
+either party said. An `Image(systemName: "ellipsis")` marks it visually.
+
+**Covered by core tests:** zero count returns nil; one turn is singular; multiple turns
+are plural; negative or zero counts return nil; all kinds produce similar phrasing.
+**Covered by ChatModel tests:** zero for empty/small threads; zero when at exactly the
+cap; correct calculation for overage; matches pending instruction while streaming.
+
+### What CI can and cannot prove
+
+CI can prove: the property is computed correctly from the current thread; the copy
+function returns nil on zero and the right singular/plural sentence otherwise; the view
+displays the notice when there is anything to say and omits it when there is not.
+
+CI cannot prove that the notice is visually quiet or readable at all Dynamic Type sizes,
+or that it integrates well with the scope notice when both appear (though they are
+separate, a long scope notice and a long dropped notice on the same screen would need
+device verification). **Needs device verification:** open a training thread with 40+
+messages, send a message, and confirm a quiet line appears below the scope banner (if
+present) saying some number of earlier turns were not included; verify the sentence at
+largest and smallest Dynamic Type; verify with VoiceOver that the line is read correctly.
 
 **`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
 

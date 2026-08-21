@@ -314,6 +314,22 @@ public final class ChatModel {
         loadState == .ready && !isStreaming && pendingTurn != nil && replyPhase.offersRetry
     }
 
+    /// How many turns the current instruction is dropping from the replayed window
+    /// (MAX-191).
+    ///
+    /// While streaming, this is the count from the pending instruction. Otherwise, it is
+    /// calculated from the current thread's size: how many would be dropped if a message
+    /// were sent now. Returns zero when there is no thread.
+    public var droppedTurnCount: Int {
+        if let pending = pendingTurn {
+            return pending.instruction.droppedTurnCount
+        }
+        guard let thread else { return 0 }
+        let visibleCount = thread.visibleMessages.count
+        // +1 for the message that would be added
+        return max(0, visibleCount + 1 - ChatInstruction.maximumReplayedTurns)
+    }
+
     /// §4, MAX-101. Nothing here ever sets this to anything but `.idle` on its own.
     public private(set) var planDrafting: PlanDraftingState = .idle
 

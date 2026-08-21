@@ -164,4 +164,26 @@ public enum ChatConversationCopy {
     /// What that action does, for VoiceOver — said as a fact about cost, because a
     /// person cannot see that this is the app's only path to spending another call.
     public static let retryActionHint = "Asks Claude the same question again."
+
+    // MARK: - MAX-191: transcript cap notice
+
+    /// A note shown when earlier turns of the conversation are not replayed to the
+    /// model, so the athlete knows why the response might not reference them.
+    ///
+    /// Returns nil when the dropped count is zero — a "0 earlier turns" line is noise.
+    /// The core decides whether there is anything to say, so a view need never
+    /// `if count > 0` on its own.
+    ///
+    /// - Parameters:
+    ///   - kind: the subject's kind. Used to word the notice subject-specifically (though
+    ///     both workout and training threads can be capped). May be nil for a thread opened
+    ///     by id before the subject is loaded.
+    ///   - droppedTurnCount: how many turns are not replayed. When zero or negative, this
+    ///     returns nil.
+    /// - Returns: a one-line notice naming the count, or nil if there is nothing to say.
+    public static func droppedTurnsNotice(for kind: ChatSubjectKind?, droppedTurnCount: Int) -> String? {
+        guard droppedTurnCount > 0 else { return nil }
+        let turnWord = droppedTurnCount == 1 ? "turn" : "turns"
+        return "\(droppedTurnCount) earlier \(turnWord) not included — I don't have that part of the conversation."
+    }
 }

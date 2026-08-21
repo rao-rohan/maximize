@@ -93,4 +93,69 @@ final class ChatConversationCopyTests: XCTestCase {
         XCTAssertFalse(ChatConversationCopy.interruptedByFailureCaption.isEmpty)
         XCTAssertNotEqual(ChatConversationCopy.truncatedCaption, ChatConversationCopy.interruptedByFailureCaption)
     }
+
+    // MARK: - MAX-191: dropped turns notice
+
+    /// Zero dropped turns is the common case — no message is needed, following CLAUDE.md's
+    /// "absence is a designed state" rule.
+    func testZeroDroppedTurnsReturnsNil() {
+        XCTAssertNil(ChatConversationCopy.droppedTurnsNotice(for: .workout, droppedTurnCount: 0))
+        XCTAssertNil(ChatConversationCopy.droppedTurnsNotice(for: .training, droppedTurnCount: 0))
+        XCTAssertNil(ChatConversationCopy.droppedTurnsNotice(for: nil, droppedTurnCount: 0))
+    }
+
+    /// Negative counts should also return nil — they are not meaningful.
+    func testNegativeDroppedTurnsReturnsNil() {
+        XCTAssertNil(ChatConversationCopy.droppedTurnsNotice(for: .workout, droppedTurnCount: -1))
+    }
+
+    /// Singular: "1 earlier turn not included".
+    func testOneTurnUsesCorrectSingular() {
+        let notice = ChatConversationCopy.droppedTurnsNotice(for: .workout, droppedTurnCount: 1)
+        XCTAssertNotNil(notice)
+        XCTAssertTrue(notice!.contains("1 earlier turn"))
+        XCTAssertFalse(notice!.contains("turns"))
+    }
+
+    /// Plural: "2 earlier turns not included".
+    func testMultipleTurnsUseCorrectPlural() {
+        let notice = ChatConversationCopy.droppedTurnsNotice(for: .workout, droppedTurnCount: 2)
+        XCTAssertNotNil(notice)
+        XCTAssertTrue(notice!.contains("2 earlier turns"))
+    }
+
+    /// Large numbers also use plural.
+    func testLargeCountUsesPlural() {
+        let notice = ChatConversationCopy.droppedTurnsNotice(for: .training, droppedTurnCount: 40)
+        XCTAssertNotNil(notice)
+        XCTAssertTrue(notice!.contains("40 earlier turns"))
+    }
+
+    /// The message does not leak internal details like "turn count" or token counts.
+    func testTheMessageDoesNotLeakInternalDetails() {
+        for count in [1, 2, 5, 10, 20] {
+            let notice = ChatConversationCopy.droppedTurnsNotice(for: .workout, droppedTurnCount: count)
+            XCTAssertNotNil(notice)
+            let lowercased = notice!.lowercased()
+            XCTAssertFalse(lowercased.contains("token"), "message should not mention tokens")
+            XCTAssertFalse(lowercased.contains("exchange"), "message should be plain language")
+            XCTAssertFalse(lowercased.contains("buffer"), "message should not leak implementation")
+        }
+    }
+
+    /// The message is the same for all kinds — the fact of a cap is what matters, not
+    /// which kind of thread it is.
+    func testAllKindsProduceSimilarPhrasing() {
+        let workoutNotice = ChatConversationCopy.droppedTurnsNotice(for: .workout, droppedTurnCount: 5)
+        let trainingNotice = ChatConversationCopy.droppedTurnsNotice(for: .training, droppedTurnCount: 5)
+        let nilKindNotice = ChatConversationCopy.droppedTurnsNotice(for: nil, droppedTurnCount: 5)
+        // All should have content
+        XCTAssertNotNil(workoutNotice)
+        XCTAssertNotNil(trainingNotice)
+        XCTAssertNotNil(nilKindNotice)
+        // All should contain the same count and structure
+        XCTAssertTrue(workoutNotice!.contains("5"))
+        XCTAssertTrue(trainingNotice!.contains("5"))
+        XCTAssertTrue(nilKindNotice!.contains("5"))
+    }
 }

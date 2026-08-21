@@ -378,6 +378,9 @@ struct ChatConversationView: View {
                    let notice = ChatScopeNotice.text(for: subject, currentInterval: currentInterval) {
                     scopeMismatchBanner(notice)
                 }
+                if let notice = ChatConversationCopy.droppedTurnsNotice(for: model.subject?.kind, droppedTurnCount: model.droppedTurnCount) {
+                    droppedTurnsNotice(notice)
+                }
                 transcript
                 // §2.2's "Runs strip" row, below the transcript and above the composer.
                 // `nil` for a workout subject — `RunsStripView` renders nothing then.
@@ -408,6 +411,25 @@ struct ChatConversationView: View {
         .contentSurface(.inset)
         .padding(.horizontal, LayoutMetrics.screenMargin)
         .padding(.top, Spacing.snug)
+    }
+
+    /// MAX-191: "a quiet one-line note stating the transcript was capped."
+    /// Placed above the transcript in the same register as the scope banner, so it reads
+    /// as a property of the conversation rather than as something either party said.
+    private func droppedTurnsNotice(_ notice: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.tight) {
+            Image(systemName: "ellipsis")
+                .font(.microLabel)
+            Text(notice)
+                .font(.microLabel)
+                .multilineTextAlignment(.leading)
+        }
+        .foregroundStyle(Color.textSecondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .screenMargins()
+        .padding(.vertical, Spacing.snug)
+        .contentSurface(.inset)
+        .padding(.horizontal, LayoutMetrics.screenMargin)
     }
 
     private var transcript: some View {
