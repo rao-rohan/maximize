@@ -35,6 +35,10 @@ final class ChatThreadListModel {
     /// and hoping the bands still make sense afterwards.
     private var summaries: [ChatThreadSummary] = []
 
+    /// The message when a thread deletion fails (§2.5). Cleared on the next successful
+    /// delete or when the list is reloaded.
+    private(set) var couldNotDeleteMessage: String?
+
     private let chatThreadRepository: (any ChatThreadRepository)?
     private let now: () -> Date
     private let timeZone: TimeZone
@@ -64,6 +68,7 @@ final class ChatThreadListModel {
         }
         do {
             summaries = try await chatThreadRepository.threadSummaries()
+            couldNotDeleteMessage = nil
             present()
         } catch {
             state = .failed
@@ -74,6 +79,8 @@ final class ChatThreadListModel {
     /// reload — §2.3's swipe (and its no-gesture equivalent) should feel instant, and a
     /// second read of the whole list for one row leaving it is wasted work.
     ///
+    /// If the deletion fails, the row is restored and an error message is set (§2.5).
+    ///
     /// A no-op if `state` is not `.loaded` (the delete affordance is not on screen
     /// otherwise) or the repository is unavailable.
     ///
@@ -82,13 +89,21 @@ final class ChatThreadListModel {
     /// collapse that band rather than leave a heading behind.
     func delete(threadID: UUID) async {
         guard let chatThreadRepository, case .loaded = state else { return }
+        let summary = summaries.first { $0.id == threadID }
         summaries.removeAll { $0.id == threadID }
         present()
-        // Best-effort: the row is already gone from what the athlete sees, and a failed
-        // on-disk delete here is the same class of "local storage problem" that does not
-        // warrant clawing back something already removed (`ChatModel`'s own reasoning for
-        // a failed `store(_:)`, e.g. "This reply could not be saved").
-        try? await chatThreadRepository.deleteThread(id: threadID)
+        do {
+            try await chatThreadRepository.deleteThread(id: threadID)
+            couldNotDeleteMessage = nil
+        } catch {
+            // Restore the row and state the failure, matching `couldNotSaveReply`'s voice
+            // (§2.5) — what happened and what will happen next.
+            if let summary = summary {
+                summaries.append(summary)
+                present()
+            }
+            couldNotDeleteMessage = ChatThreadListCopy.couldNotDeleteThread
+        }
     }
 
     private func present() {

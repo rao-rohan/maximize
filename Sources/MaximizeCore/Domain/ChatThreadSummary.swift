@@ -273,6 +273,12 @@ public enum ChatThreadListCopy {
     /// toolbar button that pushes this screen is already labelled for the action, and the
     /// screen itself is the noun.
     public static let title = "Chats"
+
+    /// A thread could not be deleted from storage (§2.5). The row stays on screen, and the
+    /// athlete can try again — matching `ChatFailureNotice.couldNotSaveReply`'s voice for a
+    /// storage failure: what happened, what will happen next, no retry button offered.
+    public static let couldNotDeleteThread =
+        "This conversation could not be deleted. It is still here, and you can try again."
 }
 
 /// Turning a turn of a conversation into one line of a list row.
