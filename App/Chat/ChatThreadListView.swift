@@ -69,7 +69,6 @@ struct ChatThreadListView: View {
             .navigationTitle(ChatThreadListCopy.title)
             .navigationBarTitleDisplayMode(.inline)
             .contentSurface(.screen)
-<<<<<<< HEAD
             // §4.3: the current platform search affordance rather than a hand-rolled
             // field in a toolbar item — it gets the system's placement, cancel button
             // and keyboard handling for free, and `model.searchText` is the one thing
@@ -77,7 +76,7 @@ struct ChatThreadListView: View {
             // change re-presents through `ChatThreadListModel.searchText`'s `didSet`,
             // which asks `ChatThreadListPresentation` for the answer.
             .searchable(text: $model.searchText, prompt: ChatThreadListCopy.searchPrompt)
-=======
+
             .alert(
                 ChatThreadListCopy.couldNotDeleteThreadTitle,
                 isPresented: .constant(model.couldNotDeleteMessage != nil)
@@ -90,7 +89,6 @@ struct ChatThreadListView: View {
                     Text(message)
                 }
             }
->>>>>>> origin/main
             .task { await model.load() }
     }
 
