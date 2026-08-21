@@ -1979,6 +1979,7 @@ free. What landed in the file:
 | MAX-189 | **A failed thread delete is silent, and the row does not come back** — §2.5. The decision of what to display (row restored or deleted, and whether to show an error) is moved into `ChatThreadListPresentation.deletionOutcome()` as a testable pure function; the model is plumbing. **Needs device verification**: swipe to delete with the store failing, confirm the row returns and the message appears. | 184, 150, 152 | Haiku ✅ — merged as #182. Compiles and core tests pass; **nothing about the alert's appearance or accessibility is verified** — see the PR's device checks. |
 | MAX-192 | **The training roll-up carries strain and load balance** 🔒 — `TrainingContext` gains each session's stored `strainPoints` (MAX-176) and `LoadBalanceCalculator`'s whole reading (MAX-178), so the acute:chronic figure a tile draws now reaches the prompt one tap away from it. Closes MAX-184 §3.2, the audit's highest-ranked finding: a thread asked *"am I ramping too fast"* used to refuse, correctly under `trainingTask`'s never-invent rule, to answer a question the app had already computed. The reading arrives **already computed** through `LoadBalanceResolver` — never assembled from the roll-up's own records, which cover the scope's weeks and not the chronic window — and is anchored to *today*, which `ContextInputs` enforces. Three absences worded apart; the window's opening sentence now names the one rolling exception. **Per-muscle fatigue (MAX-179) was considered and declined**, and the exclusion is stated in the prompt. **Gated on A30** — A12 rule 2 makes a widening of what leaves the device an amendment, A29 settled the same question for the workout subject, and gating one subject and not the other would make the rule arbitrary; the amendment is in the same PR, first in the diff. See the MAX-192 section below | 176, 177, 178, 179, 184, A12/A29/**A30** | **Opus** 🔒 |
 | MAX-194 | **A run's conversation gets a door to the plan's** — §3.5's fix. A new composer accessory on a workout thread, `PlanConversationDoor` (`MaximizeCore`, under test), decides whether to offer the door and what it says; `ChatModel.planConversationDoor` reads it straight off the same context the fact sheet already rendered. **Targets the run's own Monday-first week** — `WorkoutContext.SurroundingWeek`'s own bounds (MAX-182), reused rather than re-derived, never the dashboard's current window, so the target can never disagree with what the athlete was already told. Resolves *the* thread for that week exactly the way the Ask button and the scope-mismatch banner already do — `ChatSheet`'s existing `.subject` reassignment gained a `continuityNote` passenger rather than a fourth `Opening` case, and never mints (minting stays **New chat**'s job). Carries exactly one honest line of continuity, screen-only and never sent to a prompt — D3 untouched, no widening. The button's own words vary with whether a plan governs that week, matching `PlanAuthoringFormatting`'s canonical "No plan has been authored yet" rather than a second wording of the same fact. **`canDraftPlan`'s training-only gate is untouched** — MAX-184's audit called it correct, and this is the missing route, not a relaxation of it. See the MAX-194 section below | 184, 097, 182 | Sonnet — branch pushed, PR open; not yet reviewed or merged. Package compiles and core unit tests pass by inspection only; no toolchain here to run them (R1). Needs device verification, per the PR |
+| MAX-195 | **Replies render as Markdown and can be selected** — MAX-184 §6.1/§6.2. `Text(message.text)` parsed no Markdown (only the `LocalizedStringKey` overload does), and nothing anywhere in `App/` carried `.textSelection`, so a coaching reply's own structure came through as literal punctuation and could not be copied by any means. `ChatMessageRendering.isMarkdown(for:)` (`MaximizeCore`, under test) is the one decision — **`.assistant` only**; the athlete's own turns stay verbatim and app notices stay plain sentences — and `ChatMarkdownText` (`App/Chat`) carries it out with `AttributedString(markdown:)`, `.full` syntax so a reply's lists render as lists, `.returnPartiallyParsedIfPossible` so an unmatched `**` mid-stream sits as literal asterisks rather than flickering between bold and plain, and a plain-text fallback so nothing the model sent is ever dropped. `.textSelection(.enabled)` is on every bubble, including the athlete's own. **Folded `WorkoutChatBubble`'s three parallel `if`s** (`wasTruncated`/`wasInterruptedByFailure`/`wasStoppedByAthlete`) into `DisplayMessage.trailingCaption`, the small cleanup MAX-197's own report flagged as cheap if it fell out of this ticket's own edit to the same view. See the MAX-195 section below | 184, 097, 150, 197 | Sonnet — branch pushed, PR open; not yet reviewed or merged. Package compiles and core unit tests pass by inspection only; no toolchain here to run them (R1). Needs device verification, per the PR |
 | MAX-197 | **A reply in flight can be stopped** — MAX-184 §6.4's craft gap: `ChatModel.stream` ran to its terminal event with nothing able to interrupt it, so the honest composer control mid-reply was a progress indicator. `stop()` now cancels the task consuming the stream — real cancellation, which reaches `URLSession` through the `AsyncStream` termination the transport already handles, not a flag a suspended `for await` would never read. **A stopped turn is a fifth terminal rung, `ChatReplyPhase.stopped`**, rather than a reuse of `.failed(.interrupted)`: that case says the connection dropped and offers a retry, and neither is true of something the athlete did. **What was already on screen is kept on screen and nothing is written** — the same treatment a dropped connection gets, and the caption says out loud that it goes when the conversation closes; storing a half-sentence would read back as a whole one and be replayed to the model as its own completed prior turn. The seam MAX-153 left (`ChatComposerCancellation`, `ChatComposerSendControl.stop`) is filled with no change to the composer view. See the MAX-197 section below | 184, 152, 153, 170 | **Opus** — branch pushed, PR open. **No Swift toolchain in this container**, so nothing here was compiled or run (R1); cancellation reaching the network read is argued, not observed, and needs device verification per the PR |
 
 **Four collisions the overseer must respect.**
@@ -6782,6 +6783,113 @@ the largest Dynamic Type size.
 
 **`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
 
+## MAX-195 — Markdown and selectable replies
+
+[docs/CHAT-AUDIT.md](./docs/CHAT-AUDIT.md) (MAX-184) §6.1/§6.2. Both premises verified
+before anything was designed: `WorkoutChatBubble` drew every row with `Text(message.text)`
+against a plain `String`, which does not parse Markdown — only the `LocalizedStringKey`
+overload does — and `.textSelection` and `.contextMenu` appear nowhere under `App/`. A
+person could not select or copy a single character out of this app, and `**bold**`, `- `
+bullets and `1.` lists all arrived as their own literal punctuation.
+
+### Which roles render as Markdown, and why
+
+**`.assistant` only.** `ChatMessageRendering.isMarkdown(for:)` (`MaximizeCore`, under
+test) is the single decision, read at both call sites that draw a reply's text —
+`WorkoutChatBubble.bubble(fill:textColor:)` for a finished turn and
+`ChatPendingReplyView`'s `.streaming`/`.stalled` rung for one still arriving — rather than
+a `.kind == .assistant` check written twice in `App/`. The other two roles were never in
+question: the athlete's own turns are `.user`, verbatim — a person who types `*hi*` meant
+two asterisks and the word "hi," and reinterpreting their own words as formatting puts
+something in their mouth they did not choose. `.notice` rows are this codebase's own
+copy (`ChatFailureNotice`, `ChatConversationCopy`) — plain English sentences with no
+Markdown in them by construction, and parsing one risks a stray `*` inside an athlete's
+own quoted words (MAX-191's dropped-turn notice, for instance) being read as syntax
+instead of the character it is.
+
+### What a half-arrived Markdown token does
+
+This is the trap the ticket named, and it is why the decision is `ChatMarkdownText`'s
+rather than a bare `Text(message.text)` swapped for a bare
+`Text(.init(message.text))`-style shortcut: a reply streams, so the same growing string
+is parsed many times a second, and most of those parses see a document that has not
+finished — an opened `**` with no closing pair yet, a `-` with nothing after it.
+
+- **`.full` interpreted syntax, `.returnPartiallyParsedIfPossible` failure policy.**
+  `.full` rather than an inline-only mode because a coaching reply's lists — "a list of
+  sessions," per the ticket — need block structure to render as an actual list; inline-only
+  would leave `- ` exactly as literal as it was before this ticket. An unmatched inline
+  delimiter is Foundation's documented behaviour to leave as the literal characters it
+  is rather than apply formatting speculatively, so a lone `**` sits on screen as two
+  asterisks and gains bold styling only once its pair completes — **no flip-flop between
+  bold and plain as tokens arrive**, because the run is never bold before the pair closes.
+- **A plain-text fallback for whatever even that cannot parse.** The failure policy above
+  is best-effort, not a guarantee against ever throwing; `ChatMarkdownText.attributedString`
+  falls back to the raw string unformatted rather than dropping it. Every character the
+  model sent is on screen either way — styled if the parser could manage it, plain if it
+  could not. Nothing here ever shows a parse failure as a failure or loses a token.
+- **No heading size is hard-coded.** `ChatMarkdownText` sets no font beyond the
+  `.bodyCopy` the call sites already applied as a default; header/list/emphasis structure
+  arrives as `PresentationIntent` attributes, and `Text` resolves those against the
+  system's own scaled text styles — the same mechanism `.bodyCopy` itself rides. A literal
+  point size for a heading would be the exact bug CLAUDE.md warns against.
+
+### Selection
+
+`.textSelection(.enabled)` on `WorkoutChatBubble.content` (one modifier, propagated as an
+environment value to every `Text` beneath — the user bubble, the assistant bubble and the
+notice row alike) and on `ChatPendingReplyView`'s streaming/stalled `Text`. **Every role
+is selectable, not only replies** — the ticket's role restriction is about Markdown
+*parsing*; letting someone copy a message does not reinterpret it, and there is no reason
+an athlete could copy the model's answer but not their own question. No separate
+`.contextMenu` was added on top: `.textSelection(.enabled)` already brings the platform's
+own long-press selection UI with Copy/Share in it, and a second menu competing for the
+same long-press gesture on top of that would be the redundant affordance the ticket's
+own "does this fight the scroll gesture or existing interactions" question was aimed at
+— this was checked by reading `ChatConversationView`'s transcript for a competing gesture
+and finding none, not on a device.
+
+### The caption fold (MAX-197's report)
+
+MAX-197 left `WorkoutChatBubble` drawing three parallel `if`s — one each for
+`wasTruncated`, `wasInterruptedByFailure`, `wasStoppedByAthlete` — and flagged folding
+them as cheap if a later ticket touching the same view did it. This one does: `DisplayMessage`
+gains `trailingCaption: String?`, which asks the three flags in order and returns the one
+caption that applies (`DisplayMessage`'s own documentation already states at most one is
+ever true), and the view now reads it once. Tested against messages `ChatModel.send()`
+actually produced in `ChatReplyLadderModelTests` — the truncated, interrupted-by-failure
+and stopped-by-athlete paths each assert `trailingCaption` off the real returned row,
+never off a `DisplayMessage` built for the assertion.
+
+### Tests (core, CI-verified — if CI runs them; see below)
+
+`ChatMessageRenderingTests`: the three-role decision, direct. `ChatReplyLadderModelTests`
+gains assertions on existing scenarios rather than a parallel suite: a clean completion
+has no caption and is Markdown for the assistant's row, never for the athlete's; a
+truncated, an interrupted, and a stopped reply each carry exactly the caption
+`ChatConversationCopy` already owns; every `ChatStreamError` notice reads as non-Markdown
+regardless of which failure produced it.
+
+### What CI can and cannot prove
+
+CI can prove the three-role decision and the caption fold, both against real `ChatModel`
+output. CI cannot prove that a reply actually looks formatted on screen, that selection
+does not fight the transcript's scroll gesture, that Increase Contrast or Reduce
+Transparency leave emphasis and code spans legible, or that a heading — should a reply
+ever send one — scales correctly at an accessibility text size. **Needs device
+verification:** send (or fake) a streaming reply containing a Markdown list and bold text
+and watch it arrive without any bold/plain flicker on the unclosed `**`; long-press a
+reply and a sent question and confirm both select and copy, and that the gesture does not
+fight the transcript's own scroll; check at the largest Dynamic Type size; check under
+Increase Contrast and Reduce Transparency.
+
+**`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
+
+### Found outside the ticket, not done
+
+Nothing. `ChatConversationView.swift` and `ChatPendingReplyView.swift` were read in full
+before anything changed; no other defect was found in either file.
+
 ## MAX-197 — a reply in flight can be stopped
 
 [docs/CHAT-AUDIT.md](./docs/CHAT-AUDIT.md) (MAX-184) §6.4. The premise was verified before
@@ -6890,9 +6998,11 @@ stopped turn is gone and the earlier ones are intact.
   resolves to `.stop` rather than `.awaitingReply`. That is `ChatComposerSendControl`'s design
   as written in MAX-153 and matches every mainstream chat client, and the transcript still says
   *"Thinking…"* — but it is a visible change to a shipped screen and belongs in the device pass.
-- **`ChatConversationView` still draws captions with three parallel `if`s**, one per
+- ~~**`ChatConversationView` still draws captions with three parallel `if`s**, one per
   `DisplayMessage` flag. Folding them into one core-decided caption would be tidier and touches a
-  file MAX-195/196 own concurrently; left alone deliberately.
+  file MAX-195/196 own concurrently; left alone deliberately.~~ **Folded by MAX-195**, which was
+  already editing the same view for Markdown rendering — see `DisplayMessage.trailingCaption`
+  and the MAX-195 section above.
 
 ---
 
