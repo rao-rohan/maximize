@@ -1145,7 +1145,7 @@ final class ChatModelTests: XCTestCase {
     }
 
     /// The instruction's dropped count equals what the shared helper computes.
-    func testInstructionDroppedCountMatchesSharedHelper() throws {
+    func testInstructionDroppedCountMatchesSharedHelper() async throws {
         let turnCount = ChatInstruction.maximumReplayedTurns + 7
         let sharedCount = ChatInstruction.droppedCount(for: turnCount)
         let instruction = try ChatInstruction(
