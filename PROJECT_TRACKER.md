@@ -1975,6 +1975,7 @@ free. What landed in the file:
 | MAX-185 | **"New chat" now actually creates a new thread** — the chat audit's worst-ranked defect (MAX-184 §2.1). `ChatSheet.startNewTrainingChat()` reassigned `opening` to the same `.subject(scope)` value the Ask button already produces on the common path, so `.id(opening)` never changed and the toolbar button was inert; `ChatThreadRepository.thread(for:newThreadID:at:)` would have resolved to the thread already open even if the view had been recreated. **Both no-ops confirmed by reading, independently — the diagnosis was correct.** Fixed with a third `ChatModel.Opening` case, `.newThread`, reached by a new `init(startingNewThreadFor:)`: it mints a thread unconditionally rather than ever asking the repository to resolve one, under test in `ChatModelTests`. `ChatSheet.Opening.newThread(ChatSubject, UUID)` carries a nonce so `.id(opening)` changes on every tap, including a second tap on an unchanged scope. See the MAX-185 section below | 184, 097 | Sonnet — **PR open, not yet merged.** Package compiles and core unit tests pass by inspection only; no toolchain here to run them (R1). Needs device verification, per the PR |
 | MAX-186 | **The workout chat card becomes a door, and refreshes** — `WorkoutChatSectionView`'s card had no tap target of any kind (MAX-098 removed its "Open chat" button and never replaced it) and reloaded only in `.task`, which does not re-fire on return from the chat sheet — so *chat about this run → Done* left the card still showing the invitation, verbatim the defect MAX-098's own doc comment says the card exists to prevent. Both confirmed against current source before anything was changed, per `docs/CHAT-AUDIT.md` §2.2 (MAX-184). Fixed: the whole card is now a `Button` presenting `ChatSheet(subject: .workout(workoutID))` — the same route `ChatEntryPoint.resolve(focus:currentInterval:)` already resolves for this screen, not a second one — and `.sheet(item:onDismiss:)` reloads the preview exactly once, on dismissal, however it happened (no polling, no `onAppear`/`onDisappear` pair, no model call — A14). What the card says moved into `MaximizeCore` (`WorkoutChatCardPresentation`, built on `ChatThreadSummary` rather than a parallel notion of "the last thing said"), under test. **Reconciles §2.1's "two chat buttons on one screen" argument**: this was never a second *button* saying the same thing as the Ask control, it is a preview the audit found had no affordance at all — see the MAX-186 section below | 184 | Sonnet — **PR open, not yet merged.** Package compiles and core unit tests pass by inspection only; no toolchain here to run them (R1). Needs device verification, per the PR |
 | MAX-187 | **A plan proposal card does not outlive its save** — §2.3's defect: accepting a proposal, saving, and pressing Back used to leave a diff card on screen describing a change already applied, **Accept** still live, a second tap writing a genuine duplicate plan version (D1 intact throughout — the screen was lying, not the data). `ChatModel.endProposalIfAlreadyStored()` reuses `discardProposal()`'s one door (`planDrafting = .idle` plus a transcript `.notice`) rather than adding a second mechanism, and decides by asking storage: `PlanProposalReview.standing`'s captured version against a fresh `PlanAuthoring.currentVersion(of:)` read — not a callback from `PlanAuthoringModel`, which has no reference back to the `ChatModel` that opened it and was kept that way rather than wired up across `ChatSheet.swift` (owned by MAX-185 concurrently). `ChatConversationView` calls it from `.onAppear`, since `.task` does not re-run when `PlanAuthoringView` pops back off the stack. See the MAX-187 section below | 184 | Sonnet — branch pushed, PR open; not yet reviewed or merged |
+| MAX-188 | 🔒 **`threadSummaries()` no longer decodes a transcript to draw a list of titles** — §2.4's in-memory exposure. `ChatThreadRecord` gains three columnar fields (`summaryFirstUserMessageContent`, `summaryLastVisibleMessageContent`, `summaryFieldsComputed`) written whenever a thread is stored; the fast path builds `ChatThreadSummary` from those columns and never touches the `@Attribute(.externalStorage)` `messagesJSON` blob. A pre-ticket row (`summaryFieldsComputed == false`) still falls back to a full decode for that one row — bounded, self-clearing the next time the thread is written to. The workout lookup is batched into one query for every workout thread in the list, closing the audit's N+1 alongside it. **No schema version bump** — three additive, default-required columns, `distanceSplitsComputed`'s precedent. See the MAX-188 section below | 184 | Sonnet 🔒 |
 | MAX-192 | **The training roll-up carries strain and load balance** 🔒 — `TrainingContext` gains each session's stored `strainPoints` (MAX-176) and `LoadBalanceCalculator`'s whole reading (MAX-178), so the acute:chronic figure a tile draws now reaches the prompt one tap away from it. Closes MAX-184 §3.2, the audit's highest-ranked finding: a thread asked *"am I ramping too fast"* used to refuse, correctly under `trainingTask`'s never-invent rule, to answer a question the app had already computed. The reading arrives **already computed** through `LoadBalanceResolver` — never assembled from the roll-up's own records, which cover the scope's weeks and not the chronic window — and is anchored to *today*, which `ContextInputs` enforces. Three absences worded apart; the window's opening sentence now names the one rolling exception. **Per-muscle fatigue (MAX-179) was considered and declined**, and the exclusion is stated in the prompt. **Gated on A30** — A12 rule 2 makes a widening of what leaves the device an amendment, A29 settled the same question for the workout subject, and gating one subject and not the other would make the rule arbitrary; the amendment is in the same PR, first in the diff. See the MAX-192 section below | 176, 177, 178, 179, 184, A12/A29/**A30** | **Opus** 🔒 |
 
 **Four collisions the overseer must respect.**
@@ -6406,6 +6407,123 @@ one new version was written.
 
 **`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
 
+## MAX-188 — the thread list stops decoding every transcript
+
+§2.4's finding, confirmed before anything was built: `ChatThreadSummary`'s own doc comment
+(`ChatThreadSummary.swift:134-137` pre-ticket) states a summary must carry no transcript — "health
+data in memory for a screen that shows none of it" — and `MaximizeStore.threadSummaries()` was
+the one implementation the app actually calls, and it violated that rule on every call: full
+`record.stored.toDomain()` per row (a `messagesJSON` JSON decode, `@Attribute(.externalStorage)`),
+plus a separate `workoutFacts(for:)` fetch per workout-subject thread. The premise held; nothing
+here is a refusal.
+
+### The shape chosen: stored summary fields, not a projection fetch
+
+Two viable shapes were on the table. A `FetchDescriptor` projection (`propertiesToFetch`) was
+rejected first: there is no Swift toolchain in this container to confirm SwiftData actually
+returns a partial `ChatThreadRecord` rather than faulting in the rest on first property access —
+and this ticket's own brief says not to assume it. Denormalised fields are the shape that does
+not depend on an unverifiable SwiftData behaviour.
+
+**`ChatThreadRecord` gains three columns**, mirrored on `StoredChatThread` in the core:
+
+- `summaryFirstUserMessageContent: String?` — the raw content of `thread.firstUserMessage`.
+- `summaryLastVisibleMessageContent: String?` — the raw content of `thread.lastVisibleMessage`.
+- `summaryFieldsComputed: Bool = false` — whether the two strings above were actually written by
+  a build that knows about them, as opposed to defaulting to `nil` because the row predates the
+  column.
+
+**Raw content, not a formatted title or preview.** `ChatThreadTitle` and the new `ChatThreadPreview`
+still do the collapsing, truncation and scope-label fallback — at read time, from whichever source
+handed them a string. A decoded `ChatMessage.content` and this column's value are interchangeable
+inputs to the same pure functions, so a future change to how a title or preview is *formatted*
+needs no backfill of stored data.
+
+**What keeps them honest.** `StoredChatThread.init(_ thread:createdAt:)` — `MaximizeStore.store(_:)`'s
+only path to a written row — recomputes all three columns from the thread being written, every
+time. So a thread being talked to never drifts: the columns are exactly what a full decode would
+have produced, one turn behind at most (never stale across a completed write). A thread that is
+never written to again keeps whatever it last wrote, which is correct — nothing about it changed.
+The one place drift could enter — the write and the read using different rules — is closed by
+construction: `ChatThreadSummary`'s new lightweight initializer and the full-thread initializer
+both bottom out in the same `ChatThreadTitle.derive(subject:firstUserMessageContent:workoutFacts:)`
+and `ChatThreadPreview.line(for:)`, pinned equal by
+`testALightweightSummaryMatchesOneBuiltFromTheFullThread`.
+
+### Why `summaryFieldsComputed`, not just checking the strings for `nil`
+
+`nil` is also the *correct* value for a thread nobody has asked anything in, or one with no
+visible turns yet — so a bare `nil` cannot distinguish "empty thread" from "row written before
+this ticket, nothing backfilled." The flag is what does: `false` on every row `ChatThreadRecord`
+already held, `true` on every row this build's `store(_:)` ever writes, permanently after. It is
+the same shape `DerivedMetricsRecord.distanceSplitsComputed` already established for exactly this
+"a column some rows will not have written" case.
+
+`MaximizeStore.threadSummaries()` reads the flag: `true` builds the summary from the three
+columns and the subject's own plain-column fields (`subjectKindRawValue`, `workoutUUID`,
+`scopeFromISO8601`, `scopeThroughISO8601`) — `messagesJSON` never touched. `false` falls back to
+exactly the old full decode, for that one row only. That fallback is bounded and self-clearing:
+the next time the athlete writes to that thread, `store(_:)` recomputes the columns and the row
+joins the fast path. A thread that is never spoken to again keeps paying the old cost for
+itself alone — never for the whole list, which was the defect.
+
+### Schema version: unchanged, and the argument for it
+
+Every new property is either `String?` with no default or `Bool` with a `false` default — the two
+shapes `DerivedMetricsRecord.distanceSplitsJSON`/`.distanceSplitsComputed` already used for an
+additive column under A8 (mirroring off, so the CloudKit promotion that would demand a version
+bump has not happened). SwiftData's lightweight migration adds the column to an existing table
+without rewriting a row: a `ChatThreadRecord` written before this build reads back with both
+strings `nil` and the flag `false` — the legacy shape, read honestly, not backfilled with an
+invented value. `MaximizeSchemaV1`'s version number does not move.
+
+### The batched workout lookup
+
+`workoutFacts(for subject:)` (one `WorkoutRecord` fetch per workout-subject thread) is replaced
+by `workoutFacts(forWorkoutIDs ids: Set<UUID>)` — one `FetchDescriptor<WorkoutRecord>` with an
+`ids.contains($0.workoutUUID)` predicate over every workout id the list's threads name, sorted by
+`ingestedAt` so a CloudKit-race duplicate resolves to the same oldest record `workoutRecords(for:)`
+already picks. An empty id set (an all-training thread list) short-circuits before any fetch runs.
+
+### Existing rows are safe — the load-bearing test
+
+`StoredRecordRoundTripTests.testALegacyRowPredatingTheSummaryColumnsStillReadsBackWhole`
+hand-constructs a `StoredChatThread` the way the memberwise initializer's now-defaulted trailing
+parameters make trivial — omitting `firstUserMessageContent`, `lastVisibleMessageContent` and
+`summaryFieldsComputed` entirely, the exact shape a pre-MAX-188 row reads back as. It asserts the
+flag reads `false`, both new columns read `nil`, and — the part that actually matters —
+`toDomain()` still reconstructs the full transcript, subject and `lastActivityAt` unchanged. A
+device holding history from before this build loses nothing and keeps reading correct summaries,
+through the fallback path, until the next time each thread is written to.
+
+### Tests (core, CI-verified)
+
+`StoredRecordRoundTripTests`: writing a thread computes its summary columns; an empty thread's
+columns are `nil` but `summaryFieldsComputed` is `true`; the seed-only case; the legacy-payload
+read-back above; `StoredChatThread.subject(kindRawValue:workoutUUID:scopeFromISO8601:scopeThroughISO8601:)`
+decodes both subject kinds from columns alone and rejects the same two corrupted shapes
+`toDomain()` already rejected. `ChatThreadSummaryTests`/`ChatThreadTitleTests`: the lightweight
+`ChatThreadSummary` initializer agrees with the full-thread one; an empty training thread's
+lightweight summary states its window; the lightweight preview collapses and truncates
+identically; `ChatThreadTitle.derive(subject:firstUserMessageContent:workoutFacts:)` agrees with
+`derive(for:workoutFacts:)` and falls back to the scope label.
+
+### What could not be verified
+
+**No Swift toolchain in this container** — `App/Persistence/MaximizeStore.swift` and
+`MaximizeSchema.swift` were never built. Both files are App-layer and CI has never executed
+them (R2/R13); the core changes they depend on (`StoredChatThread`, `ChatThreadSummary`,
+`ChatThreadTitle`) are covered by the tests above, which *would* run in CI, but this session could
+not run `swift build`/`swift test` itself to confirm they pass. The `ids.contains($0.workoutUUID)`
+`#Predicate` shape is SwiftData's documented pattern for a captured-array membership test; it was
+not compiled here either. **Needs device verification**: install over an existing store carrying
+several threads (ideally some pre-dating this build) and confirm the thread list still shows
+correct titles, previews and ordering, and that opening any of them shows the full history intact.
+
+### Security review
+
+`/security-review` was run — mandatory, this changes how health data (chat transcripts) sits in
+memory. See the PR for its findings.
 ---
 
 ## MAX-192 — the training roll-up carries strain and load balance
