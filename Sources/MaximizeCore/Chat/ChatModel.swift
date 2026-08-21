@@ -831,6 +831,11 @@ public final class ChatModel {
     /// scope that does not start on a Monday would misjudge its edges and the roll-up
     /// would disagree with the dashboard — the failure §3.6 exists to make impossible.
     /// `ContextBuilder` narrows the extra days back out of the session list itself.
+    ///
+    /// **A second, differently-shaped read follows it since MAX-192**: the acute:chronic
+    /// load balance is measured over the 28 days ending today, which is neither the scope
+    /// nor its widened weeks, so it is resolved by `LoadBalanceResolver` rather than
+    /// squeezed out of the records above. Only four scalars from it reach the prompt.
     private func trainingContext(
         for scope: TrainingScope,
         subject: ChatSubject,
@@ -871,7 +876,22 @@ public final class ChatModel {
                 today: currentDay,
                 planCalendar: planCalendar,
                 restDayBudget: settings.restDayBudget,
-                records: records
+                records: records,
+                // MAX-192. Resolved through the same function the dashboard tile's own
+                // reading comes from, and **not** assembled from `records` above: those
+                // cover the scope's Monday-first weeks, which for a week-long window is
+                // seven days against the 28 the chronic sum needs, and a calculator
+                // handed a short set returns a smaller number rather than an error. See
+                // `ContextInputs.loadBalance`.
+                //
+                // Anchored to the athlete's current day even though the window is frozen
+                // — `TrainingContext.loadBalance` gives the reasoning, and
+                // `ContextInputs` refuses any other anchor.
+                loadBalance: try await LoadBalanceResolver.reading(
+                    anchor: currentDay,
+                    timeZone: timeZone,
+                    workoutRepository: workoutRepository
+                )
             )
         )
     }

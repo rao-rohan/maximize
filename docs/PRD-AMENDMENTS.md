@@ -893,6 +893,159 @@ person whose data it is.
 
 ---
 
+## A30 — A training thread's prompt carries what each session cost, and how the last four weeks compare.
+
+**Amends:** A12's list of what a training subject may carry. **Sibling of A29**, which
+answers the same question for the workout subject; read the two together.
+**Source:** MAX-192, from MAX-184's audit ([docs/CHAT-AUDIT.md](./CHAT-AUDIT.md) §3.2), which
+ranked this first of everything it found.
+
+A12 rule 2 makes the set of subjects closed because *every subject is a new answer to what
+health data leaves the device, and that is not a question a ticket should be able to answer
+on its own.* A29 applied that reasoning to widening an **existing** subject, for the workout
+side. This is the same widening question for the other subject, and it is recorded here for
+the same reason — and for one more: **gating one subject and not the other would make the
+rule arbitrary, and a rule applied arbitrarily stops constraining anything.**
+
+### What was wrong, and why it was worth widening for
+
+The app computes three things that answer *does this fit the block* — strain (MAX-176/177),
+acute:chronic load balance (MAX-178) and per-muscle fatigue (MAX-179). All three are stored,
+all three are drawn on a screen, and before this **none of them reached any prompt on the
+training side.**
+
+So the app could draw *"your seven-day load is 1.6× your recent normal"* on a tile and, one
+tap away, a training thread asked *"am I ramping too fast?"* would correctly refuse to
+answer — `trainingTask` forbids inventing a figure the summary does not state. That refusal
+is honest and useless, and it is the shape of failure that makes an honesty rule look like a
+defect to the person it is protecting.
+
+### The two halves are not the same widening, and only one of them is new
+
+**Per-session strain adds no new category, and is held to be inside A12's existing answer.**
+`TrainingContext.Session` already carries that session's average heart rate and its
+heart-rate drift. `WorkoutStrain` is a zone-weighted integral of *the same curve those two
+are read from* — Edwards' summated-zone score over `DerivedMetrics.zoneSplits`, stored once
+at ingestion. It reveals nothing about the session that the record did not already state in
+the same prompt at finer resolution: a curve that produces an average of 142 bpm across an
+hour produces the strain that follows from it. One figure per line, on lines the athlete's
+scope already chose.
+
+**The four load-balance scalars do extend past the frozen scope, and that is a real change
+in what a scope means.** A thread scoped to one week now carries four numbers measured over
+the 28 days ending on the athlete's current day: the 7-day strain sum, the 28-day sum, that
+sum scaled to one week, and their ratio. For a frozen historical window, some of those days
+are training the scope does not cover. **"The dashboard already draws these" is not the
+test** — the dashboard does not leave the device.
+
+### Why four aggregates naming nothing was judged acceptable
+
+1. **They name nothing.** No session, no day, no distance, no duration, no route, no
+   activity type, no score. Four scalars and a day label, from which no individual session
+   can be recovered.
+2. **The unit is already in the prompt.** They are sums of the same per-session strain figure
+   the session lines now carry, over a wider window.
+3. **They are O(1) forever.** An athlete who trains twice a week and one who trains twice a
+   day send the same four numbers. Nothing here grows with training volume — the property
+   MAX-184's audit demanded of A29's block, held to here as well.
+4. **They are the answer to the owner's own question**, asked in the conversation where a
+   person would ask it, and the alternative was a coach that refuses to read a number it is
+   sitting next to.
+5. **They sit in the cached system prefix**, paid once per thread rather than once per turn,
+   and A14 still holds: no chat call is ever unattended.
+
+That is a small widening. **Small is not none, and this paragraph exists so it is not
+recorded as none.**
+
+### The anchor is the athlete's current day, not the window's last day
+
+This is a constraint, not an implementation detail, because it decides what the figures
+describe.
+
+`TrendTileData` anchors load balance to *now* regardless of which interval the dashboard is
+showing, on the reasoning that a rolling 7-and-28-day read is not a property of a selected
+span. A training thread inherits that, so the two surfaces cannot disagree. Anchoring to
+`scope.through` instead would have been worse than inconsistent: an ordinary this-week thread
+opened on a Wednesday ends its window on Sunday, so the acute sum would run four days into
+the future and report a load quietly deflated by days that have not happened.
+
+**The prompt states the anchor and states that the windows roll**, and the fact sheet's
+opening sentence — which claimed every figure below it was measured over exactly the
+window's days — now names this one exception. §3.6(b)'s rule: a mismatch that cannot be
+prevented is made legible instead. `ContextInputs` refuses at assembly a reading anchored to
+any day but `today`, so a figure describing one day can never be printed under another day's
+heading.
+
+### One resolution of "how far back do our records reach", not two
+
+A29 named this ticket as the place that would produce it, and the reasoning is load-bearing
+enough to restate as a rule.
+
+`LoadBalanceInput.historyStart` — the earliest day the app can vouch for — is what tells *the
+athlete rested all month* apart from *the app has only been installed a week*. It cannot be
+read off the chronic window alone: an athlete with two years of history who happens to have
+trained only in the last five days would otherwise be told the app is still building a
+baseline while the tile beside the conversation showed a real ratio. **`LoadBalanceResolver`
+in `MaximizeCore` is that resolution**, and any second surface wanting this figure calls it
+rather than writing its own probe. The dashboard's own private copy predates it and should
+be migrated onto it; until it is, the two agree only because the resolver is that method
+moved verbatim, which is agreement by history rather than by construction.
+
+**And the reading is never assembled from `ContextInputs.records`.** Those cover the
+Monday-first weeks touching the scope — seven days for a weekly thread, against the 28 the
+chronic sum needs. `LoadBalanceCalculator` handed a short set does not fail; it returns a
+smaller sum. A silently undercounted load figure inside a prompt is exactly the class of
+wrongness nothing on screen would contradict, and it is why the reading arrives already
+computed rather than being derived where it is rendered.
+
+### What is deliberately excluded
+
+- **Per-muscle fatigue** (MAX-179/180). Sanctioned by neither this amendment nor A29, and
+  declined here on three grounds: it is six figures rather than one, for a signal its own
+  documentation calls *"roughly one bit of real information"*; it is a function of **now**,
+  so it would age inside a prompt prefix that is cached precisely because the scope is
+  frozen — day three of a conversation would still assert Tuesday's reading; and it answers
+  *"what should I train today"*, which is not the question a roll-up over a fixed, possibly
+  historical, window is for. **The exclusion is stated in the prompt** rather than left
+  silent, because the plan block already names the muscle groups the plan *prescribes* and
+  the session lines name every lift — a model given both and no such sentence can assemble a
+  recovery narrative out of an ask and a duration.
+- **Any strain figure recomputed at render time.** D2: `strainPoints` is stored once at
+  ingestion and read. No integral, no sum and no ratio is taken where a prompt is written.
+- **A verdict on the ratio.** `LoadBalanceCalculator` reports and does not grade — no
+  threshold, no band, no colour, no "high"/"low" — and a prompt is the one surface where
+  that omission could be undone by inference, so the instruction against it is explicit in
+  the text.
+- **Anything that would let a session outside the scope be identified.** See the tripwire.
+
+### Absence, which is four different facts here
+
+The record states its own absences so the model does not supply a figure (MAX-175), and
+these four are worded apart because they are not the same statement:
+
+| State | What it is |
+|---|---|
+| A session with no strain | No heart-rate curve, or metrics that predate the figure. The field is absent — **never `0`**, which would say the session cost nothing |
+| Under 28 days of history | `.buildingHistory` — a designed state, **not a ratio computed from a short window** and not a zero |
+| A full chronic window carrying no strain | The days exist; what is missing is a baseline. The acute sum is real and stated; the ratio is withheld rather than divided by zero |
+| No reading supplied at all | A fact about the record, not about the athlete. It never borrows `.buildingHistory`'s sentence |
+
+### Tripwire
+
+**Any figure that names a session, a day or a place outside the thread's frozen scope is
+outside this amendment, and this amendment must not be read as licensing one.** What is
+sanctioned here is aggregate and anonymous: four scalars and the day they are anchored to.
+A per-session line, a date, a distance, a route or a score belonging to a day the athlete's
+chosen window does not contain is a different answer to "what leaves the device", and it
+needs its own paragraph here before it needs a ticket.
+
+The tempting version — *"while you have the last 28 days loaded, list what was in them"* —
+is exactly the shape A29 rejected on the workout side, and it is rejected here for the same
+two reasons: it reintroduces a term that grows with how much the athlete trains, and it
+silently replaces a window the athlete chose with one they did not.
+
+---
+
 ## Requirements unaffected
 
 Everything in §7 (features), §9 (metric definitions), §10 (scoring logic), §13 (risks)
