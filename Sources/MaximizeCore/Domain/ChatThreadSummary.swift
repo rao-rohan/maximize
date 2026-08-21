@@ -353,6 +353,28 @@ public enum ChatThreadListCopy {
     /// screen itself is the noun.
     public static let title = "Chats"
 
+    // MARK: - MAX-201: §4.3's search
+
+    /// `.searchable`'s own placeholder — what the field says before anything is typed.
+    public static let searchPrompt = "Search conversations"
+
+    /// A third absence, distinct from `noConversationsYet` (§4.3, MAX-201): the store
+    /// has threads, the search found none of them. Telling the athlete their history is
+    /// empty when it is merely unmatched would be inventing a fact the store does not
+    /// hold, which is the same rule `ChatFailureNotice` follows for a stream failure.
+    ///
+    /// The query is quoted back for the same reason the platform's own "No Results for
+    /// '…'" does it: it is the one fact that tells the athlete whether their search
+    /// actually reached the field, rather than a stray character being eaten somewhere
+    /// on the way.
+    public static func noConversationsMatch(_ query: String) -> String {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return "No conversations match “\(trimmed)”."
+    }
+
+    public static let noSearchResultsTitle = "No matches"
+    public static let noSearchResultsGlyphSystemImageName = "magnifyingglass"
+
     /// A thread could not be deleted from storage (§2.5). The row stays on screen, and the
     /// athlete can try again — matching `ChatFailureNotice.couldNotSaveReply`'s voice for a
     /// storage failure: what happened, what will happen next, no retry button offered.

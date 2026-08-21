@@ -90,4 +90,79 @@ final class PlanAuthoringConversationalRouteTests: XCTestCase {
     func testActionLabelIsNotEmpty() {
         XCTAssertFalse(PlanAuthoringConversationalRoute.actionLabel.isEmpty)
     }
+
+    // MARK: - MAX-190: bounding the loop with ChatSheet (CHAT-AUDIT §2.6)
+
+    /// The gate this ticket adds: arriving from a conversation disables the button even
+    /// with a key stored — the two conditions that would otherwise both say "available"
+    /// individually.
+    func testUnavailableWhenArrivedFromConversationEvenWithKeyStored() {
+        let route = PlanAuthoringConversationalRoute(
+            apiKeyPresence: .stored,
+            arrivedFromConversation: true
+        )
+        XCTAssertFalse(route.isAvailable)
+    }
+
+    /// `.unknown` is available on the ordinary path (`testAvailableWhenUnknown`) — this
+    /// checks the override still wins over every `StoredAPIKeyPresence` case, not just
+    /// `.stored`.
+    func testArrivedFromConversationOverridesEveryKeyPresence() {
+        for presence in StoredAPIKeyPresence.allCases {
+            let route = PlanAuthoringConversationalRoute(
+                apiKeyPresence: presence,
+                arrivedFromConversation: true
+            )
+            XCTAssertFalse(
+                route.isAvailable,
+                "\(presence) with arrivedFromConversation still reported available"
+            )
+        }
+    }
+
+    /// Never a hidden button here either — the explanation is real copy, not a blank
+    /// disabled control.
+    func testArrivedFromConversationExplanationIsNotEmpty() {
+        let route = PlanAuthoringConversationalRoute(
+            apiKeyPresence: .stored,
+            arrivedFromConversation: true
+        )
+        XCTAssertFalse(route.explanation.isEmpty)
+    }
+
+    /// The arrived-from-conversation sentence must read differently from both ordinary
+    /// states — a person reading it needs to know this is not the same "add a key"
+    /// message, and not the same "opens a conversation" invitation either.
+    func testArrivedFromConversationExplanationDiffersFromBothOrdinaryStates() {
+        let arrived = PlanAuthoringConversationalRoute(
+            apiKeyPresence: .stored,
+            arrivedFromConversation: true
+        )
+        let available = PlanAuthoringConversationalRoute(apiKeyPresence: .stored)
+        let unavailable = PlanAuthoringConversationalRoute(apiKeyPresence: .notStored)
+        XCTAssertNotEqual(arrived.explanation, available.explanation)
+        XCTAssertNotEqual(arrived.explanation, unavailable.explanation)
+    }
+
+    /// The explanation must point back rather than invite a second conversation — the
+    /// exact defect being fixed.
+    func testArrivedFromConversationExplanationNamesGoingBack() {
+        let route = PlanAuthoringConversationalRoute(
+            apiKeyPresence: .stored,
+            arrivedFromConversation: true
+        )
+        XCTAssertTrue(route.explanation.lowercased().contains("back"))
+    }
+
+    /// The default parameter is the ordinary, ubiquitous call shape used everywhere but
+    /// the one screen MAX-190 touches — it must resolve exactly as if `false` had been
+    /// passed explicitly.
+    func testArrivedFromConversationDefaultsToOrdinaryBehavior() {
+        let implicit = PlanAuthoringConversationalRoute(apiKeyPresence: .stored)
+        let explicit = PlanAuthoringConversationalRoute(
+            apiKeyPresence: .stored,
+            arrivedFromConversation: false
+        )
+        XCTAssertEqual(implicit, explicit)
+    }
 }

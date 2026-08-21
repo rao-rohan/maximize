@@ -31,9 +31,21 @@ import MaximizeCore
 ///
 /// ## Absence uses the platform's own empty state
 ///
-/// `ContentUnavailableView` is what iOS draws for "there is nothing here", and both of
-/// this screen's absences are that. The copy is `ChatThreadListCopy`'s (MAX-150's voice,
-/// unchanged); what this view supplies is the layout, which is the platform's.
+/// `ContentUnavailableView` is what iOS draws for "there is nothing here", and all three
+/// of this screen's absences are that (a fresh install, a failed load, and — since
+/// MAX-201 — a search that found nothing). The copy is `ChatThreadListCopy`'s; what this
+/// view supplies is the layout, which is the platform's.
+///
+/// ## Searchable over what a row already shows (§4.3, MAX-201)
+///
+/// `.searchable(text:prompt:)` on this screen, over `model.searchText`. The filter itself
+/// runs in `ChatThreadListPresentation.sections(for:matching:now:timeZone:)` — the same
+/// banding function the unfiltered list uses, given a narrower input — so a band with
+/// rows filtered out of it collapses exactly as it does when a delete empties one
+/// (MAX-189's `deletionOutcome`), rather than surviving as a heading over nothing. What
+/// the query is matched against is `ChatThreadSummary`'s own stored `title` and
+/// `preview` fields — never a transcript. MAX-188 stopped `threadSummaries()` from
+/// decoding one to draw this list; a search box is not a reason to bring it back.
 struct ChatThreadListView: View {
     @State private var model: ChatThreadListModel
     private let onSelect: (UUID) -> Void
@@ -57,6 +69,14 @@ struct ChatThreadListView: View {
             .navigationTitle(ChatThreadListCopy.title)
             .navigationBarTitleDisplayMode(.inline)
             .contentSurface(.screen)
+            // §4.3: the current platform search affordance rather than a hand-rolled
+            // field in a toolbar item — it gets the system's placement, cancel button
+            // and keyboard handling for free, and `model.searchText` is the one thing
+            // this view owns about it. Filtering itself never happens here; every
+            // change re-presents through `ChatThreadListModel.searchText`'s `didSet`,
+            // which asks `ChatThreadListPresentation` for the answer.
+            .searchable(text: $model.searchText, prompt: ChatThreadListCopy.searchPrompt)
+
             .alert(
                 ChatThreadListCopy.couldNotDeleteThreadTitle,
                 isPresented: .constant(model.couldNotDeleteMessage != nil)
@@ -83,6 +103,17 @@ struct ChatThreadListView: View {
                 ChatThreadListCopy.couldNotLoadConversationsTitle,
                 systemImage: ChatThreadListCopy.couldNotLoadConversationsGlyphSystemImageName,
                 description: Text(ChatThreadListCopy.couldNotLoadConversations)
+            )
+        // §4.3: a filtered-to-nothing list is a different absence than a genuinely
+        // empty one — telling the athlete their history is empty when a search simply
+        // found nothing in it would be inventing a fact the store does not hold. This
+        // case has to precede the plain `sections.isEmpty` one below, since both match
+        // the same pattern and Swift takes the first `where` clause that is true.
+        case let .loaded(sections) where sections.isEmpty && model.isSearching:
+            ContentUnavailableView(
+                ChatThreadListCopy.noSearchResultsTitle,
+                systemImage: ChatThreadListCopy.noSearchResultsGlyphSystemImageName,
+                description: Text(ChatThreadListCopy.noConversationsMatch(model.searchText))
             )
         case let .loaded(sections) where sections.isEmpty:
             // Absence is a designed state (CLAUDE.md): a fresh install and a store that
