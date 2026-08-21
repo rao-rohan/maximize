@@ -199,6 +199,100 @@ final class ChatPlanDraftingTests: XCTestCase {
         XCTAssertEqual(chatModel.messages.last?.text, "Proposal discarded. Your plan is unchanged.")
     }
 
+    // MARK: - MAX-187: a proposal does not outlive the save it caused
+
+    /// The exact defect: a second tap on "Accept" after the first has already been
+    /// stored must not reach `PlanRepository.store(_:)` again. `PlanAuthoringSession
+    /// .plan(from:effectiveFrom:)` computes a fresh version every time it is asked
+    /// (D1 is not violated by either call, on its own) — the bug is a screen that keeps
+    /// asking a second time for a change it already made.
+    ///
+    /// Fails without the fix: `chatModel.planDrafting` stays `.proposed`, the `if case`
+    /// gate below stays true, and the second `acceptAndSave` writes a genuine second
+    /// version — this assertion catches exactly that.
+    func testAcceptedProposalIsNotOfferedASecondTime() async throws {
+        let (chatModel, store, _) = try await makeModel(
+            planCalendar: try PlanCalendar([try storedPlan()])
+        )
+        await chatModel.load()
+        await chatModel.draftPlan()
+        let proposal = try XCTUnwrap(chatModel.proposalAwaitingReview)
+
+        // The first "Accept, then Save" — exactly what `PlanAuthoringView` does on its
+        // own Save action: build a fresh session against current storage, apply the
+        // handed-over proposal, and store the result through A13's one door.
+        try await acceptAndSave(proposal, into: store)
+        XCTAssertEqual(store.planWriteCount, 1)
+
+        // What `ChatConversationView` does on reappearing (§2.3, popping the authoring
+        // screen back off the stack).
+        await chatModel.endProposalIfAlreadyStored()
+
+        XCTAssertEqual(chatModel.planDrafting, .idle)
+        XCTAssertNil(chatModel.proposalAwaitingReview)
+        XCTAssertEqual(chatModel.messages.last?.kind, .notice)
+
+        // Reproduce a second tap on "Accept" exactly as a real card would gate it — on
+        // the state the card actually reads before drawing its button.
+        if case .proposed = chatModel.planDrafting {
+            try await acceptAndSave(proposal, into: store)
+        }
+
+        XCTAssertEqual(store.planWriteCount, 1, "a spent proposal must not be reachable a second time")
+        let versions = try await store.planCalendar()?.versions ?? []
+        XCTAssertEqual(versions.count, 2, "the plan the fixture starts with, plus the one accept wrote")
+    }
+
+    /// The other half of the same guarantee: looking at the prefilled form and pressing
+    /// Back **without saving** must leave the card exactly as it was — nothing was
+    /// stored, so nothing has happened yet (A13), and the athlete still has a real
+    /// decision to make.
+    func testALookWithoutSavingLeavesTheProposalLive() async throws {
+        let (chatModel, store, _) = try await makeModel(
+            planCalendar: try PlanCalendar([try storedPlan()])
+        )
+        await chatModel.load()
+        await chatModel.draftPlan()
+        guard case .proposed = chatModel.planDrafting else {
+            return XCTFail("expected a proposal before the reappearance check")
+        }
+
+        await chatModel.endProposalIfAlreadyStored()
+
+        XCTAssertEqual(store.planWriteCount, 0)
+        guard case .proposed = chatModel.planDrafting else {
+            return XCTFail("a proposal nothing has been saved from must still be offered")
+        }
+    }
+
+    /// The first-plan case, where "already stored" means "a plan now exists at all"
+    /// rather than "the version moved past what this diffed against".
+    func testAcceptedFirstPlanProposalIsNotOfferedASecondTime() async throws {
+        let (chatModel, store, _) = try await makeModel(planCalendar: nil)
+        await chatModel.load()
+        await chatModel.draftPlan()
+        let proposal = try XCTUnwrap(chatModel.proposalAwaitingReview)
+
+        try await acceptAndSave(proposal, into: store)
+        await chatModel.endProposalIfAlreadyStored()
+
+        XCTAssertEqual(chatModel.planDrafting, .idle)
+        XCTAssertEqual(store.planWriteCount, 1)
+    }
+
+    /// What `PlanAuthoringView`'s Save button does, reproduced exactly: build a fresh
+    /// session against current storage, apply the proposal to it, and store the result
+    /// through A13's one door — never a second write path.
+    private func acceptAndSave(_ proposal: PlanProposal, into store: InMemoryWorkoutStore) async throws {
+        let session = try PlanAuthoring.session(
+            revising: try await store.planCalendar(),
+            today: try Fixture.day(2026, 1, 1)
+        )
+        let draft = try session.draft.applying(proposal)
+        let saved = try session.plan(from: draft, effectiveFrom: session.suggestedEffectiveFrom)
+        try await store.store(saved)
+    }
+
     /// A proposal is not a turn. It is never written to the thread, so a card on screen
     /// leaves the stored conversation exactly as it was.
     func testAProposalIsNeverWrittenToTheThread() async throws {

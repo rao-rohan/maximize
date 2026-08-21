@@ -1103,6 +1103,19 @@ public final class ChatModel {
         messages.append(DisplayMessage(kind: .notice, text: PlanDraftingNotice.notice(for: failure).message))
     }
 
+    /// The single door a proposal leaves through, whichever way it ends: clears
+    /// `planDrafting` and says so in the transcript, as a `.notice` — never a turn, never
+    /// silent.
+    ///
+    /// MAX-187 found `discardProposal()` as the only such door and a second ending —
+    /// **accepted, and stored** — with no door at all. The fix is not a second mechanism
+    /// beside this one; it is this one, reused, with the sentence that fits what actually
+    /// happened.
+    private func endProposal(sayingInTranscript text: String) {
+        planDrafting = .idle
+        messages.append(DisplayMessage(kind: .notice, text: text))
+    }
+
     /// Rejecting a proposal. Leaves the plan in force **completely** untouched, which
     /// costs nothing to guarantee because nothing was ever written: this drops a value
     /// held in memory.
@@ -1111,11 +1124,50 @@ public final class ChatModel {
     /// disappears on tap leaves an athlete unsure whether they just changed something.
     public func discardProposal() {
         guard case .proposed = planDrafting else { return }
-        planDrafting = .idle
-        messages.append(DisplayMessage(
-            kind: .notice,
-            text: "Proposal discarded. Your plan is unchanged."
-        ))
+        endProposal(sayingInTranscript: "Proposal discarded. Your plan is unchanged.")
+    }
+
+    /// MAX-187: ends a proposal the moment the plan it describes has actually been
+    /// **stored** — not the moment the athlete taps "Open in the plan editor", and not on
+    /// any timer. Nothing calls this automatically; the conversation view calls it when it
+    /// reappears (popping `PlanAuthoringView` off the stack reveals it again, which
+    /// `ChatConversationView`'s own `.task` does not react to — see that view's note).
+    ///
+    /// ## Why this asks storage rather than trusting a signal from the authoring screen
+    ///
+    /// `PlanAuthoringView` is pushed by `ChatSheet` holding only the `PlanProposal` it was
+    /// handed (§4.6) — it carries no repository and no reference back to the `ChatModel`
+    /// that opened it (by design: A13's door is `PlanAuthoringSession
+    /// .plan(from:effectiveFrom:)`, and nothing about that door needs to know who is
+    /// watching it). Rather than build a second, parallel channel just to notify this
+    /// screen, this asks the one thing that actually decides the question: has
+    /// `planRepository.planCalendar()`'s current version moved past the one
+    /// `review.standing` was diffed against? That door is the *only* thing in this build
+    /// that can move it (A13), so a version this review did not already know about means
+    /// that door was used — by the authoring screen this exact proposal opened.
+    ///
+    /// A no-op when nothing is proposed, when the read fails, or when the calendar has
+    /// not moved: an athlete who opened the form, looked, and pressed Back **without**
+    /// saving must still find the same card offering the same proposal, because nothing
+    /// has happened yet (A13).
+    public func endProposalIfAlreadyStored() async {
+        guard case let .proposed(review) = planDrafting, let planRepository else { return }
+        guard let calendar = try? await planRepository.planCalendar() else { return }
+        let current = PlanAuthoring.currentVersion(of: calendar)
+
+        let stillLive: Bool
+        switch review.standing {
+        case .firstPlan:
+            stillLive = current == nil
+        case let .revision(supersedes, _):
+            stillLive = current?.version == supersedes
+        }
+        guard !stillLive, let current else { return }
+
+        endProposal(
+            sayingInTranscript: "This proposal has been applied — plan \(current.version) is now "
+                + "in force, effective \(CalendarDayLabel.full(current.effectiveFrom))."
+        )
     }
 
     /// The proposal awaiting review, if there is one — what the accept action hands to

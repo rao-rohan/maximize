@@ -1971,6 +1971,7 @@ free. What landed in the file:
 | MAX-180 | **The muscle map, drawn** — `MuscleFatigueMark` bands MAX-179's reading into five states (`.notLogged`/`.fresh`/`.light`/`.moderate`/`.high`) and marks each with a non-hue geometric channel (fill fraction + dashed outline + glyph), extending `WCAGContrastTests`'s hue-alone test with a third representation rather than a parallel suite. `MuscleMapView` draws it on a flat content surface with `@ScaledMetric` throughout, and `WorkoutDetailView` composes it unconditionally (it is the athlete's state, not the workout's). A group never logged draws dashed-and-glyphed, never a coloured "at rest" fill. **Adapted after #173 landed on top of it**: the "last worked" caption reads `mostRecentlyWorkedAt`, not the removed `elapsedDays`, and the day count is now calendar-correct via `CalendarDay.days(until:)` rather than fixed 86,400-second blocks. See the MAX-180 section below | 179 | Sonnet ✅ — merged as `ae85d0a`. Compiles and its core tests pass in CI; **nothing about how it draws is verified** — see the PR's device checks |
 | MAX-181 | **The fact sheet renders the lift slot** — `TrainingFactSheet`'s plan block now names each weekday's lift ask beside its run ask, tagged `Lift:`, omitted rather than stated when the plan asks nothing of the slot. Closes MAX-174 §5.3's G2, and MAX-136's open item. **Also closes the more severe consequence MAX-175 found and declined to fix**: `PlanProposalInstruction` tells a drafting model to restate each weekday's lift ask from this same fact sheet unchanged — it could not, so an accepted revision could silently zero out an athlete's whole lift schedule. See the MAX-181 section below | 174, 175 | Sonnet ✅ |
 | MAX-184 | **An audit of the chat surface and its context continuity** — `docs/CHAT-AUDIT.md`. Seven defects, the worst of them a **"New chat" button that is inert on the ordinary path** and a **workout chat card that is not tappable and never refreshes**; a ranked craft list; and a position on the owner's central ask. **Nothing dangerous was found** — no data loss, no leak off the device, no crash. The one context finding that matters is not the one it was dispatched on: **strain, acute:chronic load balance and per-muscle fatigue reach a tile and reach no prompt**, so a training thread asked "am I ramping too fast" correctly refuses to answer a question the app has already computed. Proposes MAX-185–201; MAX-193 is blocked on a new amendment. See the MAX-184 section below | 090, 152, 153, 170, 177, 178, 179 | **Opus** — audit only, no behaviour changed |
+| MAX-187 | **A plan proposal card does not outlive its save** — §2.3's defect: accepting a proposal, saving, and pressing Back used to leave a diff card on screen describing a change already applied, **Accept** still live, a second tap writing a genuine duplicate plan version (D1 intact throughout — the screen was lying, not the data). `ChatModel.endProposalIfAlreadyStored()` reuses `discardProposal()`'s one door (`planDrafting = .idle` plus a transcript `.notice`) rather than adding a second mechanism, and decides by asking storage: `PlanProposalReview.standing`'s captured version against a fresh `PlanAuthoring.currentVersion(of:)` read — not a callback from `PlanAuthoringModel`, which has no reference back to the `ChatModel` that opened it and was kept that way rather than wired up across `ChatSheet.swift` (owned by MAX-185 concurrently). `ChatConversationView` calls it from `.onAppear`, since `.task` does not re-run when `PlanAuthoringView` pops back off the stack. See the MAX-187 section below | 184 | Sonnet — branch pushed, PR open; not yet reviewed or merged |
 
 **Four collisions the overseer must respect.**
 
@@ -6017,6 +6018,72 @@ conversation starters, thread-list search). Tiers, collisions and a dispatch ord
 document's §8. Three collisions to respect: 192 before 193 (`ContextBuilder.swift`), 188 before
 201 (the thread list), and 185 → 194 → 190 in sequence (all three are `ChatSheet.swift`).
 
+## MAX-187 — a plan proposal card does not outlive its save
+
+Verified the audit's chain first, since a duplicate plan version is a permanent data
+consequence: `PlanAuthoringModel.save()` stores and reloads its own state but never
+dismisses the screen; nothing in `ChatModel` cleared `planDrafting` after a save happened
+on a screen it had opened; `ChatConversationView`'s `.task` does not re-run when
+`PlanAuthoringView` pops back off the navigation stack, so nothing reloaded either. All
+three held. Back really did return to a diff describing a change already applied, with
+**Accept this plan** still live, and tapping it a second time really did reach
+`PlanAuthoringSession.plan(from:effectiveFrom:)` again — a legitimate write each time
+(D1 intact), producing a second version identical in effect to the first.
+
+**The fix reuses `discardProposal()`'s one door rather than adding a second.** A private
+`endProposal(sayingInTranscript:)` now does what that method's body used to do inline
+(`planDrafting = .idle` plus a transcript `.notice`), and both `discardProposal()` and the
+new `endProposalIfAlreadyStored()` call it — one place decides what "the proposal is no
+longer live" means, exactly as the ticket asked.
+
+**How the new method decides "already stored" without a callback from
+`PlanAuthoringModel`.** `PlanAuthoringView` is pushed by `ChatSheet` holding only the
+`PlanProposal` it was handed — it carries no repository and no reference back to the
+`ChatModel` that opened it, and wiring one across `ChatSheet.swift`'s `Route`/navigation
+plumbing was the one file this ticket was told MAX-185 owns concurrently. Rather than
+build a second, parallel notification channel to avoid that file, `endProposalIfAlreadyStored()`
+asks the one thing that actually decides the question: `PlanProposalReview.standing`
+already carries the exact version the card's diff was built against (`.firstPlan`, or
+`.revision(supersedes:, _)`); a fresh `PlanAuthoring.currentVersion(of:)` read of the
+current calendar is compared against it, and `PlanAuthoringSession.plan(from:effectiveFrom:)`
+is A13's only door onto that calendar — so a version the review did not already know about
+means that door was used. Called from `ChatConversationView.onAppear`, since `.task`
+demonstrably does not re-run on the pop that reveals this screen again.
+
+**An athlete who looks and presses Back without saving keeps a live card** — the check is
+a no-op whenever the calendar has not moved, which is the same guard that makes it safe to
+call on every reappearance rather than only the one that follows a real save.
+
+**What the transcript says.** Matches `discardProposal()`'s existing voice (a short,
+plain `.notice`, never a turn): *"This proposal has been applied — plan v3 is now in
+force, effective 1 Jan 2026."* — naming the version and the date rather than a vaguer
+"something changed," the same way `PlanAuthoringModel.save()`'s own on-screen confirmation
+does.
+
+**Not touched: `App/Plan/PlanAuthoringModel.swift`, `App/Chat/PlanProposalCardView.swift`.**
+Both were named in the brief as likely files; neither needed a change once the decision
+moved entirely into `ChatModel` and the trigger into `ChatConversationView`'s existing
+`.onAppear`. `PlanAuthoringModel.save()` still does not dismiss the screen — that was
+never the defect on its own, only a contributor, and D1's own rule ("never undo a write")
+means the fix could not have been there either way.
+
+### What CI can and cannot prove
+
+CI can prove: the package compiles; `ChatModel.endProposalIfAlreadyStored()` clears
+`planDrafting` and appends the notice once a plan has actually been stored, for both the
+first-plan and revision cases; it leaves a not-yet-saved proposal untouched; and a
+same-shaped "accept twice" reproduction, gated on the state a real card would read before
+drawing its button, writes exactly one plan version with the fix and two without it
+(`ChatPlanDraftingTests.testAcceptedProposalIsNotOfferedASecondTime`).
+
+CI cannot prove that `.onAppear` actually fires when a human pops `PlanAuthoringView` off
+the stack on a device, or that the card visually disappears rather than merely becoming
+inert. **Needs device verification:** draft a plan proposal in a training thread, accept
+it, save it on the authoring screen, press Back, and confirm the card no longer offers
+**Accept this plan** and a notice explains why; then open Plan history and confirm exactly
+one new version was written.
+
+**`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
 
 ## Risks
 

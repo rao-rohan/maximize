@@ -242,6 +242,16 @@ struct ChatConversationView: View {
             .task {
                 await model.load()
             }
+            // MAX-187: `.task` above does not re-run when this screen is merely
+            // *revealed* again — popping `PlanAuthoringView` off the stack after a save
+            // uncovers this view rather than recreating it, so the load above never
+            // fires a second time (nor should it: a reload would start the conversation
+            // over). `.onAppear` does fire on that reveal, and
+            // `endProposalIfAlreadyStored()` is a no-op unless a proposal is actually on
+            // screen and the plan it describes has actually been stored since.
+            .onAppear {
+                Task { await model.endProposalIfAlreadyStored() }
+            }
     }
 
     @ToolbarContentBuilder
