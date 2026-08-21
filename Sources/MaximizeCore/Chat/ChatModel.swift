@@ -190,6 +190,19 @@ import Observation
 /// this file; nothing pre-drafts a proposal in case one is wanted, and **no failure ever
 /// re-asks itself** — MAX-152's retry is a button, and `ChatFailureNotice` carries the
 /// argument for why it is not a policy.
+///
+/// ## MAX-198 — an unsent draft outlives this exact instance
+///
+/// `composerText` is restored from `composerDraftStore` at the end of `load()` and
+/// mirrored back into it on every subsequent write, so the sheet being dismissed —
+/// which discards this `ChatModel` entirely, per `ChatSheet`'s `.id(opening)` — does
+/// not discard what the athlete had half-typed. Two things this deliberately does
+/// **not** do: it never reaches `ChatThreadRepository` (a draft is not a turn, D6), and
+/// it never reaches `StreamingChatModelInvoking` on its own (A14 — restoring text into
+/// a field is not asking anything). `send()` clears both the field and the store
+/// together, and a failed or stopped reply's *sent* question is `pendingTurn`'s
+/// business, not this one's — see that property's own documentation for why the two do
+/// not merge into a second notion of "what the athlete is waiting on."
 @MainActor
 @Observable
 public final class ChatModel {
@@ -330,7 +343,25 @@ public final class ChatModel {
     public private(set) var streamingText = ""
 
     /// Bound directly to the composer's text field.
-    public var composerText = ""
+    ///
+    /// **MAX-198.** Every write — whether from the field's binding or from this type's
+    /// own `load()`/`send()` — also reaches `composerDraftStore`, keyed by `subject`.
+    /// That is what lets an unsent draft survive this exact `ChatModel` being discarded
+    /// when the sheet dismisses: see `ChatComposerDraftStore`'s own documentation for
+    /// where the draft actually lives and why that is the smaller privacy claim. `didSet`
+    /// rather than a wrapping computed property because the field writes through this
+    /// property directly (`$model.composerText`) — there is no call site to intercept.
+    public var composerText = "" {
+        didSet {
+            // `subject` is nil only in the brief window before a thread-id-opened model
+            // has resolved one, during which the composer is not on screen at all (the
+            // view's `.ready` branch is the only one that draws it) — nothing typed can
+            // reach here with `subject` still nil, but the guard is what keeps that a
+            // fact this type enforces rather than a fact this type assumes.
+            guard let subject else { return }
+            composerDraftStore.setDraft(composerText, for: subject)
+        }
+    }
 
     public var canSend: Bool {
         loadState == .ready && !isStreaming
@@ -514,6 +545,12 @@ public final class ChatModel {
     private let timeZone: TimeZone
     private let now: @Sendable () -> Date
 
+    /// MAX-198: where `composerText` is read from and written to, keyed by `subject`.
+    /// Defaults to the process-wide store so a fresh `ChatModel` — every reopened sheet
+    /// gets one — sees whatever an earlier, since-discarded `ChatModel` left behind.
+    /// Overridable so tests get one store per case rather than sharing the app's.
+    private let composerDraftStore: ChatComposerDraftStore
+
     /// Built once by `load()`, from stored data only, and read again — never rebuilt —
     /// by every `send()` afterward (see this type's "D3" note).
     private var context: PromptContext?
@@ -590,6 +627,9 @@ public final class ChatModel {
     ///   - now: injected rather than read from the clock so a sent turn's timestamps —
     ///     and the civil day a training roll-up is measured against — are reproducible in
     ///     a test, matching `WorkoutIngestionPipeline`'s `now`.
+    ///   - composerDraftStore: MAX-198. Defaults to the process-wide store — see that
+    ///     type's own documentation for why one instance per app, not per `ChatModel`,
+    ///     is the point. A test that cares about draft behaviour passes its own.
     public init(
         subject: ChatSubject,
         workoutRepository: (any WorkoutRepository)?,
@@ -600,7 +640,8 @@ public final class ChatModel {
         chatClient: any StreamingChatModelInvoking,
         planProposalClient: (any PlanProposalModelInvoking)? = nil,
         timeZone: TimeZone = .current,
-        now: @escaping @Sendable () -> Date = { Date() }
+        now: @escaping @Sendable () -> Date = { Date() },
+        composerDraftStore: ChatComposerDraftStore? = nil
     ) {
         self.opening = .subject(subject)
         self.subject = subject
@@ -613,6 +654,11 @@ public final class ChatModel {
         self.planProposalClient = planProposalClient
         self.timeZone = timeZone
         self.now = now
+        // MAX-049's own lesson, applied here: a defaulted parameter that silently
+        // resolves to a stub is the footgun; `?? .shared` resolves inside the body
+        // instead, where it is one line a reader can see rather than a signature they
+        // have to already know to distrust.
+        self.composerDraftStore = composerDraftStore ?? .shared
     }
 
     /// Opens a genuinely new, empty thread on this subject — **New chat** (MAX-185).
@@ -639,7 +685,8 @@ public final class ChatModel {
         chatClient: any StreamingChatModelInvoking,
         planProposalClient: (any PlanProposalModelInvoking)? = nil,
         timeZone: TimeZone = .current,
-        now: @escaping @Sendable () -> Date = { Date() }
+        now: @escaping @Sendable () -> Date = { Date() },
+        composerDraftStore: ChatComposerDraftStore? = nil
     ) {
         self.opening = .newThread(subject)
         self.subject = subject
@@ -652,6 +699,7 @@ public final class ChatModel {
         self.planProposalClient = planProposalClient
         self.timeZone = timeZone
         self.now = now
+        self.composerDraftStore = composerDraftStore ?? .shared // see `init(subject:...)`
     }
 
     /// Opens a specific, already-existing thread by identity rather than resolving
@@ -675,7 +723,8 @@ public final class ChatModel {
         chatClient: any StreamingChatModelInvoking,
         planProposalClient: (any PlanProposalModelInvoking)? = nil,
         timeZone: TimeZone = .current,
-        now: @escaping @Sendable () -> Date = { Date() }
+        now: @escaping @Sendable () -> Date = { Date() },
+        composerDraftStore: ChatComposerDraftStore? = nil
     ) {
         self.opening = .threadID(threadID)
         self.subject = nil
@@ -688,6 +737,7 @@ public final class ChatModel {
         self.planProposalClient = planProposalClient
         self.timeZone = timeZone
         self.now = now
+        self.composerDraftStore = composerDraftStore ?? .shared // see `init(subject:...)`
     }
 
     // MARK: - Loading
@@ -796,6 +846,12 @@ public final class ChatModel {
             self.subject = resolvedSubject
             self.thread = resolvedThread
             self.messages = resolvedThread.visibleMessages.map(Self.displayMessage)
+            // MAX-198: whatever was left unsent the last time this subject's composer
+            // was on screen, restored now that `subject` is known for every opening —
+            // including the thread-id one, which only reaches here after resolving it a
+            // few lines above. A no-op read-then-write when there was nothing to
+            // restore, since `composerDraftStore.draft(for:)` answers `""` by default.
+            composerText = composerDraftStore.draft(for: resolvedSubject)
             self.loadState = .ready
         } catch {
             loadState = .failed
@@ -1064,6 +1120,12 @@ public final class ChatModel {
             return
         }
 
+        // MAX-198: clears the persisted draft too, via `composerText`'s own `didSet` —
+        // sending is not drafting any more, and what happens to this exact text from
+        // here (kept on screen for `retry()` if the reply fails) is `pendingTurn`'s job,
+        // a separate mechanism this does not duplicate. See `ChatComposerDraftStore`'s
+        // own note on why the two must not become one notion of "the text the athlete
+        // is waiting to send".
         composerText = ""
         messages.append(Self.displayMessage(for: pending.message))
         pendingTurn = pending

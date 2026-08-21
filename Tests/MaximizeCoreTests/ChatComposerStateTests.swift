@@ -184,3 +184,55 @@ final class ChatComposerSendControlTests: XCTestCase {
         }
     }
 }
+
+/// MAX-198, §6.5: the keyed store `ChatModel` reads and writes `composerText` through.
+/// `ChatModel`'s own suite exercises it end to end (restoring across a fresh model,
+/// staying off a different subject, clearing on send); this asserts the store's own
+/// small contract in isolation.
+///
+/// `@MainActor` to match `ChatComposerDraftStore` itself — every test method is `async`
+/// so it compiles under Linux's non-isolated test discovery (SwiftPM), the same rule
+/// `ChatModelTests` follows.
+@MainActor
+final class ChatComposerDraftStoreTests: XCTestCase {
+
+    private let workout = ChatSubject.workout(UUID())
+    private let otherWorkout = ChatSubject.workout(UUID())
+
+    func testANeverWrittenSubjectReadsAsEmptyRatherThanRequiringAnUnwrap() async {
+        let store = ChatComposerDraftStore()
+        XCTAssertEqual(store.draft(for: workout), "")
+    }
+
+    func testAWrittenDraftReadsBackExactly() async {
+        let store = ChatComposerDraftStore()
+        store.setDraft("Three sentences about how it felt.", for: workout)
+        XCTAssertEqual(store.draft(for: workout), "Three sentences about how it felt.")
+    }
+
+    /// Decision #1: per subject. Two subjects through the same store never see each
+    /// other's text.
+    func testTwoSubjectsThroughTheSameStoreDoNotSeeEachOthersDraft() async {
+        let store = ChatComposerDraftStore()
+        store.setDraft("For the run.", for: workout)
+        XCTAssertEqual(store.draft(for: otherWorkout), "")
+        XCTAssertEqual(store.draft(for: workout), "For the run.")
+    }
+
+    /// Setting an empty string removes the entry rather than storing an empty one — the
+    /// same outcome `clear(for:)` names, so the two converge on one state instead of a
+    /// blank draft and a cleared draft being subtly different things.
+    func testWritingAnEmptyStringLeavesNothingBehind() async {
+        let store = ChatComposerDraftStore()
+        store.setDraft("Typed, then deleted.", for: workout)
+        store.setDraft("", for: workout)
+        XCTAssertEqual(store.draft(for: workout), "")
+    }
+
+    func testClearIsEquivalentToWritingAnEmptyString() async {
+        let store = ChatComposerDraftStore()
+        store.setDraft("Ask about the long run.", for: workout)
+        store.clear(for: workout)
+        XCTAssertEqual(store.draft(for: workout), "")
+    }
+}

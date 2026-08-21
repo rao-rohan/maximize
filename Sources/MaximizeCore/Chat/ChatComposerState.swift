@@ -1,5 +1,96 @@
 import Foundation
 
+/// Where an unsent composer draft lives between one appearance of a thread's sheet and
+/// the next (MAX-198, §6.5).
+///
+/// ## Why a draft cannot live on `ChatModel` alone
+///
+/// `ChatSheet` gives `ChatConversationView` a fresh identity — `.id(opening)` — every
+/// time the athlete opens a different thread, and the sheet itself is torn down and
+/// rebuilt by `RootTabView` on every dismiss and re-present. `ChatModel.composerText`
+/// dies with whichever `ChatModel` held it. A draft that has to survive both of those
+/// has to live somewhere neither one owns — this type, held once per process and read
+/// by whichever `ChatModel` is current.
+///
+/// ## Keyed by subject, not by thread id (the audit's own recommendation, §6.5)
+///
+/// The obvious key would be the thread's own identity, but an unstored thread does not
+/// have a stable one: `ChatThreadRepository.thread(for:newThreadID:at:)` mints a fresh
+/// random id on *every* resolve until a turn is actually completed and stored (see its
+/// own doc comment — "used only if nothing exists yet"). A draft typed into a thread
+/// that has never sent a message would therefore be keyed to a UUID that changes the
+/// next time the sheet opens, which is exactly the bug this ticket exists to fix,
+/// wearing a UUID instead of nothing. `ChatSubject` is known immediately for two of
+/// `ChatModel`'s three ways in, and is what stays constant while the thread underneath
+/// it is still being minted.
+///
+/// **The accepted gap**: `ChatThreadRepository`'s own contract allows two distinct,
+/// already-stored threads to share one subject (MAX-185's **New chat**, used twice on
+/// an unchanged window). Opening either one through the thread list would read the same
+/// draft slot. This store does not distinguish that case — see the ticket's own note on
+/// why per-subject rather than per-row is the smaller, defensible claim: it is right for
+/// every ordinary case (a different run, a different week), it is the one key that is
+/// actually stable before a thread's first turn lands, and it is what the audit that
+/// raised this ticket asked for in these words.
+///
+/// ## Why this is in-memory only, and why that is the privacy argument
+///
+/// CLAUDE.md: "Health data is PII... do not copy workout data into logs, analytics,
+/// crash reports, or plaintext scratch files." A draft is exactly that kind of text —
+/// free-form, health-adjacent, and, unlike a sent turn, never reviewed by the athlete
+/// before it exists. `ChatModel`'s own "Only completed turns are persisted" note says
+/// disk gets nothing that was not actually said; a draft was never said. Writing it
+/// anywhere durable — `UserDefaults`, a plist, a file this app invented — would be a
+/// second, weaker-protected copy of the same category of text `ChatThreadRecord`
+/// already keeps under SwiftData's file protection, and an unreviewed one at that: an
+/// athlete who types something raw and deletes it before sending would still find it on
+/// disk. Keeping this in memory for the process's lifetime is the smaller claim: a
+/// draft outlives the sheet, and does not outlive the app.
+///
+/// ## `@MainActor`, matching `ChatModel`
+///
+/// Every reader and writer is `ChatModel`, which is itself `@MainActor` — there is no
+/// concurrent access to guard against, so this adds isolation rather than a lock.
+@MainActor
+public final class ChatComposerDraftStore {
+
+    /// The store every `ChatModel` reads and writes unless a caller overrides it (tests
+    /// do, for isolation between cases). One instance per running app is the entire
+    /// point: a `ChatModel` constructed fresh for a reopened sheet must see what a
+    /// `ChatModel` already discarded left behind.
+    public static let shared = ChatComposerDraftStore()
+
+    private var draftsBySubject: [ChatSubject: String] = [:]
+
+    public init() {}
+
+    /// The unsent text for this subject, or `""` when there is none — the same default
+    /// `ChatModel.composerText` already starts from, so a caller never has to branch on
+    /// whether a draft exists.
+    public func draft(for subject: ChatSubject) -> String {
+        draftsBySubject[subject] ?? ""
+    }
+
+    /// Replaces the draft for this subject. An empty string removes the entry rather
+    /// than storing one — both because there is nothing worth keeping and because it is
+    /// what lets `clear(for:)` below and an ordinary "typed it all back out" converge on
+    /// the same state rather than one leaving a stale empty record behind.
+    public func setDraft(_ text: String, for subject: ChatSubject) {
+        if text.isEmpty {
+            draftsBySubject.removeValue(forKey: subject)
+        } else {
+            draftsBySubject[subject] = text
+        }
+    }
+
+    /// Sending clears it (`ChatModel.send()`), and so does this — named for the call
+    /// site that means it that way rather than making every caller spell out
+    /// `setDraft("", for:)`.
+    public func clear(for subject: ChatSubject) {
+        setDraft("", for: subject)
+    }
+}
+
 /// Whether stopping a reply in progress is something the athlete can actually do
 /// (MAX-153, the seam MAX-152 fills).
 ///
