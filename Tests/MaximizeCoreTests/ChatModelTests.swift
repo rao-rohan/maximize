@@ -948,13 +948,15 @@ final class ChatModelTests: XCTestCase {
 
     // MARK: - MAX-191: droppedTurnCount exposure
 
-    /// When not streaming, the count is zero — it describes the present state, not a
-    /// hypothetical future send.
-    func testDroppedTurnCountIsZeroWhenNotStreaming() async throws {
+    /// At rest, a long thread's count describes how many of its current messages would
+    /// be dropped if sent — a standing property of the thread, visible when the athlete
+    /// reads it. This count must equal what the shared helper computes (MAX-191).
+    func testDroppedTurnCountDescribesThreadAtRest() async throws {
         let threadRepository = FakeChatThreadRepository()
         var thread = try Fixture.thread(subject: .workout(Fixture.workoutID))
-        // Store way more than the cap, so a send would result in drops.
-        for index in 0..<(ChatInstruction.maximumReplayedTurns + 25) {
+        // Store more than the cap — 46 messages means 20 would be dropped.
+        let messageCount = ChatInstruction.maximumReplayedTurns + 6  // 46 total
+        for index in 0..<messageCount {
             thread = try thread.appending(try Fixture.message(
                 index.isMultiple(of: 2) ? .user : .assistant,
                 "turn \(index)",
@@ -965,17 +967,21 @@ final class ChatModelTests: XCTestCase {
 
         let (chatModel, _) = try await model(threadRepository: threadRepository)
         await chatModel.load()
-        // Nothing is currently being streamed, so count is zero.
-        XCTAssertEqual(chatModel.droppedTurnCount, 0)
+        // At rest, the count reflects what would be dropped from these messages.
+        let expectedDrop = ChatInstruction.droppedCount(for: messageCount)
+        XCTAssertEqual(chatModel.droppedTurnCount, expectedDrop)
+        XCTAssertEqual(chatModel.droppedTurnCount, 6)
     }
 
-    /// While streaming, the model's count matches the pending instruction's count, which
-    /// reflects what is actually being sent to Claude.
-    func testDroppedTurnCountReflectsPendingInstructionWhileStreaming() async throws {
+    /// While streaming, the model's count matches the pending instruction's count.
+    /// At rest, it matches what the shared helper computes from the stored messages.
+    /// Both are stable and equal because both use the same helper.
+    func testDroppedTurnCountMatchesInstructionAndSharedHelper() async throws {
         let threadRepository = FakeChatThreadRepository()
         var thread = try Fixture.thread(subject: .workout(Fixture.workoutID))
-        // Store more than cap so the send will result in drops.
-        for index in 0..<(ChatInstruction.maximumReplayedTurns + 6) {
+        // Store more than cap: 46 messages, 6 would drop.
+        let messageCount = ChatInstruction.maximumReplayedTurns + 6
+        for index in 0..<messageCount {
             thread = try thread.appending(try Fixture.message(
                 index.isMultiple(of: 2) ? .user : .assistant,
                 "turn \(index)",
@@ -991,16 +997,19 @@ final class ChatModelTests: XCTestCase {
             now: { Fixture.at(1_000) }
         )
         await chatModel.load()
-        // Before sending, nothing is in the air.
-        XCTAssertEqual(chatModel.droppedTurnCount, 0)
+        // At rest, the count describes the current thread.
+        let atRestCount = chatModel.droppedTurnCount
+        XCTAssertEqual(atRestCount, 6)
+        XCTAssertEqual(atRestCount, ChatInstruction.droppedCount(for: messageCount))
 
-        // Send a message — this creates a pending instruction with a known drop count.
+        // Send a message — this creates a pending instruction.
         chatModel.composerText = "Question?"
         await chatModel.send()
 
-        // While streaming, the count matches what's actually being sent.
+        // While streaming, the pending instruction's count includes the new message.
+        // 46 existing + 1 new = 47, which drops 7.
         let instruction = try XCTUnwrap(chatClient.receivedInstructions.last)
-        XCTAssertEqual(instruction.droppedTurnCount, 6)
+        XCTAssertEqual(instruction.droppedTurnCount, 7)
         XCTAssertEqual(chatModel.droppedTurnCount, instruction.droppedTurnCount)
     }
 

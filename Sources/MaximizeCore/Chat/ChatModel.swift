@@ -317,12 +317,19 @@ public final class ChatModel {
     /// How many turns the current instruction is dropping from the replayed window
     /// (MAX-191).
     ///
-    /// While streaming, this is the count from the pending instruction. Otherwise, it is
-    /// zero — the conversation as it stands has nothing dropped. This property describes
-    /// the present state, not a future send.
+    /// While streaming, this is the count from the pending instruction. At rest, it is
+    /// computed from the current thread's messages: a standing property of a long
+    /// conversation, not an event that happens only during streaming. Zero when there
+    /// is no thread.
     public var droppedTurnCount: Int {
-        guard let pending = pendingTurn else { return 0 }
-        return pending.instruction.droppedTurnCount
+        if let pending = pendingTurn {
+            return pending.instruction.droppedTurnCount
+        }
+        guard let thread else { return 0 }
+        // The current thread as it stands: how many of these messages would be dropped
+        // if sent? Both streaming and resting go through the shared helper so they
+        // cannot drift apart.
+        return ChatInstruction.droppedCount(for: thread.visibleMessages.count)
     }
 
     /// §4, MAX-101. Nothing here ever sets this to anything but `.idle` on its own.
