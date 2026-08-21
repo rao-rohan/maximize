@@ -1974,6 +1974,7 @@ free. What landed in the file:
 | MAX-184 | **An audit of the chat surface and its context continuity** — `docs/CHAT-AUDIT.md`. Seven defects, the worst of them a **"New chat" button that is inert on the ordinary path** and a **workout chat card that is not tappable and never refreshes**; a ranked craft list; and a position on the owner's central ask. **Nothing dangerous was found** — no data loss, no leak off the device, no crash. The one context finding that matters is not the one it was dispatched on: **strain, acute:chronic load balance and per-muscle fatigue reach a tile and reach no prompt**, so a training thread asked "am I ramping too fast" correctly refuses to answer a question the app has already computed. Proposes MAX-185–201; MAX-193 is blocked on a new amendment. See the MAX-184 section below | 090, 152, 153, 170, 177, 178, 179 | **Opus** — audit only, no behaviour changed |
 | MAX-185 | **"New chat" now actually creates a new thread** — the chat audit's worst-ranked defect (MAX-184 §2.1). `ChatSheet.startNewTrainingChat()` reassigned `opening` to the same `.subject(scope)` value the Ask button already produces on the common path, so `.id(opening)` never changed and the toolbar button was inert; `ChatThreadRepository.thread(for:newThreadID:at:)` would have resolved to the thread already open even if the view had been recreated. **Both no-ops confirmed by reading, independently — the diagnosis was correct.** Fixed with a third `ChatModel.Opening` case, `.newThread`, reached by a new `init(startingNewThreadFor:)`: it mints a thread unconditionally rather than ever asking the repository to resolve one, under test in `ChatModelTests`. `ChatSheet.Opening.newThread(ChatSubject, UUID)` carries a nonce so `.id(opening)` changes on every tap, including a second tap on an unchanged scope. See the MAX-185 section below | 184, 097 | Sonnet — **PR open, not yet merged.** Package compiles and core unit tests pass by inspection only; no toolchain here to run them (R1). Needs device verification, per the PR |
 | MAX-186 | **The workout chat card becomes a door, and refreshes** — `WorkoutChatSectionView`'s card had no tap target of any kind (MAX-098 removed its "Open chat" button and never replaced it) and reloaded only in `.task`, which does not re-fire on return from the chat sheet — so *chat about this run → Done* left the card still showing the invitation, verbatim the defect MAX-098's own doc comment says the card exists to prevent. Both confirmed against current source before anything was changed, per `docs/CHAT-AUDIT.md` §2.2 (MAX-184). Fixed: the whole card is now a `Button` presenting `ChatSheet(subject: .workout(workoutID))` — the same route `ChatEntryPoint.resolve(focus:currentInterval:)` already resolves for this screen, not a second one — and `.sheet(item:onDismiss:)` reloads the preview exactly once, on dismissal, however it happened (no polling, no `onAppear`/`onDisappear` pair, no model call — A14). What the card says moved into `MaximizeCore` (`WorkoutChatCardPresentation`, built on `ChatThreadSummary` rather than a parallel notion of "the last thing said"), under test. **Reconciles §2.1's "two chat buttons on one screen" argument**: this was never a second *button* saying the same thing as the Ask control, it is a preview the audit found had no affordance at all — see the MAX-186 section below | 184 | Sonnet — **PR open, not yet merged.** Package compiles and core unit tests pass by inspection only; no toolchain here to run them (R1). Needs device verification, per the PR |
+| MAX-187 | **A plan proposal card does not outlive its save** — §2.3's defect: accepting a proposal, saving, and pressing Back used to leave a diff card on screen describing a change already applied, **Accept** still live, a second tap writing a genuine duplicate plan version (D1 intact throughout — the screen was lying, not the data). `ChatModel.endProposalIfAlreadyStored()` reuses `discardProposal()`'s one door (`planDrafting = .idle` plus a transcript `.notice`) rather than adding a second mechanism, and decides by asking storage: `PlanProposalReview.standing`'s captured version against a fresh `PlanAuthoring.currentVersion(of:)` read — not a callback from `PlanAuthoringModel`, which has no reference back to the `ChatModel` that opened it and was kept that way rather than wired up across `ChatSheet.swift` (owned by MAX-185 concurrently). `ChatConversationView` calls it from `.onAppear`, since `.task` does not re-run when `PlanAuthoringView` pops back off the stack. See the MAX-187 section below | 184 | Sonnet — branch pushed, PR open; not yet reviewed or merged |
 
 **Four collisions the overseer must respect.**
 
@@ -6337,6 +6338,72 @@ noticed.
 is the first compiler this code meets.
 
 ---
+## MAX-187 — a plan proposal card does not outlive its save
+
+Verified the audit's chain first, since a duplicate plan version is a permanent data
+consequence: `PlanAuthoringModel.save()` stores and reloads its own state but never
+dismisses the screen; nothing in `ChatModel` cleared `planDrafting` after a save happened
+on a screen it had opened; `ChatConversationView`'s `.task` does not re-run when
+`PlanAuthoringView` pops back off the navigation stack, so nothing reloaded either. All
+three held. Back really did return to a diff describing a change already applied, with
+**Accept this plan** still live, and tapping it a second time really did reach
+`PlanAuthoringSession.plan(from:effectiveFrom:)` again — a legitimate write each time
+(D1 intact), producing a second version identical in effect to the first.
+
+**The fix reuses `discardProposal()`'s one door rather than adding a second.** A private
+`endProposal(sayingInTranscript:)` now does what that method's body used to do inline
+(`planDrafting = .idle` plus a transcript `.notice`), and both `discardProposal()` and the
+new `endProposalIfAlreadyStored()` call it — one place decides what "the proposal is no
+longer live" means, exactly as the ticket asked.
+
+**How the new method decides "already stored" without a callback from
+`PlanAuthoringModel`.** `PlanAuthoringView` is pushed by `ChatSheet` holding only the
+`PlanProposal` it was handed — it carries no repository and no reference back to the
+`ChatModel` that opened it, and wiring one across `ChatSheet.swift`'s `Route`/navigation
+plumbing was the one file this ticket was told MAX-185 owns concurrently. Rather than
+build a second, parallel notification channel to avoid that file, `endProposalIfAlreadyStored()`
+asks the one thing that actually decides the question: `PlanProposalReview.standing`
+already carries the exact version the card's diff was built against (`.firstPlan`, or
+`.revision(supersedes:, _)`); a fresh `PlanAuthoring.currentVersion(of:)` read of the
+current calendar is compared against it, and `PlanAuthoringSession.plan(from:effectiveFrom:)`
+is A13's only door onto that calendar — so a version the review did not already know about
+means that door was used. Called from `ChatConversationView.onAppear`, since `.task`
+demonstrably does not re-run on the pop that reveals this screen again.
+
+**An athlete who looks and presses Back without saving keeps a live card** — the check is
+a no-op whenever the calendar has not moved, which is the same guard that makes it safe to
+call on every reappearance rather than only the one that follows a real save.
+
+**What the transcript says.** Matches `discardProposal()`'s existing voice (a short,
+plain `.notice`, never a turn): *"This proposal has been applied — plan v3 is now in
+force, effective 1 Jan 2026."* — naming the version and the date rather than a vaguer
+"something changed," the same way `PlanAuthoringModel.save()`'s own on-screen confirmation
+does.
+
+**Not touched: `App/Plan/PlanAuthoringModel.swift`, `App/Chat/PlanProposalCardView.swift`.**
+Both were named in the brief as likely files; neither needed a change once the decision
+moved entirely into `ChatModel` and the trigger into `ChatConversationView`'s existing
+`.onAppear`. `PlanAuthoringModel.save()` still does not dismiss the screen — that was
+never the defect on its own, only a contributor, and D1's own rule ("never undo a write")
+means the fix could not have been there either way.
+
+### What CI can and cannot prove
+
+CI can prove: the package compiles; `ChatModel.endProposalIfAlreadyStored()` clears
+`planDrafting` and appends the notice once a plan has actually been stored, for both the
+first-plan and revision cases; it leaves a not-yet-saved proposal untouched; and a
+same-shaped "accept twice" reproduction, gated on the state a real card would read before
+drawing its button, writes exactly one plan version with the fix and two without it
+(`ChatPlanDraftingTests.testAcceptedProposalIsNotOfferedASecondTime`).
+
+CI cannot prove that `.onAppear` actually fires when a human pops `PlanAuthoringView` off
+the stack on a device, or that the card visually disappears rather than merely becoming
+inert. **Needs device verification:** draft a plan proposal in a training thread, accept
+it, save it on the authoring screen, press Back, and confirm the card no longer offers
+**Accept this plan** and a notice explains why; then open Plan history and confirm exactly
+one new version was written.
+
+**`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
 
 ## Risks
 
