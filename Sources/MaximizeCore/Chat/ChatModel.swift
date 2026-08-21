@@ -439,6 +439,24 @@ public final class ChatModel {
         return RunsStripData.build(from: trainingContext)
     }
 
+    /// MAX-194, §3.5: the door from this run's conversation to the training
+    /// conversation covering its own week. **Workout subjects only** — a training
+    /// thread already is that conversation, and `canDraftPlan`'s own training-only gate
+    /// (unchanged by this ticket) is what governs drafting once there.
+    ///
+    /// Read straight off `context` — never a second fetch — mirroring `runsStripData`'s
+    /// own rule: this can never offer a week the fact sheet did not already describe.
+    /// Nil before `load()` has built one, exactly as `runsStripData` degrades before its
+    /// own input exists, and nil defensively if a workout context somehow carries no
+    /// surrounding week (unreachable in practice since MAX-182 built one
+    /// unconditionally for every chat-audience workout context).
+    public var planConversationDoor: PlanConversationDoor.Offer? {
+        guard case let .workout(workoutContext) = context, let week = workoutContext.surroundingWeek else {
+            return nil
+        }
+        return PlanConversationDoor.offer(for: week, day: workoutContext.day, activityType: workoutContext.workout.activityType)
+    }
+
     /// - Parameters:
     ///   - subject: what this thread is about (A11). The set is closed, which is what
     ///     lets `load()` stay exhaustive: a third subject cannot be added without the

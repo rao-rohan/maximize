@@ -796,6 +796,71 @@ final class ChatModelTests: XCTestCase {
         XCTAssertEqual(notice.text, "Add an Anthropic API key in Settings to chat about your training.")
     }
 
+    // MARK: - The door to the plan's conversation (MAX-194)
+
+    /// A training thread already *is* the conversation the door leads to — offering a
+    /// door there would be a door to itself. `canDraftPlan`'s own training-only gate
+    /// governs what happens once there; this property is unconditionally nil on that
+    /// side.
+    func testPlanConversationDoorIsNilForATrainingSubject() async throws {
+        let (chatModel, _) = try await model(subject: .training(try scope()))
+        await chatModel.load()
+
+        XCTAssertEqual(chatModel.loadState, .ready)
+        XCTAssertNil(chatModel.planConversationDoor)
+    }
+
+    /// Nil before `load()` has built a context — the same degrade-before-ready rule
+    /// `runsStripData`, `title` and `subtitle` all follow.
+    func testPlanConversationDoorIsNilBeforeLoad() async throws {
+        let (chatModel, _) = try await model()
+        XCTAssertNil(chatModel.planConversationDoor)
+    }
+
+    /// `Fixture.workout()` sits on Thursday 2026-01-01 — its Monday-first week is
+    /// **29 Dec 2025 – 4 Jan 2026**. The door must target exactly that week, not the
+    /// dashboard's current one (`scope()`'s Thu-through-Wed window, deliberately
+    /// different, is never consulted here — a workout thread has no `currentInterval`
+    /// input to this decision at all).
+    func testPlanConversationDoorTargetsTheRunsOwnMondayFirstWeek() async throws {
+        let (chatModel, _) = try await model()
+        await chatModel.load()
+
+        let offer = try XCTUnwrap(chatModel.planConversationDoor)
+        XCTAssertEqual(offer.scope.from, try Fixture.day(2025, 12, 29))
+        XCTAssertEqual(offer.scope.through, try Fixture.day(2026, 1, 4))
+    }
+
+    /// `Fixture.plan()` is effective from 1 Jan 2026, so it governs the fixture week —
+    /// the button reads the "a plan is in force" wording.
+    func testPlanConversationDoorLabelWhenAPlanGovernsTheWeek() async throws {
+        let (chatModel, _) = try await model()
+        await chatModel.load()
+
+        let offer = try XCTUnwrap(chatModel.planConversationDoor)
+        XCTAssertEqual(offer.buttonLabel, "Ask about the plan")
+    }
+
+    /// The continuity note names this exact run, the same way its own thread title does
+    /// — `Fixture.workout()` is a run on 1 Jan 2026.
+    func testPlanConversationDoorContinuityNoteNamesThisRun() async throws {
+        let (chatModel, _) = try await model()
+        await chatModel.load()
+
+        let offer = try XCTUnwrap(chatModel.planConversationDoor)
+        XCTAssertEqual(offer.continuityNote, "Continued from 1 Jan 2026 · Running.")
+    }
+
+    /// A lift's own activity type reaches the note — nothing here assumes "Running".
+    func testPlanConversationDoorContinuityNoteNamesALift() async throws {
+        let store = try await readyStore(activityType: .traditionalStrengthTraining)
+        let (chatModel, _) = try await model(store: store)
+        await chatModel.load()
+
+        let offer = try XCTUnwrap(chatModel.planConversationDoor)
+        XCTAssertTrue(offer.continuityNote.contains("Strength training"), offer.continuityNote)
+    }
+
     // MARK: - The task texts (§3.5)
 
     /// §3.6(b)'s mechanism, asserted rather than assumed: a frozen scope only becomes
