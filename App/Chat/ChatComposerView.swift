@@ -201,7 +201,9 @@ struct ChatComposerView<Accessory: View>: View {
         // MAX-199: light haptic feedback when send is tapped. Fires only once per send
         // action — when the button transitions from enabled to disabled (athlete tapped
         // send and the request opened). Does not fire again when the reply completes and
-        // the button re-enables. Respects Reduce Motion through `.sensoryFeedback`.
+        // the button re-enables. Playback is governed by the system's own haptics
+        // setting, which `.sensoryFeedback` honours — not by Reduce Motion, which the
+        // line above routes through `accessibleAnimation` instead.
         .sensoryFeedback(.selection, trigger: sendControl) { old, new in
             // Fire only on send initiation: button goes from enabled to disabled
             return old.isEnabled && !new.isEnabled
