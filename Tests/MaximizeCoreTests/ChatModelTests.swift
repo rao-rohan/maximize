@@ -1202,11 +1202,15 @@ final class ChatModelTests: XCTestCase {
         chatModel.composerText = "Question?"
         await chatModel.send()
 
-        // While streaming, the pending instruction's count includes the new message.
-        // 46 existing + 1 new = 47, which drops 7.
+        // The two counts answer different questions and are deliberately not equal once
+        // the turn has completed. The instruction is a *snapshot* of what was sent: 46
+        // stored messages plus the new question, 47, dropping 7. The model's count
+        // describes the thread *as it now stands*, and `send()` has since persisted both
+        // the question and the reply — 48, dropping 8. Asserting they match would pin an
+        // equality that only holds mid-stream.
         let instruction = try XCTUnwrap(chatClient.receivedInstructions.last)
-        XCTAssertEqual(instruction.droppedTurnCount, 7)
-        XCTAssertEqual(chatModel.droppedTurnCount, instruction.droppedTurnCount)
+        XCTAssertEqual(instruction.droppedTurnCount, 7, "the instruction sent 46 + 1 = 47 turns")
+        XCTAssertEqual(chatModel.droppedTurnCount, 8, "the thread now holds 46 + question + reply")
     }
 
     /// The instruction's dropped count equals what the shared helper computes.
