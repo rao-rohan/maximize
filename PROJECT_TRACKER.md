@@ -1977,6 +1977,7 @@ free. What landed in the file:
 | MAX-187 | **A plan proposal card does not outlive its save** — §2.3's defect: accepting a proposal, saving, and pressing Back used to leave a diff card on screen describing a change already applied, **Accept** still live, a second tap writing a genuine duplicate plan version (D1 intact throughout — the screen was lying, not the data). `ChatModel.endProposalIfAlreadyStored()` reuses `discardProposal()`'s one door (`planDrafting = .idle` plus a transcript `.notice`) rather than adding a second mechanism, and decides by asking storage: `PlanProposalReview.standing`'s captured version against a fresh `PlanAuthoring.currentVersion(of:)` read — not a callback from `PlanAuthoringModel`, which has no reference back to the `ChatModel` that opened it and was kept that way rather than wired up across `ChatSheet.swift` (owned by MAX-185 concurrently). `ChatConversationView` calls it from `.onAppear`, since `.task` does not re-run when `PlanAuthoringView` pops back off the stack. See the MAX-187 section below | 184 | Sonnet — branch pushed, PR open; not yet reviewed or merged |
 | MAX-188 | 🔒 **`threadSummaries()` no longer decodes a transcript to draw a list of titles** — §2.4's in-memory exposure. `ChatThreadRecord` gains three columnar fields (`summaryFirstUserMessageContent`, `summaryLastVisibleMessageContent`, `summaryFieldsComputed`) written whenever a thread is stored; the fast path builds `ChatThreadSummary` from those columns and never touches the `@Attribute(.externalStorage)` `messagesJSON` blob. A pre-ticket row (`summaryFieldsComputed == false`) still falls back to a full decode for that one row — bounded, self-clearing the next time the thread is written to. The workout lookup is batched into one query for every workout thread in the list, closing the audit's N+1 alongside it. **No schema version bump** — three additive, default-required columns, `distanceSplitsComputed`'s precedent. See the MAX-188 section below | 184 | Sonnet 🔒 |
 | MAX-189 | **A failed thread delete is silent, and the row does not come back** — §2.5. The decision of what to display (row restored or deleted, and whether to show an error) is moved into `ChatThreadListPresentation.deletionOutcome()` as a testable pure function; the model is plumbing. **Needs device verification**: swipe to delete with the store failing, confirm the row returns and the message appears. | 184, 150, 152 | Haiku ✅ — merged as #182. Compiles and core tests pass; **nothing about the alert's appearance or accessibility is verified** — see the PR's device checks. |
+| MAX-190 | **`PlanAuthoringView` and `ChatSheet` stop presenting each other** — §2.6, confirmed unchanged against current `main` before anything was touched: an authoring screen pushed by `ChatSheet` from an accepted proposal still rendered `conversationalRouteSection` unconditionally, so its own "describe it in a conversation" button opened a second `ChatSheet`, which could push a second such screen, unbounded. Fixed entirely in `MaximizeCore`: `PlanAuthoringConversationalRoute` gains `arrivedFromConversation`, which forces the button disabled — with a real explanation naming Back, never a blank control — regardless of whether a key is stored. `PlanAuthoringModel` snapshots it once, from `proposal != nil` at `init`, specifically so `save()` clearing `proposal` does not reopen the door on the same screen. **MAX-187's fix depends on `PlanAuthoringView` still being *pushed*, not presented, from `ChatSheet`'s own stack** — this ticket did not touch that mechanism, only which button is offered once there. See the MAX-190 section below | 184, 187, 194 | Sonnet — branch pushed, PR open; not yet reviewed or merged. **No Swift toolchain in this container**, so nothing here was compiled or run (R1). Needs device verification, per the PR |
 | MAX-192 | **The training roll-up carries strain and load balance** 🔒 — `TrainingContext` gains each session's stored `strainPoints` (MAX-176) and `LoadBalanceCalculator`'s whole reading (MAX-178), so the acute:chronic figure a tile draws now reaches the prompt one tap away from it. Closes MAX-184 §3.2, the audit's highest-ranked finding: a thread asked *"am I ramping too fast"* used to refuse, correctly under `trainingTask`'s never-invent rule, to answer a question the app had already computed. The reading arrives **already computed** through `LoadBalanceResolver` — never assembled from the roll-up's own records, which cover the scope's weeks and not the chronic window — and is anchored to *today*, which `ContextInputs` enforces. Three absences worded apart; the window's opening sentence now names the one rolling exception. **Per-muscle fatigue (MAX-179) was considered and declined**, and the exclusion is stated in the prompt. **Gated on A30** — A12 rule 2 makes a widening of what leaves the device an amendment, A29 settled the same question for the workout subject, and gating one subject and not the other would make the rule arbitrary; the amendment is in the same PR, first in the diff. See the MAX-192 section below | 176, 177, 178, 179, 184, A12/A29/**A30** | **Opus** 🔒 |
 | MAX-194 | **A run's conversation gets a door to the plan's** — §3.5's fix. A new composer accessory on a workout thread, `PlanConversationDoor` (`MaximizeCore`, under test), decides whether to offer the door and what it says; `ChatModel.planConversationDoor` reads it straight off the same context the fact sheet already rendered. **Targets the run's own Monday-first week** — `WorkoutContext.SurroundingWeek`'s own bounds (MAX-182), reused rather than re-derived, never the dashboard's current window, so the target can never disagree with what the athlete was already told. Resolves *the* thread for that week exactly the way the Ask button and the scope-mismatch banner already do — `ChatSheet`'s existing `.subject` reassignment gained a `continuityNote` passenger rather than a fourth `Opening` case, and never mints (minting stays **New chat**'s job). Carries exactly one honest line of continuity, screen-only and never sent to a prompt — D3 untouched, no widening. The button's own words vary with whether a plan governs that week, matching `PlanAuthoringFormatting`'s canonical "No plan has been authored yet" rather than a second wording of the same fact. **`canDraftPlan`'s training-only gate is untouched** — MAX-184's audit called it correct, and this is the missing route, not a relaxation of it. See the MAX-194 section below | 184, 097, 182 | Sonnet — branch pushed, PR open; not yet reviewed or merged. Package compiles and core unit tests pass by inspection only; no toolchain here to run them (R1). Needs device verification, per the PR |
 | MAX-197 | **A reply in flight can be stopped** — MAX-184 §6.4's craft gap: `ChatModel.stream` ran to its terminal event with nothing able to interrupt it, so the honest composer control mid-reply was a progress indicator. `stop()` now cancels the task consuming the stream — real cancellation, which reaches `URLSession` through the `AsyncStream` termination the transport already handles, not a flag a suspended `for await` would never read. **A stopped turn is a fifth terminal rung, `ChatReplyPhase.stopped`**, rather than a reuse of `.failed(.interrupted)`: that case says the connection dropped and offers a retry, and neither is true of something the athlete did. **What was already on screen is kept on screen and nothing is written** — the same treatment a dropped connection gets, and the caption says out loud that it goes when the conversation closes; storing a half-sentence would read back as a whole one and be replayed to the model as its own completed prior turn. The seam MAX-153 left (`ChatComposerCancellation`, `ChatComposerSendControl.stop`) is filled with no change to the composer view. See the MAX-197 section below | 184, 152, 153, 170 | **Opus** — branch pushed, PR open. **No Swift toolchain in this container**, so nothing here was compiled or run (R1); cancellation reaching the network read is argued, not observed, and needs device verification per the PR |
@@ -6527,6 +6528,110 @@ correct titles, previews and ordering, and that opening any of them shows the fu
 
 `/security-review` was run — mandatory, this changes how health data (chat transcripts) sits in
 memory. See the PR for its findings.
+---
+
+## MAX-190 — the sheet and the form stop presenting each other
+
+### The loop, verified against current `main` before anything changed
+
+§2.6 as written still held. `PlanAuthoringView.conversationalRouteSection` rendered
+unconditionally — `App/Plan/PlanAuthoringView.swift:103` — regardless of whether the
+screen itself had been reached by hand or pushed by `ChatSheet.Route.planAuthoring`
+(`ChatSheet.swift:151`) from an accepted proposal. Neither MAX-185's `.newThread` opening
+nor MAX-194's `PlanConversationDoor` touched either file's presentation shape (both say so
+in their own write-ups above), and MAX-197 never reaches `PlanAuthoringView` at all. So
+the loop the audit found — sheet, pushed screen, second sheet, pushed screen, unbounded —
+was exactly as described, not a stale premise.
+
+### The fix: one decision, in `MaximizeCore`, at the one place that was missing it
+
+`PlanAuthoringConversationalRoute` (MAX-166's existing gate on this button) gains a second
+input, `arrivedFromConversation: Bool`. When true it wins outright over `apiKeyPresence` —
+`isAvailable` is `false` regardless of whether a key is stored, because a stored key does
+not make reopening the conversation an athlete is already standing inside a sensible
+action. **Never a hidden button** still holds: the section renders exactly as before, the
+button disabled, with a real sentence — `arrivedFromConversationExplanation` — naming the
+way back (Back, not a second door) rather than a blank control. `PlanAuthoringView` needed
+no branch of its own; it already rendered whatever the core's value said.
+
+`PlanAuthoringModel` supplies `arrivedFromConversation` from `proposal != nil`, snapshotted
+into a `let` **at `init`**, not read from the mutable `proposal` property each time the
+gate is built. That distinction is load-bearing: `save()` clears `proposal` on a successful
+write (so the prefill banner and the proposal-reapplication logic behave correctly for the
+*next* version) and then calls `load()` again — which would have rebuilt
+`conversationalRoute` with `arrivedFromConversation: false` and silently re-enabled the
+door on the same still-pushed screen, reopening exactly the loop this ticket closes, one
+tap after Save instead of before it.
+
+### Why this, and not the sheet-vs-push question
+
+The audit offered two shapes: suppress the button on a screen reached this way, or
+reassign rather than present. Reassigning was rejected — it would mean the pushed
+authoring screen's "describe it in a conversation" button reaches back into the `ChatSheet`
+that pushed it and mutates *its* `opening`, which means threading a closure down through a
+`NavigationPath` route value, the exact wiring `ChatModel.endProposalIfAlreadyStored()`
+(MAX-187) explicitly declined for the same reason: `PlanAuthoringModel` has no reference
+back to the `ChatModel` that opened it, and building one couples two screens that
+currently only communicate through what gets pushed and what gets popped. Suppression
+needed nothing new to wire — the gate this button already reads was one field short of the
+whole answer.
+
+**One way in, one way out, unchanged by this ticket.** Every door into `PlanAuthoringView`
+(`PlanView` ×2, `WorkoutsView`, `SettingsView`'s sheet, and `ChatSheet`'s
+`Route.planAuthoring` push) still leads to exactly the screens it always did; this ticket
+only bounds how many of them a proposal can open by disabling the one button that used to
+recurse. From a direct door, the conversational route is offered normally, opens at most
+one `ChatSheet`, and accepting a proposal there pushes at most one further authoring
+screen — whose own door is now closed. Back from that screen returns to the conversation
+that produced it, the same target it always returned to.
+
+### Protecting MAX-187's fix
+
+MAX-187's `endProposalIfAlreadyStored()` fires from `ChatConversationView.onAppear`
+because popping `PlanAuthoringView` off `ChatSheet`'s `NavigationPath` **reveals** the
+conversation underneath rather than recreating it — `.task` does not re-run on that
+reveal, `.onAppear` does. That depends entirely on `PlanAuthoringView` being *pushed* onto
+the same stack as the conversation, never presented as a sibling sheet. This ticket does
+not touch `Route.planAuthoring`, `ChatSheet.body`'s `navigationDestination`, or anything
+in `ChatConversationView.swift` — `App/Chat/ChatSheet.swift`'s only change is two doc
+comments explaining where the bound now lives, and `App/Plan/PlanAuthoringView.swift`'s
+only change is a doc comment plus a `PlanAuthoringConversationalRoute` initializer call
+site already gated by an existing property. Read `ChatConversationView.swift:311-334`
+before and after this branch: unchanged, byte for byte. The push/pop mechanism MAX-187's
+fix depends on is exactly as it was.
+
+### What CI can and cannot prove
+
+CI can prove: the package compiles; the new `PlanAuthoringConversationalRouteTests` cases
+pin `arrivedFromConversation` overriding every `StoredAPIKeyPresence` case, the disabled
+state's explanation being non-empty and distinct from both ordinary-path sentences, that
+explanation naming "back", and the defaulted parameter resolving identically to passing
+`false` explicitly.
+
+CI cannot prove that a person cannot get lost — see "What CI can and cannot prove" in
+CLAUDE.md. **Needs device verification:** from the Plan tab's "Author a plan" (or
+"Author a revision"), tap **Describe it in a conversation**, describe a plan, accept the
+proposal — confirm the pushed authoring screen's own conversational-route button is
+visibly disabled, with the "This form came from the conversation..." sentence beneath it,
+still readable at the largest Dynamic Type size and by VoiceOver; tap Save, confirm the
+button is *still* disabled after the confirmation appears (the case `proposal != nil`
+being snapshotted exists to fix); tap Back and confirm it returns to the conversation, not
+an empty transcript, and that the proposal card there reflects MAX-187's fix — no longer
+offering **Accept** for a plan already saved; repeat the whole sequence from Settings'
+sheet-presented authoring screen and from Workouts' pushed one, confirming Back/Done in
+each returns to that door's own host rather than anywhere else; confirm a direct
+"Author a plan" with no proposal still offers an enabled conversational-route button as
+before.
+
+**`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1); I
+could not compile this.
+
+### Found outside the ticket, not done
+
+`docs/CHAT-AUDIT.md` §2.7 (the transcript cap's drop notice reaching the model but never
+the athlete) touches only `ChatInstruction`/`ChatConversationView` and is unrelated to this
+ticket's file set; left for its own ticket.
+
 ---
 
 ## MAX-192 — the training roll-up carries strain and load balance

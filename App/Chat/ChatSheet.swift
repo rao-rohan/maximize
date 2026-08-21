@@ -83,6 +83,13 @@ struct ChatSheet: View {
         /// place for it — and the screen it opens builds its own authoring session
         /// against storage, exactly as it does when opened by hand. Nothing about this
         /// route writes anything (A13).
+        ///
+        /// MAX-190 (`docs/CHAT-AUDIT.md` §2.6): the authoring screen this pushes always
+        /// carries a non-nil proposal, which is exactly what tells
+        /// `PlanAuthoringConversationalRoute` to disable its own "describe it in a
+        /// conversation" button rather than let it present a second `ChatSheet` here.
+        /// The bound is enforced there, in `MaximizeCore`, not by anything this case
+        /// does — this file only needs to keep handing the proposal through.
         case planAuthoring(PlanProposal)
 
         /// §6.2, MAX-103: a chip tapped in the "Runs in this conversation" strip. Pushed
