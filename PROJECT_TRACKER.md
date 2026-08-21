@@ -1971,6 +1971,8 @@ free. What landed in the file:
 | MAX-180 | **The muscle map, drawn** — `MuscleFatigueMark` bands MAX-179's reading into five states (`.notLogged`/`.fresh`/`.light`/`.moderate`/`.high`) and marks each with a non-hue geometric channel (fill fraction + dashed outline + glyph), extending `WCAGContrastTests`'s hue-alone test with a third representation rather than a parallel suite. `MuscleMapView` draws it on a flat content surface with `@ScaledMetric` throughout, and `WorkoutDetailView` composes it unconditionally (it is the athlete's state, not the workout's). A group never logged draws dashed-and-glyphed, never a coloured "at rest" fill. **Adapted after #173 landed on top of it**: the "last worked" caption reads `mostRecentlyWorkedAt`, not the removed `elapsedDays`, and the day count is now calendar-correct via `CalendarDay.days(until:)` rather than fixed 86,400-second blocks. See the MAX-180 section below | 179 | Sonnet — **PR open, not yet merged.** Package compiles and core unit tests pass by inspection only; no toolchain here to run them (R1). Needs device verification, per the PR |
 | MAX-181 | **The fact sheet renders the lift slot** — `TrainingFactSheet`'s plan block now names each weekday's lift ask beside its run ask, tagged `Lift:`, omitted rather than stated when the plan asks nothing of the slot. Closes MAX-174 §5.3's G2, and MAX-136's open item. **Also closes the more severe consequence MAX-175 found and declined to fix**: `PlanProposalInstruction` tells a drafting model to restate each weekday's lift ask from this same fact sheet unchanged — it could not, so an accepted revision could silently zero out an athlete's whole lift schedule. See the MAX-181 section below | 174, 175 | Sonnet ✅ |
 
+| MAX-182 | **A workout conversation knows where the session sits in the week** — a chat-only `## The week around this session` block on the workout fact sheet: the Monday-first week's bounds, its arc week and prescribed long run, four aggregates from `TalliesCalculator` (workouts recorded, workout-days, effective sessions, average score), a "this week is not over" line, and what the plan asked of each of the seven days. **Aggregates and plan configuration only** — MAX-184's audit rejected the first draft's one-line-per-sibling-session shape as `TrainingContext` by a side door and as an unbounded term in the longest prompt the app sends, and a test pins that the block does not grow with training volume. **Nothing reaches `.scoring`**: two gates plus `ContextDisciplineTests`' byte-for-byte literal, because a scorer that could read the week would make an immutable score depend on days other than the one it is scoring (D1/D8). **Gated on A29** — A12 rule 2 makes a widening of what leaves the device an amendment, and the amendment is in the same PR, first in the diff. The acute:chronic ratio is sanctioned by A29 and deliberately not built here; see the MAX-182 note below | 095, 096, **184**, A12/A29 | Sonnet 🔒 — **PR open, not yet merged.** Blocked on A29 being accepted. No toolchain here, so nothing was compiled or run (R1) |
+
 **Four collisions the overseer must respect.**
 
 1. **MAX-105 before MAX-135, and MAX-105's brief must carry A17** — see the MAX-105 note
@@ -5923,6 +5925,96 @@ history renders legibly at every Dynamic Type size and in both colour schemes. S
 own "Needs device verification" section.
 
 **`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
+
+---
+
+## MAX-182 — a workout conversation knows where the session sits in the week
+
+**This PR is gated on A29.** A12 rule 2 makes a widening of what leaves the device an
+amendment-level question rather than a ticket-level one, and this is a widening. The
+amendment is in the same diff, first; the code is a proposal until it is accepted.
+
+### The premise held, and the first shape of the fix did not
+
+The brief's claim was checkable and true: `WorkoutFactSheet` carried `## Workout`, `## The
+plan`, `## Measured`, `## Heart-rate shape`, `## Pace by …` and `## Score already assigned`,
+and nothing at all about the days either side of the session. *"Was this consistent with my
+week"*, *"should I back off Thursday"* and *"is this my third hard day running"* were
+unanswerable where a person would ask them.
+
+The first implementation carried **one line per sibling session** — day, type,
+classification, distance, duration, verdict. **MAX-184's audit rejected that shape mid-build
+and was right to.** Two reasons, either sufficient: it is `TrainingContext` arriving by a
+side door, which A12 rule 1 exists to prevent; and it puts an unbounded term into the longest
+prompt this app sends, so a workout thread's cost would grow with how much the athlete
+trains. The block was rebuilt as aggregates plus plan configuration, and
+`testTheBlockDoesNotGrowWithHowMuchTheAthleteTrained` pins the bound — a week with one
+session and a week with fourteen render the same number of lines.
+
+**The cost of that is real and is not hidden.** The model can say *"you were 2 of 3 on the
+plan this week"* and cannot say *"your Thursday run was 9.2 km"*. The fact sheet says so in
+the prompt, so the gap is a stated fact rather than something the model discovers by
+guessing.
+
+### The window: the Monday-first week containing the session's own day
+
+Not a trailing seven days — that straddles two template weeks, so an effective-sessions
+figure over it corresponds to nothing the plan asks and nothing any screen shows, and
+`TalliesCalculator` ranks a missed day against the other misses *in its week* (C1) and cannot
+widen what it is handed. Not the week containing *today* — the conversation is about the
+session, and a run ninety days back must get its own week or the same thread answers
+differently next month. Not the arc week as a separate notion: `PlanCalendar.arcWeek` anchors
+to the Monday on or before the plan's effective date, so the arc week *is* this week, and the
+block can quote it without a second resolution of "what week is it".
+
+Resolved through `CalendarDay.startOfTrainingWeek()` and `adding(days:)` — civil-date
+arithmetic through `Calendar`, never 86,400-second blocks, which is the defect
+`MuscleFatigue`'s own note points at. The athlete's zone enters exactly once, at
+`Workout.calendarDay(in:)`, and a test pins that the same instant belongs to two different
+weeks in GMT and in America/Los_Angeles.
+
+### The scorer is not shown this, and the gate is stronger than MAX-068's
+
+MAX-068 withholds the pace breakdown because the rubric never reads it — surplus, not
+harmful. This is withheld because a scorer that *could* read it would produce a verdict
+depending on days other than the one being scored: D1 fixes the judgement to the plan version
+in effect on the workout's date, D8 stores it forever, and two identical runs would then
+score differently according to what happened around them. Two gates —
+`WorkoutContextBuilder` drops a week for any audience but `.chat`, `WorkoutFactSheet` renders
+the section only for `.chat` — and `ContextDisciplineTests`' byte-for-byte literal **did not
+change**, which is the evidence rather than the claim.
+
+### One contract this changes, and it is the sharp edge
+
+`ContextInputs`' C1 obligation now binds the **workout** subject too: `records` must cover
+every day of the Monday-first week containing the subject, because the week's tallies come
+from `TalliesCalculator` and that calculator cannot widen what it is handed. A caller passing
+only the subject's own record gets a week reporting every other prescribed day as a miss —
+not a thinner answer but a *wrong* one, stated confidently. `ChatModel`'s workout path was
+widened accordingly, and it now reads `AppSettings.restDayBudget` rather than assuming
+`.standard`, which is a new way for a workout thread to fail and the price of the thread and
+the dashboard being unable to contradict each other.
+
+### Deliberately not built
+
+**The acute:chronic load ratio.** A29 sanctions the field; this PR does not add it. The only
+resolution of `LoadBalanceInput.historyStart` lives in the app layer
+(`App/Dashboard/TrendTilesModel.swift`), so wiring it from `ChatModel` today would create a
+second answer to "how far back do our records reach" — the divergence §3.6(a) forbids.
+**MAX-192 should add it**, since it is already lifting strain, load and fatigue into a prompt
+and already touches `ContextBuilder`; one resolution shared by both surfaces beats two born a
+week apart.
+
+**A shared tally renderer.** `WorkoutFactSheet.weekTallyLines` and `TrainingFactSheet`'s
+tally block print the same three figures through the same formatters — so they cannot
+disagree about a *number* — but they are two pieces of prose. Factoring them into
+`FactSheetFormatting` was drafted and then reverted: MAX-192 is rewriting the roll-up's tally
+block, and the merge conflict would have been bought for nothing. **Reconciling the two is a
+real follow-up**, recorded here and in a comment on the function rather than left to be
+noticed.
+
+**`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1). CI
+is the first compiler this code meets.
 
 ---
 
