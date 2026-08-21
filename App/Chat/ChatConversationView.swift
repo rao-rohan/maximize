@@ -634,9 +634,10 @@ struct ChatConversationView: View {
     /// **The control reads MAX-152's reply ladder, not a boolean.** `replyPhase` is the
     /// one authority on "is a reply in flight" now that `isStreaming` is derived from it;
     /// `ChatComposerSendControl.resolve(canSend:replyPhase:)` is where those two facts
-    /// become one of four controls, in the core, under test. `cancellation` is left at its
-    /// default — `ChatModel` cannot stop a stream, so the honest control mid-reply is a
-    /// progress indicator, not a stop button that does nothing.
+    /// become one of four controls, in the core, under test. `cancellation` now comes
+    /// from `model.replyCancellation` (MAX-197): the model can stop a stream, and whether
+    /// this particular one has anything to stop is its answer to give, not a literal
+    /// written here.
     ///
     /// **Retry is not here.** MAX-152 put "Try again" in the transcript, beside the
     /// failure notice that explains what went wrong, which is the right place for it: two
@@ -653,18 +654,26 @@ struct ChatConversationView: View {
             ChatComposerView(
                 text: $model.composerText,
                 placeholder: ChatConversationCopy.composerPlaceholder(for: model.subject?.kind),
-                sendControl: .resolve(canSend: model.canSend, replyPhase: model.replyPhase),
+                sendControl: .resolve(
+                    canSend: model.canSend,
+                    replyPhase: model.replyPhase,
+                    cancellation: model.replyCancellation
+                ),
                 isFocused: $isComposerFocused,
-                onActivate: send,
+                onActivate: activateComposerControl,
                 accessory: { draftPlanButton }
             )
         } else {
             ChatComposerView(
                 text: $model.composerText,
                 placeholder: ChatConversationCopy.composerPlaceholder(for: model.subject?.kind),
-                sendControl: .resolve(canSend: model.canSend, replyPhase: model.replyPhase),
+                sendControl: .resolve(
+                    canSend: model.canSend,
+                    replyPhase: model.replyPhase,
+                    cancellation: model.replyCancellation
+                ),
                 isFocused: $isComposerFocused,
-                onActivate: send
+                onActivate: activateComposerControl
             )
         }
     }
@@ -678,6 +687,21 @@ struct ChatConversationView: View {
     private func send() {
         guard model.canSend else { return }
         Task { await model.send() }
+    }
+
+    /// The composer's one control, and the two things it can mean (MAX-197).
+    ///
+    /// Which of them it is showing was decided in the core — `ChatComposerSendControl`
+    /// from `canSend`, the reply ladder and `model.replyCancellation` — and this asks the
+    /// model the same question rather than re-deriving it from the control's own case.
+    /// Both branches are already no-ops when their condition is false, so a tap that
+    /// arrives on the boundary between the two does nothing rather than the wrong thing.
+    private func activateComposerControl() {
+        if model.canStop {
+            model.stop()
+            return
+        }
+        send()
     }
 
     /// Carries out whatever `ChatTranscriptFollow` decided. `.stay` is the common answer
@@ -711,8 +735,9 @@ struct ChatConversationView: View {
 }
 
 /// One row of the transcript. Purely a rendering of `ChatModel.DisplayMessage`
-/// — every one of its flags (`wasTruncated`, `wasInterruptedByFailure`) is something
-/// the model already decided, not something this view infers.
+/// — every one of its flags (`wasTruncated`, `wasInterruptedByFailure`,
+/// `wasStoppedByAthlete`) is something the model already decided, not something this
+/// view infers.
 private struct WorkoutChatBubble: View {
     let message: ChatModel.DisplayMessage
 
@@ -735,6 +760,12 @@ private struct WorkoutChatBubble: View {
                     // Constraint #4: partial text survives a failure, on screen.
                     if message.wasInterruptedByFailure {
                         caption(ChatConversationCopy.interruptedByFailureCaption)
+                    }
+                    // MAX-197: and it survives a stop, which is not a failure — the
+                    // caption is the only thing on screen that says this text is not
+                    // being kept with the conversation.
+                    if message.wasStoppedByAthlete {
+                        caption(ChatConversationCopy.stoppedByAthleteCaption)
                     }
                 }
             }

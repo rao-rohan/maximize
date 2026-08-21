@@ -90,7 +90,11 @@ struct ChatPendingReplyView: View {
                     .foregroundStyle(Color.textPrimary)
                     .accessibleAnimation(Motion.streamingTextReveal, value: text)
             }
-        case .idle, .complete, .truncated, .emptyReply, .failed:
+        case .idle, .complete, .truncated, .emptyReply, .stopped, .failed:
+            // `.stopped` sits here with the rest of the terminal rungs (MAX-197): the
+            // partial reply the athlete stopped has already become a row of its own in
+            // the transcript, with its own caption, so this pending row has nothing left
+            // to draw for it.
             EmptyView()
         }
     }

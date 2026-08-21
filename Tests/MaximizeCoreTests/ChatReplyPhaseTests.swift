@@ -355,6 +355,103 @@ final class ChatReplyPhaseTests: XCTestCase {
         XCTAssertEqual(subject.phase, .idle)
     }
 
+    // MARK: - Rung 5: the athlete stopped it (MAX-197)
+
+    /// From every rung a reply can actually be live on. The one that matters most is the
+    /// first: a reply that has said nothing yet is exactly the one somebody wants out of.
+    func testAStopFromAnyLiveRungLandsOnTheStoppedRung() {
+        let live: [(String, [ChatReplyEvent])] = [
+            ("waiting", [.requestOpened]),
+            ("streaming", [.requestOpened, .textArrived]),
+            (
+                "stalled",
+                [.requestOpened, .textArrived] + beats(beatsToStallAnUncalibratedReply)
+            ),
+        ]
+        for (name, opening) in live {
+            XCTAssertTrue(phase(after: opening).isLive, name)
+            XCTAssertEqual(phase(after: opening + [.stoppedByAthlete]), .stopped, name)
+        }
+    }
+
+    /// A stop is a tap, and a tap that lands after the reply has already ended changes
+    /// nothing. `ChatModel.stop()` refuses at the same boundary; this is the ladder
+    /// holding the line whatever a caller does.
+    func testAStopAfterAnEndingChangesNothing() {
+        let endings: [(String, [ChatReplyEvent])] = [
+            ("complete", [.requestOpened, .textArrived, .completed(.endTurn)]),
+            ("truncated", [.requestOpened, .textArrived, .completed(.truncated)]),
+            ("empty", [.requestOpened, .producedNoUsableText]),
+            ("failed", [.requestOpened, .failed(.midStreamFailure)]),
+            ("stopped", [.requestOpened, .textArrived, .stoppedByAthlete]),
+        ]
+        for (name, events) in endings {
+            XCTAssertEqual(phase(after: events + [.stoppedByAthlete]), phase(after: events), name)
+        }
+    }
+
+    /// Nothing that happens on the wire can be reported as a stop. A stream can fall
+    /// quiet for as long as it likes — past the stall bar, past any bar — and the rung it
+    /// reaches is still `.stalled`, because the only event that produces `.stopped` comes
+    /// from a person.
+    func testNoAmountOfSilenceIsEverReportedAsAStop() {
+        let quiet = phase(after: [.requestOpened, .textArrived] + beats(beatsToStallAnUncalibratedReply * 4))
+        XCTAssertEqual(quiet, .stalled)
+        XCTAssertNotEqual(quiet, .stopped)
+        // And the other endings a quiet stream can reach are still themselves.
+        XCTAssertEqual(
+            phase(after: [.requestOpened, .textArrived, .endedWithoutTerminalEvent]),
+            .failed(.interrupted)
+        )
+    }
+
+    /// The mirror of the case above: a stall that recovers is a reply again, not a
+    /// casualty. MAX-170's calibration is what makes the stall bar move, and a stop must
+    /// not be able to ride in on either half of that.
+    func testAStallThatRecoversIsStreamingAgainAndNotStopped() {
+        let recovered = phase(
+            after: [.requestOpened, .textArrived]
+                + beats(beatsToStallAnUncalibratedReply)
+                + [.textArrived]
+        )
+        XCTAssertEqual(recovered, .streaming)
+
+        // And the recovery genuinely raised the bar rather than leaving it where it was,
+        // so the next quiet run of the same length is not a stall either (MAX-170).
+        let afterRecovery = progress(
+            after: [.requestOpened, .textArrived]
+                + beats(beatsToStallAnUncalibratedReply)
+                + [.textArrived]
+        )
+        XCTAssertGreaterThan(afterRecovery.heartbeatsRequiredForStall, beatsToStallAnUncalibratedReply)
+    }
+
+    /// A stop before the request was even opened is not a state this machine invents.
+    func testAStopWithNothingInFlightIsIgnored() {
+        XCTAssertEqual(phase(after: [.stoppedByAthlete]), .idle)
+    }
+
+    /// The rung's own answers, stated rather than inferred from the sweeps below.
+    func testTheStoppedRungIsTerminalAndOffersNoRetry() {
+        XCTAssertFalse(ChatReplyPhase.stopped.isLive)
+        XCTAssertTrue(ChatReplyPhase.stopped.isTerminal)
+        XCTAssertFalse(
+            ChatReplyPhase.stopped.offersRetry,
+            "the athlete ended this one; asking the same question back is the app arguing"
+        )
+    }
+
+    /// A new request from the stopped rung starts at the bottom like every other, and
+    /// takes MAX-170's calibration with it — what the abandoned connection did is not
+    /// evidence about this one.
+    func testAskingAgainAfterAStopStartsAFreshRequest() {
+        let restarted = progress(after: [
+            .requestOpened, .textArrived, .stoppedByAthlete, .requestOpened,
+        ])
+        XCTAssertEqual(restarted.phase, .awaitingFirstToken)
+        XCTAssertEqual(restarted.heartbeatsRequiredForStall, beatsToStallAnUncalibratedReply)
+    }
+
     // MARK: - What each rung offers
 
     func testOnlyTheThreeLiveRungsCountAsInFlight() {
@@ -460,6 +557,7 @@ final class ChatReplyPhaseTests: XCTestCase {
         .complete,
         .truncated,
         .emptyReply,
+        .stopped,
         .failed(.interrupted),
     ]
 

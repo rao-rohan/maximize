@@ -1977,6 +1977,7 @@ free. What landed in the file:
 | MAX-187 | **A plan proposal card does not outlive its save** — §2.3's defect: accepting a proposal, saving, and pressing Back used to leave a diff card on screen describing a change already applied, **Accept** still live, a second tap writing a genuine duplicate plan version (D1 intact throughout — the screen was lying, not the data). `ChatModel.endProposalIfAlreadyStored()` reuses `discardProposal()`'s one door (`planDrafting = .idle` plus a transcript `.notice`) rather than adding a second mechanism, and decides by asking storage: `PlanProposalReview.standing`'s captured version against a fresh `PlanAuthoring.currentVersion(of:)` read — not a callback from `PlanAuthoringModel`, which has no reference back to the `ChatModel` that opened it and was kept that way rather than wired up across `ChatSheet.swift` (owned by MAX-185 concurrently). `ChatConversationView` calls it from `.onAppear`, since `.task` does not re-run when `PlanAuthoringView` pops back off the stack. See the MAX-187 section below | 184 | Sonnet — branch pushed, PR open; not yet reviewed or merged |
 | MAX-188 | 🔒 **`threadSummaries()` no longer decodes a transcript to draw a list of titles** — §2.4's in-memory exposure. `ChatThreadRecord` gains three columnar fields (`summaryFirstUserMessageContent`, `summaryLastVisibleMessageContent`, `summaryFieldsComputed`) written whenever a thread is stored; the fast path builds `ChatThreadSummary` from those columns and never touches the `@Attribute(.externalStorage)` `messagesJSON` blob. A pre-ticket row (`summaryFieldsComputed == false`) still falls back to a full decode for that one row — bounded, self-clearing the next time the thread is written to. The workout lookup is batched into one query for every workout thread in the list, closing the audit's N+1 alongside it. **No schema version bump** — three additive, default-required columns, `distanceSplitsComputed`'s precedent. See the MAX-188 section below | 184 | Sonnet 🔒 |
 | MAX-192 | **The training roll-up carries strain and load balance** 🔒 — `TrainingContext` gains each session's stored `strainPoints` (MAX-176) and `LoadBalanceCalculator`'s whole reading (MAX-178), so the acute:chronic figure a tile draws now reaches the prompt one tap away from it. Closes MAX-184 §3.2, the audit's highest-ranked finding: a thread asked *"am I ramping too fast"* used to refuse, correctly under `trainingTask`'s never-invent rule, to answer a question the app had already computed. The reading arrives **already computed** through `LoadBalanceResolver` — never assembled from the roll-up's own records, which cover the scope's weeks and not the chronic window — and is anchored to *today*, which `ContextInputs` enforces. Three absences worded apart; the window's opening sentence now names the one rolling exception. **Per-muscle fatigue (MAX-179) was considered and declined**, and the exclusion is stated in the prompt. **Gated on A30** — A12 rule 2 makes a widening of what leaves the device an amendment, A29 settled the same question for the workout subject, and gating one subject and not the other would make the rule arbitrary; the amendment is in the same PR, first in the diff. See the MAX-192 section below | 176, 177, 178, 179, 184, A12/A29/**A30** | **Opus** 🔒 |
+| MAX-197 | **A reply in flight can be stopped** — MAX-184 §6.4's craft gap: `ChatModel.stream` ran to its terminal event with nothing able to interrupt it, so the honest composer control mid-reply was a progress indicator. `stop()` now cancels the task consuming the stream — real cancellation, which reaches `URLSession` through the `AsyncStream` termination the transport already handles, not a flag a suspended `for await` would never read. **A stopped turn is a fifth terminal rung, `ChatReplyPhase.stopped`**, rather than a reuse of `.failed(.interrupted)`: that case says the connection dropped and offers a retry, and neither is true of something the athlete did. **What was already on screen is kept on screen and nothing is written** — the same treatment a dropped connection gets, and the caption says out loud that it goes when the conversation closes; storing a half-sentence would read back as a whole one and be replayed to the model as its own completed prior turn. The seam MAX-153 left (`ChatComposerCancellation`, `ChatComposerSendControl.stop`) is filled with no change to the composer view. See the MAX-197 section below | 184, 152, 153, 170 | **Opus** — branch pushed, PR open. **No Swift toolchain in this container**, so nothing here was compiled or run (R1); cancellation reaching the network read is argued, not observed, and needs device verification per the PR |
 
 **Four collisions the overseer must respect.**
 
@@ -6665,6 +6666,120 @@ no pixels.
   ticket, and the two agree today because the resolver is that method moved verbatim.
 - **MAX-193 will want the same resolver** for the workout subject's week block, and will
   collide with this ticket in `ContextBuilder.swift`. It should land after this.
+
+---
+
+## MAX-197 — a reply in flight can be stopped
+
+[docs/CHAT-AUDIT.md](./docs/CHAT-AUDIT.md) (MAX-184) §6.4. The premise was verified before
+anything was designed: `ChatModel` had no cancellation path of any kind — no `Task` was held,
+no `cancel()` was called anywhere in the chat surface, and the composer's `cancellation:`
+parameter was left at its `.unavailable` default at both call sites. There was no second stop
+to collide with.
+
+### What happens to the partial reply, and why
+
+**Kept on screen, marked as stopped, and not persisted.** A stopped turn takes exactly the path
+a failed one already takes: the question and whatever text arrived stay in `messages`, neither
+reaches `ChatThreadRepository`, and the thread on disk is the thread from before the send — so
+there is nothing half-written for `load()` to read back (D6). The bubble carries
+`ChatConversationCopy.stoppedByAthleteCaption`, which says the text stays until the conversation
+is closed, because that is the one thing the athlete cannot see for themselves.
+
+The alternative — persisting the partial — was rejected on two grounds. The schema has no way
+to mark an assistant message as unfinished, so it would read back as something Claude said in
+full; and `send()` builds every later instruction from `thread.visibleMessages`, so the
+half-sentence would be replayed to the model as its own completed prior turn for the rest of the
+thread's life. A paragraph that does not survive the sheet is a smaller cost than a lie that
+compounds, and the caption means nobody is surprised by it.
+
+A stop before the first token has no bubble to caption, so it gets a `.notice` row of its own
+(`stoppedBeforeAnyReplyArrived`) rather than leaving a blank under the question — absence as a
+designed state.
+
+### How cancellation propagates, and how far that was verified
+
+`stream(_:thread:chatThreadRepository:)` now runs its consumption in a `Task` the model holds and
+awaits; `stop()` cancels it. Cancelling resumes the suspended `AsyncStream` read immediately —
+which is the whole point, because a stalled reply is precisely the one a flag would never
+interrupt — and terminates the stream, which fires `continuation.onTermination`, which
+`AnthropicStreamingChatClient` already implements as `work.cancel()`, which cancels the
+`URLSession.AsyncBytes` read. That last link predates this ticket and is the reason
+`StreamingChatModelInvoking`'s contract already said a stream abandoned part-way emits no
+terminal event.
+
+**The half of that chain inside `MaximizeCore` is under test; the half inside `URLSession` is
+not, and cannot be here.** No toolchain, no device, no network in this container. What CI checks
+is that a stop mid-stream ends the turn on `.stopped`, keeps exactly the text that was on screen,
+writes nothing, and settles every reader of `isStreaming`. What it cannot check is that a real
+HTTPS response body stops being read on a phone.
+
+The outer direction is preserved too: `stream` wraps its `await task.value` in a
+`withTaskCancellationHandler`, so a sheet dismissed mid-answer still cancels the request rather
+than leaving an unstructured task reading a reply nobody will see.
+
+### Telling a stop apart from a stall, a drop and a completion
+
+`ChatReplyProgress` gains one event, `.stoppedByAthlete`, which only `ChatModel.stop()` sends.
+No number of quiet beats can produce it, so MAX-170's calibrating stall bar is untouched and a
+stall — or a stall that recovers — can never be reported as a stop. The reverse is what the new
+rung buys: a cancelled stream yields no terminal event, which from the model's side is
+indistinguishable from a dropped connection, and without the flag a deliberate stop would have
+read as *"The connection dropped before the reply finished"* and offered a retry.
+
+Completion is settled by one rule: **the stop takes effect if, and only if, the reply was still
+live when the tap landed.** `stop()` refuses once the phase is terminal, and the phase becomes
+terminal in the same synchronous run that folds in the stream's last event — there is no
+suspension point in between — so a late tap cannot disturb a reply that is already being
+written, and an accepted tap ends the turn as stopped even if a completion was sitting behind it
+in the buffer. Both directions are tested. The button always means what it says.
+
+### The transcript after a stop
+
+`canSend` returns (the composer was never disabled), `canStop` and `replyCancellation` withdraw,
+`canRetry` stays false — `.stopped` offers no retry, and `pendingTurn` is cleared, so the app
+never offers to re-ask a question the athlete has just ended (A14: stopping spends no call and
+starts none). `canDraftPlan` is unaffected for the right reason: it reads
+`thread.visibleMessages`, which the stopped turn never entered.
+
+### Tests (core, CI-verified — if CI runs them; see below)
+
+`ChatReplyPhaseTests`: a stop from each of the three live rungs; a stop after every ending is a
+no-op; no amount of silence is ever a stop; a recovered stall is streaming, not stopped; asking
+again after a stop resets MAX-170's calibration. `ChatReplyLadderModelTests` (thirteen new
+assertions' worth): the partial kept is exactly what was on screen, nothing is written, the
+no-text case says so, a reload reads the thread back without the stopped turn, a stalled reply
+that is stopped reads as stopped, the failure behind a stop never reaches the transcript, the
+next question is asked without the stopped turn, and `retry()` after a stop calls nothing.
+`ChatComposerStateTests`/`ChatConversationCopyTests`: the stopped rung is not a live control even
+with cancellation available, and the two new strings carry no numerals and no code.
+
+`FakeStreamingChatModelInvoking` now produces one event per read rather than pushing the whole
+script into a buffer before the consumer starts, and gains a `beforeEachEvent` hook. That is what
+makes a mid-stream tap deterministic — no sleeping, no polling, no second task racing the first
+— and it also makes the fake behave like a stream rather than like a completed reply.
+
+### What CI can and cannot prove
+
+CI can prove everything in the paragraph above. CI cannot prove that the stop button appears,
+that it is reachable, that tapping it feels immediate, or that the network read actually stops on
+a device. **Needs device verification:** stop a long reply early and confirm what arrived stays
+with its caption; stop one just as it lands and confirm the completed reply is stored instead of
+being discarded; stop with the network off, before any token arrives, and confirm the transcript
+says the reply was stopped rather than blaming the connection; reopen the thread and confirm the
+stopped turn is gone and the earlier ones are intact.
+
+**`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
+
+### Found outside the ticket, not done
+
+- **The composer loses its progress indicator while a reply arrives**, since every live rung now
+  resolves to `.stop` rather than `.awaitingReply`. That is `ChatComposerSendControl`'s design
+  as written in MAX-153 and matches every mainstream chat client, and the transcript still says
+  *"Thinking…"* — but it is a visible change to a shipped screen and belongs in the device pass.
+- **`ChatConversationView` still draws captions with three parallel `if`s**, one per
+  `DisplayMessage` flag. Folding them into one core-decided caption would be tidier and touches a
+  file MAX-195/196 own concurrently; left alone deliberately.
 
 ---
 

@@ -7,16 +7,17 @@ import Foundation
 ///
 /// A composer that draws a stop button which does not stop anything is worse than one
 /// that draws no stop button at all: it teaches a gesture that silently fails, and the
-/// only way to discover that is to tap it during a reply you wanted to abandon.
-/// `ChatModel` today has no cancellation — `send()` runs the stream to its terminal
-/// event and nothing interrupts it — so the honest control during a stream is a progress
-/// indicator, not a stop.
+/// only way to discover that is to tap it during a reply you wanted to abandon. So this
+/// is a parameter: MAX-153 owns the composer's *shape*, MAX-152 owns the waiting and
+/// streaming *states*, and rather than the shell guessing which world it is in, the
+/// caller says.
 ///
-/// MAX-153 owns the composer's *shape*; MAX-152 owns the waiting and streaming *states*.
-/// Rather than the shell guessing which of those two worlds it is in, the caller says.
-/// When cancellation lands, one call site changes from `.unavailable` to `.available`
-/// and the control becomes a stop button, already sized, already labelled, already
-/// tested — see `ChatComposerSendControlTests`.
+/// **MAX-197 filled it.** `ChatModel.stop()` cancels the task reading the reply, and
+/// `ChatModel.replyCancellation` is the answer this type is handed — `.available`
+/// whenever there is a request open with a task to cancel. The default stays
+/// `.unavailable` so that a caller which has *not* answered the question cannot get a
+/// stop button by omission; that is the same "no affordance is better than a false one"
+/// rule stated from the other end.
 public enum ChatComposerCancellation: Hashable, Sendable {
     /// The stream can be stopped, and the control offers it.
     case available

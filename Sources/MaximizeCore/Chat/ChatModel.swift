@@ -137,6 +137,39 @@ import Observation
 /// `wasInterruptedByFailure` set, appended right alongside a notice describing what
 /// happened. Nothing here ever clears a bubble because the connection dropped.
 ///
+/// ## MAX-197 — a reply in flight can be stopped, and what that leaves behind
+///
+/// `stop()` is the athlete's way out of a long or wrong answer. Three decisions make it
+/// up, and all three are here rather than in a view:
+///
+/// 1. **It is cancellation, not a flag.** `stream(_:...)` runs its consumption in a task
+///    this type holds, and `stop()` cancels it. A `for await` loop suspended on the next
+///    frame cannot notice a bit being flipped — it would sit there until the next token
+///    or ping arrived, which on a stalled reply is precisely never. Cancelling resumes
+///    that read at once, ends the `AsyncStream`, and reaches the transport through
+///    `continuation.onTermination`, which `AnthropicStreamingChatClient` already
+///    implements by cancelling its `URLSession` work. That seam predates this ticket:
+///    `StreamingChatModelInvoking`'s own contract says a stream abandoned part-way emits
+///    no terminal event, because nothing failed — the caller left.
+///
+/// 2. **A stop is not a stall and not a drop.** Both of those already existed and both
+///    are still reached the same way; a stop reaches `.stopped` only because
+///    `stop()` sent `ChatReplyEvent.stoppedByAthlete`. Without that the transport's
+///    silence would land on `.failed(.interrupted)` — "the connection dropped before the
+///    reply finished" — which is a sentence about the network describing something the
+///    athlete did.
+///
+/// 3. **Nothing a stop leaves behind is written.** A stopped turn takes the same path a
+///    failed one takes: the question and whatever text arrived stay on screen, neither
+///    reaches `ChatThreadRepository`, and the thread on disk is byte-for-byte what it was
+///    before `send()` (D6 — what the loader reads back afterwards is a transcript that
+///    never had this turn in it). The alternative — storing a half-sentence as an
+///    assistant turn — has no way to mark itself as partial in the schema, so it would
+///    read back as something Claude said in full, and would then be replayed to the model
+///    as its own completed prior turn on every later question in the thread. A lie that
+///    compounds is worse than a paragraph that does not survive the sheet, and
+///    `ChatConversationCopy.stoppedByAthleteCaption` says out loud that it will not.
+///
 /// ## MAX-152 — the surface knows which waiting it is doing
 ///
 /// `replyPhase` is the whole ladder between "sent" and "answered": waiting with nothing
@@ -207,18 +240,33 @@ public final class ChatModel {
         /// anything actually written to the thread.
         public let wasInterruptedByFailure: Bool
 
+        /// An assistant reply the athlete stopped (MAX-197). Like
+        /// `wasInterruptedByFailure` it is only ever true of a row that was **not**
+        /// written to the thread; unlike it, nothing went wrong.
+        ///
+        /// A third flag rather than a rewrite of these three into one enum, deliberately:
+        /// the three are set at three separate construction sites in this file, exactly
+        /// one of them per row, and the alternative is a wider edit to a file two other
+        /// tickets are in. `ChatModel` is the only thing that can build a
+        /// `DisplayMessage` — the initializer is internal — so "at most one is true" is
+        /// held where the rows are made, and `ChatReplyLadderModelTests` asserts it on
+        /// each path rather than trusting the sentence.
+        public let wasStoppedByAthlete: Bool
+
         init(
             id: UUID = UUID(),
             kind: Kind,
             text: String,
             wasTruncated: Bool = false,
-            wasInterruptedByFailure: Bool = false
+            wasInterruptedByFailure: Bool = false,
+            wasStoppedByAthlete: Bool = false
         ) {
             self.id = id
             self.kind = kind
             self.text = text
             self.wasTruncated = wasTruncated
             self.wasInterruptedByFailure = wasInterruptedByFailure
+            self.wasStoppedByAthlete = wasStoppedByAthlete
         }
     }
 
@@ -279,6 +327,26 @@ public final class ChatModel {
     /// make the surface claim a reply is arriving when none is.
     private var progress = ChatReplyProgress()
 
+    /// The task consuming the reply in flight, held only so `stop()` can cancel it
+    /// (MAX-197). Nil whenever no request is open.
+    ///
+    /// Unstructured on purpose, and it is the only unstructured task in this file. A stop
+    /// has to reach the read from outside the task performing it, and there is no way to
+    /// hand a running `for await` loop a cancel that is not this. `stream(_:...)` still
+    /// awaits it before returning and forwards its own caller's cancellation into it, so
+    /// nothing here outlives the call that started it.
+    private var streamTask: Task<Void, Never>?
+
+    /// Whether the athlete has asked for the reply in flight to stop (MAX-197).
+    ///
+    /// Set only by `stop()`, and only while a request is open; cleared by the next
+    /// `stream(_:...)`. It is not how cancellation *travels* — `streamTask.cancel()` is
+    /// that, and a flag alone would be the failure this ticket exists to avoid — it is
+    /// how the turn's *ending* is told apart from every other ending afterwards. A
+    /// cancelled stream yields no terminal event, which is exactly what a dropped
+    /// connection looks like from here, and only this says which of the two happened.
+    private var stopRequested = false
+
     /// The question whose answer has not landed, kept in memory so `retry()` can ask it
     /// again without the athlete retyping it (MAX-152).
     ///
@@ -312,6 +380,27 @@ public final class ChatModel {
     /// tell the athlete the same thing twice.
     public var canRetry: Bool {
         loadState == .ready && !isStreaming && pendingTurn != nil && replyPhase.offersRetry
+    }
+
+    /// Whether the reply in flight can be stopped (MAX-197, §6.4).
+    ///
+    /// Two conditions, and the second is not redundant: a request is open, and there is a
+    /// task to cancel. They agree today by construction — `stream(_:...)` sets the handle
+    /// in the same synchronous run that opens the request — and asserting both is what
+    /// keeps a future edit from offering a stop this type could not carry out, which is
+    /// the exact failure `ChatComposerCancellation` was written to prevent.
+    public var canStop: Bool { isStreaming && streamTask != nil }
+
+    /// What the composer's trailing control may offer while a reply is arriving
+    /// (MAX-197): a stop, or the progress indicator that was the honest answer before
+    /// this ticket.
+    ///
+    /// Here rather than at the call site so the view passes a fact instead of a literal.
+    /// `ChatComposerSendControl.resolve(canSend:replyPhase:cancellation:)` is still the
+    /// one place the four control states are decided; this is the one place the app
+    /// answers "can this particular model stop what it is doing".
+    public var replyCancellation: ChatComposerCancellation {
+        canStop ? .available : .unavailable
     }
 
     /// §4, MAX-101. Nothing here ever sets this to anything but `.idle` on its own.
@@ -970,11 +1059,44 @@ public final class ChatModel {
         await stream(pending, thread: thread, chatThreadRepository: chatThreadRepository)
     }
 
-    /// Opens one request and consumes it to its terminal event.
+    /// Stops the reply in flight, keeping what has already arrived (MAX-197, §6.4).
     ///
-    /// The one place events reach the ladder. Every `progress.apply` in this type is
-    /// here or in `resolve`, which is what keeps "which state is showing" a single
-    /// derivation rather than something reconstructed at each call site.
+    /// A no-op when no request is open, so a view may call it from the composer's control
+    /// without a second guard — the same shape `send()`, `retry()` and `draftPlan()` have.
+    /// Not `async`: it hands the running task a cancellation and returns, and the turn
+    /// ends on the task that was already consuming it. A stop that had to be awaited
+    /// would be a second place this type decides how a turn ends.
+    ///
+    /// ## The guard is the whole race
+    ///
+    /// `isStreaming` is `replyPhase.isLive`, and the phase becomes terminal in the same
+    /// synchronous run that the stream's last event is folded in — so by the time a reply
+    /// has completed, failed or been stopped, this can no longer accept anything. That is
+    /// what makes "stopped just as it completed" safe in both directions: a tap that
+    /// lands while the reply is live ends the turn as stopped and stores nothing, and a
+    /// tap that lands after it is not a stop at all and cannot disturb a completed reply
+    /// that is already being written. There is no window in which half of each happens.
+    ///
+    /// **A14 holds.** This spends no call and starts nothing; it is the only method here
+    /// that reaches the model by *not* talking to it.
+    public func stop() {
+        guard canStop else { return }
+        // What the consuming task reads to tell this ending from every other one. A
+        // cancelled stream yields no terminal event, which is exactly what a dropped
+        // connection looks like from there, and this is the only thing that says which.
+        stopRequested = true
+        // The part that actually stops bytes arriving. Cancelling resumes the suspended
+        // read immediately — which is why a stalled reply, the one a flag could never
+        // interrupt, stops as promptly as a fast one — terminates the `AsyncStream`, and
+        // through `onTermination` tells the transport to abandon its request.
+        streamTask?.cancel()
+    }
+
+    /// Opens one request, and hands the consumption of it to a task `stop()` can cancel
+    /// (MAX-197).
+    ///
+    /// Returns only when the turn is over, so every caller — and every test — still sees
+    /// `send()` and `retry()` as "ask, and come back when there is an answer".
     private func stream(
         _ pending: PendingTurn,
         thread: ChatThread,
@@ -982,9 +1104,51 @@ public final class ChatModel {
     ) async {
         progress.apply(.requestOpened)
         streamingText = ""
+        // A new request, so the previous turn's stop is not this turn's. Set before the
+        // task exists, which is the order that matters: nothing can observe a request
+        // that is open and pre-stopped.
+        stopRequested = false
+
+        let task = Task {
+            await self.consume(pending, thread: thread, chatThreadRepository: chatThreadRepository)
+        }
+        // Assigned in the same synchronous run as `.requestOpened` above — this type is
+        // `@MainActor`, so nothing else runs in between and `canStop` is never false
+        // while a request is open.
+        streamTask = task
+        // Cancellation from *outside* still reaches the request: a sheet dismissed
+        // mid-answer cancels whatever called `send()`, and without this the unstructured
+        // task above would carry on reading a reply nobody will see. The transport's own
+        // documentation calls that case out; this is the half of it that lives here.
+        await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
+        }
+        streamTask = nil
+    }
+
+    /// Consumes one open request to its ending, whichever ending it gets.
+    ///
+    /// The one place events reach the ladder. Every `progress.apply` in this type is
+    /// here or in `resolve`, which is what keeps "which state is showing" a single
+    /// derivation rather than something reconstructed at each call site.
+    private func consume(
+        _ pending: PendingTurn,
+        thread: ChatThread,
+        chatThreadRepository: any ChatThreadRepository
+    ) async {
         var accumulated = ""
         var outcome: StreamOutcome?
         for await event in chatClient.stream(pending.instruction) {
+            // A stop ends the turn at the first opportunity and everything after it is
+            // discarded — a terminal event included. Cancelling the task is what stops
+            // the *bytes*; this is what stops the *turn*, and it is needed because a
+            // frame can already be buffered on this side when the tap lands. Two
+            // consequences worth stating: what is kept is exactly what the athlete had on
+            // screen at that moment, and the button never has to explain that it arrived
+            // a frame too late.
+            if stopRequested { break }
             switch event {
             case let .text(delta):
                 // Contract #1 (`ChatStreamEvent`): text only ever appends.
@@ -1004,6 +1168,14 @@ public final class ChatModel {
             }
         }
 
+        // An accepted stop is the ending, whatever else had arrived by then. `stop()`
+        // only accepts while the phase is live, so this cannot overwrite an ending the
+        // surface has already shown — it settles the one narrow case where a terminal
+        // event had been read but not yet folded in when the athlete tapped. The button
+        // says it stops the reply; a turn that saved itself anyway would make that false
+        // in a way nobody could see coming.
+        if stopRequested { outcome = .stoppedByAthlete }
+
         // The assistant's message is built once, here, and both the phase and the
         // transcript read that one attempt. Deciding "was there a usable reply" twice —
         // once for the phase and once for the row — is the drift D2 warns about in
@@ -1018,6 +1190,8 @@ public final class ChatModel {
             progress.apply(assistantMessage == nil ? .producedNoUsableText : .completed(completion))
         case let .failed(streamError):
             progress.apply(.failed(streamError))
+        case .stoppedByAthlete:
+            progress.apply(.stoppedByAthlete)
         case nil:
             progress.apply(.endedWithoutTerminalEvent)
         }
@@ -1040,6 +1214,10 @@ public final class ChatModel {
     private enum StreamOutcome {
         case completed(ChatTurnCompletion)
         case failed(ChatStreamError)
+        /// The athlete stopped it (MAX-197). Its own case rather than `nil`: a stream
+        /// that ends without a terminal event is `nil` and means "the connection went
+        /// away", which is the one thing a stop must never be reported as.
+        case stoppedByAthlete
     }
 
     private func resolve(
@@ -1093,6 +1271,29 @@ public final class ChatModel {
                 // spend a call on a problem that is not Claude's.
             }
 
+        case .stoppedByAthlete:
+            // **Nothing is written.** `chatThreadRepository` is not touched anywhere on
+            // this path, so the thread on disk after a stop is the thread from before the
+            // send — there is no half-written turn for `load()` to read back, and the
+            // question and the partial answer live only in `messages` (D6, and the same
+            // treatment a failure already gets).
+            if accumulated.isEmpty {
+                // Nothing arrived, so there is no bubble for a caption to sit under and a
+                // blank under the question would otherwise be the whole answer.
+                noteRow(ChatConversationCopy.stoppedBeforeAnyReplyArrived)
+            } else {
+                messages.append(DisplayMessage(
+                    kind: .assistant,
+                    text: accumulated,
+                    wasStoppedByAthlete: true
+                ))
+            }
+            // Unlike a failure, this leaves nothing to ask again. `.stopped` offers no
+            // retry, so `canRetry` is already false; clearing the turn as well means the
+            // model is not holding a question the athlete has finished with, and a later
+            // failure's "Try again" can only ever mean that later question.
+            pendingTurn = nil
+
         case .failed, nil:
             // Constraint: partial text survives a failure, on screen — never persisted.
             // `pendingTurn` is kept, which is what makes "Try again" possible for the
@@ -1114,7 +1315,16 @@ public final class ChatModel {
     /// Appends a failure's sentence to the transcript as a `.notice` — never a turn,
     /// never persisted (see `DisplayMessage.Kind.notice`).
     private func note(_ notice: ChatFailureNotice) {
-        messages.append(DisplayMessage(kind: .notice, text: notice.message))
+        noteRow(notice.message)
+    }
+
+    /// The same row, for the one sentence that is not a failure: a reply the athlete
+    /// stopped before anything arrived (MAX-197). It does not come from
+    /// `ChatFailureNotice` because nothing failed, and that type is "every way a chat
+    /// turn can fail" — widening it to hold a deliberate act would blur the one thing it
+    /// is for.
+    private func noteRow(_ text: String) {
+        messages.append(DisplayMessage(kind: .notice, text: text))
     }
 
     // MARK: - Drafting a plan from this conversation (MAX-101, §4)
