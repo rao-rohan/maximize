@@ -51,7 +51,14 @@ jobs:
         run: HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
 
       - name: Generate Xcode project from project.yml
-        run: xcodegen generate
+        run: |
+          xcodegen generate
+          echo "=== Generated entitlements files ==="
+          ls -la Support/*.entitlements 2>/dev/null || echo "No entitlements files in Support/"
+          for f in Support/*.entitlements; do
+            echo "--- $f ---"
+            cat "$f" 2>/dev/null || true
+          done
 
       - name: Create and boot simulator
         id: simulator
