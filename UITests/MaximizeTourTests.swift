@@ -35,20 +35,20 @@ final class MaximizeTourTests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
         app = XCUIApplication()
-        // TEMPORARILY DISABLED: The app seeds sample workouts from its own process
-        // (it holds the HealthKit entitlement; the test runner does not). See
-        // `TourWorkoutSeeder` in the app target.
-        // app.launchArguments.append("-seedTourWorkouts")
+        // The app seeds sample workouts from its own process (it holds the
+        // HealthKit entitlement; the test runner does not). The workflow
+        // pre-grants HealthKit via simctl, so the seeder's authorization request
+        // returns immediately without a sheet. See `TourWorkoutSeeder`.
+        app.launchArguments.append("-seedTourWorkouts")
     }
 
     // MARK: - The tour
 
     func testTour() {
         app.launch()
-        // The `-seedTourWorkouts` launch argument makes the app request HealthKit
-        // authorization on launch (for seeding). Answer that sheet before the
-        // first-run cover's own request.
-        answerSystemHealthPrompt(timeout: 20)
+        // The workflow pre-grants HealthKit via `simctl privacy grant health`, so
+        // no sheet should appear. `dismissFirstRunCover` still attempts UI
+        // dismissal as a fallback.
         dismissFirstRunCover()
         takeScreenshot(named: "01-first-run-complete")
         authorFirstPlan()

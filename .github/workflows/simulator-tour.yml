@@ -107,6 +107,11 @@ jobs:
           echo "udid=$UDID" >> "$GITHUB_OUTPUT"
           xcrun simctl boot "$UDID"
           xcrun simctl bootstatus "$UDID" -b
+          # Pre-grant HealthKit access so the tour doesn't have to automate the
+          # system Health sheet (which is version-specific and fragile). The app
+          # still exercises its real HealthKit code paths; the permission is just
+          # already granted.
+          xcrun simctl privacy "$UDID" grant health com.example.maximize.app || echo "Note: simctl privacy grant health failed (may not be supported); tour will attempt UI dismissal"
 
       - name: Build for testing (ad-hoc signed)
         run: |
