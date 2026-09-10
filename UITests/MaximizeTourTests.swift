@@ -95,6 +95,11 @@ final class MaximizeTourTests: XCTestCase {
             authorButton.waitForExistence(timeout: 15),
             "Setup card should offer plan authoring"
         )
+        // The button may be below the fold; scroll it into view before tapping.
+        // NavigationLink taps are unreliable when the link isn't visible.
+        if !authorButton.isHittable {
+            app.swipeUp()
+        }
         authorButton.tap()
 
         // The screen proposes a default plan that is immediately saveable.
