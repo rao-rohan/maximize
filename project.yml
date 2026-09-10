@@ -204,8 +204,15 @@ targets:
 
 # An explicit scheme for the tour so `xcodebuild test -scheme Tour` builds the
 # app for running and the UI tests for testing, instead of relying on
-# XcodeGen's default scheme generation to wire the test action up.
+# XcodeGen's default scheme generation to wire the test action up. Declaring
+# `schemes` replaces XcodeGen's automatic per-target schemes, so `Maximize`
+# (which CI's app-shell job builds with `-scheme Maximize`) is declared here
+# too, unchanged from what XcodeGen generated on its own.
 schemes:
+  Maximize:
+    build:
+      targets:
+        Maximize: [run]
   Tour:
     build:
       targets:
