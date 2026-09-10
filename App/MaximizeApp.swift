@@ -46,8 +46,13 @@ struct MaximizeApp: App {
             .task(id: storeAvailability.availability.isUsable) { await settingsModel.load() }
             // The simulator tour seeds sample workouts from the app process (the UI
             // test runner cannot hold the HealthKit entitlement). Gated by the launch
-            // argument; never runs in production.
-            .task { await TourWorkoutSeeder.seedIfRequested() }
+            // argument; never runs in production. Runs detached (not in the view's
+            // .task) so a HealthKit authorization prompt can't block first render.
+            .onAppear {
+                Task.detached {
+                    await TourWorkoutSeeder.seedIfRequested()
+                }
+            }
             .preferredColorScheme(preferredColorScheme)
         }
     }

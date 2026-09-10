@@ -35,22 +35,34 @@ final class MaximizeTourTests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
         app = XCUIApplication()
-        // The app seeds sample workouts from its own process (it holds the
-        // HealthKit entitlement; the test runner does not). The workflow
-        // pre-grants HealthKit via simctl, so the seeder's authorization request
-        // returns immediately without a sheet. See `TourWorkoutSeeder`.
-        app.launchArguments.append("-seedTourWorkouts")
+        // Seeding is done on a second launch (see testTour): the first launch
+        // completes the first-run HealthKit permission flow via UI; the second
+        // launch passes `-seedTourWorkouts` so the app seeds from its own process
+        // (it holds the HealthKit entitlement; the test runner does not).
     }
 
     // MARK: - The tour
 
     func testTour() {
+        // First launch: complete the first-run cover and grant HealthKit access
+        // via the system sheet. No seeding yet — the seeder can't prompt for
+        // permission before the UI is up.
         app.launch()
-        // The workflow pre-grants HealthKit via `simctl privacy grant health`, so
-        // no sheet should appear. `dismissFirstRunCover` still attempts UI
-        // dismissal as a fallback.
         dismissFirstRunCover()
         takeScreenshot(named: "01-first-run-complete")
+
+        // Second launch: seed sample workouts. Permission is already granted, so
+        // the seeder's authorization request returns immediately and it writes
+        // three runs in the background while the tour continues.
+        app.terminate()
+        app.launchArguments.append("-seedTourWorkouts")
+        app.launch()
+        // The first-run cover is gone on second launch; wait for the main UI.
+        XCTAssertTrue(
+            app.tabBars.firstMatch.waitForExistence(timeout: 15),
+            "App should show the tab bar on second launch"
+        )
+
         authorFirstPlan()
         takeScreenshot(named: "02-plan-saved")
         storeDummyAPIKey()
