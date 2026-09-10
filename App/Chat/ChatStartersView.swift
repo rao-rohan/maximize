@@ -36,8 +36,8 @@ import MaximizeCore
 struct ChatStartersView: View {
     let starters: [String]
 
-    /// A tap sends the starter's exact text as the next turn — see this file's own
-    /// "Send immediately" note on `ChatConversationView`'s call site for the argument.
+    /// A tap fills the composer with the starter's text for editing — see
+    /// `ChatConversationView.fillStarter(_:)` for the argument.
     let onSelect: (String) -> Void
 
     /// Guarantees the platform's own minimum hit target even for a one-line starter at
