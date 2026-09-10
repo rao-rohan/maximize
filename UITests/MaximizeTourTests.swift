@@ -222,17 +222,15 @@ final class MaximizeTourTests: XCTestCase {
             "An Ask entry button should be present"
         )
         askButton.tap()
+        // The sheet may not register as app.sheets; wait for the composer
+        // directly, which is the proof the chat UI opened.
+        let composer = app.textFields["Ask about your training…"]
         XCTAssertTrue(
-            app.sheets.firstMatch.waitForExistence(timeout: 10),
-            "Chat sheet should open"
+            composer.waitForExistence(timeout: 15),
+            "Chat composer should show the training placeholder"
         )
         takeScreenshot(named: "08a-chat-opened")
 
-        let composer = app.textFields["Ask about your training…"]
-        XCTAssertTrue(
-            composer.waitForExistence(timeout: 10),
-            "Chat composer should show the training placeholder"
-        )
         composer.tap()
         composer.typeText("How did my training week go?")
         // Deliberately not sent: the stored key is a dummy and sending would
