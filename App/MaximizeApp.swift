@@ -44,6 +44,10 @@ struct MaximizeApp: App {
             // still says settings could not be loaded, after the app has just told the
             // athlete their history opened, would be the app disagreeing with itself.
             .task(id: storeAvailability.availability.isUsable) { await settingsModel.load() }
+            // The simulator tour seeds sample workouts from the app process (the UI
+            // test runner cannot hold the HealthKit entitlement). Gated by the launch
+            // argument; never runs in production.
+            .task { await TourWorkoutSeeder.seedIfRequested() }
             .preferredColorScheme(preferredColorScheme)
         }
     }

@@ -4,11 +4,11 @@
 // `.github/workflows/simulator-tour.yml` (workflow_dispatch only).
 //
 // What it does, in order:
-//   1. Seeds three sample runs (heart-rate series on each, a GPS route on one)
-//      into the simulator's HealthKit store, answering the test runner's own
+//   1. Launches the app with `-seedTourWorkouts`, which makes the app seed three
+//      sample runs (heart-rate series on each, a GPS route on one) into the
+//      simulator's HealthKit store from its own process. The test answers the
 //      Health permission sheet the way a user would.
-//   2. Launches the app and walks first run: cover -> Continue -> Health
-//      permission sheet -> setup card.
+//   2. Walks first run: cover -> Continue -> Health permission sheet.
 //   3. Authors the first plan by hand and saves the default the screen proposes.
 //   4. Stores a dummy Anthropic key in Settings. The key is deliberately fake
 //      and the tour never sends a message, so no network call is ever made.
@@ -26,8 +26,6 @@
 // - If seeding fails the tour does not abort: it continues and documents the
 //   empty state, so every stage degrades to something a reviewer can see.
 
-import CoreLocation
-import HealthKit
 import XCTest
 
 final class MaximizeTourTests: XCTestCase {
@@ -37,13 +35,20 @@ final class MaximizeTourTests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
         app = XCUIApplication()
+        // The app seeds sample workouts from its own process (it holds the
+        // HealthKit entitlement; the test runner does not). See
+        // `TourWorkoutSeeder` in the app target.
+        app.launchArguments.append("-seedTourWorkouts")
     }
 
     // MARK: - The tour
 
     func testTour() {
-        seedSampleWorkouts()
         app.launch()
+        // The `-seedTourWorkouts` launch argument makes the app request HealthKit
+        // authorization on launch (for seeding). Answer that sheet before the
+        // first-run cover's own request.
+        answerSystemHealthPrompt(timeout: 20)
         dismissFirstRunCover()
         takeScreenshot(named: "01-first-run-complete")
         authorFirstPlan()
@@ -55,32 +60,6 @@ final class MaximizeTourTests: XCTestCase {
         tourWorkoutDetail()
         tourChatSheet()
         takeScreenshot(named: "09-tour-complete")
-    }
-
-    // MARK: - Stage 0: seed HealthKit samples from the test runner
-
-    /// Writes three runs into the simulator's HealthKit store from the test
-    /// process, answering the runner's own permission sheet via SpringBoard.
-    /// Best-effort: on failure the tour continues and documents the empty state.
-    private func seedSampleWorkouts() {
-        let box = ErrorBox()
-        let done = DispatchSemaphore(value: 0)
-        Task {
-            do {
-                try await SampleWorkoutSeeder.seed()
-            } catch {
-                box.error = error
-            }
-            done.signal()
-        }
-        answerSystemHealthPrompt(timeout: 20)
-        _ = done.wait(timeout: .now() + 180)
-        if let error = box.error {
-            // Seeding failed; the tour continues and `waitForSeededWorkouts`
-            // will document the empty state. The failure is in the test log.
-            print("TOUR: seeding sample workouts failed: \(error)")
-            takeScreenshot(named: "00-seeding-failed")
-        }
     }
 
     // MARK: - Stage 1: first run
@@ -266,14 +245,33 @@ final class MaximizeTourTests: XCTestCase {
 
     /// Answers the system Health permission sheet ("Allow" / "Don't Allow")
     /// directly through SpringBoard, the way a user would.
+    /// Answers the iOS Health permission sheet the way a user would. The HealthKit
+    /// authorization UI is a system sheet, not a SpringBoard alert — it appears in
+    /// the app's own hierarchy. Tries the common button labels; if none appears
+    /// within the timeout, returns without failing (the caller decides whether the
+    /// sheet was required).
     private func answerSystemHealthPrompt(timeout: TimeInterval) {
-        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        let allowButton = springboard.alerts.firstMatch.buttons["Allow"]
+        // The sheet is presented by the system over the app. Look for it in the
+        // app's hierarchy first, then fall back to SpringBoard.
+        let allowLabels = ["Allow", "Allow While Using App", "OK"]
         let appeared = waitForCondition(timeout: timeout, message: "Health permission sheet") {
-            allowButton.exists
+            allowLabels.contains { label in
+                self.app.buttons[label].exists
+                    || XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.firstMatch.buttons[label].exists
+            }
         }
         guard appeared else { return }
-        allowButton.tap()
+        for label in allowLabels {
+            if app.buttons[label].exists {
+                app.buttons[label].tap()
+                return
+            }
+            let springboardButton = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.firstMatch.buttons[label]
+            if springboardButton.exists {
+                springboardButton.tap()
+                return
+            }
+        }
     }
 
     /// Taps Done until the sheet with the given navigation title is gone. The
@@ -309,144 +307,4 @@ final class MaximizeTourTests: XCTestCase {
         attachment.lifetime = .keepAlways
         add(attachment)
     }
-}
-
-// MARK: - Sample data
-
-/// Writes three deterministic runs into HealthKit: heart-rate series on each,
-/// a GPS route on the most recent one. Runs on the test runner, not in the app —
-/// the app itself never writes to HealthKit.
-private enum SampleWorkoutSeeder {
-    static func seed() async throws {
-        guard HKHealthStore.isHealthDataAvailable() else { return }
-        let store = HKHealthStore()
-        let workoutType = HKObjectType.workoutType()
-        let heartRateType = HKQuantityType.quantityType(forIdentifier: .heartRate)!
-        let routeType = HKSeriesType.workoutRoute()
-        try await store.requestAuthorization(
-            toShare: [workoutType, heartRateType, routeType],
-            read: [workoutType, heartRateType, routeType]
-        )
-
-        let now = Date()
-        // A loop in Central Park for the route, timestamps matching the run.
-        let routeStart = now.addingTimeInterval(-86400 - 1800)
-        try await seedRun(
-            store: store,
-            heartRateType: heartRateType,
-            start: routeStart,
-            duration: 1800,
-            distanceMeters: 5000,
-            baseBPM: 142,
-            withRoute: true
-        )
-        try await seedRun(
-            store: store,
-            heartRateType: heartRateType,
-            start: now.addingTimeInterval(-3 * 86400 - 1500),
-            duration: 1500,
-            distanceMeters: 5200,
-            baseBPM: 158,
-            withRoute: false
-        )
-        try await seedRun(
-            store: store,
-            heartRateType: heartRateType,
-            start: now.addingTimeInterval(-6 * 86400 - 4500),
-            duration: 4500,
-            distanceMeters: 12000,
-            baseBPM: 138,
-            withRoute: false
-        )
-    }
-
-    private static func seedRun(
-        store: HKHealthStore,
-        heartRateType: HKQuantityType,
-        start: Date,
-        duration: TimeInterval,
-        distanceMeters: Double,
-        baseBPM: Double,
-        withRoute: Bool
-    ) async throws {
-        let end = start.addingTimeInterval(duration)
-
-        // HKWorkoutBuilder, not the deprecated HKWorkout(activityType:start:end:)
-        // initializer — the builder is the only supported way to create a workout
-        // with associated samples since iOS 17.
-        let configuration = HKWorkoutConfiguration()
-        configuration.activityType = .running
-        let builder = try await HKWorkoutBuilder(
-            healthStore: store,
-            configuration: configuration,
-            device: .local()
-        )
-        try await builder.beginCollection(at: start)
-
-        let bpmUnit = HKUnit.count().unitDivided(by: .minute())
-        let sampleCount = Int(duration / 10)
-        let samples = (0..<sampleCount).map { index -> HKQuantitySample in
-            let timestamp = start.addingTimeInterval(Double(index) * 10)
-            let bpm = baseBPM + 12 * sin(Double(index) / 9) + Double(index % 5)
-            return HKQuantitySample(
-                type: heartRateType,
-                quantity: HKQuantity(unit: bpmUnit, doubleValue: bpm),
-                start: timestamp,
-                end: timestamp
-            )
-        }
-        // Samples go through the builder, not a separate save + add: the builder
-        // owns the in-progress workout. `add(_:completion:)` has no async
-        // variant, so it is bridged with a continuation.
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            builder.add(samples) { success, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else if success {
-                    continuation.resume()
-                } else {
-                    continuation.resume(throwing: SampleWorkoutSeederError.samplesNotAdded)
-                }
-            }
-        }
-
-        try await builder.endCollection(at: end)
-        guard let workout = try await builder.finishWorkout() else {
-            throw SampleWorkoutSeederError.workoutNotFinished
-        }
-
-        if withRoute {
-            let builder = HKWorkoutRouteBuilder(healthStore: store, device: nil)
-            let center = CLLocationCoordinate2D(latitude: 40.7812, longitude: -73.9665)
-            let locations = (0..<120).map { index -> CLLocation in
-                let angle = Double(index) / 120 * 2 * .pi
-                return CLLocation(
-                    coordinate: CLLocationCoordinate2D(
-                        latitude: center.latitude + 0.004 * cos(angle),
-                        longitude: center.longitude + 0.004 * sin(angle)
-                    ),
-                    altitude: 10,
-                    horizontalAccuracy: 5,
-                    verticalAccuracy: 5,
-                    timestamp: start.addingTimeInterval(Double(index) * duration / 120)
-                )
-            }
-            try await builder.insertRouteData(locations)
-            try await builder.finishRoute(with: workout, metadata: nil)
-        }
-    }
-}
-
-/// A mutable box so the unstructured seeding Task can report its error back to
-/// the synchronous test without tripping Swift 6's Sendable checks. Written
-/// once by the Task, read once after the semaphore synchronizes the two.
-private final class ErrorBox: @unchecked Sendable {
-    var error: Error?
-}
-
-/// The seeder's own failures, distinct from HealthKit's — so a tour failure says
-/// which half broke.
-private enum SampleWorkoutSeederError: Error {
-    case samplesNotAdded
-    case workoutNotFinished
 }
