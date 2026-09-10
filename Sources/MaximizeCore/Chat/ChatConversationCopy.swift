@@ -189,4 +189,26 @@ public enum ChatConversationCopy {
     /// What that action does, for VoiceOver — said as a fact about cost, because a
     /// person cannot see that this is the app's only path to spending another call.
     public static let retryActionHint = "Asks Claude the same question again."
+
+    // MARK: - MAX-191: transcript cap notice
+
+    /// A note shown when earlier messages of the conversation are not replayed to the
+    /// model, so the athlete knows why the response might not reference them.
+    ///
+    /// Returns nil when the dropped count is zero — a "0 earlier messages" line is noise.
+    /// The core decides whether there is anything to say, so a view need never
+    /// `if count > 0` on its own.
+    ///
+    /// - Parameter droppedMessageCount: how many messages are not replayed. When zero or
+    ///   negative, this returns nil.
+    /// - Returns: a one-line notice naming the count, or nil if there is nothing to say.
+    ///
+    /// The fact that a conversation is capped reads the same regardless of subject, so
+    /// this function does not branch on kind. It states what is true for both: earlier
+    /// messages won't reach the model, stated in the app's voice.
+    public static func droppedTurnsNotice(droppedMessageCount: Int) -> String? {
+        guard droppedMessageCount > 0 else { return nil }
+        let messageWord = droppedMessageCount == 1 ? "message" : "messages"
+        return "\(droppedMessageCount) earlier \(messageWord) aren't included in what Claude sees."
+    }
 }
