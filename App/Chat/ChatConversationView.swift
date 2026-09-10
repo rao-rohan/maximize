@@ -58,7 +58,7 @@ import MaximizeCore
 /// **MAX-200 adds a fourth, alongside the first.** `ChatStarters.starters(for:)`
 /// (`MaximizeCore`) picks the tappable questions under the empty-transcript sentence,
 /// worded from the same subject and pinned under test — this view lays out whichever
-/// three it is handed and forwards a tap to `sendStarter(_:)`, nothing more.
+/// three it is handed and forwards a tap to `fillStarter(_:)`, nothing more.
 ///
 /// ## Why chat is its own screen (MAX-081)
 ///
@@ -508,7 +508,7 @@ struct ChatConversationView: View {
                         // lands, by the same guard this `if` already applies.
                         ChatStartersView(
                             starters: ChatStarters.starters(for: model.subject?.kind),
-                            onSelect: sendStarter
+                            onSelect: fillStarter
                         )
                     }
 
@@ -843,21 +843,15 @@ struct ChatConversationView: View {
 
     /// §6.7, MAX-200: a tap on a suggested starter.
     ///
-    /// **Sends immediately rather than filling the composer for editing.** Every string
-    /// `ChatStarters` returns is already a complete, well-formed question — there is
-    /// nothing about it that benefits from a review-and-edit step, and asking the
-    /// athlete to tap once to fill the field and again to send is one more step for no
-    /// return on exactly the words this ticket wrote to be sent as-is. This is also the
-    /// pattern chat surfaces generally use for a suggested prompt, so it is the one that
-    /// needs no explaining the first time somebody meets it. A14 is unaffected either
-    /// way — the athlete's own tap is what starts the call, immediately or after an
-    /// edit — and going straight through `send()` below, the same path the send button
-    /// already takes, keeps this file's only interaction with `composerText` the one
-    /// assignment on the next line rather than any change to how the composer itself
-    /// manages that text (MAX-198 owns that).
-    private func sendStarter(_ starter: String) {
+    /// **Fills the composer for editing rather than sending.** The ticket's words: a
+    /// starter is a starting point, and the athlete may want to adjust it before it
+    /// becomes a turn. The text lands in the field with the keyboard up, and the send
+    /// button — the same one-tap-per-call path as always — is one more tap away.
+    /// A14 is unaffected either way: the athlete's own tap is what starts the call,
+    /// immediately or after an edit.
+    private func fillStarter(_ starter: String) {
         model.composerText = starter
-        send()
+        isComposerFocused = true
     }
 
     /// The composer's one control, and the two things it can mean (MAX-197).
