@@ -119,6 +119,22 @@ public enum ChatStreamError: Error, Hashable, Sendable, CustomStringConvertible 
         }
     }
 
+    /// Whether the fix lives in Settings: the three failures whose notice already
+    /// names Settings as the remedy — no key stored, a key that could not be read,
+    /// a key Anthropic rejected. The chat surface reads this to offer "Open
+    /// Settings" exactly where the failure is shown, and nowhere else (MAX-199).
+    ///
+    /// Exhaustive with no `default`, like `isWorthRetrying`: a new failure case
+    /// must decide here at compile time rather than silently inheriting an answer.
+    public var isKeyConfiguration: Bool {
+        switch self {
+        case .noAPIKeyStored, .keyStoreUnavailable, .invalidAPIKey:
+            return true
+        case .requestFailed, .timedOut, .rateLimited, .serverUnavailable, .unexpectedStatus, .refused, .interrupted, .midStreamFailure, .unreadableResponse:
+            return false
+        }
+    }
+
     public var description: String {
         switch self {
         case .noAPIKeyStored:

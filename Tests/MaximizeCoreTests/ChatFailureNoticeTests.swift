@@ -185,6 +185,33 @@ final class ChatFailureNoticeTests: XCTestCase {
         }
     }
 
+    // MARK: - The Settings action, offered for exactly the key failures (MAX-199)
+
+    /// The chat surface offers "Open Settings" beside the transcript for the three
+    /// failures whose notice already names Settings as the remedy — and for nothing
+    /// else. Exhaustive over `everyError`, so a new failure case has to decide here.
+    func testTheSettingsActionIsOfferedForExactlyTheKeyFailures() {
+        for error in everyError {
+            let expected: Bool = {
+                switch error {
+                case .noAPIKeyStored, .keyStoreUnavailable, .invalidAPIKey:
+                    return true
+                default:
+                    return false
+                }
+            }()
+            XCTAssertEqual(error.isKeyConfiguration, expected, "\(error)")
+        }
+    }
+
+    /// Named individually, because these are the three a person meets when chat
+    /// cannot work at all — and the ones where a missing button strands them.
+    func testTheKeyFailuresAreTheOnesYouWouldExpect() {
+        for error in [ChatStreamError.noAPIKeyStored, .keyStoreUnavailable, .invalidAPIKey] {
+            XCTAssertTrue(error.isKeyConfiguration, "\(error)")
+        }
+    }
+
     // MARK: - The failures that are not stream failures
 
     /// An empty reply is neither a dropped connection nor an answer, and gets a sentence

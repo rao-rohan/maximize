@@ -185,6 +185,10 @@ struct ChatConversationView: View {
     /// this view feeds it events and carries out the directive it returns.
     @State private var follow = ChatTranscriptFollow()
 
+    /// MAX-199: whether the Settings sheet is presented. Used to allow reaching Settings
+    /// from the chat surface when a missing API key prevents chat from working.
+    @State private var isPresentingSettings = false
+
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// The transcript's trailing anchor. Scrolling to a fixed empty view is stable in a
@@ -333,6 +337,34 @@ struct ChatConversationView: View {
             .navigationSubtitle(model.subtitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
+            // MAX-199: Settings sheet, so a missing key error message can link directly
+            // to settings rather than forcing the athlete to navigate separately.
+            .sheet(isPresented: $isPresentingSettings) {
+                ChatSettingsSheet()
+            }
+            // MAX-199: haptic feedback for reply completion (success, truncated, or empty)
+            .sensoryFeedback(.success, trigger: model.replyPhase) { oldPhase, newPhase in
+                // Fire on terminal states that indicate success: complete, truncated, or
+                // empty reply. Not on failure, which gets its own haptic. Not on stopped,
+                // which the athlete chose. A reply completing is worth one light tap.
+                guard (newPhase == .complete || newPhase == .truncated || newPhase == .emptyReply) else { return false }
+                return !oldPhase.isTerminal
+            }
+            // MAX-199: haptic feedback for reply failure (error feedback)
+            .sensoryFeedback(.error, trigger: model.replyPhase) { oldPhase, newPhase in
+                // Fire only when transitioning to .failed, and only if we weren't already
+                // in a failed state. This ensures we only fire once per failure.
+                guard case .failed = newPhase else { return false }
+                return !oldPhase.isTerminal
+            }
+            // MAX-199: haptic feedback for proposal arrival (success/notification feedback)
+            .sensoryFeedback(.success, trigger: model.planDrafting) { oldDrafting, newDrafting in
+                // Fire when a proposal arrives. Check that we're transitioning to .proposed
+                // from a non-proposed state.
+                guard case .proposed = newDrafting else { return false }
+                guard case .idle = oldDrafting else { return false }
+                return true
+            }
             .task {
                 await model.load()
             }
@@ -556,7 +588,10 @@ struct ChatConversationView: View {
                     // the stream.
                     ChatPendingReplyView(phase: model.replyPhase, text: model.streamingText)
 
-                    retryButton
+                    HStack(spacing: Spacing.compact) {
+                        retryButton
+                        openSettingsButton
+                    }
 
                     // §4.6: the proposal appears *in the transcript*, as a card, at the
                     // end — it is the most recent thing that happened. It is not a
@@ -674,6 +709,36 @@ struct ChatConversationView: View {
     /// a completed reply, a notice — arrived without them asking for it now.
     private var latestMessageChange: ChatTranscriptChange {
         model.messages.last?.kind == .user ? .ownMessage : .incoming
+    }
+
+    /// MAX-199: "Open Settings", offered exactly where a key failure is shown.
+    ///
+    /// The failure notice already names Settings as the remedy ("add a key",
+    /// "enter it again", "enter a current one") — this is the one-tap version of
+    /// that sentence, beside the transcript rather than in the toolbar, so it
+    /// appears for the three key failures and for nothing else. There is no
+    /// permanent Settings chrome on this screen.
+    ///
+    /// One tap, one sheet. Nothing here presents on appearance or on a timer (A14).
+    @ViewBuilder
+    private var openSettingsButton: some View {
+        if offersSettingsAction {
+            Button("Open Settings") {
+                isPresentingSettings = true
+            }
+            .buttonStyle(.bordered)
+            .tint(Color.accent)
+            .font(.metricLabel)
+            .accessibilityHint("Opens Settings so you can add or replace the Anthropic API key.")
+        }
+    }
+
+    /// The current failure is one whose fix lives in Settings
+    /// (`ChatStreamError.isKeyConfiguration`). Read from `model.replyPhase` — the
+    /// same rung the transcript's notice row is drawn from — never re-derived.
+    private var offersSettingsAction: Bool {
+        guard case .failed(let error) = model.replyPhase else { return false }
+        return error.isKeyConfiguration
     }
 
     /// MAX-152: "Try again", offered for exactly the failures where asking again could
@@ -1033,3 +1098,25 @@ private struct WorkoutChatBubble: View {
 // face: a request with nothing back, a reply arriving, and a reply that had stopped
 // arriving all rendered identically. The states are `ChatReplyPhase`'s now, and the
 // drawing is that file's.
+
+/// MAX-199: Settings sheet wrapper for presentation from the chat surface.
+///
+/// Wraps `SettingsView()` with a NavigationStack and a Done button, mirroring the
+/// structure in `SettingsToolbar`. This allows the athlete to reach Settings from
+/// the chat when a missing or invalid API key prevents chat from working.
+private struct ChatSettingsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            SettingsView()
+                .navigationTitle("Settings")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { dismiss() }
+                    }
+                }
+        }
+    }
+}
