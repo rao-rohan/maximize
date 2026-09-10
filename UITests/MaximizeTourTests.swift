@@ -367,19 +367,18 @@ private enum SampleWorkoutSeeder {
         withRoute: Bool
     ) async throws {
         let end = start.addingTimeInterval(duration)
-        let workout = HKWorkout(
-            activityType: .running,
-            start: start,
-            end: end,
-            workoutEvents: nil,
-            totalEnergyBurned: HKQuantity(
-                unit: .kilocalorie(),
-                doubleValue: duration / 60 * 10
-            ),
-            totalDistance: HKQuantity(unit: .meter(), doubleValue: distanceMeters),
-            metadata: [HKMetadataKeyIndoorWorkout: false]
+
+        // HKWorkoutBuilder, not the deprecated HKWorkout(activityType:start:end:)
+        // initializer — the builder is the only supported way to create a workout
+        // with associated samples since iOS 17.
+        let configuration = HKWorkoutConfiguration()
+        configuration.activityType = .running
+        let builder = try await HKWorkoutBuilder(
+            healthStore: store,
+            configuration: configuration,
+            device: .local()
         )
-        try await store.save(workout)
+        try await builder.beginCollection(at: start)
 
         let bpmUnit = HKUnit.count().unitDivided(by: .minute())
         let sampleCount = Int(duration / 10)
@@ -393,8 +392,13 @@ private enum SampleWorkoutSeeder {
                 end: timestamp
             )
         }
-        try await store.save(samples)
-        try await store.add(samples, to: workout)
+        // Samples go through the builder, not a separate save + add: the builder
+        // owns the in-progress workout, and HKHealthStore.add(_:to:) has no async
+        // variant.
+        try await builder.add(samples)
+
+        try await builder.endCollection(at: end)
+        let workout = try await builder.finishWorkout()
 
         if withRoute {
             let builder = HKWorkoutRouteBuilder(healthStore: store, device: nil)
