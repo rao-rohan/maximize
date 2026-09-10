@@ -847,15 +847,20 @@ struct ChatConversationView: View {
     /// no empty row.
     @ViewBuilder
     private var composer: some View {
+        // Resolved once for every branch below. The door branch previously called
+        // the cancellation-less overload with `onActivate: send`, which silently
+        // dropped the MAX-197 stop control exactly when the door was showing —
+        // a runaway reply could not be stopped from that screen state.
+        let sendControl = ChatComposerSendControl.resolve(
+            canSend: model.canSend,
+            replyPhase: model.replyPhase,
+            cancellation: model.replyCancellation
+        )
         if model.subject?.kind == .training {
             ChatComposerView(
                 text: $model.composerText,
                 placeholder: ChatConversationCopy.composerPlaceholder(for: model.subject?.kind),
-                sendControl: .resolve(
-                    canSend: model.canSend,
-                    replyPhase: model.replyPhase,
-                    cancellation: model.replyCancellation
-                ),
+                sendControl: sendControl,
                 isFocused: $isComposerFocused,
                 onActivate: activateComposerControl,
                 accessory: { draftPlanButton }
@@ -864,20 +869,16 @@ struct ChatConversationView: View {
             ChatComposerView(
                 text: $model.composerText,
                 placeholder: ChatConversationCopy.composerPlaceholder(for: model.subject?.kind),
-                sendControl: .resolve(canSend: model.canSend, replyPhase: model.replyPhase),
+                sendControl: sendControl,
                 isFocused: $isComposerFocused,
-                onActivate: send,
+                onActivate: activateComposerControl,
                 accessory: { planConversationDoorButton(doorOffer) }
             )
         } else {
             ChatComposerView(
                 text: $model.composerText,
                 placeholder: ChatConversationCopy.composerPlaceholder(for: model.subject?.kind),
-                sendControl: .resolve(
-                    canSend: model.canSend,
-                    replyPhase: model.replyPhase,
-                    cancellation: model.replyCancellation
-                ),
+                sendControl: sendControl,
                 isFocused: $isComposerFocused,
                 onActivate: activateComposerControl
             )
