@@ -63,8 +63,12 @@ final class ChatModelTests: XCTestCase {
         // A fresh store per call, not `.shared` — the app's default, but the wrong one
         // for a suite whose cases must not see each other's drafts. MAX-198's own tests
         // pass one explicitly, shared across the two `ChatModel`s a case constructs, to
-        // exercise the thing the ticket is about.
-        composerDraftStore: ChatComposerDraftStore = ChatComposerDraftStore()
+        // exercise the thing the ticket is about. The default is `nil`, resolved to a
+        // fresh store in the body: a defaulted `ChatComposerDraftStore()` trips Swift 6's
+        // "call to main actor-isolated initializer in a nonisolated context" (default-arg
+        // thunks don't inherit this type's `@MainActor`), the same footgun MAX-049
+        // documents on `ChatModel`'s own initializers.
+        composerDraftStore: ChatComposerDraftStore? = nil
     ) async throws -> (ChatModel, InMemoryWorkoutStore) {
         let resolvedStore: InMemoryWorkoutStore
         if let store {
@@ -82,7 +86,7 @@ final class ChatModelTests: XCTestCase {
             chatClient: chatClient,
             timeZone: utc,
             now: now,
-            composerDraftStore: composerDraftStore
+            composerDraftStore: composerDraftStore ?? ChatComposerDraftStore()
         )
         return (chatModel, resolvedStore)
     }
@@ -95,7 +99,7 @@ final class ChatModelTests: XCTestCase {
         threadRepository: FakeChatThreadRepository = FakeChatThreadRepository(),
         chatClient: FakeStreamingChatModelInvoking = FakeStreamingChatModelInvoking(),
         now: @escaping @Sendable () -> Date = { Fixture.epoch },
-        composerDraftStore: ChatComposerDraftStore = ChatComposerDraftStore()
+        composerDraftStore: ChatComposerDraftStore? = nil
     ) async throws -> (ChatModel, InMemoryWorkoutStore) {
         let resolvedStore: InMemoryWorkoutStore
         if let store {
@@ -113,7 +117,7 @@ final class ChatModelTests: XCTestCase {
             chatClient: chatClient,
             timeZone: utc,
             now: now,
-            composerDraftStore: composerDraftStore
+            composerDraftStore: composerDraftStore ?? ChatComposerDraftStore()
         )
         return (chatModel, resolvedStore)
     }
@@ -126,7 +130,7 @@ final class ChatModelTests: XCTestCase {
         threadRepository: FakeChatThreadRepository = FakeChatThreadRepository(),
         chatClient: FakeStreamingChatModelInvoking = FakeStreamingChatModelInvoking(),
         now: @escaping @Sendable () -> Date = { Fixture.epoch },
-        composerDraftStore: ChatComposerDraftStore = ChatComposerDraftStore()
+        composerDraftStore: ChatComposerDraftStore? = nil
     ) async throws -> (ChatModel, InMemoryWorkoutStore) {
         let resolvedStore: InMemoryWorkoutStore
         if let store {
@@ -144,7 +148,7 @@ final class ChatModelTests: XCTestCase {
             chatClient: chatClient,
             timeZone: utc,
             now: now,
-            composerDraftStore: composerDraftStore
+            composerDraftStore: composerDraftStore ?? ChatComposerDraftStore()
         )
         return (chatModel, resolvedStore)
     }
