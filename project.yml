@@ -158,3 +158,66 @@ targets:
         # for apps that write to HealthKit, and PRD §3 lists writing as an explicit
         # non-goal. Declaring it would put a write-permission row on the sheet for a
         # capability this app does not have.
+
+  # The simulator tour's UI-test runner (chore/simulator-tour). It launches the
+  # app and walks it end to end, seeding sample HealthKit data from the test
+  # process first. It is not part of the shipped app and never runs in CI's
+  # main workflow — only the manual simulator-tour workflow builds it.
+  MaximizeUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: UITests
+    dependencies:
+      # The app under test.
+      - target: Maximize
+      # Swift auto-links what the test imports, but the spec stays legible.
+      - sdk: HealthKit.framework
+      - sdk: CoreLocation.framework
+    # Same unsigned signing as the app target, so a fresh clone can build and
+    # run the tour with no setup.
+    configFiles:
+      Debug: Support/Signing.xcconfig
+      Release: Support/Signing.xcconfig
+    settings:
+      base:
+        # Tells Xcode this bundle tests the Maximize app: XCUIApplication()
+        # launches it, and xcodebuild can find the tests with
+        # -only-testing:MaximizeUITests.
+        TEST_TARGET_NAME: Maximize
+        GENERATE_INFOPLIST_FILE: YES
+        # The runner WRITES samples, so it needs the update key the app
+        # deliberately does not declare — without it the seeding authorization
+        # request crashes the test process.
+        INFOPLIST_KEY_NSHealthShareUsageDescription: "The simulator tour writes sample workouts into HealthKit so the app's ingestion can be exercised end to end."
+        INFOPLIST_KEY_NSHealthUpdateUsageDescription: "The simulator tour writes sample workouts into HealthKit so the app's ingestion can be exercised end to end."
+    # Written by XcodeGen on `xcodegen generate` into gitignored Support/
+    # (same convention as the app target's entitlements above): the properties
+    # here are the single source of truth. The HealthKit capability is what
+    # lets the runner save workouts, heart-rate series and routes; the app
+    # target keeps its read-only posture.
+    entitlements:
+      path: Support/MaximizeUITests.entitlements
+      properties:
+        com.apple.developer.healthkit: true
+
+# An explicit scheme for the tour so `xcodebuild test -scheme Tour` builds the
+# app for running and the UI tests for testing, instead of relying on
+# XcodeGen's default scheme generation to wire the test action up. Declaring
+# `schemes` replaces XcodeGen's automatic per-target schemes, so `Maximize`
+# (which CI's app-shell job builds with `-scheme Maximize`) is declared here
+# too, unchanged from what XcodeGen generated on its own.
+schemes:
+  Maximize:
+    build:
+      targets:
+        Maximize: [run]
+  Tour:
+    build:
+      targets:
+        Maximize: [run]
+        MaximizeUITests: [test]
+    test:
+      targets:
+        - MaximizeUITests
