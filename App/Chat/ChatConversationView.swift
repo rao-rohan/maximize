@@ -395,17 +395,6 @@ struct ChatConversationView: View {
                 Button("New chat", action: onStartNewChatForCurrentWindow)
             }
         }
-        // MAX-199: Settings button, so a missing key error message can link directly to
-        // settings rather than forcing the athlete to navigate separately. Both this and
-        // the "New chat" button use `.topBarTrailing`, and iOS manages their layout
-        // together on the right side of the toolbar.
-        ToolbarItem(placement: .topBarTrailing) {
-            Button(action: { isPresentingSettings = true }) {
-                Label("Settings", systemImage: "gearshape")
-            }
-            .labelStyle(.iconOnly)
-            .accessibilityLabel("Settings")
-        }
         ToolbarItem(placement: .confirmationAction) {
             Button("Done") {
                 // Release focus before dismissing so the keyboard leaves with the sheet
@@ -563,7 +552,10 @@ struct ChatConversationView: View {
                     // the stream.
                     ChatPendingReplyView(phase: model.replyPhase, text: model.streamingText)
 
-                    retryButton
+                    HStack(spacing: Spacing.compact) {
+                        retryButton
+                        openSettingsButton
+                    }
 
                     // §4.6: the proposal appears *in the transcript*, as a card, at the
                     // end — it is the most recent thing that happened. It is not a
@@ -681,6 +673,36 @@ struct ChatConversationView: View {
     /// a completed reply, a notice — arrived without them asking for it now.
     private var latestMessageChange: ChatTranscriptChange {
         model.messages.last?.kind == .user ? .ownMessage : .incoming
+    }
+
+    /// MAX-199: "Open Settings", offered exactly where a key failure is shown.
+    ///
+    /// The failure notice already names Settings as the remedy ("add a key",
+    /// "enter it again", "enter a current one") — this is the one-tap version of
+    /// that sentence, beside the transcript rather than in the toolbar, so it
+    /// appears for the three key failures and for nothing else. There is no
+    /// permanent Settings chrome on this screen.
+    ///
+    /// One tap, one sheet. Nothing here presents on appearance or on a timer (A14).
+    @ViewBuilder
+    private var openSettingsButton: some View {
+        if offersSettingsAction {
+            Button("Open Settings") {
+                isPresentingSettings = true
+            }
+            .buttonStyle(.bordered)
+            .tint(Color.accent)
+            .font(.metricLabel)
+            .accessibilityHint("Opens Settings so you can add or replace the Anthropic API key.")
+        }
+    }
+
+    /// The current failure is one whose fix lives in Settings
+    /// (`ChatStreamError.isKeyConfiguration`). Read from `model.replyPhase` — the
+    /// same rung the transcript's notice row is drawn from — never re-derived.
+    private var offersSettingsAction: Bool {
+        guard case .failed(let error) = model.replyPhase else { return false }
+        return error.isKeyConfiguration
     }
 
     /// MAX-152: "Try again", offered for exactly the failures where asking again could
