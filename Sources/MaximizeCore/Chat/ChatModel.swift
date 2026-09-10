@@ -397,6 +397,24 @@ public final class ChatModel {
         loadState == .ready && !isStreaming && pendingTurn != nil && replyPhase.offersRetry
     }
 
+    /// How many turns the current instruction is dropping from the replayed window
+    /// (MAX-191).
+    ///
+    /// While streaming, this is the count from the pending instruction. At rest, it is
+    /// computed from the current thread's messages: a standing property of a long
+    /// conversation, not an event that happens only during streaming. Zero when there
+    /// is no thread.
+    public var droppedTurnCount: Int {
+        if let pending = pendingTurn {
+            return pending.instruction.droppedTurnCount
+        }
+        guard let thread else { return 0 }
+        // The current thread as it stands: how many of these messages would be dropped
+        // if sent? Both streaming and resting go through the shared helper so they
+        // cannot drift apart.
+        return ChatInstruction.droppedCount(for: thread.visibleMessages.count)
+    }
+
     /// Whether the reply in flight can be stopped (MAX-197, §6.4).
     ///
     /// Two conditions, and the second is not redundant: a request is open, and there is a
