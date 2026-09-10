@@ -201,4 +201,81 @@ final class ChatConversationCopyTests: XCTestCase {
             ChatConversationCopy.stoppedByAthleteCaption
         )
     }
+
+    // MARK: - MAX-196: VoiceOver transcript treatment
+
+    /// Every bubble is introduced by its speaker — a VoiceOver user cannot see the
+    /// bubble's side or tint.
+    func testSpokenRowsCarrySpeakerAttribution() {
+        XCTAssertTrue(
+            ChatConversationCopy.spokenTranscriptRow(kind: .user, text: "How was my pacing?", trailingCaption: nil)
+                .hasPrefix("You: ")
+        )
+        XCTAssertTrue(
+            ChatConversationCopy.spokenTranscriptRow(kind: .assistant, text: "Steady.", trailingCaption: nil)
+                .hasPrefix("Claude: ")
+        )
+    }
+
+    /// Notices are not from either party, so they are introduced as what they are
+    /// rather than wearing a speaker's name.
+    func testSpokenNoticesAreIntroducedAsNotesNotSpeakers() {
+        let spoken = ChatConversationCopy.spokenTranscriptRow(
+            kind: .notice, text: "The connection dropped.", trailingCaption: nil
+        )
+        XCTAssertTrue(spoken.hasPrefix("Note: "))
+        XCTAssertFalse(spoken.hasPrefix("You:"))
+        XCTAssertFalse(spoken.hasPrefix("Claude:"))
+    }
+
+    /// The trailing caption (truncated / interrupted / stopped) is part of what the
+    /// row says — it is the only place the reply's fate is stated.
+    func testSpokenRowAppendsATrailingCaption() {
+        let spoken = ChatConversationCopy.spokenTranscriptRow(
+            kind: .assistant,
+            text: "Steady.",
+            trailingCaption: ChatConversationCopy.truncatedCaption
+        )
+        XCTAssertTrue(spoken.contains("Steady."))
+        XCTAssertTrue(spoken.contains(ChatConversationCopy.truncatedCaption))
+    }
+
+    /// The announcement fires exactly once per arriving reply: on the transition
+    /// into `.complete` from a live rung.
+    func testReplyLandedAnnouncesOnlyOnArrival() {
+        for previous: ChatReplyPhase in [.awaitingFirstToken, .streaming, .stalled] {
+            XCTAssertTrue(
+                ChatConversationCopy.shouldAnnounceReplyLanded(previousPhase: previous, currentPhase: .complete),
+                "expected an announcement from \(previous)"
+            )
+        }
+    }
+
+    /// Restores and re-renders stay silent: opening an old thread has the phase
+    /// already `.idle`, and terminal rungs that are not a reply each produced a row
+    /// that already says what happened.
+    func testReplyLandedStaysSilentOnRestoreAndNonReplyTerminals() {
+        // Not an arrival.
+        for previous: ChatReplyPhase in [.idle, .complete, .truncated, .emptyReply, .stopped, .failed(.interrupted)] {
+            XCTAssertFalse(
+                ChatConversationCopy.shouldAnnounceReplyLanded(previousPhase: previous, currentPhase: .complete),
+                "expected silence from \(previous)"
+            )
+        }
+        // Not a completed reply.
+        for current: ChatReplyPhase in [.idle, .awaitingFirstToken, .streaming, .stalled, .truncated, .emptyReply, .stopped, .failed(.interrupted)] {
+            XCTAssertFalse(
+                ChatConversationCopy.shouldAnnounceReplyLanded(previousPhase: .streaming, currentPhase: current),
+                "expected silence into \(current)"
+            )
+        }
+    }
+
+    /// The announcement says the one fact and stops — the reply itself is the next
+    /// swipe away and will be read in full there.
+    func testReplyLandedAnnouncementIsOneShortSentence() {
+        let announcement = ChatConversationCopy.replyLandedAnnouncement
+        XCTAssertFalse(announcement.isEmpty)
+        XCTAssertLessThanOrEqual(announcement.count, 60, announcement)
+    }
 }

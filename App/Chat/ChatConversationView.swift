@@ -610,6 +610,22 @@ struct ChatConversationView: View {
             .onChange(of: model.replyPhase) {
                 apply(follow.transcriptChanged(.reflow), proxy)
             }
+            // MAX-196: the reply-landed announcement. The *timing* decision lives in
+            // `MaximizeCore` (`shouldAnnounceReplyLanded`) — this only carries it
+            // out. `UIAccessibility.post` rather than a focus change: the reply is
+            // the next swipe away and will be read in full there; yanking focus to it
+            // would strand a reader who was mid-transcript.
+            .onChange(of: model.replyPhase) { previousPhase, currentPhase in
+                if ChatConversationCopy.shouldAnnounceReplyLanded(
+                    previousPhase: previousPhase,
+                    currentPhase: currentPhase
+                ) {
+                    UIAccessibility.post(
+                        notification: .announcement,
+                        argument: ChatConversationCopy.replyLandedAnnouncement
+                    )
+                }
+            }
             // Tokens, on the other hand, *are* the reply arriving.
             .onChange(of: model.streamingText) {
                 apply(follow.transcriptChanged(.incoming), proxy)
@@ -951,6 +967,10 @@ private struct WorkoutChatBubble: View {
             bubbleRow(alignment: .trailing) {
                 bubble(fill: Color.accent, textColor: Color.textOnSaturatedFill)
             }
+            // MAX-196: a sighted reader gets the speaker from the bubble's side
+            // and tint; neither survives VoiceOver, so the label carries it.
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(spokenRow)
         case .assistant:
             bubbleRow(alignment: .leading) {
                 VStack(alignment: .leading, spacing: Spacing.hairspace) {
@@ -965,13 +985,33 @@ private struct WorkoutChatBubble: View {
                     }
                 }
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(spokenRow)
         case .notice:
+            // MAX-196: a notice is not from either party — "add a key in
+            // Settings", "the connection dropped" — so it wears the `.isStaticText`
+            // trait rather than a bubble's element, and its label introduces it as
+            // what it is.
             Text(message.text)
                 .font(.metricLabel)
                 .foregroundStyle(Color.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .center)
                 .multilineTextAlignment(.center)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(spokenRow)
+                .accessibilityAddTraits(.isStaticText)
         }
+    }
+
+    /// MAX-196: the one spoken sentence for this row — speaker, words, trailing
+    /// caption — composed in `MaximizeCore` beside every other string this surface
+    /// reads.
+    private var spokenRow: String {
+        ChatConversationCopy.spokenTranscriptRow(
+            kind: message.kind,
+            text: message.text,
+            trailingCaption: message.trailingCaption
+        )
     }
 
     private func bubble(fill: Color, textColor: Color) -> some View {
