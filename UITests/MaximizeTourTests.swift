@@ -59,7 +59,7 @@ final class MaximizeTourTests: XCTestCase {
         takeScreenshot(named: "03-key-stored")
         tourTabs()
         tourWorkoutDetail()
-        tourChat()
+        tourChatSheet()
         tourChatSheet()
         takeScreenshot(named: "09-tour-complete")
     }
