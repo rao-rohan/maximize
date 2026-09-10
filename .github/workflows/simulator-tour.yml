@@ -1,0 +1,166 @@
+# .github/workflows/simulator-tour.yml
+#
+# Hands-on simulator tour of the Maximize app: boots an iPhone simulator,
+# screen-records the run, and executes the MaximizeUITests XCUITest bundle,
+# which seeds sample HealthKit data from the test runner and then walks first
+# run, plan authoring, settings, all three tabs, a workout detail and the chat
+# sheet (draft only — nothing is ever sent).
+#
+# Manual only (workflow_dispatch): it takes several minutes and produces video,
+# so it does not run on every push.
+#
+# Artifacts (uploaded even on failure):
+#   - tour.mp4 — the screen recording of the whole run
+#   - attachments/ — the test's stage screenshots, exported from the xcresult
+#   - Tour.xcresult — the full test result bundle
+#   - xcodebuild-test.log / tour-build.log — build and test logs
+#
+# Nothing here touches production behavior: the tour's HealthKit writes come
+# from the test runner (the MaximizeUITests target), the app itself stays
+# read-only, and the stored Anthropic key is a dummy.
+
+name: Simulator tour
+
+on:
+  workflow_dispatch:
+
+jobs:
+  tour:
+    name: Drive the app on an iPhone simulator
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 26 (iOS 26 SDK, required for PRD §7.4 Liquid Glass)
+        run: |
+          XCODE_26=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XCODE_26" ]; then
+            echo "::error::No Xcode 26.x found on this runner. PRD §7.4 requires the iOS 26 SDK for Liquid Glass; refusing to silently fall back to an older SDK."
+            echo "Available Xcode installs:"
+            ls /Applications | grep -i xcode || true
+            exit 1
+          fi
+          echo "Selecting $XCODE_26"
+          sudo xcode-select -s "$XCODE_26/Contents/Developer"
+
+      - name: Show toolchain
+        run: xcodebuild -version
+
+      - name: Install XcodeGen
+        run: HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+
+      - name: Generate Xcode project from project.yml
+        run: xcodegen generate
+
+      - name: Create and boot simulator
+        id: simulator
+        run: |
+          # Prefer iPhone 17 on the newest available iOS runtime, falling back
+          # through older iPhone types. A missing runtime fails loudly here,
+          # not halfway through the test run.
+          UDID=$(python3 - <<'EOF'
+          import json, subprocess
+
+          def simctl(*args):
+              return json.loads(subprocess.run(
+                  ["xcrun", "simctl", "list", "-j"] + list(args),
+                  capture_output=True, text=True, check=True).stdout)
+
+          # Tidy up any simulator a previous tour left behind.
+          for device in simctl("devices")["devices"].values():
+              for d in device:
+                  if d["name"] == "maximize-tour":
+                      subprocess.run(["xcrun", "simctl", "delete", d["udid"]],
+                                     capture_output=True)
+
+          runtimes = [r for r in simctl("runtimes")["runtimes"]
+                      if r["platform"] == "iOS" and r["isAvailable"]]
+          if not runtimes:
+              raise SystemExit("No available iOS runtimes on this runner")
+          runtime = sorted(runtimes, key=lambda r: r["version"])[-1]
+
+          devicetypes = [d["name"] for d in simctl("devicetypes")["devicetypes"]]
+          for name in ("iPhone 17", "iPhone 16", "iPhone 15", "iPhone 14"):
+              if name in devicetypes:
+                  break
+          else:
+              raise SystemExit(f"No known iPhone device type; have: {devicetypes[:8]}")
+
+          out = subprocess.run(
+              ["xcrun", "simctl", "create", "maximize-tour", name, runtime["identifier"]],
+              capture_output=True, text=True, check=True).stdout.strip()
+          print(out)
+          print(f"device={name} runtime={runtime['version']}")
+          EOF
+          )
+          # The UDID is the first line; the rest is informational.
+          UDID=$(echo "$UDID" | head -1)
+          echo "$UDID" | grep -qE '^[0-9A-F-]{36}$' || { echo "::error::simctl create did not return a UDID: $UDID"; exit 1; }
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+
+      - name: Build for testing (unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild build-for-testing \
+            -project Maximize.xcodeproj \
+            -scheme Tour \
+            -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee /tmp/tour-build.log
+
+      - name: Run the tour (screen-recorded)
+        run: |
+          set -o pipefail
+          mkdir -p /tmp/tour-artifacts
+          UDID="${{ steps.simulator.outputs.udid }}"
+          # Record the simulator screen for the whole run. The trap guarantees
+          # the recording is finalized even if the tests fail — a failed tour
+          # is exactly when the video matters most.
+          xcrun simctl io "$UDID" recordVideo --codec=h264 /tmp/tour-artifacts/tour.mp4 &
+          RECORDER_PID=$!
+          trap 'kill -INT $RECORDER_PID 2>/dev/null; wait $RECORDER_PID 2>/dev/null || true' EXIT
+          xcodebuild test-without-building \
+            -project Maximize.xcodeproj \
+            -scheme Tour \
+            -destination "platform=iOS Simulator,id=$UDID" \
+            -resultBundlePath /tmp/tour-artifacts/Tour.xcresult \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee /tmp/tour-artifacts/xcodebuild-test.log
+          TEST_EXIT=$?
+          kill -INT $RECORDER_PID 2>/dev/null
+          wait $RECORDER_PID 2>/dev/null || true
+          trap - EXIT
+          exit $TEST_EXIT
+
+      - name: Export test attachments (stage screenshots)
+        if: always()
+        run: |
+          mkdir -p /tmp/tour-artifacts/attachments
+          if [ -d /tmp/tour-artifacts/Tour.xcresult ]; then
+            xcrun xcresulttool export attachments \
+              --path /tmp/tour-artifacts/Tour.xcresult \
+              --output-path /tmp/tour-artifacts/attachments \
+              || echo "::warning::attachment export failed; screenshots remain viewable inside Tour.xcresult"
+          else
+            echo "::warning::no xcresult bundle; the test run never started"
+          fi
+          find /tmp/tour-artifacts/attachments -type f | head -30 || true
+
+      - name: Upload tour artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: simulator-tour
+          path: |
+            /tmp/tour-artifacts/tour.mp4
+            /tmp/tour-artifacts/attachments/
+            /tmp/tour-artifacts/Tour.xcresult
+            /tmp/tour-artifacts/xcodebuild-test.log
+            /tmp/tour-build.log
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Delete tour simulator
+        if: always()
+        run: xcrun simctl delete "${{ steps.simulator.outputs.udid }}" 2>/dev/null || true
