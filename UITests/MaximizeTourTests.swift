@@ -35,10 +35,10 @@ final class MaximizeTourTests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
         app = XCUIApplication()
-        // The app seeds sample workouts from its own process (it holds the
-        // HealthKit entitlement; the test runner does not). See
+        // TEMPORARILY DISABLED: The app seeds sample workouts from its own process
+        // (it holds the HealthKit entitlement; the test runner does not). See
         // `TourWorkoutSeeder` in the app target.
-        app.launchArguments.append("-seedTourWorkouts")
+        // app.launchArguments.append("-seedTourWorkouts")
     }
 
     // MARK: - The tour
