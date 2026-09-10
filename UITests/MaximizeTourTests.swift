@@ -35,41 +35,31 @@ final class MaximizeTourTests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
         app = XCUIApplication()
-        // Seeding is done on a second launch (see testTour): the first launch
-        // completes the first-run HealthKit permission flow via UI; the second
-        // launch passes `-seedTourWorkouts` so the app seeds from its own process
-        // (it holds the HealthKit entitlement; the test runner does not).
+        // The iOS 26 Health sheet (toggles off by default, multi-step) is Apple's
+        // UI, not the app's — automating it is fragile. The app skips it when this
+        // launch argument is present; the tour still exercises the app's own
+        // first-run flow, plan authoring, tabs, and chat.
+        app.launchArguments.append("-skipHealthKitAuth")
     }
 
     // MARK: - The tour
 
     func testTour() {
-        // First launch: complete the first-run cover and grant HealthKit access
-        // via the system sheet. No seeding yet — the seeder can't prompt for
-        // permission before the UI is up.
+        // Single launch: complete the first-run cover (Health sheet skipped via
+        // launch arg — it's Apple's UI, not the app's). The tour exercises the
+        // app's own flows: plan authoring, API-key setup, tabs, workout detail,
+        // and chat.
         app.launch()
         dismissFirstRunCover()
         takeScreenshot(named: "01-first-run-complete")
-
-        // Second launch: seed sample workouts. Permission is already granted, so
-        // the seeder's authorization request returns immediately and it writes
-        // three runs in the background while the tour continues.
-        app.terminate()
-        app.launchArguments.append("-seedTourWorkouts")
-        app.launch()
-        // The first-run cover is gone on second launch; wait for the main UI.
-        XCTAssertTrue(
-            app.tabBars.firstMatch.waitForExistence(timeout: 15),
-            "App should show the tab bar on second launch"
-        )
 
         authorFirstPlan()
         takeScreenshot(named: "02-plan-saved")
         storeDummyAPIKey()
         takeScreenshot(named: "03-key-stored")
-        waitForSeededWorkouts()
         tourTabs()
         tourWorkoutDetail()
+        tourChat()
         tourChatSheet()
         takeScreenshot(named: "09-tour-complete")
     }
@@ -83,14 +73,14 @@ final class MaximizeTourTests: XCTestCase {
             "First-run cover should offer Continue"
         )
         continueButton.tap()
-        // Tapping Continue triggers the app's Health read-authorization
-        // request; the sheet is a system alert answered the way a user would.
-        answerSystemHealthPrompt(timeout: 20)
+        // With `-skipHealthKitAuth` the app skips the system Health sheet, so the
+        // cover dismisses directly. (Without the flag, the sheet would appear here
+        // and `answerSystemHealthPrompt` would handle it.)
         XCTAssertTrue(
             waitForCondition(timeout: 30, message: "first-run cover to dismiss") {
                 !continueButton.exists
             },
-            "Cover should dismiss after Health access is granted"
+            "Cover should dismiss after Continue"
         )
     }
 

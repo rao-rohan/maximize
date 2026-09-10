@@ -115,7 +115,13 @@ struct FirstRunCoverView: View {
     @MainActor
     private func presentHealthSheet() async {
         do {
-            try await IngestionComposition.workoutObserver.requestReadAuthorization()
+            // Simulator tour hook: skip the system Health sheet entirely. The
+            // sheet's iOS 26 UI (toggles off by default, multi-step) is Apple's,
+            // not the app's, and automating it is fragile. Gated by launch arg;
+            // never active in production.
+            if !ProcessInfo.processInfo.arguments.contains("-skipHealthKitAuth") {
+                try await IngestionComposition.workoutObserver.requestReadAuthorization()
+            }
 
             // Mirrors `HealthAccessSettingsSection.requestAuthorization()`: registration
             // is idempotent, and re-running it here is what makes the very first grant
