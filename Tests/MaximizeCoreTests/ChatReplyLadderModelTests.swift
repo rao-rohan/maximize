@@ -92,6 +92,13 @@ final class ChatReplyLadderModelTests: XCTestCase {
         XCTAssertEqual(model.streamingText, "")
         XCTAssertEqual(model.messages.map(\.kind), [.user, .assistant])
         XCTAssertEqual(threads.writes, 1)
+        // MAX-195: a clean completion has nothing to caption, and the roles this reply
+        // is actually made of are exactly the ones `ChatMessageRendering` says get
+        // which treatment — asked of the messages `send()` produced, not of a
+        // `DisplayMessage` built for the assertion.
+        XCTAssertNil(model.messages[1].trailingCaption)
+        XCTAssertFalse(ChatMessageRendering.isMarkdown(for: model.messages[0].kind), "the athlete's own turn")
+        XCTAssertTrue(ChatMessageRendering.isMarkdown(for: model.messages[1].kind), "the model's own reply")
     }
 
     func testATruncatedReplyLandsOnItsOwnRungAndIsStillStored() async throws {
@@ -103,6 +110,8 @@ final class ChatReplyLadderModelTests: XCTestCase {
         XCTAssertEqual(model.replyPhase, .truncated)
         XCTAssertTrue(model.messages.last?.wasTruncated ?? false)
         XCTAssertEqual(threads.writes, 1, "a truncated reply is real and storable")
+        // MAX-195: the folded caption, read off the row `send()` actually produced.
+        XCTAssertEqual(model.messages.last?.trailingCaption, ChatConversationCopy.truncatedCaption)
     }
 
     /// Heartbeats are consumed by the ladder and are not text, not a terminal event, and
@@ -143,6 +152,8 @@ final class ChatReplyLadderModelTests: XCTestCase {
                 "\(error)"
             )
             XCTAssertNotEqual(notice.text, error.description, "\(error)")
+            // MAX-195: app copy is never Markdown-eligible, whichever failure produced it.
+            XCTAssertFalse(ChatMessageRendering.isMarkdown(for: notice.kind), "\(error)")
         }
     }
 
@@ -160,6 +171,8 @@ final class ChatReplyLadderModelTests: XCTestCase {
         XCTAssertTrue(model.messages[1].wasInterruptedByFailure)
         XCTAssertFalse(model.messages[1].wasTruncated, "unfinished is not the same as cut short")
         XCTAssertEqual(threads.writes, 0, "a partial reply is never persisted")
+        // MAX-195
+        XCTAssertEqual(model.messages[1].trailingCaption, ChatConversationCopy.interruptedByFailureCaption)
     }
 
     /// A stream that stops without a terminal event is forbidden by `ChatStreamEvent`'s
@@ -267,6 +280,8 @@ final class ChatReplyLadderModelTests: XCTestCase {
         XCTAssertFalse(model.messages[1].wasTruncated, "stopped is not cut short")
         XCTAssertEqual(threads.writes, 0, "a stopped turn is never written")
         XCTAssertEqual(model.streamingText, "")
+        // MAX-195
+        XCTAssertEqual(model.messages[1].trailingCaption, ChatConversationCopy.stoppedByAthleteCaption)
     }
 
     /// The absence case: stopped before one token arrived, so there is no bubble for a

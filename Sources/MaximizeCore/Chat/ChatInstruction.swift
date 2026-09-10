@@ -164,6 +164,17 @@ public struct ChatInstruction: Hashable, Sendable {
         self.factSheet = factSheet
     }
 
+    /// How many turns would be dropped from a conversation of the given size.
+    ///
+    /// One source of truth for the capping arithmetic, so two notions of "which turns
+    /// are replayed" cannot drift apart. Used by both the instruction's initializer and
+    /// by `ChatModel` to compute what would be sent if a message were added now.
+    /// - Parameter turnCount: the total number of turns, including any that would be added.
+    /// - Returns: how many of those would be dropped by the cap.
+    public static func droppedCount(for turnCount: Int) -> Int {
+        max(0, turnCount - Self.maximumReplayedTurns)
+    }
+
     /// What the model is told when the cap bit.
     ///
     /// Bracketed so it cannot be mistaken for something the athlete typed, and explicit

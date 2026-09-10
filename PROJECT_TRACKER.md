@@ -1976,11 +1976,17 @@ free. What landed in the file:
 | MAX-186 | **The workout chat card becomes a door, and refreshes** — `WorkoutChatSectionView`'s card had no tap target of any kind (MAX-098 removed its "Open chat" button and never replaced it) and reloaded only in `.task`, which does not re-fire on return from the chat sheet — so *chat about this run → Done* left the card still showing the invitation, verbatim the defect MAX-098's own doc comment says the card exists to prevent. Both confirmed against current source before anything was changed, per `docs/CHAT-AUDIT.md` §2.2 (MAX-184). Fixed: the whole card is now a `Button` presenting `ChatSheet(subject: .workout(workoutID))` — the same route `ChatEntryPoint.resolve(focus:currentInterval:)` already resolves for this screen, not a second one — and `.sheet(item:onDismiss:)` reloads the preview exactly once, on dismissal, however it happened (no polling, no `onAppear`/`onDisappear` pair, no model call — A14). What the card says moved into `MaximizeCore` (`WorkoutChatCardPresentation`, built on `ChatThreadSummary` rather than a parallel notion of "the last thing said"), under test. **Reconciles §2.1's "two chat buttons on one screen" argument**: this was never a second *button* saying the same thing as the Ask control, it is a preview the audit found had no affordance at all — see the MAX-186 section below | 184 | Sonnet — **PR open, not yet merged.** Package compiles and core unit tests pass by inspection only; no toolchain here to run them (R1). Needs device verification, per the PR |
 | MAX-187 | **A plan proposal card does not outlive its save** — §2.3's defect: accepting a proposal, saving, and pressing Back used to leave a diff card on screen describing a change already applied, **Accept** still live, a second tap writing a genuine duplicate plan version (D1 intact throughout — the screen was lying, not the data). `ChatModel.endProposalIfAlreadyStored()` reuses `discardProposal()`'s one door (`planDrafting = .idle` plus a transcript `.notice`) rather than adding a second mechanism, and decides by asking storage: `PlanProposalReview.standing`'s captured version against a fresh `PlanAuthoring.currentVersion(of:)` read — not a callback from `PlanAuthoringModel`, which has no reference back to the `ChatModel` that opened it and was kept that way rather than wired up across `ChatSheet.swift` (owned by MAX-185 concurrently). `ChatConversationView` calls it from `.onAppear`, since `.task` does not re-run when `PlanAuthoringView` pops back off the stack. See the MAX-187 section below | 184 | Sonnet — branch pushed, PR open; not yet reviewed or merged |
 | MAX-188 | 🔒 **`threadSummaries()` no longer decodes a transcript to draw a list of titles** — §2.4's in-memory exposure. `ChatThreadRecord` gains three columnar fields (`summaryFirstUserMessageContent`, `summaryLastVisibleMessageContent`, `summaryFieldsComputed`) written whenever a thread is stored; the fast path builds `ChatThreadSummary` from those columns and never touches the `@Attribute(.externalStorage)` `messagesJSON` blob. A pre-ticket row (`summaryFieldsComputed == false`) still falls back to a full decode for that one row — bounded, self-clearing the next time the thread is written to. The workout lookup is batched into one query for every workout thread in the list, closing the audit's N+1 alongside it. **No schema version bump** — three additive, default-required columns, `distanceSplitsComputed`'s precedent. See the MAX-188 section below | 184 | Sonnet 🔒 |
+| MAX-188 | **The thread list stops decoding every transcript** | §2.4. Give `ChatThreadRecord` the fields a summary needs (preview line, last-activity) or fetch with a projection, so `threadSummaries()` reads no `messagesJSON`. Batch the workout lookup. Honour `ChatThreadSummary`'s stated contract in the one implementation the app uses. See the MAX-188 section below | 184 | Sonnet 🔒 — ⬜ blocked on concurrent work |
 | MAX-189 | **A failed thread delete is silent, and the row does not come back** — §2.5. The decision of what to display (row restored or deleted, and whether to show an error) is moved into `ChatThreadListPresentation.deletionOutcome()` as a testable pure function; the model is plumbing. **Needs device verification**: swipe to delete with the store failing, confirm the row returns and the message appears. | 184, 150, 152 | Haiku ✅ — merged as #182. Compiles and core tests pass; **nothing about the alert's appearance or accessibility is verified** — see the PR's device checks. |
+| MAX-189 | **A failed delete says so** | §2.5. Restore the row and state the failure, in `ChatThreadListCopy`'s voice, the way `couldNotSaveReply` does one surface over. See the MAX-189 section below | 184 | Haiku — 🔲 ready |
 | MAX-190 | **`PlanAuthoringView` and `ChatSheet` stop presenting each other** — §2.6, confirmed unchanged against current `main` before anything was touched: an authoring screen pushed by `ChatSheet` from an accepted proposal still rendered `conversationalRouteSection` unconditionally, so its own "describe it in a conversation" button opened a second `ChatSheet`, which could push a second such screen, unbounded. Fixed entirely in `MaximizeCore`: `PlanAuthoringConversationalRoute` gains `arrivedFromConversation`, which forces the button disabled — with a real explanation naming Back, never a blank control — regardless of whether a key is stored. `PlanAuthoringModel` snapshots it once, from `proposal != nil` at `init`, specifically so `save()` clearing `proposal` does not reopen the door on the same screen. **MAX-187's fix depends on `PlanAuthoringView` still being *pushed*, not presented, from `ChatSheet`'s own stack** — this ticket did not touch that mechanism, only which button is offered once there. See the MAX-190 section below | 184, 187, 194 | Sonnet — branch pushed, PR open; not yet reviewed or merged. **No Swift toolchain in this container**, so nothing here was compiled or run (R1). Needs device verification, per the PR |
+| MAX-190 | **The chat sheet and the plan form stop presenting each other** | §2.6. Suppress `conversationalRouteSection` on an authoring screen that was itself pushed from a chat sheet, or reassign rather than present. Whichever, say which in the PR. See the MAX-190 section below | 184 | Sonnet — 🔲 ready |
+| MAX-191 | **The athlete is told when the transcript was capped** | §2.7. Surface `ChatInstruction.droppedTurnCount` as one quiet line above the replayed window, in the same register as the scope banner. See the MAX-191 section below | 184 | Haiku — 🔄 in progress (this session) |
 | MAX-192 | **The training roll-up carries strain and load balance** 🔒 — `TrainingContext` gains each session's stored `strainPoints` (MAX-176) and `LoadBalanceCalculator`'s whole reading (MAX-178), so the acute:chronic figure a tile draws now reaches the prompt one tap away from it. Closes MAX-184 §3.2, the audit's highest-ranked finding: a thread asked *"am I ramping too fast"* used to refuse, correctly under `trainingTask`'s never-invent rule, to answer a question the app had already computed. The reading arrives **already computed** through `LoadBalanceResolver` — never assembled from the roll-up's own records, which cover the scope's weeks and not the chronic window — and is anchored to *today*, which `ContextInputs` enforces. Three absences worded apart; the window's opening sentence now names the one rolling exception. **Per-muscle fatigue (MAX-179) was considered and declined**, and the exclusion is stated in the prompt. **Gated on A30** — A12 rule 2 makes a widening of what leaves the device an amendment, A29 settled the same question for the workout subject, and gating one subject and not the other would make the rule arbitrary; the amendment is in the same PR, first in the diff. See the MAX-192 section below | 176, 177, 178, 179, 184, A12/A29/**A30** | **Opus** 🔒 |
 | MAX-194 | **A run's conversation gets a door to the plan's** — §3.5's fix. A new composer accessory on a workout thread, `PlanConversationDoor` (`MaximizeCore`, under test), decides whether to offer the door and what it says; `ChatModel.planConversationDoor` reads it straight off the same context the fact sheet already rendered. **Targets the run's own Monday-first week** — `WorkoutContext.SurroundingWeek`'s own bounds (MAX-182), reused rather than re-derived, never the dashboard's current window, so the target can never disagree with what the athlete was already told. Resolves *the* thread for that week exactly the way the Ask button and the scope-mismatch banner already do — `ChatSheet`'s existing `.subject` reassignment gained a `continuityNote` passenger rather than a fourth `Opening` case, and never mints (minting stays **New chat**'s job). Carries exactly one honest line of continuity, screen-only and never sent to a prompt — D3 untouched, no widening. The button's own words vary with whether a plan governs that week, matching `PlanAuthoringFormatting`'s canonical "No plan has been authored yet" rather than a second wording of the same fact. **`canDraftPlan`'s training-only gate is untouched** — MAX-184's audit called it correct, and this is the missing route, not a relaxation of it. See the MAX-194 section below | 184, 097, 182 | Sonnet — branch pushed, PR open; not yet reviewed or merged. Package compiles and core unit tests pass by inspection only; no toolchain here to run them (R1). Needs device verification, per the PR |
+| MAX-195 | **Replies render as Markdown and can be selected** — MAX-184 §6.1/§6.2. `Text(message.text)` parsed no Markdown (only the `LocalizedStringKey` overload does), and nothing anywhere in `App/` carried `.textSelection`, so a coaching reply's own structure came through as literal punctuation and could not be copied by any means. `ChatMessageRendering.isMarkdown(for:)` (`MaximizeCore`, under test) is the one decision — **`.assistant` only**; the athlete's own turns stay verbatim and app notices stay plain sentences — and `ChatMarkdownText` (`App/Chat`) carries it out with `AttributedString(markdown:)`, `.full` syntax so a reply's lists render as lists, `.returnPartiallyParsedIfPossible` so an unmatched `**` mid-stream sits as literal asterisks rather than flickering between bold and plain, and a plain-text fallback so nothing the model sent is ever dropped. `.textSelection(.enabled)` is on every bubble, including the athlete's own. **Folded `WorkoutChatBubble`'s three parallel `if`s** (`wasTruncated`/`wasInterruptedByFailure`/`wasStoppedByAthlete`) into `DisplayMessage.trailingCaption`, the small cleanup MAX-197's own report flagged as cheap if it fell out of this ticket's own edit to the same view. See the MAX-195 section below | 184, 097, 150, 197 | Sonnet — branch pushed, PR open; not yet reviewed or merged. Package compiles and core unit tests pass by inspection only; no toolchain here to run them (R1). Needs device verification, per the PR |
 | MAX-197 | **A reply in flight can be stopped** — MAX-184 §6.4's craft gap: `ChatModel.stream` ran to its terminal event with nothing able to interrupt it, so the honest composer control mid-reply was a progress indicator. `stop()` now cancels the task consuming the stream — real cancellation, which reaches `URLSession` through the `AsyncStream` termination the transport already handles, not a flag a suspended `for await` would never read. **A stopped turn is a fifth terminal rung, `ChatReplyPhase.stopped`**, rather than a reuse of `.failed(.interrupted)`: that case says the connection dropped and offers a retry, and neither is true of something the athlete did. **What was already on screen is kept on screen and nothing is written** — the same treatment a dropped connection gets, and the caption says out loud that it goes when the conversation closes; storing a half-sentence would read back as a whole one and be replayed to the model as its own completed prior turn. The seam MAX-153 left (`ChatComposerCancellation`, `ChatComposerSendControl.stop`) is filled with no change to the composer view. See the MAX-197 section below | 184, 152, 153, 170 | **Opus** — branch pushed, PR open. **No Swift toolchain in this container**, so nothing here was compiled or run (R1); cancellation reaching the network read is argued, not observed, and needs device verification per the PR |
+| MAX-198 | **A composer draft survives the sheet** — MAX-184 §6.5's craft gap: `composerText` lived only on `ChatModel`, which `ChatSheet`'s `.id(opening)` discards whole on every dismiss, so three typed sentences were gone on return. `ChatComposerDraftStore` (`MaximizeCore`, `@MainActor`, under test) is a small keyed store, one instance per process by default (`ChatModel`'s own three initializers resolve a nil parameter to `.shared`, MAX-049's "resolve in the body, not the signature" idiom rather than a defaulted singleton in a call site); `ChatModel.composerText` mirrors every write into it and restores from it once `subject` is known at the end of `load()`. **Keyed by `ChatSubject`, not by thread id** — the audit's own words, and the only key stable before a thread's first turn is stored: `ChatThreadRepository.thread(for:newThreadID:at:)` mints a fresh random id on every resolve until then, so a thread-id key would have re-broken the exact case the ticket opens on. Accepted gap, argued in the PR: two already-stored threads sharing one subject (**New chat** used twice on an unchanged window) share one draft slot. **In memory only, never `UserDefaults`, never a file** — the privacy argument in the PR reads CLAUDE.md's health-data rule against `ChatModel`'s own "only completed turns are persisted": a draft was never said, so it gets strictly less durability than a sent turn, not the same or more. `send()` clears the field and the store together through `composerText`'s own `didSet`; `pendingTurn` (MAX-152's retry mechanism, unchanged) stays the only notion of "the text the athlete is waiting on" — the two are asserted never to merge. `ChatComposerState.swift`, `ChatModel.swift`'s composer text, and their tests only — `ChatSheet.swift`, `ChatConversationView.swift` and `ChatComposerView.swift` untouched, all three concurrently owned by MAX-190/195/196 | 184, 152, 153, 197 | Sonnet — branch pushed, PR open; not yet reviewed or merged. Package compiles and core unit tests pass by inspection only; no toolchain here to run them (R1). Needs device verification, per the PR |
 | MAX-200 | **Conversation starters on an empty thread** — MAX-184 §6.7's craft gap: the empty-thread sentence names three example topics in prose and leaves the athlete to turn one into a typed question. `ChatStarters` (`MaximizeCore`, new) picks three tappable questions per subject, pinned as literals under test, each keyed to a specific fact-sheet section — a workout thread's ask whether the session matched the plan, what its MAX-177 strain figure means, and how it fits the MAX-182 surrounding week; a training thread's ask whether both the MAX-181 run and lift slots were hit, what the MAX-192 acute:chronic load balance says, and what is pulling the average score down. Deliberately discipline-agnostic on the workout side — a thread only ever reaches `.ready` for a run or a lift, and none of the three names a run-only figure `WorkoutFactSheet` omits for a lift. **Tapping sends immediately** rather than filling the composer for editing: every starter is already a complete question, so a second tap to confirm buys nothing, and `ChatConversationView.sendStarter(_:)` goes through the same `send()` the send button already uses, touching `composerText` no differently than typing would (MAX-198 owns the composer's draft-persistence, untouched by this ticket). `ChatStartersView` (new) draws full-width, unlimited-line rows — never `RunsStripView`'s `.lineLimit(1)` chip, which would ellipsis a full sentence at large Dynamic Type — and disappears the instant the thread is not empty, gated by the same guard the invitation sentence already uses. No UI change to any file MAX-198 or MAX-199 own | 175, 177, 181, 182, 184, 192 | Sonnet — branch pushed, PR open; not yet reviewed or merged. **No Swift toolchain in this container**, so nothing here was compiled or run (R1). Needs device verification, per the PR |
 | MAX-201 | **The thread list is searchable, and the transcript is dateable** — §4.3, §6.8. `.searchable` over `ChatThreadSummary`'s stored `title` and `preview` — never a transcript, keeping MAX-188's fix intact — with the match and the filter both decided in `ChatThreadListPresentation`, which composes the new `sections(for:matching:now:timeZone:)` from the existing banded `sections(for:now:timeZone:)` so a filtered list bands exactly as the unfiltered one does: a band emptied by a filter disappears rather than surviving as a heading over nothing. A third `ContentUnavailableView`, distinct from "no conversations yet", for a search that found nothing — quoting the query back, in `ChatThreadListCopy`'s voice. Separately, `ChatTranscriptDaySeparators` (new, core) decides which transcript turns start a new calendar day and what to call it — Today / Yesterday / a weekday name / a dated label, the same ladder `compactTimestamp` already uses — from a thread's own stored `ChatMessage` timestamps, timezone-aware via `CalendarDay.days(until:)`. `ChatConversationView`'s only change is one `if let` inside the existing transcript `ForEach`, reading the core's answer. See the MAX-201 section below | 153, 184, 188 | Sonnet |
 
@@ -7039,6 +7045,113 @@ running them.
 
 ---
 
+## MAX-195 — Markdown and selectable replies
+
+[docs/CHAT-AUDIT.md](./docs/CHAT-AUDIT.md) (MAX-184) §6.1/§6.2. Both premises verified
+before anything was designed: `WorkoutChatBubble` drew every row with `Text(message.text)`
+against a plain `String`, which does not parse Markdown — only the `LocalizedStringKey`
+overload does — and `.textSelection` and `.contextMenu` appear nowhere under `App/`. A
+person could not select or copy a single character out of this app, and `**bold**`, `- `
+bullets and `1.` lists all arrived as their own literal punctuation.
+
+### Which roles render as Markdown, and why
+
+**`.assistant` only.** `ChatMessageRendering.isMarkdown(for:)` (`MaximizeCore`, under
+test) is the single decision, read at both call sites that draw a reply's text —
+`WorkoutChatBubble.bubble(fill:textColor:)` for a finished turn and
+`ChatPendingReplyView`'s `.streaming`/`.stalled` rung for one still arriving — rather than
+a `.kind == .assistant` check written twice in `App/`. The other two roles were never in
+question: the athlete's own turns are `.user`, verbatim — a person who types `*hi*` meant
+two asterisks and the word "hi," and reinterpreting their own words as formatting puts
+something in their mouth they did not choose. `.notice` rows are this codebase's own
+copy (`ChatFailureNotice`, `ChatConversationCopy`) — plain English sentences with no
+Markdown in them by construction, and parsing one risks a stray `*` inside an athlete's
+own quoted words (MAX-191's dropped-turn notice, for instance) being read as syntax
+instead of the character it is.
+
+### What a half-arrived Markdown token does
+
+This is the trap the ticket named, and it is why the decision is `ChatMarkdownText`'s
+rather than a bare `Text(message.text)` swapped for a bare
+`Text(.init(message.text))`-style shortcut: a reply streams, so the same growing string
+is parsed many times a second, and most of those parses see a document that has not
+finished — an opened `**` with no closing pair yet, a `-` with nothing after it.
+
+- **`.full` interpreted syntax, `.returnPartiallyParsedIfPossible` failure policy.**
+  `.full` rather than an inline-only mode because a coaching reply's lists — "a list of
+  sessions," per the ticket — need block structure to render as an actual list; inline-only
+  would leave `- ` exactly as literal as it was before this ticket. An unmatched inline
+  delimiter is Foundation's documented behaviour to leave as the literal characters it
+  is rather than apply formatting speculatively, so a lone `**` sits on screen as two
+  asterisks and gains bold styling only once its pair completes — **no flip-flop between
+  bold and plain as tokens arrive**, because the run is never bold before the pair closes.
+- **A plain-text fallback for whatever even that cannot parse.** The failure policy above
+  is best-effort, not a guarantee against ever throwing; `ChatMarkdownText.attributedString`
+  falls back to the raw string unformatted rather than dropping it. Every character the
+  model sent is on screen either way — styled if the parser could manage it, plain if it
+  could not. Nothing here ever shows a parse failure as a failure or loses a token.
+- **No heading size is hard-coded.** `ChatMarkdownText` sets no font beyond the
+  `.bodyCopy` the call sites already applied as a default; header/list/emphasis structure
+  arrives as `PresentationIntent` attributes, and `Text` resolves those against the
+  system's own scaled text styles — the same mechanism `.bodyCopy` itself rides. A literal
+  point size for a heading would be the exact bug CLAUDE.md warns against.
+
+### Selection
+
+`.textSelection(.enabled)` on `WorkoutChatBubble.content` (one modifier, propagated as an
+environment value to every `Text` beneath — the user bubble, the assistant bubble and the
+notice row alike) and on `ChatPendingReplyView`'s streaming/stalled `Text`. **Every role
+is selectable, not only replies** — the ticket's role restriction is about Markdown
+*parsing*; letting someone copy a message does not reinterpret it, and there is no reason
+an athlete could copy the model's answer but not their own question. No separate
+`.contextMenu` was added on top: `.textSelection(.enabled)` already brings the platform's
+own long-press selection UI with Copy/Share in it, and a second menu competing for the
+same long-press gesture on top of that would be the redundant affordance the ticket's
+own "does this fight the scroll gesture or existing interactions" question was aimed at
+— this was checked by reading `ChatConversationView`'s transcript for a competing gesture
+and finding none, not on a device.
+
+### The caption fold (MAX-197's report)
+
+MAX-197 left `WorkoutChatBubble` drawing three parallel `if`s — one each for
+`wasTruncated`, `wasInterruptedByFailure`, `wasStoppedByAthlete` — and flagged folding
+them as cheap if a later ticket touching the same view did it. This one does: `DisplayMessage`
+gains `trailingCaption: String?`, which asks the three flags in order and returns the one
+caption that applies (`DisplayMessage`'s own documentation already states at most one is
+ever true), and the view now reads it once. Tested against messages `ChatModel.send()`
+actually produced in `ChatReplyLadderModelTests` — the truncated, interrupted-by-failure
+and stopped-by-athlete paths each assert `trailingCaption` off the real returned row,
+never off a `DisplayMessage` built for the assertion.
+
+### Tests (core, CI-verified — if CI runs them; see below)
+
+`ChatMessageRenderingTests`: the three-role decision, direct. `ChatReplyLadderModelTests`
+gains assertions on existing scenarios rather than a parallel suite: a clean completion
+has no caption and is Markdown for the assistant's row, never for the athlete's; a
+truncated, an interrupted, and a stopped reply each carry exactly the caption
+`ChatConversationCopy` already owns; every `ChatStreamError` notice reads as non-Markdown
+regardless of which failure produced it.
+
+### What CI can and cannot prove
+
+CI can prove the three-role decision and the caption fold, both against real `ChatModel`
+output. CI cannot prove that a reply actually looks formatted on screen, that selection
+does not fight the transcript's scroll gesture, that Increase Contrast or Reduce
+Transparency leave emphasis and code spans legible, or that a heading — should a reply
+ever send one — scales correctly at an accessibility text size. **Needs device
+verification:** send (or fake) a streaming reply containing a Markdown list and bold text
+and watch it arrive without any bold/plain flicker on the unclosed `**`; long-press a
+reply and a sent question and confirm both select and copy, and that the gesture does not
+fight the transcript's own scroll; check at the largest Dynamic Type size; check under
+Increase Contrast and Reduce Transparency.
+
+**`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
+
+### Found outside the ticket, not done
+
+Nothing. `ChatConversationView.swift` and `ChatPendingReplyView.swift` were read in full
+before anything changed; no other defect was found in either file.
+
 ## MAX-197 — a reply in flight can be stopped
 
 [docs/CHAT-AUDIT.md](./docs/CHAT-AUDIT.md) (MAX-184) §6.4. The premise was verified before
@@ -7147,11 +7260,62 @@ stopped turn is gone and the earlier ones are intact.
   resolves to `.stop` rather than `.awaitingReply`. That is `ChatComposerSendControl`'s design
   as written in MAX-153 and matches every mainstream chat client, and the transcript still says
   *"Thinking…"* — but it is a visible change to a shipped screen and belongs in the device pass.
-- **`ChatConversationView` still draws captions with three parallel `if`s**, one per
+- ~~**`ChatConversationView` still draws captions with three parallel `if`s**, one per
   `DisplayMessage` flag. Folding them into one core-decided caption would be tidier and touches a
-  file MAX-195/196 own concurrently; left alone deliberately.
+  file MAX-195/196 own concurrently; left alone deliberately.~~ **Folded by MAX-195**, which was
+  already editing the same view for Markdown rendering — see `DisplayMessage.trailingCaption`
+  and the MAX-195 section above.
 
 ---
+
+## MAX-191 — the athlete is told when the transcript was capped
+
+A long conversation rolls up and gets capped at 40 turns before replaying to the model.
+`ChatInstruction.droppedTurnCount` is public and already computed; nothing reads it.
+So a person scrolls up into their own older messages, asks a follow-up, and gets "I no
+longer have that stretch of the conversation" with no prior warning that anything was
+missing. The model is told in the instructions; the athlete is not.
+
+**Verification first.** `ChatInstruction.droppedTurnCount` reflects the mechanical count
+from initializing an instruction: `let dropped = max(0, turns.count - Self.maximumReplayedTurns)`.
+It is set correctly, public (line 123), and does exactly what the audit describes — no
+false premise.
+
+**Exposed through `ChatModel` as a new computed property.** When streaming, it reads from
+the pending instruction; otherwise, it calculates from the current thread's size what
+would be dropped if a message were sent now. Returns zero when there is no thread.
+
+**The sentence lives in `ChatConversationCopy`** as `droppedTurnsNotice(for:droppedTurnCount:)`,
+matching `ChatScopeNotice`'s pattern: nil when nothing to say (zero count), one quiet line
+when dropping occurs. Singular and plural both correct. Does not leak "turns", "tokens",
+or any implementation detail. Worded the same for all kinds — the fact of a cap is what
+matters, not the subject.
+
+**Displayed in `ChatConversationView`** above the transcript, in the same visual register
+as the scope notice. Uses `.microLabel` and `.textSecondary`, with the same `.contentSurface`
+inset and margins. A quiet line that reads as a property of the thread, not as something
+either party said. An `Image(systemName: "ellipsis")` marks it visually.
+
+**Covered by core tests:** zero count returns nil; one turn is singular; multiple turns
+are plural; negative or zero counts return nil; all kinds produce similar phrasing.
+**Covered by ChatModel tests:** zero for empty/small threads; zero when at exactly the
+cap; correct calculation for overage; matches pending instruction while streaming.
+
+### What CI can and cannot prove
+
+CI can prove: the property is computed correctly from the current thread; the copy
+function returns nil on zero and the right singular/plural sentence otherwise; the view
+displays the notice when there is anything to say and omits it when there is not.
+
+CI cannot prove that the notice is visually quiet or readable at all Dynamic Type sizes,
+or that it integrates well with the scope notice when both appear (though they are
+separate, a long scope notice and a long dropped notice on the same screen would need
+device verification). **Needs device verification:** open a training thread with 40+
+messages, send a message, and confirm a quiet line appears below the scope banner (if
+present) saying some number of earlier turns were not included; verify the sentence at
+largest and smallest Dynamic Type; verify with VoiceOver that the line is read correctly.
+
+**`swift build`/`swift test` were not run** — no Swift toolchain in this container (R1).
 
 ## Risks
 

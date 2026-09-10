@@ -441,6 +441,9 @@ struct ChatConversationView: View {
                    let notice = ChatScopeNotice.text(for: subject, currentInterval: currentInterval) {
                     scopeMismatchBanner(notice)
                 }
+                if let notice = ChatConversationCopy.droppedTurnsNotice(droppedMessageCount: model.droppedTurnCount) {
+                    droppedTurnsNotice(notice)
+                }
                 transcript
                 // §2.2's "Runs strip" row, below the transcript and above the composer.
                 // `nil` for a workout subject — `RunsStripView` renders nothing then.
@@ -471,6 +474,26 @@ struct ChatConversationView: View {
         .contentSurface(.inset)
         .padding(.horizontal, LayoutMetrics.screenMargin)
         .padding(.top, Spacing.snug)
+    }
+
+    /// MAX-191: "a quiet one-line note stating the transcript was capped."
+    /// Placed above the transcript in the same register as the scope banner, so it reads
+    /// as a property of the conversation rather than as something either party said.
+    private func droppedTurnsNotice(_ notice: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.tight) {
+            Image(systemName: "ellipsis")
+                .font(.microLabel)
+            Text(notice)
+                .font(.microLabel)
+                .multilineTextAlignment(.leading)
+        }
+        .foregroundStyle(Color.textSecondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .screenMargins()
+        .padding(.vertical, Spacing.snug)
+        .contentSurface(.inset)
+        .padding(.horizontal, LayoutMetrics.screenMargin)
+        .accessibilityElement(children: .combine)
     }
 
     /// MAX-194: the one line of continuity `PlanConversationDoor` composed. A caption,
@@ -926,10 +949,35 @@ private struct ChatDaySeparatorView: View {
 /// — every one of its flags (`wasTruncated`, `wasInterruptedByFailure`,
 /// `wasStoppedByAthlete`) is something the model already decided, not something this
 /// view infers.
+///
+/// ## MAX-195: Markdown, and why this file makes no role decision of its own
+///
+/// `bubble(fill:textColor:)` asks `ChatMessageRendering.isMarkdown(for: message.kind)` —
+/// **not** a check on `message.kind == .assistant` written here — so "which roles are
+/// Markdown" stays the one answer in `MaximizeCore` rather than a second copy of the
+/// same rule sitting beside it. The `.notice` row keeps its own plain `Text`
+/// unconditionally, for the same reason: it is never asked, because app copy is never
+/// Markdown-eligible in the first place (see that type's own documentation).
+///
+/// ## MAX-195: selection
+///
+/// `.textSelection(.enabled)` is applied once, on `content` below, rather than at each
+/// of the three cases' own `Text` — SwiftUI propagates it as an environment value to
+/// every `Text` beneath, so this covers the user bubble, the assistant bubble and the
+/// notice row alike with one modifier rather than three. Selection is on for **every**
+/// role here, including the athlete's own turns: unlike Markdown parsing, letting
+/// someone copy a message does not reinterpret it, and there is no reason a person
+/// should be able to copy the model's answer but not their own question.
 private struct WorkoutChatBubble: View {
     let message: ChatModel.DisplayMessage
 
     var body: some View {
+        content
+            .textSelection(.enabled)
+    }
+
+    @ViewBuilder
+    private var content: some View {
         switch message.kind {
         case .user:
             bubbleRow(alignment: .trailing) {
@@ -939,21 +987,13 @@ private struct WorkoutChatBubble: View {
             bubbleRow(alignment: .leading) {
                 VStack(alignment: .leading, spacing: Spacing.hairspace) {
                     bubble(fill: Color.surfaceInset, textColor: Color.textPrimary)
-                    // FR-2.4: `.completed(.truncated)` is a real, storable reply that
-                    // simply ran out of room — `ChatTurnCompletion`'s own documentation
-                    // says the UI is what should say so.
-                    if message.wasTruncated {
-                        caption(ChatConversationCopy.truncatedCaption)
-                    }
-                    // Constraint #4: partial text survives a failure, on screen.
-                    if message.wasInterruptedByFailure {
-                        caption(ChatConversationCopy.interruptedByFailureCaption)
-                    }
-                    // MAX-197: and it survives a stop, which is not a failure — the
-                    // caption is the only thing on screen that says this text is not
-                    // being kept with the conversation.
-                    if message.wasStoppedByAthlete {
-                        caption(ChatConversationCopy.stoppedByAthleteCaption)
+                    // MAX-195: `wasTruncated`, `wasInterruptedByFailure` and
+                    // `wasStoppedByAthlete` used to be three parallel `if`s here, one
+                    // per flag this type is documented to hold at most one of at a
+                    // time. `trailingCaption` folds them into the one answer
+                    // `ChatModel` already knows.
+                    if let trailingCaption = message.trailingCaption {
+                        caption(trailingCaption)
                     }
                 }
             }
@@ -967,7 +1007,7 @@ private struct WorkoutChatBubble: View {
     }
 
     private func bubble(fill: Color, textColor: Color) -> some View {
-        Text(message.text)
+        ChatMarkdownText.text(message.text, isMarkdown: ChatMessageRendering.isMarkdown(for: message.kind))
             .font(.bodyCopy)
             .foregroundStyle(textColor)
             .padding(Spacing.compact)

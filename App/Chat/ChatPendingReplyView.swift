@@ -85,9 +85,17 @@ struct ChatPendingReplyView: View {
             }
         case .streaming, .stalled:
             bubbleSurface {
-                Text(text)
+                // MAX-195: this text is always the model's own — nothing else streams
+                // — so it takes the same Markdown treatment `WorkoutChatBubble` gives a
+                // finished `.assistant` row, through the one decision in
+                // `ChatMessageRendering` rather than a `true` written here. See
+                // `ChatMarkdownText`'s own documentation for what a half-arrived
+                // Markdown token does while this is still redrawing several times a
+                // second.
+                ChatMarkdownText.text(text, isMarkdown: ChatMessageRendering.isMarkdown(for: .assistant))
                     .font(.bodyCopy)
                     .foregroundStyle(Color.textPrimary)
+                    .textSelection(.enabled)
                     .accessibleAnimation(Motion.streamingTextReveal, value: text)
             }
         case .idle, .complete, .truncated, .emptyReply, .stopped, .failed:
