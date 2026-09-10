@@ -98,6 +98,8 @@ final class MaximizeTourTests: XCTestCase {
         authorButton.tap()
 
         // The screen proposes a default plan that is immediately saveable.
+        // Take a screenshot first for diagnostics (the assertion below may fail).
+        takeScreenshot(named: "02a-plan-authoring")
         let saveButton = app.buttons
             .matching(NSPredicate(format: "label BEGINSWITH %@", "Save as plan"))
             .firstMatch
@@ -105,7 +107,6 @@ final class MaximizeTourTests: XCTestCase {
             saveButton.waitForExistence(timeout: 15),
             "Plan authoring should offer a save button for the default plan"
         )
-        takeScreenshot(named: "02a-plan-authoring")
         saveButton.tap()
 
         // The save is async; wait for its confirmation before leaving, so the
