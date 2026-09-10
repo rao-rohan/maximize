@@ -106,6 +106,9 @@ final class MaximizeTourTests: XCTestCase {
     // MARK: - Stage 2: author the first plan
 
     private func authorFirstPlan() {
+        // "Author a plan" lives on the Plan tab's empty state — the first-run
+        // cover dismisses onto the Workouts tab, so switch tabs first.
+        app.buttons["Plan"].tap()
         let authorButton = app.buttons["Author a plan"]
         XCTAssertTrue(
             authorButton.waitForExistence(timeout: 15),

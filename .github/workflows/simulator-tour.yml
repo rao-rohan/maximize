@@ -101,14 +101,18 @@ jobs:
           xcrun simctl boot "$UDID"
           xcrun simctl bootstatus "$UDID" -b
 
-      - name: Build for testing (unsigned)
+      - name: Build for testing (ad-hoc signed)
         run: |
           set -o pipefail
+          # Ad-hoc sign (CODE_SIGN_IDENTITY="-") instead of CODE_SIGNING_ALLOWED=NO:
+          # skipping code signing entirely also skips entitlements processing, and
+          # the test runner needs the HealthKit entitlement to seed workouts.
+          # Ad-hoc signing needs no team or provisioning profile.
           xcodebuild build-for-testing \
             -project Maximize.xcodeproj \
             -scheme Tour \
             -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
-            CODE_SIGNING_ALLOWED=NO 2>&1 | tee /tmp/tour-build.log
+            CODE_SIGN_IDENTITY="-" CODE_SIGNING_ALLOWED=YES 2>&1 | tee /tmp/tour-build.log
 
       - name: Run the tour (screen-recorded)
         run: |
