@@ -211,4 +211,65 @@ public enum ChatConversationCopy {
         let messageWord = droppedMessageCount == 1 ? "message" : "messages"
         return "\(droppedMessageCount) earlier \(messageWord) aren't included in what Claude sees."
     }
+
+    // MARK: - MAX-196: the transcript is legible to VoiceOver
+
+    /// What VoiceOver reads for one transcript row: the speaker first, then the
+    /// words, then any trailing caption (truncated / interrupted / stopped). A
+    /// sighted reader gets the speaker from the bubble's side and tint; neither
+    /// survives VoiceOver, so the label carries it.
+    ///
+    /// Notices are not from either party — "add a key in Settings", "the
+    /// connection dropped" — so they are introduced as what they are rather than
+    /// wearing a speaker's name.
+    public static func spokenTranscriptRow(
+        kind: ChatModel.DisplayMessage.Kind,
+        text: String,
+        trailingCaption: String?
+    ) -> String {
+        let speaker: String = switch kind {
+        case .user: "You"
+        case .assistant: "Claude"
+        case .notice: "Note"
+        }
+        var spoken = "\(speaker): \(text)"
+        if let trailingCaption, !trailingCaption.isEmpty {
+            spoken += " \(trailingCaption)"
+        }
+        return spoken
+    }
+
+    /// The announcement posted when a reply lands, for a VoiceOver user who is not
+    /// watching the text arrive. Kept to the one fact — a reply arrived — because
+    /// the reply itself is the next swipe away and will be read in full there.
+    public static let replyLandedAnnouncement = "Claude's reply has arrived."
+
+    /// Whether the reply-phase transition `previous -> current` should post
+    /// `replyLandedAnnouncement`.
+    ///
+    /// The timing is the ticket's subtle part, so the decision is here, pure and
+    /// under test, rather than inline in the view:
+    /// - Only the transition *into* `.complete` announces. Terminal rungs that are
+    ///   not a reply (`.truncated` gets its caption read on its row, `.failed` gets
+    ///   its notice, `.stopped` gets its caption) each already produced a row that
+    ///   says what happened — announcing a second sentence about a row already on
+    ///   screen breaks MAX-150's "never restate a fact the surface already stated"
+    ///   rule, the same reason `pendingAccessibilityLabel(for:)` is nil for them.
+    /// - The previous rung must be a live one (`.awaitingFirstToken`, `.streaming`,
+    ///   `.stalled`). Opening an old thread restores completed messages with the
+    ///   phase already `.idle`, so a transition from `.idle` — or from another
+    ///   terminal rung — is a restore or a re-render, not an arrival, and stays
+    ///   silent.
+    public static func shouldAnnounceReplyLanded(
+        previousPhase: ChatReplyPhase,
+        currentPhase: ChatReplyPhase
+    ) -> Bool {
+        guard currentPhase == .complete else { return false }
+        switch previousPhase {
+        case .awaitingFirstToken, .streaming, .stalled:
+            return true
+        case .idle, .complete, .truncated, .emptyReply, .stopped, .failed:
+            return false
+        }
+    }
 }
