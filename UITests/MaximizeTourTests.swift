@@ -393,12 +393,24 @@ private enum SampleWorkoutSeeder {
             )
         }
         // Samples go through the builder, not a separate save + add: the builder
-        // owns the in-progress workout, and HKHealthStore.add(_:to:) has no async
-        // variant.
-        try await builder.add(samples)
+        // owns the in-progress workout. `add(_:completion:)` has no async
+        // variant, so it is bridged with a continuation.
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            builder.add(samples) { success, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if success {
+                    continuation.resume()
+                } else {
+                    continuation.resume(throwing: SampleWorkoutSeederError.samplesNotAdded)
+                }
+            }
+        }
 
         try await builder.endCollection(at: end)
-        let workout = try await builder.finishWorkout()
+        guard let workout = try await builder.finishWorkout() else {
+            throw SampleWorkoutSeederError.workoutNotFinished
+        }
 
         if withRoute {
             let builder = HKWorkoutRouteBuilder(healthStore: store, device: nil)
@@ -427,4 +439,11 @@ private enum SampleWorkoutSeeder {
 /// once by the Task, read once after the semaphore synchronizes the two.
 private final class ErrorBox: @unchecked Sendable {
     var error: Error?
+}
+
+/// The seeder's own failures, distinct from HealthKit's — so a tour failure says
+/// which half broke.
+private enum SampleWorkoutSeederError: Error {
+    case samplesNotAdded
+    case workoutNotFinished
 }
