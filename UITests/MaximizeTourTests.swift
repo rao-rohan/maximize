@@ -262,27 +262,27 @@ final class MaximizeTourTests: XCTestCase {
     /// the app's own hierarchy. Tries the common button labels; if none appears
     /// within the timeout, returns without failing (the caller decides whether the
     /// sheet was required).
+    /// Answers the iOS Health Access sheet the way a user would. The sheet lists
+    /// data types with toggles (all off by default) — tapping "Allow" with
+    /// everything off grants nothing. So: tap "Turn On All" first, then "Allow".
     private func answerSystemHealthPrompt(timeout: TimeInterval) {
-        // The sheet is presented by the system over the app. Look for it in the
-        // app's hierarchy first, then fall back to SpringBoard.
-        let allowLabels = ["Allow", "Allow While Using App", "OK"]
         let appeared = waitForCondition(timeout: timeout, message: "Health permission sheet") {
-            allowLabels.contains { label in
-                self.app.buttons[label].exists
-                    || XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.firstMatch.buttons[label].exists
-            }
+            self.app.buttons["Turn On All"].exists || self.app.buttons["Allow"].exists
         }
         guard appeared else { return }
-        for label in allowLabels {
-            if app.buttons[label].exists {
-                app.buttons[label].tap()
-                return
+        // Enable all data types first; otherwise Allow grants nothing.
+        if app.buttons["Turn On All"].exists {
+            app.buttons["Turn On All"].tap()
+            // Give the toggles a moment to flip on.
+            _ = waitForCondition(timeout: 5, message: "toggles to enable") {
+                // The Allow button becomes enabled once types are on; just proceed
+                // to tapping it — if it's still disabled the tap is a no-op and the
+                // caller will see the cover not dismiss.
+                true
             }
-            let springboardButton = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.firstMatch.buttons[label]
-            if springboardButton.exists {
-                springboardButton.tap()
-                return
-            }
+        }
+        if app.buttons["Allow"].exists {
+            app.buttons["Allow"].tap()
         }
     }
 
