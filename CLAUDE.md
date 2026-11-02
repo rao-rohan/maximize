@@ -14,6 +14,7 @@ App/                   SwiftUI app + platform adapters   (arrives in MAX-006)
 docs/PRD.md            the spec, as received
 docs/PRD-AMENDMENTS.md where we deliberately deviate from it, and why
 docs/DEVICE-BUILD.md   how to get a build onto a real iPhone
+latent/                separate product (RAW camera), planning only — own CLAUDE.md
 ```
 
 **CI never produces an installable build.** Signing needs credentials this repo does
