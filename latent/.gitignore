@@ -1,0 +1,7 @@
+# Reference images and personal captures never enter this repo: it is public, and
+# photos carry faces and location EXIF. Test fixtures need a deliberate exception.
+look-reference/
+captures/
+*.dng
+*.DNG
+!Tests/**/Fixtures/**/*.dng

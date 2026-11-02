@@ -17,6 +17,7 @@ App Store collisions. That check has not been done.
 | Doc | What it is |
 |---|---|
 | [docs/RESEARCH.md](./docs/RESEARCH.md) | Public facts about Chromagraph, preserved as received, with sourced claims kept apart from inference |
+| [docs/LOOK-BRIEF.md](./docs/LOOK-BRIEF.md) | Measured targets for the look, from the owner's four reference images |
 | [docs/PRD.md](./docs/PRD.md) | What we are building, the decisions it locks, and what it explicitly does not do |
 | [docs/BUILD-PLAN.md](./docs/BUILD-PLAN.md) | Phased tickets (LAT-xxx), agent tiers, what CI can and cannot prove |
 | [CLAUDE.md](./CLAUDE.md) | Conventions for work in this folder, and where they differ from Maximize's |
@@ -31,5 +32,5 @@ The argument against this is strong and is recorded here deliberately. **These a
 unrelated products.** Maximize's CI, tracker, PRD amendments and design rules all
 assume one app. A second `Package.swift` and a second app target in the same repo will
 eventually confuse path-scoped CI, agents reading the root `CLAUDE.md`, and anyone
-doing `git log`. LAT-002 decides whether to extract this folder into its own repo
-before any code lands. The recommendation is to extract it.
+doing `git log`. LAT-002 decided: it stays here for now and the owner extracts it later. Until then,
+any Latent CI job must be path-filtered to `latent/**`.

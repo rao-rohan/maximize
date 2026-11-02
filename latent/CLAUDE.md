@@ -45,3 +45,8 @@ for convenience.
 Photos are personal data. They include location EXIF and faces. There is no network
 code in this app: no analytics, no crash reporting that ships pixels or metadata, and no
 cloud processing. Photos library access is **add-only** unless a ticket justifies more.
+
+**This repository is public.** Never commit reference images, personal captures or DNGs
+(`latent/.gitignore` enforces the common paths). A test fixture DNG is a deliberate
+exception under `Tests/**/Fixtures/`. It must show no people, its location EXIF must be
+stripped, and it must have been shot for the purpose.

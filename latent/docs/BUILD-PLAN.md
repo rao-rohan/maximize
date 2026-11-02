@@ -17,8 +17,8 @@ Status key: ✅ merged · 🔲 ready · ⬜ blocked on dependencies
 | ID | Ticket | Tier | Status | Depends on |
 |---|---|---|---|---|
 | LAT-001 | Folder, README, conventions, research, PRD, build plan | — | ✅ (this change) | — |
-| LAT-002 | **Decide repo home.** Extract to its own repo (recommended) or keep here with path-filtered CI | Owner | 🔲 | — |
-| LAT-003 | `LatentCore` package skeleton + Linux CI job + import guard (no AVFoundation/CoreImage/Metal/UIKit/SwiftUI/Photos) | Sonnet | ⬜ | LAT-002 |
+| LAT-002 | **Repo home:** stays in `latent/`, and the owner extracts it later. Until then, Latent CI jobs must be path-filtered to `latent/**` | Owner | ✅ decided | — |
+| LAT-003 | `LatentCore` package skeleton + path-filtered CI job (`latent/**`) + import guard (no AVFoundation/CoreImage/Metal/UIKit/SwiftUI/Photos) | Sonnet | 🔲 | LAT-002 |
 | LAT-004 | App shell: XcodeGen spec, iOS 26, camera/Photos usage strings, simulator build in CI | Sonnet | ⬜ | LAT-003 |
 
 ## Phase 1 — Spikes that de-risk the PRD (device and owner)
@@ -28,7 +28,7 @@ written finding committed to `latent/docs/findings/`.
 
 | ID | Question | Tier | Depends on |
 |---|---|---|---|
-| LAT-010 | On the owner's phone: which lenses offer Bayer RAW and ProRAW, at what resolutions? DNG sizes? Shutter-to-file latency? Noise at ISO 100/800/3200 for each path? (Decides L-D1 for real.) | Owner + Sonnet | LAT-004 |
+| LAT-010 | On the owner's iPhone 16 Pro (main, ultra wide, 5× tele): which lenses offer Bayer RAW and ProRAW, at what resolutions? DNG sizes? Shutter-to-file latency? Noise at ISO 100/800/3200 for each path? (Decides L-D1 for real.) | Owner + Sonnet | LAT-004 |
 | LAT-011 | Is `CIRAWFilter` with `boostAmount = 0` actually scene-linear? Shoot a grey step chart at bracketed exposures and check that a doubling of exposure gives a doubling of output, ±2%. **If this fails, L-D2 is re-opened.** | Opus | LAT-010 |
 | LAT-012 | Can CI run Core Image Metal kernels? GitHub-hosted macOS runners have limited or no Metal (confidence: low). Test `CIContext` with `.useSoftwareRenderer`. The result decides whether LAT-032 runs in CI or is a device-only check. | Sonnet | LAT-003 |
 
@@ -55,7 +55,7 @@ values from published references (CIE, CAT16 test vectors, ACES RGC reference va
 |---|---|---|---|
 | LAT-030 | `latent-render` macOS CLI: DNG folder + look JSON → rendered PNG/HEIC folder + contact sheet, using `CIRAWFilter` decode and the CPU reference renderer | Sonnet | LAT-027 |
 | LAT-050 | Calibration session: shoot the chart under daylight and tungsten for each lens, run LAT-028, commit the matrices as data | Owner + Opus | LAT-028, LAT-030 |
-| LAT-051 | **Look development:** shoot 50 fixed reference scenes (skin, sky, foliage, neon, backlight, low light, mixed light), then iterate the `LookVersion` in the CLI against the owner's reference images (PRD §13 Q2). Output: `LookVersion` 1 | Owner + Opus | LAT-030, LAT-050 |
+| LAT-051 | **Look development:** shoot 50 fixed reference scenes (skin, sky, foliage, neon, backlight, low light, mixed light), then iterate the `LookVersion` in the CLI until renders hit [LOOK-BRIEF.md](./LOOK-BRIEF.md)'s targets (paper white about L\* 88.5 and cream; neutral true-black shadows; partial white-balance adaptation; cyan-leaning deep skies; yellow-leaning muted greens). Output: `LookVersion` 1 | Owner + Opus | LAT-030, LAT-050 |
 | LAT-052 | Blind A/B harness: pairs Apple Camera HEIC with Latent's render of the same scene, randomised order, records preference. **Gate:** ≥ 70% preference, or the look goes back to LAT-051 | Sonnet + Owner | LAT-051 |
 
 **Nothing in Phase 4 should be polished until LAT-052 passes.** A beautiful camera UI on

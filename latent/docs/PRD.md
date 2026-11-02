@@ -3,7 +3,8 @@
 **Owner:** Rohan
 **Status:** Draft v1 (for review)
 **Last updated:** 2026-11-02
-**Background:** [RESEARCH.md](./RESEARCH.md)
+**Background:** [RESEARCH.md](./RESEARCH.md) · **Look targets:** [LOOK-BRIEF.md](./LOOK-BRIEF.md)
+**Target device:** iPhone 16 Pro
 
 ---
 
@@ -98,6 +99,13 @@ name, or any claim of reproducing their look in anything public.
 | Device support | Most modern iPhones, but lens availability varies | Pro models only (iPhone 12 Pro and later) |
 | Size | ~15–25 MB at 12 MP (estimate) | ~25 MB at 12 MP, ~75 MB at 48 MP (Apple's published figures, moderate-high confidence) |
 
+**On the target device, the iPhone 16 Pro**, the cameras are a 48 MP main (24 mm, f/1.78),
+a 48 MP ultra wide (13 mm, f/2.2) and a 12 MP 5× telephoto (120 mm, f/2.8). Confidence:
+high. ProRAW is available, at 48 MP on the main and ultra-wide (moderate-high confidence).
+Which lenses expose Bayer RAW, and at what resolution, is **not known**, and LAT-010
+answers it first. The expectation (moderate confidence) is 12 MP binned Bayer RAW on the
+48 MP sensors.
+
 **Decision: Bayer RAW is the default.** The product promise is "Apple's processing is
 not in your picture", and only Bayer RAW keeps it fully. Our grain model gives us
 cover: film-like grain tolerates and partly masks single-frame noise, which is a real
@@ -138,7 +146,7 @@ toggle is a v2 candidate, built only if the approximation's error is measured an
   undoable because it only changes `lookVersionID`.
 
 ### L-D5 — One device, calibrated
-v1 targets the owner's iPhone model only, all lenses that support the chosen RAW path.
+v1 targets the owner's iPhone 16 Pro only, all lenses that support the chosen RAW path.
 Device and lens are recorded per photo, so a future multi-device version can attach a
 per-(device, lens) input correction without a migration.
 
@@ -160,16 +168,22 @@ Metal Core Image kernel (L5). The order matters and is justified per stage.
    measured. It corrects any residual error in Apple's DNG calibration.
 3. **Exposure and white balance.** Exposure is a scalar multiply in linear. White
    balance is a **chromatic adaptation transform (CAT16) in LMS**, not RGB channel gains,
-   so neutrals adapt without skewing saturated colours.
+   so neutrals adapt without skewing saturated colours. By default the adaptation is
+   **partial**: the camera's auto-white-balance estimate is blended toward a fixed
+   ~5500 K anchor by `adaptationStrength` (initially 0.5–0.6). That is how daylight film
+   behaves, and it is why candlelight stays amber in the references (LOOK-BRIEF trait 8).
+   The user's temperature and tint sliders act after this.
 4. **Halation, in scene-linear, before tone.** Physically, halation is light passing
    through the emulsion, reflecting off the film base, and re-exposing mostly the red
    layer. So: isolate energy above a scene-linear threshold, blur it with a sum of
    Gaussians whose radius is a fraction of the image diagonal (resolution-independent),
    tint it toward red-orange, and add it back. Doing this before the tone scale is what
    makes highlights bloom naturally into the shoulder instead of looking pasted on.
-5. **Tone scale.** A parametric filmic curve in log2 exposure space with a toe, a
-   mid-grey anchor (scene 0.18 → display ≈ 0.10–0.12, to be tuned), and a long shoulder
-   that never hard-clips. **A key look decision is whether to apply it per channel or on
+5. **Tone scale.** A parametric filmic curve in log2 exposure space. It has a toe that
+   reaches true black (no matte lift), a mid-grey anchor (to be tuned, placed low-key),
+   and a long shoulder that approaches a **paper white below display white**: about
+   L\* 88.5 (Y ≈ 0.73), tinted cream (b\* ≈ +12). The tint rises with luminance and is
+   zero below mid-grey. These targets come from LOOK-BRIEF traits 1–4. **A key look decision is whether to apply it per channel or on
    a norm.** Per-channel tone mapping gives the classic film behaviour: highlights
    desaturate and some hues skew (oranges toward yellow, saturated blues toward cyan).
    Some of that is what makes film look like film, and some is ugly. Norm-based mapping
@@ -261,12 +275,18 @@ Location is captured only if the user grants it, and it goes only into EXIF. Ori
 use `.complete` file protection. There is no secret to protect: this app has no API key,
 unlike Maximize.
 
-## 13. Open questions (owner)
+## 13. Resolved questions (2026-11-02)
 
-1. Which iPhone model is the target device? This determines L-D1's resolution and lens
-   availability.
-2. The look's starting brief: name 3–5 reference images (stills from films, or
-   photographers) that define "the way we like it". Look development without a target
-   is guessing.
-3. Extract this into its own repo before the first code lands (LAT-002)? The
-   recommendation is yes.
+1. **Target device:** iPhone 16 Pro (see L-D1, L-D5).
+2. **Look references:** four images supplied, measured in [LOOK-BRIEF.md](./LOOK-BRIEF.md).
+   Images are kept out of the repo, which is public.
+3. **Repo home:** this stays in `latent/` for now. The owner will extract it. The
+   planning agent could not create repositories in its session.
+
+## 14. Open questions (owner)
+
+1. **Full-resolution references.** Grain and halation cannot be measured from 652 px
+   screenshots. Are there full-size originals?
+2. **Coverage of the brief.** Three of the four references are warm or golden light.
+   Are there references for overcast, night-urban and open-shade skin, or should
+   LAT-051 extrapolate?
